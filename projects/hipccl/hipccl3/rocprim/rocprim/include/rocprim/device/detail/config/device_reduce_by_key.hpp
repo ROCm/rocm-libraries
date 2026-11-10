@@ -83,7 +83,7 @@ constexpr auto reduce_by_key_config_picker()
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -545,7 +545,7 @@ constexpr auto reduce_by_key_config_picker()
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'float', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'float', 'block_size_x': 512, 'ipt': 8}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -558,7 +558,7 @@ constexpr auto reduce_by_key_config_picker()
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 10}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 2)))
@@ -571,7 +571,7 @@ constexpr auto reduce_by_key_config_picker()
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 10}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -584,7 +584,7 @@ constexpr auto reduce_by_key_config_picker()
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 512, 'ipt': 8}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -597,7 +597,7 @@ constexpr auto reduce_by_key_config_picker()
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 512, 'ipt': 10}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
@@ -610,7 +610,7 @@ constexpr auto reduce_by_key_config_picker()
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 384, 'ipt': 14, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 384, 'ipt': 14}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 1)))
@@ -635,7 +635,7 @@ constexpr auto reduce_by_key_config_picker()
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'float', 'block_size_x': 512, 'ipt': 12, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int', 'value_type': 'float', 'block_size_x': 512, 'ipt': 12}
     if constexpr(((sizeof(key_type) <= 4) && (sizeof(key_type) > 2)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -660,7 +660,7 @@ constexpr auto reduce_by_key_config_picker()
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 12, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 12}
     if constexpr(((sizeof(key_type) <= 4) && (sizeof(key_type) > 2)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -745,7 +745,7 @@ constexpr auto reduce_by_key_config_picker()
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 14, 'tiles_per_block': 2}
+    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 14}
     if constexpr(((sizeof(key_type) <= 2) && (sizeof(key_type) > 1)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))

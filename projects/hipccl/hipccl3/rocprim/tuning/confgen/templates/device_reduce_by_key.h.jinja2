@@ -3,9 +3,5 @@
 reduce_by_key_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
                             block_load_method::block_load_transpose,
                             block_load_method::block_load_transpose,
-                            block_scan_algorithm::using_warp_scan
-                            {%- if config.tiles_per_block is defined -%}
-                            , {{ config.tiles_per_block }}
-                            {%- endif -%}
-                            }
+                            block_scan_algorithm::using_warp_scan}
 {%- endblock %}
