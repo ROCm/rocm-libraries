@@ -323,9 +323,6 @@ namespace TensileLite
                     }
             }
 
-            // false in case of early return;
-            lastFindTopRetAll = false;
-
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
