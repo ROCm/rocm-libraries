@@ -1,0 +1,6 @@
+outs:
+- md5: 1aa6e75b92b16899520ca0ff52fbcc54.dir
+  size: 35053
+  nfiles: 5
+  hash: md5
+  path: gfx942

@@ -1031,3 +1031,54 @@ Approved for this integration.
 | Deviation | What FlyDSL does instead | Status |
 |---|---|---|
 | **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
+
+---
+
+## RoPE (rotate-half) — `hipkernel:flydsl_rope`
+
+3 objects per arch (bf16, f16, f32), built for **gfx90a, gfx942 and gfx950**: the kernel is
+scalar global loads and stores, f32 arithmetic and OCML `sin`/`cos`, nothing gfx94x-only.
+RDNA is not built (the kernel would compile for it; no object has been validated there).
+Kernel: [`kernels_src/kernels/rope/rope_kernel.py`](kernels_src/kernels/rope/rope_kernel.py),
+written for this provider against flydsl 0.3.4; FlyDSL v0.5.0's
+`kernels/attention/fused_rope_cache_kernel.py` bakes head_dim, the head counts, a packed
+layout and cos/sin caches, and rotates only the full head dim, so none of it carried over.
+Native half: [`FlydslRopeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRopeNative.cpp),
+problem resolution in [`FlydslRopeCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRopeCommon.hpp).
+
+It computes the schema's rotate-half RoPE (`rope_attributes.fbs`, `CpuFpReferenceRope`): with
+r = `rope_dim` (0 means D), h = r / 2, o = `rope_offset_ext` (absent: D - r, cuDNN's
+trailing segment) and f the raw angles, `y[o+i] = s(x[o+i] cos f[i] - x[o+i+h] sin f[i])`,
+`y[o+i+h] = s(x[o+i+h] cos f[i+h] + x[o+i] sin f[i+h])`, and `y[j] = s x[j]` outside the
+segment, in f32 with sin and cos from OCML (full range reduction, so angles of thousands of
+radians are exact to f32). x is addressed as `[d0, d1, d2, D]` (lower ranks padded with unit
+axes); one 64-thread workgroup per row on grid `(d2, d1, d0)`, each thread owning either one
+passthrough element or one rotation pair, so every element is read and written by one
+thread, read first: **y may alias x**.
+
+**Baked:** the element type of x and y. **Runtime:** D, r, o, `output_scale`, and the four
+element strides of x, freqs and y (64-bit offsets), so Qwen3's BSHD q/k with
+`freqs [1, 1, S, 64]` or `[B, 1, S, 64]`, BHSD, and any other layout run without a copy.
+
+| Graph-scoped (`flydslRopeGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `RopeAttributes` node | anything else; override-shape graphs |
+| Operands | x, freqs, y real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | x bf16 / f16 / f32, y in x's dtype, freqs FLOAT; compute type unset, FLOAT, HALF or BFLOAT16 | other dtypes or compute types; y converting |
+| Rank | x of rank 2, 3 or 4; freqs of x's rank; y of x's dims | rank 1 or above 4 |
+| Segment | r even in (0, D]; `0 <= o <= D - r` | otherwise (as the CPU reference) |
+| freqs | last dim r, every other x's or 1 (broadcast) | anything else |
+| Strides | any non-negative strides on every operand; a broadcast or unit axis's stride is ignored | a negative stride; a zero y stride on an axis of extent > 1 |
+| Alignment | x and y on their element size, freqs on 4 bytes | less |
+| Extents | d2 <= 2^31 - 1, d1 and d0 <= 65535 (grid), D <= 2^31 - 1, every operand's furthest element < 2^61 | larger |
+
+| Kernel-scoped (`flydslRopeKernelMatches`) | |
+|---|---|
+| `dtype` | equals x's |
+
+**Checked by:** `TestFlydslRopeEngine` (every accept and decline row, the resolved rank-4
+problem, kernel match, binding; host-only), `TestGpuFlydslRopeObjects` (every staged object
+through graph_match, kernel_match, prepare and launch against `CpuFpReferenceRope`: Qwen
+prefill BSHD with angles to 4000 rad, per-batch freqs, cuDNN's trailing default with a scale,
+full rotation in place, a middle segment at rank 3, D = 1000, and a strided head dim), and
+the census `TestFlydslRopePacks`.

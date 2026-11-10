@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "856e09e9-4bf2-5a77-ba64-63153956aa3e",
+  "name": "flydsl rope variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "13073bf7-9772-55f1-8b4a-81807a385160",
+  "name": "flydsl rope dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_rope.dispatch"
+}

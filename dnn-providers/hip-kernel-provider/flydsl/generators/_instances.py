@@ -1464,6 +1464,31 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
     return instances
 
 
+# --- RoPE (rotate-half) ---------------------------------------------------------
+
+# kernels_src/kernels/rope/rope_kernel.py: one wave per row, and head_dim, rope_dim,
+# rope_offset, output_scale and every stride of x, freqs and y are runtime arguments,
+# so one object per x/y dtype serves every RoPE graph of that dtype. Nothing is baked
+# but the element type: there is no tier to rank, so every row is the one candidate.
+ROPE_DTYPES = ("bf16", "f16", "f32")
+ROPE_BLOCK_THREADS = 64
+
+
+def rope_instances() -> list[Instance]:
+    """The RoPE table: one runtime-shape object per dtype."""
+    instances = [
+        Instance(
+            op="rope",
+            dtype=dtype,
+            priority=PRIORITY_GENERIC,
+            knobs={"block_threads": ROPE_BLOCK_THREADS},
+        )
+        for dtype in ROPE_DTYPES
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -1473,6 +1498,7 @@ OPS = {
     "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
     "sdpa_aiw": sdpa_aiw_instances,
+    "rope": rope_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}

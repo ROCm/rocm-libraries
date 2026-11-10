@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "63e6c418-2c79-5d30-a8b1-a545f473117a",
+  "name": "flydsl rope selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_rope.score"
+  }
+}

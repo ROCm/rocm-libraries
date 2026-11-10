@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "id": "f631bdf7-fc4d-5bac-a09a-83c61f002f69",
+  "name": "hipkernel:flydsl_rope",
+  "graph_match": {
+    "native": "hipkernel.flydsl_rope.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "63e6c418-2c79-5d30-a8b1-a545f473117a"
+  },
+  "predict_engine": {
+    "default": "1d1d8e61-6a1a-5508-bb90-59ff711932c6"
+  },
+  "metadata": "856e09e9-4bf2-5a77-ba64-63153956aa3e",
+  "knobs": [
+    "block_threads"
+  ]
+}

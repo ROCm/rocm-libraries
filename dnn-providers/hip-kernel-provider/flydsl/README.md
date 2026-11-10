@@ -163,6 +163,14 @@ these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
+**RoPE** (`hipkernel:flydsl_rope`, **gfx90a**, **gfx942** and **gfx950**, 3 objects each):
+cuDNN's rotate-half rotary embedding with raw f32 angles, sin and cos computed in the
+kernel, for bf16, f16 and f32 x and y. One object per dtype serves every graph of it:
+head_dim, rope_dim, the segment offset (the leading segment Qwen/Llama rotate, or cuDNN's
+trailing default), output_scale and every stride of x, freqs and y (BSHD, BHSD, broadcast
+freqs) are kernel arguments. In place (y aliasing x) is safe
+([COVERAGE.md, RoPE](COVERAGE.md)).
+
 ## How it reaches hipDNN
 
 The objects and their descriptors are a **bundle of the provider's production
@@ -344,7 +352,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 253/253 gfx950, 255/255 gfx942, 255/255 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 256/256 gfx950, 258/258 gfx942, 258/258 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

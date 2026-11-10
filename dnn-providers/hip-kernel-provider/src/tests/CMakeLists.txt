@@ -422,6 +422,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFortySlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_rope)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_rope}
+            SUITES TestFlydslRopePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsOneRuntimeShapeObjectPerDtype
+                EveryKernelDeclaresTheNineteenSlotSignature
+        )
+    endif()
 
     # Census for the gfx950 attention production packs. Each reads only the product
     # shard, so it is eligible for census registration.
