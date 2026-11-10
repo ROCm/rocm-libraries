@@ -246,8 +246,9 @@ build/bin/hipdnn_integration_tests \
   with events, which a capturing stream forbids.
 
 Every engine that reports the note and has a lane also has a graph-capture lane,
-`<lane stem>-graph-capture-external-integration-check`, with the same tiers as
-the other lanes. It runs a few quick bundle suites with `--graph-capture`. Its
+`<lane stem>-graph-capture-external-integration-check`, in the `standard`,
+`comprehensive` and `full` tiers but not in `quick` or `ffm-quick`. It runs a
+few quick bundle suites with `--graph-capture`. Its
 suites are in `GRAPH_CAPTURE_test_categories_integration.yaml`
 (hip-kernel-provider) and `test_categories_graph_capture.yaml`
 (hipblaslt-provider). To add one, see

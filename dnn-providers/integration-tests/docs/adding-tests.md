@@ -683,8 +683,9 @@ and the FlyDSL SDPA engines still call the function directly.
 
 An engine that reports `SUPPORTS_GRAPH_CAPTURE` also needs a graph-capture
 lane: a second lane pinned to the same engine, with `EXTRA_ARGS --graph-capture`
-and a tier YAML that names a few quick bundle suites the engine serves. Every
-tier of that YAML runs the same short list. Without the lane, nothing in CI
+and a tier YAML that names a few quick bundle suites the engine serves. Its
+`standard`, `comprehensive` and `full` tiers run the same short list, and it has
+no `quick` or `ffm-quick` tier. Without the lane, nothing in CI
 captures the engine's `execute()`, so a change that makes it unsafe to capture
 fails no test.
 

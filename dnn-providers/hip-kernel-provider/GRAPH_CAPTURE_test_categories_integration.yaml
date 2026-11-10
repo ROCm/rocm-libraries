@@ -14,7 +14,8 @@
 # engines. A pinned engine declines the suites it does not serve, and an unclaimed
 # decline skips, so one list serves every lane.
 #
-# Every tier runs the same short list, so the lane is part of each tier's run. Keep the
+# The standard, comprehensive and full tiers run the same short list. The lane stays out of
+# quick and ffm-quick: pull requests run standard, nightly runs comprehensive. Keep the
 # patterns in step with HKP_GRAPH_CAPTURE_GTEST_FILTER in src/CMakeLists.txt, which the
 # legacy-label build passes instead of this file.
 
@@ -38,15 +39,6 @@ _graph_capture_excludes: &graph_capture_excludes
   - "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
 
 test_categories:
-  quick:
-    description: "Graph-capture replay of a few quick bundle suites"
-    test_patterns: *graph_capture_patterns
-    exclude: *graph_capture_excludes
-    labels:
-      - "quick"
-      - "pre-commit"
-      - "smoke"
-
   standard:
     description: "Graph-capture replay of a few quick bundle suites"
     test_patterns: *graph_capture_patterns
@@ -73,21 +65,12 @@ test_categories:
       - "full"
       - "all"
 
-  ffm-quick:
-    description: "Fast-feedback quick tier: graph-capture replay of a few quick bundle suites"
-    test_patterns: *graph_capture_patterns
-    exclude: *graph_capture_excludes
-    labels:
-      - "ffm-quick"
-      - "ffm-full"
-
-# Each tier runs the same list, so each gets the quick-tier kill limit the other lanes use.
+# The tiers run the same list, so each gets the 600 s kill limit the other lanes' quick
+# tiers use.
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    quick: 600
     standard: 600
     comprehensive: 600
     full: 600
-    ffm-quick: 600

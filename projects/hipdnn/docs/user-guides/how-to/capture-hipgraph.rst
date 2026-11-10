@@ -196,6 +196,6 @@ Test an engine with the integration tests
 The provider integration tests have an opt-in ``--graph-capture`` flag. With it, each verified
 test captures one more execution of the plan into a hipGraph, replays it, and compares the result
 with the reference. The flag needs a GPU. Each engine in the list above that has a provider test
-lane also has a graph-capture lane, which runs a few quick test cases with the flag in every test
-tier. For the full description and the other options, see
-``dnn-providers/integration-tests/docs/running-tests.md`` in the repository.
+lane also has a graph-capture lane, which runs a few quick test cases with the flag in the
+standard, comprehensive and full test tiers. For the full description and the other options,
+see ``dnn-providers/integration-tests/docs/running-tests.md`` in the repository.
