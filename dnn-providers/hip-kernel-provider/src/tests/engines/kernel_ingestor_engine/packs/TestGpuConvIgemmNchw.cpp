@@ -315,6 +315,8 @@ std::vector<DeviceCase> deviceCases()
         {"S1K7D5", dilateWidth(upsample(17, 33, {}, 90, 7, 1, 15, 15), 5)},
         {"S1K11D5", dilateWidth(upsample(16, 24, {2}, 130, 11, 1, 25, 25), 5)},
         {"S1K11", upsample(40, 16, {}, 61, 11, 1, 3, 7)},
+        {"S1K5", upsample(24, 32, {}, 70, 5, 1, 2, 2)},
+        {"S1K7", upsample(17, 40, {2}, 66, 7, 1, 3, 3)},
         {"S1K7D3Unpadded", dilateWidth(upsample(16, 16, {}, 45, 7, 1, 0, 0), 3)},
         {"ThreeD3x3x3S2Unpadded",
          strideRows(upsample(8, 12, {9, 8}, 21, 3, 2, 0, 0), {3, 3}, {2, 2}, {0, 0})},
