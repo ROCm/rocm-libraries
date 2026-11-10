@@ -2476,6 +2476,19 @@ sweep CSVs.
   no split-K binary at all. Scope each validator rule to the code path
   that consumes it, and test reachability through the AOT grid, not a
   hand-built spec.
+- **VGPR-to-AGPR spill at the 512-register ceiling computes wrong
+  results.** A kernel that reaches the register-file ceiling makes comgr
+  spill VGPRs into AGPRs, and that path has produced kernels that are
+  silently wrong (a two-stage TF32 wgrad on gfx950, a preloading MFMA
+  dgrad), while the same IR is correct at `-O1` or with
+  `-amdgpu-spill-vgpr-to-agpr=0`. Keep such kernels out of the grid with
+  a register estimate in the validator (`_tf32_conv_spec_reason`'s
+  accumulator cap, `direct_mfma_knobs_reason`'s preload budget), not by
+  testing after the fact. Count operands at their storage width: fp32
+  storage holds one element per register where fp16 / bf16 packs two,
+  and an emulated TF32 atom (BF16x3) keeps each fragment's bf16 halves
+  live next to it. A 16-bit estimate applied to fp32 storage admits
+  kernels that spill.
 
 ### 14.2 Performance Failures
 
@@ -2632,6 +2645,11 @@ An optimization is done when:
   timing observation only; the cause was not classified with hardware
   counters. When no cap avoids such a loss, turn the automatic split off for
   that dtype and leave the explicit degree as an opt-in.
+- If a kernel family gains a wider storage dtype (fp32 next to fp16 /
+  bf16), re-derive every register estimate and budget for it before
+  enumerating the new grid (§14.1). Compile the new jobs and confirm none
+  spills; a budget that is conservative for the wider dtype costs some
+  clean binaries, which is cheaper than one silently wrong kernel.
 
 ### 16.2 Anti-patterns (what to avoid)
 
