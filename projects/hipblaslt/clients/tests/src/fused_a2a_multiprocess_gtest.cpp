@@ -106,6 +106,15 @@ namespace
         arg.a2a_world  = uint8_t(env.world);
         return arg;
     }
+
+    HSA_ENGINE_ID gfx(uint32_t major, uint32_t minor, uint32_t stepping)
+    {
+        HSA_ENGINE_ID id{};
+        id.ui32.Major    = major;
+        id.ui32.Minor    = minor;
+        id.ui32.Stepping = stepping;
+        return id;
+    }
 } // namespace
 
 namespace hipblaslt_bench
@@ -238,27 +247,86 @@ TEST(FusedA2AWorldShape_smoke, EveryWorldFrom2To8IsTileDivisible)
     EXPECT_EQ(two.extent, 2048);
 }
 
-TEST(FusedA2ASdmaEngine_smoke, RemoteQueuesNeedAnEvenEngineOnGfx942AndGfx950)
+TEST(FusedA2ASdmaEngine_smoke, RotateWalksTheEvenXgmiEngines)
 {
-    using TensileLite::Client::sdmaCheckRemoteEngine;
-    auto gfx = [](uint32_t major, uint32_t minor, uint32_t stepping) {
-        HSA_ENGINE_ID id{};
-        id.ui32.Major    = major;
-        id.ui32.Minor    = minor;
-        id.ui32.Stepping = stepping;
-        return id;
-    };
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_EQ(sdmaRotateEngine(4, 0, 14), 4u);
+    EXPECT_EQ(sdmaRotateEngine(2, -1, 14), 14u);
+    EXPECT_EQ(sdmaRotateEngine(14, 1, 14), 2u);
+    EXPECT_THROW(sdmaRotateEngine(3, -1, 14), std::runtime_error);
+}
 
+TEST(FusedA2ASdmaEngine_smoke, RotateRejectsOddAndPcieEnginesAtAnyRotate)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(3, 0, 14), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(7, 0, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(0, 0, 14), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(16, 0, 14), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(6, 0, 6), 6u);
+}
+
+TEST(FusedA2ASdmaEngine_smoke, RotateReportsAnUnusableEngineFirst)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    try
+    {
+        sdmaRotateEngine(3, -1, 6);
+        FAIL();
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_EQ(std::string(e.what()).find("--fused-a2a-sdma-rotate=0"), std::string::npos);
+    }
+}
+
+TEST(FusedA2ASdmaEngine_smoke, RotateRequiresFourteenXgmiEngines)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(2, -1, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(2, 1, 0), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(2, 0, 6), 2u);
+}
+
+TEST(FusedA2ASdmaEngine_smoke, SpreadGivesEachRemotePeerItsOwnEngine)
+{
+    using TensileLite::Client::sdmaSpreadEngine;
+    EXPECT_EQ(sdmaSpreadEngine(0xFFFF, 0), 1u);
+    EXPECT_EQ(sdmaSpreadEngine(0xFFFF, 2), 3u);
+    EXPECT_EQ(sdmaSpreadEngine(0xFFFF, 14), 15u);
+    EXPECT_EQ(sdmaSpreadEngine(0xFFFF, 15), 1u);
+    EXPECT_EQ(sdmaSpreadEngine(0b1011, 1), 3u);
+}
+
+TEST(FusedA2ASdmaEngine_smoke, SpreadKeepsASingleRecommendedEngine)
+{
+    using TensileLite::Client::sdmaSpreadEngine;
+    EXPECT_EQ(sdmaSpreadEngine(1u << 6, 0), 6u);
+    EXPECT_EQ(sdmaSpreadEngine(1u << 6, 3), 6u);
+    EXPECT_EQ(sdmaSpreadEngine(1u, 1), 0u);
+    EXPECT_EQ(sdmaSpreadEngine(0, 2), 0u);
+}
+
+TEST(FusedA2ASdmaEngine_smoke, RemoteQueuesRotateTheFirstRecommendedEngineOnGfx942AndGfx950)
+{
+    using TensileLite::Client::sdmaRemoteEngine;
     for(HSA_ENGINE_ID id : {gfx(9, 4, 2), gfx(9, 5, 0)})
     {
-        EXPECT_NO_THROW(sdmaCheckRemoteEngine(id, 2));
-        EXPECT_NO_THROW(sdmaCheckRemoteEngine(id, 14));
-        EXPECT_THROW(sdmaCheckRemoteEngine(id, 0), std::runtime_error);
-        EXPECT_THROW(sdmaCheckRemoteEngine(id, 3), std::runtime_error);
-        EXPECT_THROW(sdmaCheckRemoteEngine(id, 16), std::runtime_error);
+        EXPECT_EQ(sdmaRemoteEngine(id, (1u << 4) | (1u << 8), 14, 3, 0), 4u);
+        EXPECT_EQ(sdmaRemoteEngine(id, 1u << 4, 14, 0, -1), 2u);
+        EXPECT_EQ(sdmaRemoteEngine(id, 1u << 4, 14, 5, -1), 2u);
+        EXPECT_THROW(sdmaRemoteEngine(id, 1u << 3, 14, 0, 0), std::runtime_error);
+        EXPECT_THROW(sdmaRemoteEngine(id, 0, 14, 0, 0), std::runtime_error);
+        EXPECT_THROW(sdmaRemoteEngine(id, 1u << 4, 6, 0, -1), std::runtime_error);
     }
-    EXPECT_NO_THROW(sdmaCheckRemoteEngine(gfx(9, 0, 10), 3));
-    EXPECT_NO_THROW(sdmaCheckRemoteEngine(gfx(12, 5, 0), 0));
+}
+
+TEST(FusedA2ASdmaEngine_smoke, RemoteQueuesSpreadOverTheRecommendedEnginesElsewhere)
+{
+    using TensileLite::Client::sdmaRemoteEngine;
+    EXPECT_EQ(sdmaRemoteEngine(gfx(12, 5, 0), 0xFFFF, 0, 0, -1), 1u);
+    EXPECT_EQ(sdmaRemoteEngine(gfx(12, 5, 0), 0xFFFF, 0, 2, -1), 3u);
+    EXPECT_EQ(sdmaRemoteEngine(gfx(9, 0, 10), 1u << 3, 0, 1, 0), 3u);
 }
 
 class FusedA2AMultiProcess_multi_gpu

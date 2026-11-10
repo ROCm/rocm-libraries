@@ -173,16 +173,11 @@ namespace TensileLite
             return node;
         }
 
-        // SDMA engine id to use for the srcNode->dstNode link: the first engine
-        // in KFD's RecSdmaEngIdMask for that io-link. Everything else -- loopback
-        // (no io-link), an empty mask, or a failed KFD query -- yields the general
-        // engine 0.
-        inline uint32_t sdmaSelectEngine(uint32_t srcNode, uint32_t dstNode)
+        // KFD's RecSdmaEngIdMask for the srcNode -> dstNode io-link; 0 without one
+        // or on a failed KFD query.
+        inline uint32_t sdmaRecommendedEngineMask(uint32_t srcNode, uint32_t dstNode)
         {
             detail::ensureHsaKfd();
-            if(srcNode == dstNode)
-                return 0;
-
             HsaNodeProperties props{};
             if(hsaKmtGetNodeProperties(srcNode, &props) != HSAKMT_STATUS_SUCCESS
                || props.NumIOLinks == 0)
@@ -194,53 +189,91 @@ namespace TensileLite
                 return 0;
 
             for(const auto& link : links)
-            {
                 if(link.NodeTo == dstNode)
-                {
-                    uint32_t mask = link.RecSdmaEngIdMask;
-                    // First engine set in the recommended mask (one queue per
-                    // peer -- no fan-out over multiple engines).
-                    for(uint32_t b = 0; b < 32; ++b)
-                        if(mask & (1u << b))
-                            return b;
-                    break;
-                }
-            }
+                    return link.RecSdmaEngIdMask;
             return 0;
         }
 
-        inline uint32_t sdmaXgmiEngineCount(uint32_t node)
+        inline HsaNodeProperties sdmaNodeProperties(uint32_t node)
         {
             detail::ensureHsaKfd();
             HsaNodeProperties props{};
             CHK_KMT(hsaKmtGetNodeProperties(node, &props));
-            return props.NumSdmaXgmiEngines;
+            return props;
         }
 
         // On gfx942 and gfx950 a remote peer queue needs an even engine in 2..14.
-        inline void sdmaCheckRemoteEngine(HSA_ENGINE_ID gfx, uint32_t engine)
+        inline bool sdmaRemoteEngineEvenOnly(HSA_ENGINE_ID gfx)
         {
-            const bool evenOnly = gfx.ui32.Major == 9
-                                  && ((gfx.ui32.Minor == 4 && gfx.ui32.Stepping == 2)
-                                      || (gfx.ui32.Minor == 5 && gfx.ui32.Stepping == 0));
-            if(evenOnly && (engine < 2 || engine > 14 || engine % 2 != 0))
-                throw std::runtime_error(
-                    "[fused-a2a] a remote peer queue requires an even xGMI SDMA engine in 2..14; "
-                    "got "
-                    + std::to_string(engine) + ".");
+            return gfx.ui32.Major == 9
+                   && ((gfx.ui32.Minor == 4 && gfx.ui32.Stepping == 2)
+                       || (gfx.ui32.Minor == 5 && gfx.ui32.Stepping == 0));
         }
 
-        // sdmaSelectEngine, checked by sdmaCheckRemoteEngine unless srcNode == dstNode.
-        inline uint32_t sdmaSelectCheckedEngine(uint32_t srcNode, uint32_t dstNode)
+        // `engine` moved `steps` places around the ring 2, 4, ..., 14. `xgmiEngines`
+        // is the node's NumSdmaXgmiEngines.
+        inline uint32_t sdmaRotateEngine(uint32_t engine, int steps, uint32_t xgmiEngines)
         {
-            const uint32_t engine = sdmaSelectEngine(srcNode, dstNode);
-            if(srcNode != dstNode)
-            {
-                HsaNodeProperties props{};
-                CHK_KMT(hsaKmtGetNodeProperties(srcNode, &props));
-                sdmaCheckRemoteEngine(props.EngineId, engine);
-            }
-            return engine;
+            if(engine < 2 || engine > 14 || engine % 2 != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] a remote peer queue requires an even xGMI SDMA engine in "
+                    "2..14; got "
+                    + std::to_string(engine) + ".");
+            if(steps != 0 && xgmiEngines != 14)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-sdma-rotate=" + std::to_string(steps)
+                    + " requires 14 xGMI SDMA engines; the node has " + std::to_string(xgmiEngines)
+                    + ". Use --fused-a2a-sdma-rotate=0.");
+            if(steps == 0)
+                return engine;
+            return 2 + 2 * ((((int)engine - 2) / 2 + steps % 7 + 7) % 7);
+        }
+
+        // The k-th engine set in `mask`, wrapping, without engine 0 unless it is the
+        // only one.
+        inline uint32_t sdmaSpreadEngine(uint32_t mask, size_t k)
+        {
+            if(mask & ~1u)
+                mask &= ~1u;
+            if(mask == 0)
+                return 0;
+            size_t engines = 0;
+            for(uint32_t b = 0; b < 32; ++b)
+                engines += (mask >> b) & 1u;
+            k %= engines;
+            for(uint32_t b = 0;; ++b)
+                if((mask & (1u << b)) && k-- == 0)
+                    return b;
+        }
+
+        // Engine of the `remote`-th remote peer queue of a node with target `gfx`, given
+        // KFD's recommended `mask` for the link. On gfx942 and gfx950 the mask's first
+        // engine rotated by `rotate` (sdmaRotateEngine); elsewhere sdmaSpreadEngine, and
+        // `rotate` is ignored.
+        inline uint32_t sdmaRemoteEngine(
+            HSA_ENGINE_ID gfx, uint32_t mask, uint32_t xgmiEngines, size_t remote, int rotate)
+        {
+            if(!sdmaRemoteEngineEvenOnly(gfx))
+                return sdmaSpreadEngine(mask, remote);
+            uint32_t first = 0;
+            while(mask != 0 && !(mask & (1u << first)))
+                ++first;
+            return sdmaRotateEngine(first, rotate, xgmiEngines);
+        }
+
+        // Engine for srcNode's queue to dstNode: engine 0 for the loopback queue,
+        // sdmaRemoteEngine otherwise.
+        inline uint32_t
+            sdmaQueueEngine(uint32_t srcNode, uint32_t dstNode, size_t remote, int rotate)
+        {
+            if(srcNode == dstNode)
+                return 0;
+            const HsaNodeProperties props = sdmaNodeProperties(srcNode);
+            return sdmaRemoteEngine(props.EngineId,
+                                    sdmaRecommendedEngineMask(srcNode, dstNode),
+                                    props.NumSdmaXgmiEngines,
+                                    remote,
+                                    rotate);
         }
 
         // One SDMA queue: owns a 256KB Uncached ring and the KFD queue resource.
@@ -249,7 +282,7 @@ namespace TensileLite
         // (DeviceContext.cpp).
         //
         // localNode / engineId are KFD topology ids; use sdmaNodeIdForDevice()
-        // and sdmaSelectEngine() above to derive them from a HIP device id.
+        // and sdmaQueueEngine() above to derive them from a HIP device id.
         class SdmaQueue
         {
         public:
