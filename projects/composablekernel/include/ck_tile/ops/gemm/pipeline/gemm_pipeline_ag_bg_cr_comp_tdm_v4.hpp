@@ -162,14 +162,23 @@ CK_TILE_DEVICE uint32_t uniform(uint32_t v)
 #endif
 }
 
-/// `p`, computed here: LLVM may otherwise sink the address math of one side of a select into a
-/// divergent branch.
-CK_TILE_DEVICE const uint8_t* materialized(const uint8_t* p)
+/// `v`, opaque to LLVM: a scalar it can no longer factor out of the expressions using it.
+CK_TILE_DEVICE index_t opaque_scalar(index_t v)
 {
 #if defined(__gfx125__)
-    asm("" : "+v"(p));
+    asm("" : "+s"(v));
 #endif
-    return p;
+    return v;
+}
+
+/// `c ? a : b` as an IR select. Clang emits `?:` as a branch, LLVM then sinks the address math of
+/// one side into it and the branch stays divergent; an asm barrier on the address instead makes
+/// expert scheduling drain the WMMA pipeline (va_vdst(0)) before it.
+CK_TILE_DEVICE const uint8_t* select_address(bool c, const uint8_t* a, const uint8_t* b)
+{
+    const uint64_t mask = uint64_t{0} - static_cast<uint64_t>(c);
+    return reinterpret_cast<const uint8_t*>((reinterpret_cast<uint64_t>(a) & mask) |
+                                            (reinterpret_cast<uint64_t>(b) & ~mask));
 }
 
 CK_TILE_DEVICE void global_prefetch([[maybe_unused]] const uint8_t* p)
@@ -469,6 +478,10 @@ struct GemmPipelineAgBgCrCompTDMV4
         mx_tdm_v4::TdmDesc data{};
         mx_tdm_v4::TdmDesc scale{};
         index_t scale_stride = 0;
+        // Scale row bytes for the GL2 prefetch: as M * 4 / N * 4, LLVM factors the 4 out of
+        // row * stride + offset and the address takes an extra VALU op.
+        index_t a_scale_stride;
+        index_t b_scale_stride;
 
         CK_TILE_DEVICE Run(const mx_tdm_v4::Operands& p_,
                            const mx_tdm_v4::Coords& c_,
@@ -480,7 +493,9 @@ struct GemmPipelineAgBgCrCompTDMV4
               packed_k(mx_tdm_v4::div_c<kKPerByte>(p_.K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
               k_atoms(mx_tdm_v4::div_c<mx_tdm_v4::kAtomK>(
-                  Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K))
+                  Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
+              a_scale_stride(mx_tdm_v4::opaque_scalar(p_.M * 4)),
+              b_scale_stride(mx_tdm_v4::opaque_scalar(p_.N * 4))
         {
             if constexpr(kHasCluster)
             {
@@ -718,13 +733,13 @@ struct GemmPipelineAgBgCrCompTDMV4
                         constexpr bool clamp =
                             (is_a ? Traits::kEdgeM : Traits::kEdgeN) || Traits::kHasTail;
                         constexpr index_t lines_per_row = is_a ? a_lines_per_row : b_lines_per_row;
-                        const index_t extent            = is_a ? p.M : p.N;
+                        const index_t row_bytes         = is_a ? a_scale_stride : b_scale_stride;
                         const index_t mn0               = is_a ? cluster_m0 : cluster_n0;
                         const index_t row = k_step + mx_tdm_v4::div_c<lines_per_row>(index);
                         const index_t offset =
                             mn0 * 4 + mx_tdm_v4::mod_c<lines_per_row>(index) * line;
                         const index_t element =
-                            LastInside<clamp>(row * (extent * 4) + offset, k_atoms * (extent * 4));
+                            LastInside<clamp>(row * row_bytes + offset, k_atoms * row_bytes);
                         return (is_a ? p.a_scale : p.b_scale) + static_cast<uint32_t>(element);
                     }
                 };
@@ -747,10 +762,11 @@ struct GemmPipelineAgBgCrCompTDMV4
                                      start + count > round_start)
                         {
                             const index_t local = start ? index - start : index;
-                            const uint8_t* here =
-                                mx_tdm_v4::materialized(address(number<cat>{}, local));
-                            pointer = first ? here : (index < start + count ? here : pointer);
-                            first   = false;
+                            const uint8_t* here = address(number<cat>{}, local);
+                            pointer             = first ? here
+                                                        : mx_tdm_v4::select_address(
+                                                  index < start + count, here, pointer);
+                            first               = false;
                         }
                     });
                     mx_tdm_v4::global_prefetch(pointer);
