@@ -280,3 +280,59 @@ def test_hoisted_tile_count_decode_rejects_other_divisions():
     wrong = _hoisted_num_tiles("Tensor_0_size_0", 192, magic=magic_multiple_s64(160))
     assert branchfree_divisor(wrong) is None
     assert classify_wgm_expression(wrong) is None
+
+
+# The strides and sizes each layout's gfx950 MXFP8 64x64x128 kernel reads, as
+# JIT-compiled by rocRoller, and the semantic each must launch with.
+_NON_TN_COMMAND_ARGUMENTS = {
+    "NN": {
+        "Tensor_0_stride_1": "StrideA0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_1": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_1": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_1": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+    "NT": {
+        "Tensor_0_stride_1": "StrideA0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_0": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_1": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_0": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+    "TT": {
+        "Tensor_0_stride_0": "StrideA0",
+        "Tensor_0_size_0": "SizeFree0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_0": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_0": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_0": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+}
+
+
+@pytest.mark.parametrize("layout", sorted(_NON_TN_COMMAND_ARGUMENTS))
+def test_non_tn_kernels_command_arguments_map_to_semantics(layout):
+    for index, (name, semantic) in enumerate(_NON_TN_COMMAND_ARGUMENTS[layout].items()):
+        meta = {
+            ".name": f"{name}_{index}",
+            ".size": 8,
+            ".value_kind": "by_value",
+            ".expression": {
+                "type": "CommandArgument",
+                "name": name,
+                "variableType": {"dataType": "Int64", "pointerType": "Value"},
+            },
+        }
+        assert _metadataArgToCustomArg(meta) == {"type": "int64", "semantic": semantic}, name
