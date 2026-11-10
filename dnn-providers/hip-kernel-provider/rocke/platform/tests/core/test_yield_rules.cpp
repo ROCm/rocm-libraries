@@ -6,11 +6,11 @@
  * lowerings refuse what an scf.if_else or an scf.for body cannot hold, and an
  * scf.yield where nothing takes it, with the Python engine's types and texts.
  *
- * An scf.for's carried-value counts agree, its iter_args metadata names each
- * carried value and its type (which the loop's result shares), and its body
- * yields only at its end, one value per carried value, of its type, ending in
- * that yield whenever the loop carries any; a carried value or result with no
- * type is refused rather than read.
+ * An scf.for's num_iter_args is an int attr, its carried-value counts agree,
+ * its iter_args metadata names each carried value and its type (which the
+ * loop's result shares), and its body yields only at its end, one value per
+ * carried value, of its type, ending in that yield whenever the loop carries
+ * any; a carried value or result with no type is refused rather than read.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -574,6 +574,45 @@ void a_loop_whose_carried_counts_disagree_is_refused()
                   "loop with a disagreeing result count");
 }
 
+/* Serialized IR can give a loop a num_iter_args attr that is not an int (a
+ * bool, a float or a string), which no engine reads as a count; the verifier
+ * and both lowerings refuse it, even when it would equal the carried-value
+ * count. tests/core/test_scf_for_yields.py checks the Python engine's text. */
+void a_loop_whose_num_iter_args_is_not_an_int_is_refused()
+{
+    struct count_case
+    {
+        const char* what;
+        void (*edit)(rocke_ir_builder_t* b, rocke_op_t* loop_op);
+    };
+    const count_case cases[] = {
+        {"a bool",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_bool(b, &loop_op->attrs, "num_iter_args", true);
+         }},
+        {"a float",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_float(b, &loop_op->attrs, "num_iter_args", 1.0);
+         }},
+        {"a string",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_str(b, &loop_op->attrs, "num_iter_args", "1");
+         }},
+    };
+    for(const count_case& count : cases)
+    {
+        Kernel k("loop_count_kind");
+        rocke_op_t* loop_op = nullptr;
+        k.build_carrying_loop(4, false, [&loop_op](const rocke_for_t& loop) { loop_op = loop.op; });
+        rocke_b_ret(&k.b);
+        count.edit(&k.b, loop_op);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      "scf.for num_iter_args must be an integer count of carried values",
+                      std::string("loop whose num_iter_args is ") + count.what);
+    }
+}
+
 /* The loop's iter_args metadata attr, to edit as serialized IR could leave it
  * (the attr API hands out only a read-only view). */
 rocke_attr_value_t& iter_args_metadata(rocke_op_t* loop_op)
@@ -980,6 +1019,7 @@ int main()
     a_loop_yield_that_does_not_match_the_carried_values_is_refused();
     each_loop_is_held_to_its_own_carried_values();
     a_loop_whose_carried_counts_disagree_is_refused();
+    a_loop_whose_num_iter_args_is_not_an_int_is_refused();
     a_loop_whose_iter_args_metadata_is_malformed_is_refused();
     a_loop_value_with_no_type_is_refused();
     a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused();
