@@ -770,17 +770,12 @@ NodeMetaData
                     // in-place is not allowed or it can't be done or it would require a larger buffer
                     // than what's safe to expect from user. Pack results contiguously in a temporary
                     // buffer and work out of place.
-                    root_plan_other_io_layout = data_set_t::default_full_range(
-                        other(io) == io_data_label::INPUT ? desc.input_layout.lengths()
-                                                          : desc.output_layout.lengths(),
-                        desc.batch());
-                    root_plan.placement = rocfft_placement_notinplace;
-                    const auto tmp_size
-                        = root_plan_other_io_layout->buffer_element_count()
-                          * element_size(precision,
-                                         other(io) == io_data_label::INPUT
-                                             ? desc.input_layout.get_array_type()
-                                             : desc.output_layout.get_array_type());
+                    const auto& other_io_layout = other(io) == io_data_label::INPUT
+                                                      ? desc.input_layout
+                                                      : desc.output_layout;
+                    root_plan_other_io_layout   = other_io_layout.get_packed_data_set();
+                    root_plan.placement         = rocfft_placement_notinplace;
+                    const auto tmp_size         = root_plan_other_io_layout->buffer_size_bytes();
                     root_plan_other_io_buffer
                         = tempBuffers.emplace(desc.get_current_location(), tmp_size);
                 }
@@ -795,20 +790,13 @@ NodeMetaData
         // and output of the execution plan. In-place default layout operations are
         // used to minimize the library's memory footprint.
         root_plan.placement = rocfft_placement_inplace;
-        root_plan_input_layout
-            = data_set_t::default_full_range(desc.input_layout.lengths(),
-                                             desc.input_layout.batch(),
-                                             transformType == rocfft_transform_type_real_forward);
-        root_plan_output_layout
-            = data_set_t::default_full_range(desc.output_layout.lengths(),
-                                             desc.output_layout.batch(),
-                                             transformType == rocfft_transform_type_real_inverse);
+        root_plan_input_layout = desc.input_layout.get_packed_data_set(
+            transformType == rocfft_transform_type_real_forward);
+        root_plan_output_layout = desc.output_layout.get_packed_data_set(
+            transformType == rocfft_transform_type_real_inverse);
 
-        const auto tmp_size
-            = std::max(root_plan_input_layout->buffer_element_count()
-                           * element_size(precision, desc.input_layout.get_array_type()),
-                       root_plan_output_layout->buffer_element_count()
-                           * element_size(precision, desc.output_layout.get_array_type()));
+        const auto tmp_size    = std::max(root_plan_input_layout->buffer_size_bytes(),
+                                       root_plan_output_layout->buffer_size_bytes());
         root_plan.input_buffer = root_plan.output_buffer
             = tempBuffers.emplace(desc.get_current_location(), tmp_size);
     }
@@ -1504,8 +1492,7 @@ rocfft_status
             // Compare axes only: a lone brick's layout does not carry the array type and
             // precision that description layouts carry (until AIFFT-563), and in-place
             // array type consistency is validated above.
-            if(expected_out_layout->len_axes != out_layout.len_axes
-               || expected_out_layout->batch_axes != out_layout.batch_axes)
+            if(!expected_out_layout->has_same_axes_as(out_layout))
                 throw std::runtime_error("Undistributed input and output layout are not compatible "
                                          "for single-device in-place transforms.");
             // Check offsets if they're not to be ignored
