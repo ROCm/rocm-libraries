@@ -580,15 +580,15 @@ TEST_P(CPU_FinInterfaceTestGetAllConvSolvers_NONE, FinInterface) { this->RunTest
 TEST_P(CPU_FinInterfaceTestGetConvSolvers_NONE, FinInterface) { this->RunTest(); };
 TEST_P(GPU_FinInterfaceTestGetConvSolver_FP32, FinInterface) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_FinInterfaceTestGetAllConvSolvers_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_FinInterfaceTestGetConvSolvers_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_FinInterfaceTestGetConvSolver_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::ValuesIn(GetTestCases<ConvTestCase>())));
@@ -602,16 +602,16 @@ TEST_P(CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE, FinInterface) { this->Ru
 TEST_P(CPU_FinInterfaceTestGetBatchNormSolvers_NONE, FinInterface) { this->RunTest(); };
 TEST_P(GPU_FinInterfaceTestGetBatchNormSolver_FP32, FinInterface) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_FinInterfaceTestGetBatchNormSolvers_NONE,
                          testing::Values(GetTestParams()));
 
 // clang-format off
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_FinInterfaceTestGetBatchNormSolver_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::ValuesIn(GetTestCases<BatchNormTestCase>())));

@@ -256,7 +256,7 @@ TEST_P(CPU_CandidateSelectionCpu_NONE, VocabIdsWellFormed)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_CandidateSelectionCpu_NONE,
                          ::testing::ValuesIn(AllArchSolvers()),
                          NameOf);

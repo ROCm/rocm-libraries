@@ -72,10 +72,10 @@ TEST_P(GPU_GLU_bwd_BFP16, Test)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_fwd_FP32, testing::ValuesIn(GenFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_fwd_FP16, testing::ValuesIn(GenFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_fwd_BFP16, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_fwd_FP32, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_fwd_FP16, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_fwd_BFP16, testing::ValuesIn(GenFullTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_bwd_FP32, testing::ValuesIn(GenFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_bwd_FP16, testing::ValuesIn(GenFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GLU_bwd_BFP16, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_bwd_FP32, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_bwd_FP16, testing::ValuesIn(GenFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GLU_bwd_BFP16, testing::ValuesIn(GenFullTestCases()));
