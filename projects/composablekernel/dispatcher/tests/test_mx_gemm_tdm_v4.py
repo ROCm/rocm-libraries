@@ -93,7 +93,7 @@ class TestTuning(unittest.TestCase):
             v4.cpp_kernel_traits(
                 spec, {"edge": False, "odd_tiles": 0, "tail_steps": 2}
             ),
-            "ck_tile::mx_tdm_v4::KernelTraits<false, false, false, false, false, 0, 2, 8>",
+            "ck_tile::MxTdmV4GemmTraits<false, false, false, false, false, 0, 2, 8>",
         )
         self.assertEqual(
             v4.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),

@@ -53,16 +53,15 @@ template <typename A,
           index_t AtomM,
           typename Tuning,
           typename Traits>
-using Kernel = ck_tile::MxGemmTdmV4Kernel<
-    ck_tile::GemmPipelineAgBgCrCompTDMV4<
-        ck_tile::MxGemmTdmV4Problem<A,
-                                    B,
-                                    O,
-                                    ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                                                           ck_tile::sequence<WarpM, WarpN, 1>,
-                                                           ck_tile::sequence<AtomM, 16, 128>>>,
-        ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>,
-    Traits>;
+using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
+    ck_tile::MxGemmTdmV4Problem<A,
+                                B,
+                                O,
+                                ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                                                       ck_tile::sequence<WarpM, WarpN, 1>,
+                                                       ck_tile::sequence<AtomM, 16, 128>>,
+                                Traits>,
+    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
 
 template <index_t CX,
           index_t CY,
@@ -76,10 +75,10 @@ using Tu = ck_tile::MxTdmV4TuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
 
 // Whole tiles, even tile count, no K tail.
 template <index_t StoreWidth>
-using Even = v4::KernelTraits<false, false, false, false, false, 0, 0, StoreWidth>;
+using Even = ck_tile::MxTdmV4GemmTraits<false, false, false, false, false, 0, 0, StoreWidth>;
 // Any M, N (edges), any tile count, no K tail.
 template <index_t StoreWidth>
-using Any = v4::KernelTraits<true, true, false, false, false, -1, 0, StoreWidth>;
+using Any = ck_tile::MxTdmV4GemmTraits<true, true, false, false, false, -1, 0, StoreWidth>;
 
 using ck_tile::bf16_t;
 using ck_tile::bf8_t;

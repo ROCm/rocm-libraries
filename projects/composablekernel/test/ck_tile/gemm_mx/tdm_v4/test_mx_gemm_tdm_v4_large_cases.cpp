@@ -63,7 +63,7 @@ TEST(MxGemmTdmV4LargeCases, WideA)
                      1,
                      16,
                      Tu<1, 4, 0, -1, 0, MxTdmV4HalfPlr::None>,
-                     v4::KernelTraits<false, false, true, false, false, 0, 0, 1>>;
+                     ck_tile::MxTdmV4GemmTraits<false, false, true, false, false, 0, 0, 1>>;
     check_sampled<K>(65536, 16, 81920, 0.5f);
 }
 
@@ -80,7 +80,7 @@ TEST(MxGemmTdmV4LargeCases, WideD)
                      2,
                      32,
                      Tu<1, 1>,
-                     v4::KernelTraits<false, false, false, false, true, 0, 0, 8>>;
+                     ck_tile::MxTdmV4GemmTraits<false, false, false, false, true, 0, 0, 8>>;
     check_sampled<K>(33024, 33024, 1024, 0.0f);
     check_sampled<K>(33024, 33024, 1024, 0.5f);
 }

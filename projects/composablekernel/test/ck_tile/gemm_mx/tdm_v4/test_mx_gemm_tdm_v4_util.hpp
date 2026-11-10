@@ -45,16 +45,15 @@ template <typename A,
           index_t AtomM,
           typename Tuning,
           typename Traits>
-using Kernel = ck_tile::MxGemmTdmV4Kernel<
-    ck_tile::GemmPipelineAgBgCrCompTDMV4<
-        ck_tile::MxGemmTdmV4Problem<A,
-                                    B,
-                                    O,
-                                    ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                                                           ck_tile::sequence<WarpM, WarpN, 1>,
-                                                           ck_tile::sequence<AtomM, 16, 128>>>,
-        ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>,
-    Traits>;
+using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
+    ck_tile::MxGemmTdmV4Problem<A,
+                                B,
+                                O,
+                                ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                                                       ck_tile::sequence<WarpM, WarpN, 1>,
+                                                       ck_tile::sequence<AtomM, 16, 128>>,
+                                Traits>,
+    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
 
 /// rocKE's tuning knobs with its defaults after the cluster: GL2 distance, signal WMMAs (-1 for
 /// the default), local prefetch, half PLR, half-B order, segment interleave.
@@ -69,7 +68,8 @@ template <index_t CX,
 using Tu = ck_tile::MxTdmV4TuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
 
 template <bool EdgeM, bool EdgeN, index_t OddTiles, index_t TailSteps, index_t StoreWidth>
-using Shape = v4::KernelTraits<EdgeM, EdgeN, false, false, false, OddTiles, TailSteps, StoreWidth>;
+using Shape =
+    ck_tile::MxTdmV4GemmTraits<EdgeM, EdgeN, false, false, false, OddTiles, TailSteps, StoreWidth>;
 
 /// rocKE's sparse check (mx_gemm_bench.sparse_inputs): A and B nonzero only in a few 128-K steps
 /// (the first and last, both sides of the first and last tile boundaries, then random ones up to

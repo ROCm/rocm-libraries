@@ -12,23 +12,6 @@ namespace ck_tile {
 
 namespace mx_tdm_v4 {
 
-/// The run-time shape of one v4 kernel's main loop. Edge M / N: the last M (N) tile is partial,
-/// its TDM rows clipped. Wide A / B: A's (B's) byte offsets pass 2^31 and are i64. TailSteps: the
-/// K steps of a last, partial tile when tile_k does not divide K (0 without one), as rocKE's
-/// MxGemmSpec.tail_steps. OddTiles: 1 if K / tile_k is odd, 0 if even, -1 if either (the odd tile
-/// then runs after the loop, which may cost registers: rocKE knows the count at compile time).
-template <bool EdgeM_, bool EdgeN_, bool WideA_, bool WideB_, index_t OddTiles_, index_t TailSteps_>
-struct LoopTraits
-{
-    static constexpr bool kEdgeM        = EdgeM_;
-    static constexpr bool kEdgeN        = EdgeN_;
-    static constexpr bool kWideA        = WideA_;
-    static constexpr bool kWideB        = WideB_;
-    static constexpr index_t kOddTiles  = OddTiles_;
-    static constexpr index_t kTailSteps = TailSteps_;
-    static constexpr bool kHasTail      = TailSteps_ != 0;
-};
-
 /// The operands of one run: A, B and their K-major scales as bytes, and the problem.
 struct Operands
 {
@@ -122,7 +105,8 @@ CK_TILE_DEVICE TDM_GROUP1 tdm_group1(uint32_t workgroup_mask,
  * buffer with tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K
  * step).
  *
- * rocKE's M, N and K are compile-time; here they are run time and LoopTraits carries what rocKE
+ * rocKE's M, N and K are compile-time; here they are run time and the Problem's traits
+ * (MxTdmV4GemmTraits) carry what rocKE
  * derives from them (edges, wide offsets, a K tail). The loop runs tile pairs, one per buffer; an
  * odd tile count runs its last full tile after the loop (rocKE peels it before the loop; the
  * buffers the tiles use are the same) and the K tail tile picks its K step count at run time.
@@ -132,6 +116,7 @@ struct GemmPipelineAgBgCrCompTDMV4
 {
     using Problem   = remove_cvref_t<Problem_>;
     using Policy    = remove_cvref_t<Policy_>;
+    using Traits    = typename Problem::Traits;
     using Tuning    = typename Policy::TuningType;
     using ADataType = typename Problem::ADataType;
     using BDataType = typename Problem::BDataType;
@@ -274,7 +259,6 @@ struct GemmPipelineAgBgCrCompTDMV4
 #endif
     }
 
-    template <typename Traits>
     struct Run
     {
         const mx_tdm_v4::Operands& p;
@@ -1043,13 +1027,12 @@ struct GemmPipelineAgBgCrCompTDMV4
 
     /// Runs the K loop of the workgroup's tile into acc (one CVec per M and N repeat, index
     /// rm * kRn + rn). `smem` is GetSmemSize() bytes of LDS.
-    template <typename Traits>
     CK_TILE_DEVICE void operator()(const mx_tdm_v4::Operands& p,
                                    const mx_tdm_v4::Coords& c,
                                    CK_TILE_LDS_ADDR uint8_t* smem,
                                    CVec (&acc)[kNumAcc]) const
     {
-        Run<Traits> run(p, c, smem);
+        Run run(p, c, smem);
         run.Main(acc);
     }
 };

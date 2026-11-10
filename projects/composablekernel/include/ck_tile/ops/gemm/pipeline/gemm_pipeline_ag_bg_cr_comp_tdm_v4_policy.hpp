@@ -15,6 +15,57 @@
 namespace ck_tile {
 
 /**
+ * @brief The GEMM traits of a GemmPipelineAgBgCrCompTDMV4 instance: RCR TileGemmUniversalTraits
+ *        plus the shape-dependent code paths rocKE derives from its compile-time M, N and K.
+ *
+ * EdgeM / EdgeN (kPadM / kPadN): the last M (N) tile is partial, its TDM rows clipped and its D
+ * vectors masked. WideA / WideB / WideD (LargeTensors if any): A's, B's or D's byte offsets pass
+ * 2^31 and are i64. OddTiles: 1 if K / tile_k is odd, 0 if even, -1 if either (the odd tile then
+ * runs after the loop, which may cost registers: rocKE knows the count at compile time).
+ * TailSteps: the K steps of a last, partial tile when tile_k does not divide K (0 without one),
+ * as rocKE's MxGemmSpec.tail_steps. StoreWidth: D columns per vector store. The edge and wide
+ * paths are supersets of the ones they replace (an edge kernel runs whole tiles, a wide one
+ * narrow offsets) and any store width dividing N works, so one instance serves every problem its
+ * traits cover; OddTiles (unless -1) and TailSteps must be the problem's.
+ */
+template <bool EdgeM_         = false,
+          bool EdgeN_         = false,
+          bool WideA_         = false,
+          bool WideB_         = false,
+          bool WideD_         = false,
+          index_t OddTiles_   = -1,
+          index_t TailSteps_  = 0,
+          index_t StoreWidth_ = 1>
+struct MxTdmV4GemmTraits : TileGemmUniversalTraits<EdgeM_,
+                                                   EdgeN_,
+                                                   false,
+                                                   true,
+                                                   tensor_layout::gemm::RowMajor,
+                                                   tensor_layout::gemm::ColumnMajor,
+                                                   tensor_layout::gemm::RowMajor,
+                                                   false,
+                                                   false,
+                                                   false,
+                                                   1,
+                                                   false,
+                                                   16,
+                                                   DataCachePrefetchKind::None,
+                                                   DataCachePrefetchKind::None,
+                                                   false,
+                                                   WideA_ || WideB_ || WideD_>
+{
+    static constexpr bool kEdgeM         = EdgeM_;
+    static constexpr bool kEdgeN         = EdgeN_;
+    static constexpr bool kWideA         = WideA_;
+    static constexpr bool kWideB         = WideB_;
+    static constexpr bool kWideD         = WideD_;
+    static constexpr index_t kOddTiles   = OddTiles_;
+    static constexpr index_t kTailSteps  = TailSteps_;
+    static constexpr bool kHasTail       = TailSteps_ != 0;
+    static constexpr index_t kStoreWidth = StoreWidth_;
+};
+
+/**
  * @brief Problem of GemmPipelineAgBgCrCompTDMV4: D = alpha * A @ B^T + beta * C.
  *
  * A is M x K and B is N x K, both K-contiguous (RCR); C and D are M x N row-major. A and B are
@@ -27,19 +78,13 @@ namespace ck_tile {
  *
  * An MxGemmPipelineProblem with float accumulators, PassThrough element functions and E8M0
  * scales per 32 K values, plus ODataType; kBlockSize follows its convention (warps x
- * get_warp_size()).
+ * get_warp_size()). Traits is an MxTdmV4GemmTraits.
  */
 template <typename ADataType_,
           typename BDataType_,
           typename ODataType_,
           typename BlockGemmShape_,
-          typename Traits_ = TileGemmUniversalTraits<false,
-                                                     false,
-                                                     false,
-                                                     true,
-                                                     tensor_layout::gemm::RowMajor,
-                                                     tensor_layout::gemm::ColumnMajor,
-                                                     tensor_layout::gemm::RowMajor>>
+          typename Traits_ = MxTdmV4GemmTraits<>>
 struct MxGemmTdmV4Problem
     : MxGemmPipelineProblem<ADataType_, BDataType_, float, BlockGemmShape_, Traits_>
 {

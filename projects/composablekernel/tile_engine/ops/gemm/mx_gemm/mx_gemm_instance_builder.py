@@ -266,9 +266,9 @@ struct SelectedKernel {{
                 CDataType,
                 ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
                                        ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
-                                       ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>>,
-            ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>,
-        Traits>;
+                                       ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
+                Traits>,
+            ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
 
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{

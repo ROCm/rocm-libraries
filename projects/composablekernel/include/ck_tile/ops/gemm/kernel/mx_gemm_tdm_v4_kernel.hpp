@@ -13,27 +13,7 @@ namespace ck_tile {
 
 namespace mx_tdm_v4 {
 
-/// The shape-dependent code paths of one v4 kernel (rocKE derives them from its compile-time M,
-/// N and K): EdgeM / EdgeN, WideA / WideB / WideD, OddTiles, TailSteps and the D store width. The
-/// edge and wide paths are supersets of the ones they replace (an edge kernel runs whole tiles, a
-/// wide one narrow offsets) and any store width dividing N works, so one instance serves every
-/// problem its traits cover; OddTiles (unless -1) and TailSteps must be the problem's. See
-/// MxGemmTdmV4Kernel::IsSupportedArgument.
-template <bool EdgeM_,
-          bool EdgeN_,
-          bool WideA_,
-          bool WideB_,
-          bool WideD_,
-          index_t OddTiles_,
-          index_t TailSteps_,
-          index_t StoreWidth_>
-struct KernelTraits : LoopTraits<EdgeM_, EdgeN_, WideA_, WideB_, OddTiles_, TailSteps_>
-{
-    static constexpr bool kWideD         = WideD_;
-    static constexpr index_t kStoreWidth = StoreWidth_;
-};
-
-/// The traits rocKE derives from `spec`'s shape, as host values.
+/// The MxTdmV4GemmTraits values rocKE derives from `spec`'s shape, as host values.
 struct ShapeTraits
 {
     bool edge_m;
@@ -70,11 +50,11 @@ CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmV4Spec& s)
  * -enable-misched=false -mllvm -enable-post-misched=false -mllvm
  * -greedy-regclass-priority-trumps-globalness.
  */
-template <typename Pipeline_, typename Traits_>
+template <typename Pipeline_>
 struct MxGemmTdmV4Kernel
 {
     using Pipeline  = remove_cvref_t<Pipeline_>;
-    using Traits    = remove_cvref_t<Traits_>;
+    using Traits    = typename Pipeline::Traits;
     using Problem   = typename Pipeline::Problem;
     using Policy    = typename Pipeline::Policy;
     using ODataType = typename Pipeline::ODataType;
@@ -194,8 +174,7 @@ struct MxGemmTdmV4Kernel
                                            args.N,
                                            args.K};
         typename Pipeline::CVec acc[Pipeline::kNumAcc];
-        Pipeline{}.template operator()<Traits>(
-            operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(smem), acc);
+        Pipeline{}(operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(smem), acc);
         Epilogue{}(args.c, args.d, args.M, args.N, args.alpha, args.beta, coords, acc);
 #else
         ignore = args;

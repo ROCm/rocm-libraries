@@ -52,7 +52,7 @@ TUNING_DEFAULTS: Dict[str, object] = {
     "lds_segment_interleave": True,
 }
 
-#: Shape-dependent code paths of a CK instance (MxGemmTdmV4Kernel's KernelTraits). rocKE derives
+#: Shape-dependent code paths of a CK instance (the Problem's MxTdmV4GemmTraits). rocKE derives
 #: them from its compile-time M, N and K; a CK instance fixes them and runs every problem they
 #: cover. The defaults run any M and N and any tile count with no K tail; store_width 0 means the
 #: widest the tile allows.
@@ -1029,12 +1029,12 @@ def cpp_tuning_type(tuning: Optional[Dict]) -> str:
 
 
 def cpp_kernel_traits(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """The mx_tdm_v4::KernelTraits<...> spelling of a tuning's shape traits."""
+    """The MxTdmV4GemmTraits<...> spelling of a tuning's shape traits."""
     t = normalize_tuning(tuning)
     edge = "true" if t["edge"] else "false"
     wide = "true" if t["wide"] else "false"
     return (
-        f"ck_tile::mx_tdm_v4::KernelTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
+        f"ck_tile::MxTdmV4GemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
         f"{t['odd_tiles']}, {t['tail_steps']}, {instance_store_width(spec, t)}>"
     )
 
