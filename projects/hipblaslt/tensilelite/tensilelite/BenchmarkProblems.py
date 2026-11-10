@@ -55,7 +55,7 @@ from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
+from .create_library import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -105,12 +105,17 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
 
     header = ["GFlops"]
     header += ["Size%d" % i for i in range(numIndices)]
+    hasWorld = bool(problems) and problems[0].world is not None
+    if hasWorld:
+        header += ["World", "A2AExtent"]
     header += ["Solution_%d" % i for i in range(numSolutions)]
 
     lines = [",".join(header)]
     for problem in problems:
         row = [gfxName]
         row += [str(int(s)) for s in problem.sizes]
+        if hasWorld:
+            row += [str(problem.world), str(problem.a2aExtent)]
         row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
         lines.append(",".join(row))
 
@@ -875,7 +880,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
+                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
+                                       deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes)
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf

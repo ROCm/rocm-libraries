@@ -147,18 +147,22 @@ gfx1250 instance uses multicast yet. The ops check the mask type but not that
 it is wave-uniform or that it selects only workgroups inside the launched
 cluster; both are left to the caller.
 
-**TDM has a descriptor builder but no production user.**
+**TDM covers rank 2 only.**
 `IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
-D# groups, and `isa_features/tdm_verify.py` runs a real global -> LDS -> global
-round trip with a padded row pitch. That round trip passes on a gfx1250 device,
-so `has_tdm` is set for gfx1250, but no gfx1250 instance uses TDM yet. Other
-limits:
+D# groups from a global pointer or an i64 global address (`global_addr_of`),
+and `isa_features/tdm_verify.py` runs a real global -> LDS -> global round trip
+with a padded row pitch, so `has_tdm` is set for gfx1250. The universal GEMM
+loads A and B through it on gfx1250 (`TraitSpec.tdm`). `encode_tdm_padding`
+(C: `rocke_encode_tdm_padding`) turns a row pad in bytes into the descriptor's
+pad fields; the GEMM's `lds_k_pad` and the winograd GEMM's row skew both go
+through it. Limits:
 
 - Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
   rank, gather, or iteration.
 - The multicast `workgroup_mask` is packed but never launched.
-- LDS padding is exposed only through the raw `pad_interval` and
-  `pad_amount` fields.
+- LDS padding is one gap of up to 512 bytes after every power-of-two
+  interval of 8 to 1024 bytes: the 3-bit `pad_interval` and 7-bit
+  `pad_amount` fields cannot express other pads.
 
 **The block-scaled GEMM prefetch flag is correctness-verified only.**
 `BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch
@@ -230,7 +234,7 @@ the provider can express.
 The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
 spec, or dispatch selector; it is built and selected in Python only. This
 follows the gfx942/gfx950 `attention_dense` family, which also ships without a
-C++ builder mirror.
+C++ builder mirror (§8).
 
 **What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
 against the Python lowerer is checked on every MLA golden case at every
@@ -280,6 +284,48 @@ and selector parity cases with LSE on.
 
 **Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
 (reduce and tiled 2D kernels mirrored in C; request side remains).
+
+---
+
+## 8. Dense attention prefill (`attention_dense`) — Python-only kernel builder
+
+**Subsystem:** `library/kernels/common/attention_dense_spec.py`,
+`library/kernels/common/attention_dense_decode.py`,
+`library/kernels/gfx9{42,50}/attention_dense.py`,
+`library/dispatch/attention/`
+
+The gfx942 / gfx950 dense prefill family has **no C++ twin** of its kernel
+builder, spec, or dispatch selector; it is built and selected in Python only.
+`grep -r attention_dense platform/cpp/` returns nothing. §6 already mentions
+this family in passing as precedent for the MLA prefill gap; this entry records
+it in its own right so the family is named debt rather than a subordinate clause.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_attention_dense` | `cpp/instances/gfx9{42,50}/`; only `attention_tiled_2d` and `attention_tiled_3d` are ported |
+| A C twin of `AttentionDenseSpec` / `Gfx9{42,50}AttentionDenseSpec`, including the `runtime_shape`, `fastdiv_divisors` and `runtime_kernarg_fields` properties | no `rocke_attention_dense_spec_t` exists |
+| A C selector / spec builder | `cpp/instances/common/attention_unified_selectors.cpp` covers the unified tiled path only; dense has no selector to mirror into |
+| The runtime-shape kernarg ABI (`attention_dense_signature`, `attention_dense_runtime_args`) | Python only; the hipDNN provider packs these kernargs from its own C++ pack, not from a rocke C++ spec |
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every dense case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1` —  `attention_dense` is a
+member of `_FAMILIES` in
+`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`.
+The Python IR itself is pinned by
+`platform/tests/golden/rocke_representative_ir_sha256/attention_dense.json`. So a change to the
+dense kernel body cannot silently diverge the two engines even without a builder
+twin.
+
+**Why deferred:** the same owner decision as §6 — per-family C++ builder mirrors
+are not currently maintained for the attention families that post-date the port,
+and the C engine is under an open deprecation proposal.
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine. Until then, keep dense emission changes gated by the
+cross-engine parity test and the representative golden above.
+
+**Sign-off:** rocKE attention maintainer, 2026-10-30.
 
 ---
 

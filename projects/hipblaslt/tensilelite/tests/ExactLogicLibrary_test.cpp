@@ -3,14 +3,19 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
 #include <cstdlib>
 #include <optional>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 
@@ -140,6 +145,114 @@ namespace
         return lib;
     }
 
+    // Stub that records the SolutionLibrarySearchType it was handed, so a test can
+    // check both the row set ExactLogicLibrary searched and what it forwarded down.
+    class RecordingLibrary : public ContractionLibrary
+    {
+    public:
+        explicit RecordingLibrary(std::shared_ptr<ContractionSolution> solution)
+            : m_solution(std::move(solution))
+        {
+        }
+
+        std::shared_ptr<ContractionSolution>
+            getSolutionByIndex(ContractionProblemGemm const&, Hardware const&, int) const override
+        {
+            return {};
+        }
+
+        std::shared_ptr<ContractionSolution> findBestSolution(ContractionProblemGemm const&,
+                                                              Hardware const&,
+                                                              double* = nullptr) const override
+        {
+            return m_solution;
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutions(ContractionProblemGemm const&,
+                             Hardware const&,
+                             SolutionLibrarySearchType searchType
+                             = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            m_lastSearchType = searchType;
+            return m_solution ? SolutionSet<ContractionSolution>({m_solution})
+                              : SolutionSet<ContractionSolution>();
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType searchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            m_lastSearchType = searchType;
+            return {};
+        }
+
+        std::string type() const override
+        {
+            return "Recording";
+        }
+
+        std::string description() const override
+        {
+            return "Recording";
+        }
+
+        SolutionVector<ContractionSolution>
+            findTopSolutions(ContractionProblemGemm const&, Hardware const&, int) const override
+        {
+            return m_solution ? SolutionVector<ContractionSolution>({m_solution})
+                              : SolutionVector<ContractionSolution>();
+        }
+
+        SolutionLibrarySearchType lastSearchType() const
+        {
+            return m_lastSearchType;
+        }
+
+    private:
+        std::shared_ptr<ContractionSolution>           m_solution;
+        mutable SolutionLibrarySearchType m_lastSearchType = SolutionLibrarySearchType::COUNT;
+    };
+
+    // equality / gridbased / prediction rows, where the latter two are the
+    // "ranking" matching libraries a no-ranking search must skip. Each call
+    // builds its own solutions.
+    std::shared_ptr<ContractionProblemSelectionLibrary> buildRankingRowsLibrary()
+    {
+        auto lib = std::make_shared<ContractionProblemSelectionLibrary>();
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::EqualityMatching>()),
+            std::make_shared<RecordingLibrary>(makeSolution("equality", 1))));
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::GridBasedMatching>()),
+            std::make_shared<RecordingLibrary>(makeSolution("gridbased", 2))));
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::PredictionMatching>()),
+            std::make_shared<RecordingLibrary>(makeSolution("prediction", 3))));
+
+        return lib;
+    }
+
+    std::set<std::string> solutionNameSet(SolutionSet<ContractionSolution> const& solutions)
+    {
+        std::set<std::string> names;
+        for(auto const& solution : solutions)
+            names.insert(solution->solutionName);
+        return names;
+    }
+
+    // gfx942 is the only processor in AMDGPU's StandardCUMap, so it is the only
+    // way to build a device for which isStandardCU() is false.
+    AMDGPU makeNonStandardCuDevice()
+    {
+        return AMDGPU(AMDGPU::Processor::gfx942, 38, "mi300x-cpx", std::nullopt);
+    }
+
     std::vector<std::string> solutionNames(SolutionVector<ContractionSolution> const& solutions)
     {
         std::vector<std::string> names;
@@ -149,6 +262,62 @@ namespace
         return names;
     }
 } // namespace
+
+// GEMM_TYPE_ONLY_NO_RANKING skips GridBasedMatching and PredictionMatching
+// rows on a standard-CU device. A full GEMM_TYPE_ONLY search on the same
+// library still returns those rows.
+
+TEST(ExactLogicLibraryTest, FindAllSolutionsGemmTypeOnlySearchesRankingRows)
+{
+    auto         lib     = buildRankingRowsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    ASSERT_TRUE(device.isStandardCU());
+
+    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
+                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY)),
+              (std::set<std::string>{"equality", "gridbased", "prediction"}));
+}
+
+TEST(ExactLogicLibraryTest, FindAllSolutionsNoRankingSkipsRankingRows)
+{
+    auto         lib     = buildRankingRowsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
+                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)),
+              (std::set<std::string>{"equality"}));
+}
+
+// The skip is suppressed on a non-standard-CU GPU, which still needs every row
+// searched to find CU-fallback solutions.
+TEST(ExactLogicLibraryTest, FindAllSolutionsNoRankingSearchesAllRowsOnNonStandardCuDevice)
+{
+    auto         lib     = buildRankingRowsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeNonStandardCuDevice();
+    ASSERT_FALSE(device.isStandardCU());
+
+    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
+                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)),
+              (std::set<std::string>{"equality", "gridbased", "prediction"}));
+}
+
+// The search type must reach the leaf library unchanged, so that the rows that
+// are searched still apply the same "same GEMM type" filter GEMM_TYPE_ONLY does.
+TEST(ExactLogicLibraryTest, FindAllSolutionsForwardsNoRankingSearchTypeToSubLibrary)
+{
+    auto         lib     = buildRankingRowsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    lib->findAllSolutions(problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+
+    auto const& equalityRow = *static_cast<RecordingLibrary const*>(lib->rows[0].second.get());
+    EXPECT_EQ(equalityRow.lastSearchType(), SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+    EXPECT_TRUE(isGemmTypeOnlySearch(equalityRow.lastSearchType()));
+}
 
 TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesEqualityAndRangeByDefault)
 {
@@ -217,4 +386,83 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
               (std::vector<std::string>{"equality", "range", "prediction"}));
+}
+
+// A non-standard-CU device stays false while several threads publish the flag.
+TEST(ExactLogicLibraryTest, IsStandardCUOnNonStandardDeviceStaysFalse)
+{
+    AMDGPU                   device = makeNonStandardCuDevice();
+    std::atomic<int>         sawTrue{0};
+    std::atomic<bool>        go{false};
+    std::vector<std::thread> threads;
+    for(int i = 0; i < 8; ++i)
+    {
+        threads.emplace_back([&] {
+            while(!go.load(std::memory_order_acquire))
+                ;
+            for(int n = 0; n < 200; ++n)
+            {
+                if(device.isStandardCU())
+                    sawTrue.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    go.store(true, std::memory_order_release);
+    for(auto& th : threads)
+        th.join();
+
+    EXPECT_FALSE(device.isStandardCU());
+    EXPECT_EQ(sawTrue.load(), 0);
+}
+
+TEST(ExactLogicLibraryTest, EqualityTableKeysOnWorld)
+{
+    using Key   = std::array<int64_t, 6>;
+    using Table = Matching::DistanceMatchingTable<Key,
+                                                  ContractionProblemGemm,
+                                                  std::shared_ptr<ContractionLibrary>,
+                                                  std::shared_ptr<ContractionSolution>,
+                                                  Matching::Equality<Key>>;
+
+    auto freeA   = std::make_shared<Contraction::FreeSizeA>();
+    auto freeB   = std::make_shared<Contraction::FreeSizeB>();
+    auto batch   = std::make_shared<Contraction::BatchSize>();
+    auto bound   = std::make_shared<Contraction::BoundSize>();
+    freeA->index = freeB->index = batch->index = bound->index = 0;
+
+    auto table        = std::make_shared<Table>();
+    table->properties = {freeA,
+                         freeB,
+                         batch,
+                         bound,
+                         std::make_shared<Contraction::World>(),
+                         std::make_shared<Contraction::FusedA2AExtent>()};
+    table->table.push_back({Key{3072, 512, 1, 2048, 2, 2048},
+                            std::make_shared<StubTopLibrary>(makeSolution("world2", 1)),
+                            0.0});
+    table->table.push_back({Key{3072, 512, 1, 2048, 4, 2048},
+                            std::make_shared<StubTopLibrary>(makeSolution("world4", 2)),
+                            0.0});
+
+    ContractionProblemMatchingLibrary lib;
+    lib.table = table;
+
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problem = ContractionProblemGemm::GEMM(
+        true, false, 3072, 512, 2048, 2048, 2048, 3072, 0.0, false, 1);
+    problem.setFusedGemmA2A(true);
+    problem.setFusedA2AExtent(2048);
+
+    problem.setWorld(2);
+    auto solution = lib.findBestSolution(problem, device);
+    ASSERT_TRUE(solution);
+    EXPECT_EQ(solution->solutionName, "world2");
+
+    problem.setWorld(4);
+    solution = lib.findBestSolution(problem, device);
+    ASSERT_TRUE(solution);
+    EXPECT_EQ(solution->solutionName, "world4");
+
+    problem.setWorld(8);
+    EXPECT_FALSE(lib.findBestSolution(problem, device));
 }

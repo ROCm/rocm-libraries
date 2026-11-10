@@ -156,7 +156,8 @@ class ConvGeometry:
         Direct conv names the same quantities differently (``H``/``W`` for the
         input extents, ``KH``/``KW`` for the filter, one ``PAD`` and one
         ``stride`` for both axes, ``dil_h``/``dil_w`` for the dilation, which
-        only the non-grouped forward kernel computes). Mapping it onto the
+        ``direct_nongrouped``, ``direct_fwd_wmma``, ``direct_fwd_tapouter_wmma``
+        and ``direct_dgrad_wmma`` compute). Mapping it onto the
         shared geometry here means the output-extent formula and the NHWC /
         NHWK stride layouts exist once for both algorithms rather than once
         per algorithm -- they were drifting apart by construction before.

@@ -27,15 +27,20 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
   slab-padded K/V layouts. IGLP-1 owns this loop schedule and K-major PV traversal
   keeps the 256-VGPR kernel spill-free.
 
-Heads / head_dim / causal / dtype are baked at build time. On the aligned, unshifted path
-`batch`, `seqlen_q`, and `seqlen_kv` are **runtime kernel params** — the spec
-declares them in `runtime_param_fields`, the launcher cache key excludes them, and
-one compiled binary therefore serves every shape (see
+head_dim / causal / window size / dtype are baked at build time. On the aligned,
+unshifted path `batch`, `seqlen_q`, `seqlen_kv`, `num_query_heads` and
+`num_kv_heads` are **runtime kernel params**, on both the grid and the persistent
+body — the spec declares them in `runtime_param_fields`, the launcher cache key
+excludes them, and one compiled binary therefore serves every shape and head count
+(see
 [runtime param field](../../../../../platform/dsl_docs/instances/attention.md#runtime-param-fields)).
-Sub-modes that still bake seqlen into the body — persistent, ragged, varlen,
-paged, sliding-window, and moving bottom-right causal — keep per-shape identity.
-Non-persistent kernels still take the shape parameters; that ABI does not make
-a baked diagonal safe to reuse for a different sequence-length difference.
+The persistent body also takes a host-computed fast-division magic/shift pair per
+work-decode divisor, so its grid-stride decode does no runtime division.
+Sub-modes that still bake the shape into the body — ragged, varlen, paged, moving
+bottom-right causal, and the `gqa_pair` / `gqa_pair_2phase` persistent orders (their
+CTA count is a formula of the shape) — keep per-shape identity. Baked grid kernels
+still take batch and both seqlens as parameters; that ABI does not make a baked
+diagonal safe to reuse for a different sequence-length difference.
 
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
 persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;

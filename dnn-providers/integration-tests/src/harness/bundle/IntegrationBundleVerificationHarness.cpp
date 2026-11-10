@@ -16,19 +16,21 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/RaggedInputs.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
@@ -41,6 +43,14 @@ namespace hipdnn_integration_tests::bundle
 
 namespace
 {
+
+// The message for a staged device wait that came back with a failing status, shared by
+// every call site that reports rather than throws on it (runEngine(),
+// benchmarkIfVerified()).
+std::string describeDeviceWaitFailure(hipError_t status)
+{
+    return std::string("engine device work failed: ") + hipGetErrorString(status);
+}
 
 // The --verification-mode value that selects `mode`, for messages.
 const char* modeName(VerificationMode mode)
@@ -257,6 +267,105 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
+std::optional<std::string> IntegrationBundleVerificationHarness::expectedRejectionClaimError() const
+{
+    if(!carriesSidecar())
+    {
+        return std::nullopt;
+    }
+
+    const auto& sidecar = _claimLocator.sidecarPath;
+    bool named = false;
+    if(_claimLocator.isSweep())
+    {
+        for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecar).claims)
+        {
+            for(const auto& group : groups)
+            {
+                named = named
+                        || std::find(group.cases.begin(), group.cases.end(), _claimLocator.caseId)
+                               != group.cases.end();
+            }
+        }
+    }
+    else
+    {
+        named = !loadSupportClaimsFromPath(sidecar).claims.empty();
+    }
+
+    if(!named)
+    {
+        return std::nullopt;
+    }
+    return "expected_rejection bundle " + _bundlePath.string() + " has a support claim in "
+           + sidecar.string()
+           + "; no engine may claim a graph every engine must reject. Remove the claim.";
+}
+
+VerificationOutcome
+    IntegrationBundleVerificationHarness::expectedRejectionOutcome(GraphSession& session)
+{
+    // An authoring error is the bundle's, whichever engine this lane pins.
+    if(auto claimError = expectedRejectionClaimError())
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, std::move(*claimError));
+    }
+
+    // "Every engine rejects it" is only checkable one lane at a time, so a run that
+    // pinned no engine has nothing to judge. Same answer as enforceAtLevel().
+    if(!_engineUnderTest.has_value())
+    {
+        return unverifiable("expected_rejection requires --test-engine");
+    }
+    const std::string& engine = _engineUnderTest->name;
+
+    // The bundle has to reach an engine for the engine to refuse it. A graph that does
+    // not even deserialize, or a ranked query that did not resolve, says nothing
+    // about this engine, so neither may pass.
+    if(session.buildFailed)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "expected-rejection bundle never reached an engine: "
+                                           "from_binary failed: "
+                                               + session.buildError + " (" + _bundlePath.string()
+                                               + ")");
+    }
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED,
+            FailureOrigin::HARNESS,
+            "the ranked-engine query for an expected-rejection bundle did not resolve ("
+                + session.engines.status.get_message() + "), so it is unknown whether " + engine
+                + " rejects it (" + _bundlePath.string() + ")");
+    }
+
+    // The query resolved, so absence from the list is the engine's refusal.
+    if(!session.engines.accepted)
+    {
+        return VerificationOutcome::rejected("ranked_list");
+    }
+
+    // Ranked: the engine took the graph. It may still refuse to build it, which is
+    // equally a rejection; only a plan that builds is acceptance.
+    const EngineOpResult built = _deps.engineRunner->buildPlans(session, _engineUnderTest);
+    if(built.declined)
+    {
+        return VerificationOutcome::rejected("plan_build_declined");
+    }
+    if(!built.ok)
+    {
+        return VerificationOutcome::rejected("plan_build_failed");
+    }
+    return VerificationOutcome::failed(VerificationDepth::BUILDABLE,
+                                       FailureOrigin::ENGINE,
+                                       "Engine " + engine + " accepted expected-rejection bundle "
+                                           + _bundlePath.string()
+                                           + ": it is ranked and its plans build");
+}
+
 std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
     const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
@@ -340,6 +449,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
+    // Decided from the bundle's own metadata, so before any input is read or filled and
+    // before the engine runs: the outcome would be the same whatever they did.
+    if(auto skipped = disabledReferenceSkip())
+    {
+        return *skipped;
+    }
+
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
     // _inputs. Filling first made a declined graph pay the full host-side
@@ -395,6 +511,72 @@ IntegrationBundleVerificationHarness::OracleChain
             + modeName(mode));
     }
     return chain;
+}
+
+void IntegrationBundleVerificationHarness::dropDisabledReferences(OracleChain& chain) const
+{
+    const auto isDisabled = [this](ReferenceExecutorType type) {
+        return type == ReferenceExecutorType::GPU ? _bundle->metadata.noGpuReference
+                                                  : _bundle->metadata.noCpuReference;
+    };
+
+    std::vector<ReferenceExecutorType> kept;
+    for(const auto type : chain.candidates)
+    {
+        if(isDisabled(type))
+        {
+            chain.declined(refLabel(type) + " (disabled by bundle metadata)");
+        }
+        else
+        {
+            kept.push_back(type);
+        }
+    }
+    chain.candidates = std::move(kept);
+}
+
+std::optional<VerificationOutcome>
+    IntegrationBundleVerificationHarness::disabledReferenceSkip() const
+{
+    const auto& metadata = _bundle->metadata;
+    switch(_deps.policy.mode)
+    {
+    case VerificationMode::GPU:
+        if(metadata.noGpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=gpu names the GPU reference, which this bundle disables "
+                "(no_gpu_reference)");
+        }
+        break;
+    case VerificationMode::CPU:
+        if(metadata.noCpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=cpu names the CPU reference, which this bundle disables "
+                "(no_cpu_reference)");
+        }
+        break;
+    case VerificationMode::AUTO:
+        // Golden data is all that can verify such a bundle. The loader guarantees it is
+        // declared, so absent here means declared but not pulled.
+        if(metadata.noCpuReference && metadata.noGpuReference && !_bundle->hasGoldenOutputs)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "golden data not pulled; bundle disables both references (no_cpu_reference, "
+                "no_gpu_reference) ("
+                    + _bundlePath.string() + ")");
+        }
+        break;
+    case VerificationMode::GOLDEN:
+    default:
+        // Golden mode demands golden data and keeps its own FAIL for its absence.
+        break;
+    }
+    return std::nullopt;
 }
 
 std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
@@ -526,6 +708,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
     if(!outcome.has_value())
     {
+        // After golden, so a message lists what the chain tried in the order it tried it.
+        dropDisabledReferences(oracles);
         outcome = runOracleChain(engine.outputs, oracles);
     }
     benchmarkIfVerified(session, engine.outputs, *outcome);
@@ -661,6 +845,15 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
         return fillBundleInputs();
     }
 
+    if(!_bundle->metadata.aliases.empty())
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "aliases cannot be used with tensor data read from "
+                                           "blobs, which store each tensor apart ("
+                                               + _bundlePath.string() + ")");
+    }
+
     // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
     // packed, and only fillBundleInputs() builds the packed set.
     const auto wrapper = _bundle->graphWrapper();
@@ -693,20 +886,61 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     return std::nullopt;
 }
 
+const std::unordered_map<int64_t, int64_t>&
+    IntegrationBundleVerificationHarness::cachedRaggedLengthUids() const
+{
+    if(!_raggedLengthUidsCache.has_value())
+    {
+        _raggedLengthUidsCache
+            = hipdnn_test_sdk::utilities::raggedLengthUids(_bundle->graphWrapper().getGraph());
+    }
+    return *_raggedLengthUidsCache;
+}
+
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBundleInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
-    // The generic fill recipes cannot produce a valid monotonic offset table, and
-    // garbage offsets would send the engine reading out of bounds.
-    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorAttrMap))
+    // Random offsets would send the engine reading out of bounds, so every offset and
+    // seq_len tensor of a ragged graph must have its exact values in the metadata.
+    std::unordered_map<int64_t, int64_t> lengthUids;
+    try
     {
-        return unverifiable("ragged inputs require golden blobs");
+        lengthUids = cachedRaggedLengthUids();
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("ragged graph cannot be filled: ") + e.what()
+                                               + " (" + _bundlePath.string() + ")");
+    }
+    std::string missingValues;
+    for(const int64_t uid : detail::raggedIndexUids(wrapper.getGraph(), tensorAttrMap))
+    {
+        if(!_inputFillRecipes.isSet(uid)
+           || _inputFillRecipes.fill(uid).kind != FillRecipe::Kind::VALUES)
+        {
+            missingValues.append(missingValues.empty() ? "" : ", ").append(std::to_string(uid));
+        }
+    }
+    if(!missingValues.empty())
+    {
+        return unverifiable("ragged inputs need exact offset values or golden blobs; tensor(s) "
+                            + missingValues + " have no values fill spec");
     }
 
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
+
+    // A view has no tensor of its own: the variant pack points it into its owner.
+    const auto& aliases = _bundle->metadata.aliases;
+    std::set<int64_t> viewUids;
+    for(const auto& alias : aliases)
+    {
+        viewUids.insert(alias.uid);
+    }
 
     InputTensorMap inputs;
     std::vector<int64_t> leafInputUids;
@@ -717,9 +951,12 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         {
             continue;
         }
-        inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
         leafInputUids.push_back(uid);
         anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
+        if(viewUids.count(uid) == 0)
+        {
+            inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
+        }
     }
 
     // Sub-byte graphs fill twice, once unpacked and once packed, and the two sets must
@@ -731,25 +968,54 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     DeviceInputFiller* const device
         = _deps.policy.useDevice() && !anySubByte ? _deps.deviceFiller.get() : nullptr;
 
+    // A recipe that cannot fill its tensor is an error in the bundle's metadata, not a
+    // limit of the harness, so it fails the test.
+    const auto fillFailure = [this](const FillResult& result) {
+        if(result.status == FillResult::Status::INVALID)
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "input fill failed: " + result.reason + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+        return unverifiable(result.reason);
+    };
+
+    const auto fillSet
+        = [&](InputTensorMap& tensors, FillResult& result) -> std::optional<VerificationOutcome> {
+        try
+        {
+            result = hipdnn_integration_tests::fillInputs(
+                wrapper.getGraph(), tensors, leafInputUids, _inputFillRecipes, device, aliases);
+        }
+        catch(const DeviceInputError& e)
+        {
+            // The device failed, not the graph, so this is a failure and not an
+            // "unverifiable" skip that would let the run go green.
+            return VerificationOutcome::failed(
+                VerificationDepth::NOT_REACHED,
+                FailureOrigin::HARNESS,
+                std::string(e.what()) + " (" + _bundlePath.string()
+                    + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on the host");
+        }
+        catch(const std::exception& e)
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               std::string("input fill failed: ") + e.what() + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+        if(!result.filled)
+        {
+            return fillFailure(result);
+        }
+        return std::nullopt;
+    };
+
     FillResult fillResult;
-    try
+    if(auto failure = fillSet(inputs, fillResult))
     {
-        fillResult = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, device);
-    }
-    catch(const DeviceInputError& e)
-    {
-        // The device failed, not the graph, so this is a failure and not an
-        // "unverifiable" skip that would let the run go green.
-        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
-                                           FailureOrigin::HARNESS,
-                                           std::string(e.what()) + " (" + _bundlePath.string()
-                                               + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on "
-                                                 "the host");
-    }
-    if(!fillResult.filled)
-    {
-        return unverifiable(fillResult.reason);
+        return failure;
     }
     _deviceFilledInputs = fillResult.deviceFilled;
 
@@ -758,20 +1024,61 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         InputTensorMap packed;
         for(const int64_t uid : leafInputUids)
         {
-            packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
-                *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
+            if(viewUids.count(uid) == 0)
+            {
+                packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
+                    *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
+            }
         }
 
-        auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
-        if(!packedFill.filled)
+        FillResult packedFill;
+        if(auto failure = fillSet(packed, packedFill))
         {
-            return unverifiable(packedFill.reason);
+            return failure;
         }
         _packedInputs = std::move(packed);
     }
 
     _inputs = std::move(inputs);
+    return checkRaggedLayouts(lengthUids);
+}
+
+std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRaggedLayouts(
+    const std::unordered_map<int64_t, int64_t>& lengthUids) const
+{
+    const auto wrapper = _bundle->graphWrapper();
+    for(const auto& [uid, attrs] : wrapper.getTensorMap())
+    {
+        if(attrs->virtual_() || !attrs->ragged_offset_tensor_uid().has_value())
+        {
+            continue;
+        }
+        std::string problem;
+        try
+        {
+            const auto footprint = detail::raggedLayoutFootprint(*attrs, _inputs, lengthUids);
+            // An output buffer is sized to its footprint; an input has its dense size.
+            const auto input = _inputs.find(uid);
+            if(input != _inputs.end() && footprint.elementSpace > input->second->elementSpace())
+            {
+                problem = "does not fit its buffer: its offsets reach element "
+                          + std::to_string(footprint.elementSpace - 1) + ", past the "
+                          + std::to_string(input->second->elementSpace())
+                          + " elements of its buffer";
+            }
+        }
+        catch(const std::exception& e)
+        {
+            problem = std::string("has no valid ragged layout: ") + e.what();
+        }
+        if(!problem.empty())
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "ragged tensor " + std::to_string(uid) + " "
+                                                   + problem + " (" + _bundlePath.string() + ")");
+        }
+    }
     return std::nullopt;
 }
 
@@ -780,17 +1087,57 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
+    return detail::allocateSentinelOutputs(wrapper.getTensorMap(),
+                                           _bundle->outputTensorUids,
+                                           _inputs,
+                                           cachedRaggedLengthUids(),
+                                           onDevice);
+}
+
+TensorMap& IntegrationBundleVerificationHarness::variantPackInputs(bool useDevice)
+{
+    return (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
 }
 
 std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs, bool useDevice)
 {
     const auto wrapper = _bundle->graphWrapper();
-    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
-    return detail::buildVariantPack(
-        inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
+    try
+    {
+        return detail::buildVariantPack(variantPackInputs(useDevice),
+                                        outputs,
+                                        wrapper.getTensorMap(),
+                                        _bundle->outputTensorUids,
+                                        useDevice,
+                                        _bundle->metadata.aliases);
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw std::invalid_argument(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
+}
+
+detail::StartOffsetStaging IntegrationBundleVerificationHarness::stageStartOffsets(
+    std::unordered_map<int64_t, void*>& variantPack, OutputTensors& outputs, bool useDevice)
+{
+    try
+    {
+        return {variantPack,
+                variantPackInputs(useDevice),
+                outputs,
+                _bundle->metadata.startOffsets,
+                _bundle->metadata.aliases,
+                useDevice};
+    }
+    catch(const detail::DeviceOutputError& e)
+    {
+        throw detail::DeviceOutputError(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw std::invalid_argument(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
 }
 
 IntegrationBundleVerificationHarness::EngineRunResult
@@ -816,6 +1163,8 @@ IntegrationBundleVerificationHarness::EngineRunResult
 
     run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
+    // The references run on the tensors themselves; only the engine sees the moved copies.
+    auto staging = stageStartOffsets(variantPack, run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
     // instead of a disposition read back off GTest, which cannot tell an engine
@@ -838,6 +1187,22 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
+    // The engine may run asynchronously, so a fault in its work on a moved copy can
+    // first show here.
+    if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
+    {
+        run.status = EngineStatus::ERRORED;
+        run.message = describeDeviceWaitFailure(status);
+        return run;
+    }
+    try
+    {
+        staging.copyOutputsBack();
+    }
+    catch(const detail::DeviceOutputError& e)
+    {
+        throw detail::DeviceOutputError(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
     markOutputsModified(run.outputs);
     run.status = EngineStatus::RAN;
     return run;
@@ -864,7 +1229,16 @@ IntegrationBundleVerificationHarness::RefRunResult
         {
             bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
         }
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
+        VariantPack variantPack;
+        try
+        {
+            variantPack = buildVariantPack(refOutputs, useDevice);
+        }
+        catch(const std::invalid_argument& e)
+        {
+            // The variant pack is the harness's, so a fault in it is never the reference's.
+            return {RefStatus::HARNESS_ERROR, e.what()};
+        }
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)
@@ -903,7 +1277,24 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
     try
     {
         auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+        auto staging = stageStartOffsets(variantPack, engineOutputs, _deps.policy.useDevice());
         _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+
+        // The benchmark may run asynchronously, so a fault in its work on the moved
+        // copies can first show here -- same as runEngine(). This also covers the
+        // path where every candidate declines: unlike a successful autotune pass,
+        // that path does not wait on its own, so this wait is the only thing
+        // standing between the staged copies and the engine's still-running work
+        // when `staging` goes out of scope below.
+        if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
+        {
+            hipdnn_frontend::AutotuneResult failed;
+            failed.errorMessage = describeDeviceWaitFailure(status);
+            _benchmark = failed;
+            return;
+        }
+        staging.copyOutputsBack();
+        markOutputsModified(engineOutputs);
     }
     catch(const std::exception& e)
     {
@@ -963,14 +1354,48 @@ VerificationOutcome
             return comparisonOutcome(false, verifier);
         }
     }
-    const auto mismatches
-        = bundle::compareOutputs(wrapper,
-                                 bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
-                                 engineOutputs,
-                                 expectedFor,
-                                 toleranceFor,
-                                 resolveValidationSite(_deps.policy.validator, site),
-                                 "Bundle: " + _bundlePath.string() + inputFillNote());
+    LiveRowMap liveRows;
+    // A filled ragged input is a dense buffer. A `like` entry reads its layout through a
+    // ragged view of that buffer.
+    std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> raggedViews;
+    try
+    {
+        liveRows = resolveLiveRows(_bundle->metadata.liveRows, wrapper, [&](int64_t uid) {
+            const auto input = _inputs.find(uid);
+            if(input != _inputs.end())
+            {
+                const auto* attrs = wrapper.getTensorMap().at(uid);
+                if(attrs->ragged_offset_tensor_uid().has_value()
+                   && !input->second->raggedIterationInfo().has_value())
+                {
+                    raggedViews.push_back(detail::makeRaggedView(
+                        input->second->rawHostData(), *attrs, _inputs, cachedRaggedLengthUids()));
+                    return raggedViews.back().get();
+                }
+                return input->second.get();
+            }
+            const auto output = engineOutputs.find(uid);
+            return output != engineOutputs.end() ? output->second.get() : nullptr;
+        });
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::EXECUTED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("metadata live_rows cannot be applied: ")
+                                               + e.what() + " (" + _bundlePath.string() + ")");
+    }
+
+    const auto mismatches = bundle::compareOutputs(
+        wrapper,
+        bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
+        engineOutputs,
+        expectedFor,
+        toleranceFor,
+        resolveValidationSite(_deps.policy.validator, site),
+        "Bundle: " + _bundlePath.string() + inputFillNote(),
+        liveRows,
+        resolveValidationSite(_deps.policy.validator, ValidationSite::HOST));
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.

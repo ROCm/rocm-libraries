@@ -202,26 +202,27 @@ struct AsmCapsConfig {
 
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
     /// path, which has no rocisa to ask.
-    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
-    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// When set alone (without `enableXnackReplay`), Gfx1250XnackHazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250XnackHazardPass for the full
     /// rule set (Rules 1–4).
     bool requiresXCntForVolatileVMEM = false;
 
-    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    /// Enable full XNACK replay protection in Gfx1250XnackHazardPass:
     ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
     ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
     ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
     /// When false, all of the above are skipped; only Rule 4a remains
     /// active if `requiresXCntForVolatileVMEM` is set independently.
-    /// See Gfx1250HazardPass for the complete rule definitions.
+    /// See Gfx1250XnackHazardPass for the complete rule definitions.
     ///
-    /// The four SW instruction-prefetch passes read the same flag for the drain
-    /// before each prefetch, so a caller gets replay protection from both passes
-    /// or from neither. There is deliberately no third "unspecified" state: a
-    /// caller that leaves this false gets no gfx1250 replay protection anywhere,
-    /// which is what Gfx1250HazardPass has always done with it. Every in-tree
-    /// entry point sets it -- `Backend::configurePassManager` from
-    /// `ModuleOptions`, and `stinkytofu-opt` from its `--arch` target ID.
+    /// The relative SW instruction-prefetch passes read the same flag for the
+    /// drain before a prefetch that would follow an open SMEM group, so a caller
+    /// gets replay protection from both passes or from neither. There is
+    /// deliberately no third "unspecified" state: a caller that leaves this false
+    /// gets no gfx1250 replay protection anywhere, which is what
+    /// Gfx1250XnackHazardPass has always done with it. Every in-tree entry point
+    /// sets it -- `Backend::configurePassManager` from `ModuleOptions`, and
+    /// `stinkytofu-opt` from its `--arch` target ID.
     bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu
