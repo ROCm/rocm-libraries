@@ -15,6 +15,7 @@ No GPU or compiler needed. Run: python3 -m pytest -q tests/test_adaptive_search_
 """
 
 import argparse
+import contextlib
 import hashlib
 import itertools
 import json
@@ -2174,6 +2175,36 @@ def test_prepare_host_data_kills_every_worker_on_a_second_interrupt(monkeypatch)
         for p in procs:
             p.kill()
             subprocess.Popen.wait(p)
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_prepare_host_data_kills_a_worker_interrupted_inside_popen(monkeypatch, sig):
+    # A search run's SIGTERM or Ctrl-C arriving inside Popen, after the worker
+    # was spawned but before Popen returned: it is held back until the
+    # worker is recorded, so the cleanup kills and reaps it.
+    pids, real = [], subprocess.Popen._execute_child
+
+    def spawn(self, *a, **kw):
+        real(self, *a, **kw)
+        pids.append(self.pid)
+        os.kill(os.getpid(), sig)
+        for _ in range(100):  # the handler runs here, inside Popen
+            time.sleep(0.001)
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", spawn)
+    old = signal.signal(sig, AS._interrupt_handler(os.getpid()))
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _prep({"a": {"sleep": 60}}, width=1)
+        assert len(pids) == 1
+        with pytest.raises(ChildProcessError):  # killed and reaped
+            os.waitpid(pids[0], os.WNOHANG)
+    finally:
+        signal.signal(sig, old)
+        for pid in pids:  # without the fix the worker is still running
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
 
 
 @pytest.mark.parametrize("record, calls, want", [
