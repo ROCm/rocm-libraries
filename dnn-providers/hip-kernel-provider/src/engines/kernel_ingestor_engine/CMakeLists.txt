@@ -300,6 +300,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvDepthwiseValuWrwArgs.h
         kernels/ConvDepthwiseRows.cpp
         ConvDepthwiseRowsCores.h
+        kernels/ConvGroup.cpp
+        ConvGroupArgs.h
+        ConvGroupCore.h
         kernels/ConvIgemm.cpp
         ConvIgemmArgs.h
         ConvIgemmCore.h
