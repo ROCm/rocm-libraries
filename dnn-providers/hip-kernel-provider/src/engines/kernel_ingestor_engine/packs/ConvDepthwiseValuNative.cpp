@@ -114,6 +114,12 @@ ConvDirection directionFor(const KernelDefinition& kernel)
         "conv_depthwise_valu kernel declares unsupported direction '" + direction + "'");
 }
 
+/// Bytes per element of @p dataType (the dtypes the depthwise kernels take).
+int64_t elementBytes(data_objects::DataType dataType)
+{
+    return dataType == data_objects::DataType::FLOAT ? 4 : 2;
+}
+
 /// The tile @p kernel's metadata declares, or nullopt for an unknown variant.
 std::optional<DepthwiseTile> tileOf(const KernelDefinition& kernel)
 {
@@ -137,6 +143,8 @@ std::optional<DepthwiseTile> tileOf(const KernelDefinition& kernel)
     tile.rd = kernel.getIntMetadata("rd");
     tile.rh = kernel.getIntMetadata("rh");
     tile.rw = kernel.getIntMetadata("rw");
+    tile.stride = kernel.getIntMetadata("stride");
+    tile.vec = kernel.getIntMetadata("vec");
     return tile;
 }
 
@@ -198,7 +206,22 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // The gather serves backward data at any stride, and only it serves a strided one.
+    // The phase blocks serve 2-D backward data at their stride (height and width) and filter,
+    // unit dilation; channels-last vectors of at most 16 bytes, whole 32-bit words.
+    if(tile->variant == DepthwiseVariant::PHASE)
+    {
+        const auto& g = problem->gatherArgs;
+        const int64_t bytes = tile->vec * elementBytes(problem->base.dataType);
+        const bool vecOk = problem->layout == DepthwiseLayout::CHANNELS_FIRST
+                               ? tile->vec == 0 && tile->bk == 0
+                               : tile->vec > 0 && bytes <= 16 && bytes % 4 == 0 && tile->bk > 0;
+        return direction == ConvDirection::BACKWARD_DATA && problem->ndims == 2 && tile->stride >= 2
+               && g.sh == tile->stride && g.sw == tile->stride && g.dh == 1 && g.dw == 1
+               && g.kh == tile->kh && g.kw == tile->kw && vecOk
+               && conv_depthwise_valu::launchFor(*problem, *tile).has_value();
+    }
+    // The gather serves backward data at any stride, and only it (and the phase blocks) a
+    // strided one.
     if(tile->variant == DepthwiseVariant::GATHER || problem->gatherOnly)
     {
         return tile->variant == DepthwiseVariant::GATHER
@@ -304,13 +327,18 @@ public:
         options.add("CONV_DW_LAYOUT",
                     std::string(problem->layout == DepthwiseLayout::CHANNELS_FIRST ? "1" : "0"));
         options.add("CONV_DW_NDIMS", std::to_string(problem->ndims));
-        const bool gather = tile->variant == DepthwiseVariant::GATHER;
+        // The gather and the phase blocks run in gather terms (in = dy, out = dx, the forward
+        // convolution's padding, stride and dilation).
+        const bool gather
+            = tile->variant == DepthwiseVariant::GATHER || tile->variant == DepthwiseVariant::PHASE;
         // The gather reads the filter as the forward convolution does: reflected only for
         // true convolution.
         options.add(
             "CONV_DW_FLIP",
             std::string((gather ? problem->convolutionMode : problem->flipFilter) ? "1" : "0"));
-        const std::array<std::pair<const char*, int64_t>, 13> tileDefines{{{"WSTRIP", tile->wstrip},
+        const std::array<std::pair<const char*, int64_t>, 15> tileDefines{{{"WSTRIP", tile->wstrip},
+                                                                           {"STRIDE", tile->stride},
+                                                                           {"VEC", tile->vec},
                                                                            {"KD", tile->kd},
                                                                            {"KH", tile->kh},
                                                                            {"KW", tile->kw},

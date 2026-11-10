@@ -32,6 +32,9 @@ enum class DepthwiseVariant
     LDS = 3,
     /// Backward data as a gather over the taps: any stride (v5_gather_bwd).
     GATHER = 4,
+    /// Backward data by stride phase blocks (v6_phase_block_*): 2-D, the tile's filter and
+    /// stride, unit dilation.
+    PHASE = 5,
 };
 
 /**
@@ -62,7 +65,7 @@ struct DepthwiseValuProblem
     /// Backward data only: the gather variant's argument block, in = dy and out = dx with the
     /// forward convolution's padding, stride and dilation.
     ConvDepthwiseValuArgs gatherArgs{};
-    /// Backward data with a stride: only the gather variant serves it (args is unused).
+    /// Backward data with a stride: only the gather and phase variants serve it (args is unused).
     bool gatherOnly = false;
     /// True convolution: the gather variant reads the filter reflected.
     bool convolutionMode = false;
@@ -107,6 +110,10 @@ struct DepthwiseTile
     int64_t rd = 0;
     int64_t rh = 0;
     int64_t rw = 0;
+    /// Phase: the stride (height and width) the tile bakes, and channels per thread
+    /// (channels-last; 0 channels-first).
+    int64_t stride = 0;
+    int64_t vec = 0;
 };
 
 /// The launch of @p tile on @p problem: threads per block and blocks.

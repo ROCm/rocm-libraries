@@ -74,6 +74,14 @@
     {
       "name": "rw",
       "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
     }
   ]
 }

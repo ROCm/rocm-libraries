@@ -22,6 +22,9 @@
 //   v2_core_nchw / v2_core_ncdhw  channel-first floors, coalesced on the contiguous width.
 //   v3b_lds_core_nchw       channel-first LDS plane-tile stage + register micro-tile (2D).
 //   v5_gather_bwd           backward data as a gather over the taps; any stride, both layouts.
+//   v6_phase_block_nhwc/nchw  backward data by stride phase blocks: each thread computes the
+//                           S x S dx pixels of one dy position from the dy window they share
+//                           (compile-time filter and stride, unit dilation), both layouts.
 #pragma once
 
 namespace conv_depthwise_valu
@@ -976,4 +979,184 @@ __device__ inline void v5_gather_bwd(const T* __restrict__ A,
     valu_from_f32(acc, D[o]);
 }
 
+// ---- v6 — backward data by stride phase blocks; stride S compile-time, unit dilation ----
+// A thread owns the S x S dx pixels sharing
+// (qy, qx) = ((y + ph) / S, (x + pw) / S), one per phase (ry, rx). They all read the dy window
+// rows qy - m, columns qx - m' (m < ceil(KH / S)), which the thread loads once; phase (ry, rx)
+// takes taps (ry + S m, rx + S m'). Channels-last: VEC channels per thread, CVB channel vectors per
+// block, the block's filter slice in LDS as fp32.
+template <typename T, int KH, int KW, int S, int VEC, int CVB>
+__device__ inline void v6_phase_block_nhwc(const T* __restrict__ A,
+                                           const T* __restrict__ Wt,
+                                           T* __restrict__ D,
+                                           ValuParams p)
+{
+    constexpr int PIX = 256 / CVB;
+    constexpr int BC = CVB * VEC;
+    constexpr int MY = (KH + S - 1) / S, MX = (KW + S - 1) / S;
+    __shared__ float sW[KH * KW][BC];
+    const int tid = threadIdx.x;
+    // One-dimensional grid: channel block fastest, then pixel block.
+    const int cblocks = (p.C + BC - 1) / BC;
+    const int pblock = blockIdx.x / cblocks;
+    const int cb = (blockIdx.x - pblock * cblocks) * BC;
+    for(int i = tid; i < KH * KW * BC; i += 256)
+    {
+        const int tap = i / BC, cc = i - tap * BC, ch = cb + cc;
+        const int ky = tap / KW, kx = tap - ky * KW;
+        sW[tap][cc]
+            = ch < p.C ? valu_to_f32(Wt[(long)ch * KH * KW + dwTap2(ky, kx, KH, KW)]) : 0.0f;
+    }
+    __syncthreads();
+    const int qh = (p.Ho - 1 + p.ph) / S + 1, qw = (p.Wo - 1 + p.pw) / S + 1;
+    const int cv = tid % CVB, tp = tid / CVB;
+    const int c0 = cb + cv * VEC;
+    const int pix = pblock * PIX + tp;
+    if(pix >= p.N * qh * qw || c0 >= p.C)
+        return;
+    const int qx = pix % qw;
+    const int rest = pix / qw;
+    const int qy = rest % qh;
+    const int n = rest / qh;
+    const bool whole = c0 + VEC <= p.C && p.C % VEC == 0;
+    typedef unsigned int __attribute__((ext_vector_type(VEC * sizeof(T) / 4))) Raw;
+    // The dy window, fp32.
+    float win[MY][MX][VEC];
+#pragma unroll
+    for(int m = 0; m < MY; ++m)
+#pragma unroll
+        for(int mm = 0; mm < MX; ++mm)
+        {
+            const int oy = qy - m, ox = qx - mm;
+            T v[VEC];
+            if(oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi)
+            {
+                const T* a = A + ((long)(n * p.Hi + oy) * p.Wi + ox) * p.C + c0;
+                if(whole)
+                    *reinterpret_cast<Raw*>(v) = *reinterpret_cast<const Raw*>(a);
+                else
+#pragma unroll
+                    for(int e = 0; e < VEC; ++e)
+                        v[e] = c0 + e < p.C ? a[e] : T(0);
+            }
+            else
+            {
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    v[e] = T(0);
+            }
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                win[m][mm][e] = valu_to_f32(v[e]);
+        }
+#pragma unroll
+    for(int ry = 0; ry < S; ++ry)
+    {
+        const int y = S * qy + ry - p.ph;
+        if(y < 0 || y >= p.Ho)
+            continue;
+#pragma unroll
+        for(int rx = 0; rx < S; ++rx)
+        {
+            const int x = S * qx + rx - p.pw;
+            if(x < 0 || x >= p.Wo)
+                continue;
+            float acc[VEC];
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                acc[e] = 0.0f;
+#pragma unroll
+            for(int m = 0; m < MY; ++m)
+            {
+                if(ry + S * m >= KH)
+                    continue;
+#pragma unroll
+                for(int mm = 0; mm < MX; ++mm)
+                {
+                    if(rx + S * mm >= KW)
+                        continue;
+                    const float* w = &sW[(ry + S * m) * KW + rx + S * mm][cv * VEC];
+#pragma unroll
+                    for(int e = 0; e < VEC; ++e)
+                        acc[e] += w[e] * win[m][mm][e];
+                }
+            }
+            T* d = D + ((long)(n * p.Ho + y) * p.Wo + x) * p.C + c0;
+            T o[VEC];
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                valu_from_f32(acc[e], o[e]);
+            if(whole)
+                *reinterpret_cast<Raw*>(d) = *reinterpret_cast<const Raw*>(o);
+            else
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    if(c0 + e < p.C)
+                        d[e] = o[e];
+        }
+    }
+}
+
+// Channels-first phase blocks: lanes along qx of one dx row band; a thread computes S rows x S
+// columns of dx (one (qy, qx) block) from its MY x MX dy window, filter of its channel in registers.
+template <typename T, int KH, int KW, int S>
+__device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
+                                           const T* __restrict__ Wt,
+                                           T* __restrict__ D,
+                                           ValuParams p)
+{
+    constexpr int MY = (KH + S - 1) / S, MX = (KW + S - 1) / S;
+    const int qh = (p.Ho - 1 + p.ph) / S + 1, qw = (p.Wo - 1 + p.pw) / S + 1;
+    const int t = blockIdx.x * 256 + threadIdx.x;
+    if(t >= p.N * p.C * qh * qw)
+        return;
+    const int qx = t % qw;
+    int rest = t / qw;
+    const int qy = rest % qh;
+    rest /= qh;
+    const int c = rest % p.C;
+    const int n = rest / p.C;
+    float w[KH * KW];
+    const T* wc = Wt + (long)c * KH * KW;
+#pragma unroll
+    for(int ky = 0; ky < KH; ++ky)
+#pragma unroll
+        for(int kx = 0; kx < KW; ++kx)
+            w[ky * KW + kx] = valu_to_f32(wc[dwTap2(ky, kx, KH, KW)]);
+    const T* a0 = A + (long)(n * p.C + c) * p.Hi * p.Wi;
+    float win[MY][MX];
+#pragma unroll
+    for(int m = 0; m < MY; ++m)
+#pragma unroll
+        for(int mm = 0; mm < MX; ++mm)
+        {
+            const int oy = qy - m, ox = qx - mm;
+            win[m][mm] = oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi
+                             ? valu_to_f32(a0[(long)oy * p.Wi + ox])
+                             : 0.0f;
+        }
+    T* d0 = D + (long)(n * p.C + c) * p.Ho * p.Wo;
+#pragma unroll
+    for(int ry = 0; ry < S; ++ry)
+    {
+        const int y = S * qy + ry - p.ph;
+        if(y < 0 || y >= p.Ho)
+            continue;
+#pragma unroll
+        for(int rx = 0; rx < S; ++rx)
+        {
+            const int x = S * qx + rx - p.pw;
+            if(x < 0 || x >= p.Wo)
+                continue;
+            float acc = 0.0f;
+#pragma unroll
+            for(int m = 0; m < MY; ++m)
+#pragma unroll
+                for(int mm = 0; mm < MX; ++mm)
+                    if(ry + S * m < KH && rx + S * mm < KW)
+                        acc += w[(ry + S * m) * KW + rx + S * mm] * win[m][mm];
+            valu_from_f32(acc, d0[(long)y * p.Wo + x]);
+        }
+    }
+}
 } // namespace conv_depthwise_valu
