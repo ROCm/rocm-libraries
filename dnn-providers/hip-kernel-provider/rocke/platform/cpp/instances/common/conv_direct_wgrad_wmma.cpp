@@ -22,10 +22,10 @@
 #include <string>
 #include <vector>
 
-#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
+#include "rocke/instance_conv_direct_wgrad_internal.hpp" /* build_new, lower_to_llvm */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
@@ -1369,29 +1369,12 @@ rocke_kernel_def_t* rocke_build_direct_wgrad_wmma_new(rocke_ir_builder_t* b,
                                                       const rocke_direct_wgrad_wmma_spec_t* spec,
                                                       const char* arch)
 {
-    if(b != NULL)
-    {
-        memset(b, 0, sizeof(*b));
-    }
-    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
-        char name[512];
-        if(b == NULL)
-            return NULL;
-        if(spec == NULL)
-        {
-            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_wgrad_wmma: null spec");
-            return NULL;
-        }
-        if(rocke_direct_wgrad_wmma_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
-        {
-            rocke_i_set_err_msg(
-                b, ROCKE_ERR_VALUE, "build_direct_wgrad_wmma: kernel name does not fit");
-            return NULL;
-        }
-        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
-            return NULL;
-        return rocke_build_direct_wgrad_wmma(b, spec, arch);
-    });
+    return rocke_dwg::build_new(
+        b,
+        spec != NULL,
+        "build_direct_wgrad_wmma",
+        [&](char* out, size_t cap) { return rocke_direct_wgrad_wmma_kernel_name(spec, out, cap); },
+        [&]() { return rocke_build_direct_wgrad_wmma(b, spec, arch); });
 }
 
 rocke_status_t rocke_direct_wgrad_wmma_lower_to_llvm(const rocke_direct_wgrad_wmma_spec_t* spec,
@@ -1401,30 +1384,15 @@ rocke_status_t rocke_direct_wgrad_wmma_lower_to_llvm(const rocke_direct_wgrad_wm
                                                      char* err,
                                                      size_t err_cap)
 {
-    rocke_ir_builder_t b = {};
-    rocke_kernel_def_t* kernel;
-    rocke_status_t st;
-
-    if(out_ll != NULL)
-        *out_ll = NULL;
-    if(spec == NULL || out_ll == NULL)
-    {
-        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
-        return ROCKE_ERR_VALUE;
-    }
     if(arch == NULL)
         arch = "gfx1250";
-    kernel = rocke_build_direct_wgrad_wmma_new(&b, spec, arch);
-    if(kernel == NULL)
-    {
-        const char* m = rocke_ir_builder_error(&b);
-        st = rocke_ir_builder_status(&b);
-        rocke_spec_set_reason(
-            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_wgrad_wmma failed");
-        rocke_ir_builder_free(&b);
-        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
-    }
-    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    rocke_ir_builder_free(&b);
-    return st;
+    return rocke_dwg::lower_to_llvm(
+        spec != NULL,
+        arch,
+        flavor,
+        out_ll,
+        err,
+        err_cap,
+        "build_direct_wgrad_wmma failed",
+        [&](rocke_ir_builder_t* b) { return rocke_build_direct_wgrad_wmma_new(b, spec, arch); });
 }
