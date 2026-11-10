@@ -9,9 +9,15 @@ rocBLAS documentation is available at
 
 * `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`) writes one `rocblas-bench`-replayable line to the trace log for each internal GEMM sub-problem that launches a kernel. Use it to break higher-level Level 3 calls such as `trsm`, `trmm`, and `syrk` into kernels that can be benchmarked individually. The bench function is `gemm_ex`, `gemm_batched_ex`, or `gemm_strided_batched_ex`, matching the sub-problem layout. A trailing comment names the path that ran it (`hipblaslt`, `tensile`, `source`, or `gemv`), the selected kernel or launcher (except for hipBLASLt), the backends it fell back from, and the calling API.
 
+### Changed
+
+* On gfx950, hipBLASLt is now the default GEMM backend for all input types. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* On gfx942, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend for `f16_r`, `bf16_r`, `f32_r`, and `f64_r` data on both MI300A (228 CU) and MI300X (304 CU). On the MI300A only, `f32_c` and `f64_c` also default to hipBLASLt. The remaining data types on gfx942 default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+
 ### Resolved issues
 
 * Fix trace and bench logging of `alpha` for `axpy_ex` and `scal_ex`, including batched and strided-batched forms, when `alpha_type` is `bf16_r`. The trace log wrote an empty `alpha` field, and the bench log omitted `--alpha`, so replaying the logged command with `rocblas-bench` ran with the default `alpha` of 1. Logging-helper failures in the `_ex` functions are now reported on `stderr` rather than silently discarded.
+* Fix the hipBLASLt backend ignoring the `rocblas_xf32_xdl_math_op` math mode for real `f32_r` Level 3 `gemm` and `gemm_ex`. The hipBLASLt compute type was always derived from the compute precision alone, so the backend ran full single precision while `rocblas_get_math_mode` still reported xf32, whereas the Tensile path applied `setF32XdlMathOp(XFloat32)` for the same problem. The hipBLASLt path now selects `HIPBLAS_COMPUTE_32F_FAST_TF32` when the handle requests xf32. This is newly reachable because `f32_r` now defaults to hipBLASLt on the MI300A.
 
 ## rocBLAS 5.8.0 
 
@@ -22,8 +28,6 @@ rocBLAS documentation is available at
 ### Changed
 
 * On gfx1250, rocBLAS loads the Tensile library catalog that matches the device revision. Strict-revision silicon uses `library/gfx1250-strict` when that catalog is present in the build, and otherwise falls back to `library/gfx1250`.
-* On gfx950, hipBLASLt is now the default GEMM backend for all input types. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
-* On gfx942, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend for `f16_r`, `bf16_r`, `f32_r`, and `f64_r` data on both MI300A (228 CU) and MI300X (304 CU). On the MI300A only, `f32_c` and `f64_c` also default to hipBLASLt. The remaining data types on gfx942 default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 * Batched GEMM now uses the same hipBLASLt selection as other GEMM while a stream is capturing. Previously, batched APIs were forced to the Tensile backend during stream capture.
 * `trsm`, `trsm_batched`, and `trsm_strided_batched` print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small if the new `ROCBLAS_VERBOSE_ERROR` environment variable is set. Previously this failure looked identical to running out of device memory.
 
@@ -38,7 +42,6 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
-* Fix the hipBLASLt backend ignoring the `rocblas_xf32_xdl_math_op` math mode for real `f32_r` Level 3 `gemm` and `gemm_ex`. The hipBLASLt compute type was always derived from the compute precision alone, so the backend ran full single precision while `rocblas_get_math_mode` still reported xf32, whereas the Tensile path applied `setF32XdlMathOp(XFloat32)` for the same problem. The hipBLASLt path now selects `HIPBLAS_COMPUTE_32F_FAST_TF32` when the handle requests xf32. This is newly reachable because `f32_r` now defaults to hipBLASLt on the MI300A.
 * Fix incorrect results and out-of-bounds reads from Level 1 ILP64 `dot` and `dotc`, including batched, strided-batched, and `_ex` forms, when a negative increment is wide enough to take the 64-bit increment path and `n` fits the single-block reduction. That path shifted by `(n - 1)` before calling the launcher, which applies the same walk, and the `y` shift tested `incx` rather than `incy`. The offsets are now passed through unshifted.
 * Fix incorrect results and out-of-bounds indexing from Level 1 ILP64 `axpy` and `axpy_ex`, including batched and strided-batched forms, when `batch_count` is greater than 65535 and an increment is wide enough to take the 64-bit kernel. That kernel was launched with the full `batch_count` rather than the chunk length, so each pass walked past the current batch and applied `alpha * x` again.
 * Fix incorrect results and out-of-bounds accesses from Level 1 ILP64 `rot` and `rot_ex`, including batched and strided-batched forms, when `n` or `batch_count` is large enough to chunk the launch and `incx` or `incy` is negative. Chunk offsets were `n_base * inc`, and the wide-increment path used `-inc * n_base`, so a negative increment started at the wrong end of the vector. Each chunk now starts at `offset + (inc < 0 ? -inc * (n - n_chunk - n_base) : n_base * inc)`.
