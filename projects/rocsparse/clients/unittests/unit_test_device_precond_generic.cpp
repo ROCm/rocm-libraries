@@ -223,11 +223,111 @@ namespace
             check_csr_matrix<Kind::ilu, T>(handle, a, opt, "boost tol " + std::to_string(tol));
         }
     }
+
+    // Float and double tolerances, in host and device memory. The float is followed
+    // by 0x7fefffff, so an 8-byte read would boost every pivot.
+    template <typename T>
+    void check_ilu_boost_inputs(rocsparse_handle handle)
+    {
+        for(const auto& a : {make_grid_matrix<T>(4, true), make_fat_row_matrix<T>(600)})
+        {
+            const std::vector<T> plain = host_ilu0(a);
+            std::vector<double>  pivots;
+            for(int32_t r = 0; r < a.n; ++r)
+                pivots.push_back(std::abs(to_cd(plain[diagonal_position(a, r)])));
+            const double largest  = *std::max_element(pivots.begin(), pivots.end());
+            const double smallest = *std::min_element(pivots.begin(), pivots.end());
+            for(const double tol : {2.0 * largest, 0.5 * smallest})
+            {
+                for(const bool float_tol : {false, true})
+                {
+                    for(const bool device : {false, true})
+                    {
+                        run_options opt;
+                        opt.boost           = true;
+                        opt.boost_tol       = tol;
+                        opt.boost_val       = 7.0;
+                        opt.boost_tol_float = float_tol;
+                        opt.boost_device    = device;
+                        check_csr_matrix<Kind::ilu, T>(handle,
+                                                         a,
+                                                         opt,
+                                                         "n " + std::to_string(a.n) + " tol "
+                                                             + std::to_string(tol) + " float_tol "
+                                                             + std::to_string(float_tol)
+                                                             + " device " + std::to_string(device));
+                    }
+                }
+            }
+        }
+    }
 }
 
 TEST_F(PrecondGeneric, spilu0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
+}
+
+TEST_F(PrecondGeneric, spilu0_numeric_boost_inputs)
+{
+    for_all_types([&](auto tag) { check_ilu_boost_inputs<decltype(tag)>(handle); });
+}
+
+// Documented 3x3: first pivot 1e-4, tolerance 1e-3, boost value 1. A float
+// tolerance must boost the same pivot a double tolerance does.
+TEST_F(PrecondGeneric, spilu0_numeric_boost_float_tolerance)
+{
+    csr_matrix<float> a;
+    a.n   = 3;
+    a.ptr = {0, 2, 4, 5};
+    a.ind = {0, 1, 0, 1, 2};
+    a.val = {1.0e-4f, 1.0f, 1.0f, 2.0f, 3.0f};
+    for(const bool float_tol : {false, true})
+    {
+        for(const bool device : {false, true})
+        {
+            run_options opt;
+            opt.boost           = true;
+            opt.boost_tol       = 1.0e-3;
+            opt.boost_val       = 1.0;
+            opt.boost_tol_float = float_tol;
+            opt.boost_device    = device;
+            check_csr_matrix<Kind::ilu, float>(
+                handle,
+                a,
+                opt,
+                std::string(float_tol ? "float" : "double") + (device ? " device" : " host"));
+        }
+    }
+}
+
+// The boost enabled without a tolerance, without a value, or without both:
+// analysis succeeds, and compute returns invalid_pointer without writing the values.
+TEST_F(PrecondGeneric, spilu0_numeric_boost_unset)
+{
+    const auto a = make_grid_matrix<double>(4, true);
+    for(const bool set_tol : {false, true})
+    {
+        for(const bool set_val : {false, true})
+        {
+            if(set_tol && set_val)
+                continue;
+            SCOPED_TRACE(::testing::Message() << "set_tol " << set_tol << " set_val " << set_val);
+            dev_csr<double, int32_t, int32_t> d;
+            d.init(a, 1, true);
+            ASSERT_NE(d.A, nullptr);
+            run_options opt;
+            opt.boost         = true;
+            opt.boost_tol     = 1.0;
+            opt.boost_val     = 7.0;
+            opt.set_boost_tol = set_tol;
+            opt.set_boost_val = set_val;
+            run_result<double> out;
+            run_factorization<Kind::ilu, double>(handle, d.A, d.val, 1, opt, out);
+            EXPECT_EQ(out.compute_status, rocsparse_status_invalid_pointer);
+            EXPECT_EQ(out.values, a.val);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +485,11 @@ namespace
         expect_size_error(A::set(handle, descr, A::input(In::boost_val), &value, 1));
         expect_size_error(A::set(handle, descr, A::input(In::sing_tol), &value, 1));
 
-        // Valid inputs: the boost tolerance may be given as a float or a double. The
-        // library stores the pointer and records the datatype as f64 whatever the
-        // size, so a float tolerance would be read as a double: it is only
-        // validated here, no factorization of this test uses it.
+        // Valid inputs: the boost tolerance may be given as a float or a double.
+        // spilu0 records a sizeof(float) tolerance as f32 and reads it as a float.
+        // spic0 and spildlt0 record the datatype as f64 whatever the size. spic0
+        // never reads its boost (AISPARSE-927). It is only validated here, no
+        // factorization of this test uses it.
         const float ftol = 1.0f;
         EXPECT_EQ(A::set(handle, descr, A::input(In::boost_tol), &ftol, sizeof(float)),
                   rocsparse_status_success);

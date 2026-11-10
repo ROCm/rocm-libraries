@@ -1060,8 +1060,12 @@ namespace precond_ut
         rocsparse_analysis_policy policy       = rocsparse_analysis_policy_reuse;
         bool                      boost        = false;
         double                    boost_tol    = 0.0;
-        double                    boost_val    = 1.0;
-        bool                      set_sing_tol = false;
+        double                    boost_val       = 1.0;
+        bool                      boost_tol_float = false; // the boost tolerance is passed as a float
+        bool                      boost_device    = false; // boost tolerance and value in device memory
+        bool                      set_boost_tol   = true; // false: enabled without a tolerance
+        bool                      set_boost_val   = true; // false: enabled without a value
+        bool                      set_sing_tol    = false;
         double                    sing_tol     = 0.0;
         bool                      tol_after    = false; // set the tolerance after the analysis
         size_t device_memory = 0; // > 0: size of the internal buffer of the handle
@@ -1127,21 +1131,62 @@ namespace precond_ut
         ASSERT_EQ((set_value<K>(handle, descr, In::policy, &opt.policy, sizeof(opt.policy))),
                   rocsparse_status_success);
 
-        const int32_t boost_enable  = opt.boost ? 1 : 0;
-        const double  boost_tol     = opt.boost_tol;
-        const T       boost_val     = make_value<T>(opt.boost_val, 0.0);
-        const void*   boost_val_ptr = &boost_val;
-        const double  sing_tol      = opt.sing_tol;
-        const void*   sing_tol_ptr  = &sing_tol;
+        const int32_t boost_enable = opt.boost ? 1 : 0;
+        const double  boost_tol    = opt.boost_tol;
+        const T       boost_val    = make_value<T>(opt.boost_val, 0.0);
+        const double  sing_tol     = opt.sing_tol;
+        const void*   sing_tol_ptr = &sing_tol;
+        // The 4 bytes after a float tolerance are the high word of a huge double.
+        // A library that reads 8 bytes boosts every pivot; sizeof(float) must not.
+        struct float_tol_bytes
+        {
+            float    f;
+            uint32_t pad;
+        };
+        static_assert(sizeof(float_tol_bytes) == sizeof(double),
+                      "a float tolerance is followed by 4 bytes");
+        float_tol_bytes host_tol_f{};
+        host_tol_f.f   = static_cast<float>(opt.boost_tol);
+        host_tol_f.pad = 0x7fefffffu;
+        device_vector<double>          d_boost_tol;
+        device_vector<float_tol_bytes> d_boost_tol_f;
+        device_vector<T>               d_boost_val;
         if(opt.boost)
         {
             ASSERT_EQ(
                 (set_value<K>(handle, descr, In::boost_enable, &boost_enable, sizeof(int32_t))),
                 rocsparse_status_success);
-            ASSERT_EQ((set_value<K>(handle, descr, In::boost_tol, &boost_tol, sizeof(double))),
-                      rocsparse_status_success);
-            ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, boost_val_ptr, sizeof(void*))),
-                      rocsparse_status_success);
+            const void* tol_ptr = opt.boost_tol_float ? static_cast<const void*>(&host_tol_f.f)
+                                                      : static_cast<const void*>(&boost_tol);
+            const void* val_ptr = &boost_val;
+            if(opt.boost_device)
+            {
+                upload(d_boost_tol, std::vector<double>{boost_tol});
+                upload(d_boost_tol_f, std::vector<float_tol_bytes>{host_tol_f});
+                upload(d_boost_val, std::vector<T>{boost_val});
+                ASSERT_TRUE(d_boost_tol.ptr && d_boost_tol_f.ptr && d_boost_val.ptr);
+                tol_ptr = opt.boost_tol_float ? static_cast<const void*>(d_boost_tol_f.ptr)
+                                              : static_cast<const void*>(d_boost_tol.ptr);
+                val_ptr = d_boost_val.ptr;
+            }
+            // The pointer mode of the handle at set_input time is the mode of the scalar.
+            ScopedOverride<rocsparse_pointer_mode> mode(
+                handle->pointer_mode,
+                opt.boost_device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
+            if(opt.set_boost_tol)
+            {
+                ASSERT_EQ((set_value<K>(handle,
+                                        descr,
+                                        In::boost_tol,
+                                        tol_ptr,
+                                        opt.boost_tol_float ? sizeof(float) : sizeof(double))),
+                          rocsparse_status_success);
+            }
+            if(opt.set_boost_val)
+            {
+                ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, val_ptr, sizeof(void*))),
+                          rocsparse_status_success);
+            }
         }
         if(opt.set_sing_tol && !opt.tol_after)
         {
@@ -1360,7 +1405,12 @@ namespace precond_ut
     template <Kind K, typename T>
     std::vector<T> reference(const csr_matrix<T>& a, const run_options& opt)
     {
-        const double boost_tol = opt.boost ? opt.boost_tol : -1.0;
+        // The tolerance the device reads: rounded to float for a float tolerance.
+        const double boost_tol
+            = !opt.boost
+                  ? -1.0
+                  : (opt.boost_tol_float ? static_cast<double>(static_cast<float>(opt.boost_tol))
+                                         : opt.boost_tol);
         if constexpr(K == Kind::ilu)
             return host_ilu0(a, boost_tol, opt.boost_val);
         else if constexpr(K == Kind::ic)
