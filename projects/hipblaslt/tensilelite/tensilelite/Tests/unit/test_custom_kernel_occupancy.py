@@ -315,7 +315,9 @@ class TestNonGfx9OccupancyNotComputed:
     compute_occupancy_from_asm_source returns None for non-gfx9 ISAs because
     _arch_caps_for_kernel returns None (the formula is gfx9/wave64-specific).
     Callers use ``if occ is not None: kernel["CUOccupancy"] = occ``; returning
-    None ensures CUOccupancy stays at its default (-1) for non-gfx9 custom kernels.
+    None ensures CUOccupancy stays at its default (-1) for non-gfx9 custom kernels
+    (gfx11 ones get theirs from the generated-kernel rule instead, see
+    TestGfx11CustomKernelOccupancy).
     """
 
     def _asm(self, vgpr=64, sgpr=32, lds=16384):
@@ -351,8 +353,8 @@ class TestNonGfx9OccupancyNotComputed:
             f"gfx908 (gfx9) must return occ >= 1, got {result}"
 
     def test_cuoccupancy_not_set_for_non_gfx9(self):
-        """Simulated caller: CUOccupancy stays -1 when compute returns None (non-gfx9)."""
-        kernel = _kernel((11, 0, 0))
+        """Simulated caller: CUOccupancy stays -1 when compute returns None (gfx12)."""
+        kernel = _kernel((12, 0, 1))
         kernel["CUOccupancy"] = -1
         asm = _make_asm(64, 32, 16384)
         occ = compute_occupancy_from_asm_source(kernel, asm)
@@ -360,6 +362,66 @@ class TestNonGfx9OccupancyNotComputed:
             kernel["CUOccupancy"] = occ   # what getSourceFileString does
         assert kernel["CUOccupancy"] == -1, \
             f"CUOccupancy must stay -1 for non-gfx9; got {kernel['CUOccupancy']}"
+
+
+class TestGfx11CustomKernelOccupancy:
+    """gfx11 W4A16 custom kernels get CUOccupancy by the rule generated gfx11 kernels get.
+
+    Origami ranks the kernels of a Prediction library by CUOccupancy, so a
+    TensileLite-generated kernel shipped as a custom kernel (the gfx1151 W4A16
+    prefill kernels) must keep the occupancy the generator gave it: getOccupancy
+    with wave32's doubled VGPR file (8-register granules) and LDS pooled over the
+    WGP.  The rocisa caps are those of gfx1151.
+    """
+
+    _REG_CAPS = {"MaxVgpr": 256, "PhysicalMaxSgpr": 1696}
+    _ARCH_CAPS = {"MaxWavesPerSimd": 16, "DeviceLDS": 65536, "LdsGranularity": 1024}
+
+    def _occupancy(self, asm, num_threads, int4_a=True):
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        mock_ti.getRegCaps.return_value = self._REG_CAPS
+        mock_ti.getArchCaps.return_value = self._ARCH_CAPS
+        kwa = object.__new__(_KWA)
+        kwa.states = SimpleNamespace()
+        kwa._getCustomKernelSource = lambda k, d=None: asm
+        kernel = _KernelObj({
+            "CustomKernelName": "test_gfx11_kernel",
+            "ISA": [11, 5, 1],
+            "NumThreads": num_threads,
+            "KernelLanguage": "Assembly",
+            "CUOccupancy": -1,
+            "ProblemType": {"DataTypeA": SimpleNamespace(isInt4=lambda: int4_a)},
+        })
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            errcode, _ = kwa.getSourceFileString(kernel)
+        assert errcode == 0
+        if kernel["CUOccupancy"] != -1:
+            # The caps are read for the kernel's ISA and wave size.
+            mock_ti.setKernel.assert_called_with((11, 5, 1), 32)
+        return kernel["CUOccupancy"]
+
+    @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly not importable")
+    def test_vgprs_limit_in_8_register_granules_of_the_doubled_file(self):
+        # 183 VGPRs -> 184 of 512 -> 2; LDS 36 KiB of the 128 KiB WGP pool -> 3.
+        assert self._occupancy(_make_asm(183, 94, 36864), 256) == 2
+
+    @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly not importable")
+    def test_lds_pooled_over_the_wgp(self):
+        # 104 VGPRs -> 4; 40 KiB of LDS -> 3 of the 128 KiB pool (1 of 64 KiB).
+        assert self._occupancy(_make_asm(100, 80, 40960), 128) == 3
+
+    @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly not importable")
+    def test_other_gfx11_kernels_keep_the_default(self):
+        # Only W4A16 (int4 A) gfx11 custom kernels get it.
+        assert self._occupancy(_make_asm(100, 80, 40960), 128, int4_a=False) == -1
+
+    @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly not importable")
+    def test_missing_directives_leave_the_default(self):
+        asm = ".amdhsa_kernel bad_kernel\n.end_amdhsa_kernel\n"
+        assert self._occupancy(asm, 256) == -1
 
 
 class TestPythonDebugWarning:
