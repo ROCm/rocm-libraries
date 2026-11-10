@@ -66,7 +66,7 @@ __device__ inline void k2rBarrier()
 /// tile j = (n / 16) % FN, kc over cpad / ka. Roles (backward data, flip) as k2FormatWeights;
 /// MATH 1 writes the three-bf16 form ([hi | lo | hi] of each weight along a 3x reduction).
 template <class T, int KPL, int FN, int MATH>
-__device__ void k2rFormatWeights(const K2FormatArgs& f)
+__device__ void k2rFormatWeightsElementwise(const K2FormatArgs& f)
 {
     T* wf = static_cast<T*>(f.wf);
     const long long total = static_cast<long long>(f.kd) * f.r * f.s * f.cpad * f.kpad;
@@ -125,6 +125,119 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
                     v = w[k2FilterOffset(f, c, n, tap, mirror)];
             }
             wf[i] = v;
+        }
+    }
+}
+
+/// The rows weight pre-pass, one 16 FN x KA tile (output columns x reduction slice) of one tap
+/// per step: every (g, kc, s, r) run of the formatted layout is one such tile, contiguous. The
+/// block gathers the tile from the filter with its unit-stride channel fastest across lanes (the
+/// forward filter's c for the forward pass, its k for backward data, where the reduction and
+/// output roles swap), transposes it through LDS and stores the run contiguously. Offsets are
+/// per-tile bases plus multiplies: no per-element index decode. Layouts other than the 64-lane
+/// 16 x 16 fragment (ka != 4 KPL) and the three-bf16 form take the element-wise loop.
+template <class T, int KPL, int FN, int MATH>
+__device__ void k2rFormatWeights(const K2FormatArgs& f)
+{
+    constexpr int KA = 4 * KPL; // 64 lanes: 16 columns x 4 slices of KPL
+    constexpr int TN = 16 * FN;
+    constexpr int TILE = TN * KA;
+    if constexpr(MATH != 0)
+    {
+        k2rFormatWeightsElementwise<T, KPL, FN, MATH>(f);
+        return;
+    }
+    else
+    {
+        if(f.ka != KA)
+        {
+            k2rFormatWeightsElementwise<T, KPL, FN, MATH>(f);
+            return;
+        }
+        // Rows padded by one KPL run: the store phase reads whole KPL runs (aligned vectors).
+        __shared__ __attribute__((aligned(16))) T tile[TN][KA + KPL];
+        typedef typename K1Raw<KPL * sizeof(T)>::type Run;
+        T* wf = static_cast<T*>(f.wf);
+        const T* w = static_cast<const T*>(f.w);
+        const int rk = f.kd * f.r;
+        const int cas = f.cpad / KA;
+        const int groups = f.kpad / TN;
+        const int tiles = groups * cas * f.s * rk;
+        const bool mirror = (f.backward != 0) != (f.flip != 0);
+        // Output column n and reduction channel c of the forward filter K C T R S: forward
+        // n = k, c = c; backward data n = c, c = k.
+        const long long strideN = f.backward ? f.wStrides[1] : f.wStrides[0];
+        const long long strideC = f.backward ? f.wStrides[0] : f.wStrides[1];
+        const int limN = f.backward ? f.c0 : f.k0;
+        const int limC = f.backward ? f.k0 : f.c0;
+        // Gather order: lanes along the smaller-stride channel; VL-element vectors along it where
+        // it is unit-stride, in range and aligned.
+        const bool nFast = strideN < strideC;
+        constexpr int VL = 16 / static_cast<int>(sizeof(T));
+        typedef typename K1Raw<16>::type Vec;
+        const long long fastStride = nFast ? strideN : strideC;
+        const int tid = static_cast<int>(threadIdx.x);
+        const int threads = static_cast<int>(blockDim.x);
+        for(int t = static_cast<int>(blockIdx.x); t < tiles; t += static_cast<int>(gridDim.x))
+        {
+            int rest = t;
+            const int r = rest % rk;
+            rest /= rk;
+            const int sc = rest % f.s;
+            rest /= f.s;
+            const int kc = rest % cas;
+            const int g = rest / cas;
+            // Tap (t, r, s) of r = t R + r', reflected for backward data or a flipped filter.
+            int tt = r / f.r, rr = r - tt * f.r, ss = sc;
+            if(mirror)
+            {
+                tt = f.kd - 1 - tt;
+                rr = f.r - 1 - rr;
+                ss = f.s - 1 - ss;
+            }
+            const long long tapOff = tt * f.wStrides[2] + rr * f.wStrides[3] + ss * f.wStrides[4];
+            const int n0 = g * TN, c0 = kc * KA;
+            static_assert(TN % VL == 0 && KA % VL == 0, "rows pre-pass vectors");
+            for(int u = tid; u < TILE / VL; u += threads)
+            {
+                // VL consecutive elements along the fast channel from (nl, cl).
+                const int nl = nFast ? (u % (TN / VL)) * VL : u / (KA / VL);
+                const int cl = nFast ? u / (TN / VL) : (u % (KA / VL)) * VL;
+                const int n = n0 + nl, c = c0 + cl;
+                const long long off = n * strideN + c * strideC + tapOff;
+                T v[VL];
+                const bool whole
+                    = fastStride == 1 && off % VL == 0
+                      && (nFast ? n + VL <= limN && c < limC : c + VL <= limC && n < limN);
+                if(whole)
+                {
+                    *reinterpret_cast<Vec*>(v) = *reinterpret_cast<const Vec*>(w + off);
+                }
+                else
+                {
+#pragma unroll
+                    for(int e = 0; e < VL; ++e)
+                    {
+                        const int ne = nFast ? n + e : n, ce = nFast ? c : c + e;
+                        v[e] = ne < limN && ce < limC ? w[ne * strideN + ce * strideC + tapOff]
+                                                      : K1Elem<T>::store(0.0f);
+                    }
+                }
+#pragma unroll
+                for(int e = 0; e < VL; ++e)
+                    tile[nFast ? nl + e : nl][nFast ? cl : cl + e] = v[e];
+            }
+            __syncthreads();
+            // The run: index (j 64 + l) KPL + e holds column j 16 + l % 16, channel (l / 16) KPL + e;
+            // each (j, l) is KPL consecutive channels of one LDS row, stored as one vector.
+            Run* dst = reinterpret_cast<Run*>(wf + static_cast<long long>(t) * TILE);
+            for(int u = tid; u < TILE / KPL; u += threads)
+            {
+                const int l = u % 64;
+                const int j = u / 64;
+                dst[u] = *reinterpret_cast<const Run*>(&tile[j * 16 + l % 16][(l / 16) * KPL]);
+            }
+            __syncthreads();
         }
     }
 }
