@@ -30,6 +30,56 @@
 // Out-of-range voffset: the tensor is below 2 GiB, so voffset + soffset never wraps into range.
 #define K5C_OOB 0x7fffffff
 
+// The cooperative kernel's filter pre-pass: U fragment-major, so a wave's A fragment is one
+// contiguous run (512 bytes) instead of 16 rows a channel stride apart. Unit (g, bin, kb = k / 16,
+// ch = c / 16) holds 256 elements in the atom's A lane order: (row r = k % 16, channel j = c % 16)
+// at ((j / KPL) * 16 + r) * KPL + j % KPL. Units run [g][bin][ceil(cgo / 16)][cgiPad / 16]; the
+// rows of a partial last k block are never written (their outputs are discarded).
+template <class T, int LAYOUT, int DIR, int KPL>
+__device__ void k5CoopFilterTransform(const K5Args& a)
+{
+    constexpr int P = 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const long long idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if(idx >= static_cast<long long>(a.groups) * cgo * cgiPad)
+        return;
+    const int i = static_cast<int>(idx % cgiPad);
+    const int o = static_cast<int>((idx / cgiPad) % cgo);
+    const int g = static_cast<int>(idx / (static_cast<long long>(cgiPad) * cgo));
+    const int cgf = DIR == K5_FORWARD ? cgi : cgo;
+    const bool rot = (DIR == K5_BACKWARD_DATA) != (a.flip != 0);
+    const T* w = static_cast<const T*>(a.w);
+    float f[9], u[P];
+#pragma unroll
+    for(int q = 0; q < 9; ++q)
+        f[q] = 0.0f;
+    if(i < cgi)
+    {
+        const int kf = DIR == K5_FORWARD ? g * cgo + o : g * cgi + i;
+        const int cf = DIR == K5_FORWARD ? i : o;
+#pragma unroll
+        for(int q = 0; q < 9; ++q)
+        {
+            const int rs = rot ? 8 - q : q;
+            const long long off = LAYOUT == K5_NCHW
+                                      ? (static_cast<long long>(kf) * cgf + cf) * 9 + rs
+                                      : (static_cast<long long>(kf) * 9 + rs) * cgf + cf;
+            f[q] = K5Elem<T>::load(w[off]);
+        }
+    }
+    k5FilterTile<2>(f, u);
+    T* U = static_cast<T*>(a.u);
+    const int kbs = (cgo + 15) / 16, chs = cgiPad / 16;
+    const int j = i % 16;
+    const long long inUnit = ((j / KPL) * 16 + o % 16) * KPL + j % KPL;
+#pragma unroll
+    for(int p = 0; p < P; ++p)
+    {
+        const long long unit = ((static_cast<long long>(g) * P + p) * kbs + o / 16) * chs + i / 16;
+        U[unit * 256 + inUnit] = K5Elem<T>::store(u[p]);
+    }
+}
+
 // Workgroup barrier that orders LDS only: __syncthreads() also waits for every outstanding global
 // load (vmcnt(0)), which would expose the prefetched U and input loads at every chunk.
 __device__ inline void k5cLdsBarrier()
@@ -50,7 +100,7 @@ struct K5CoopWmma
     typedef K5Wmma<T, GFX12> W;
     typedef typename W::frag frag;
     typedef k5f8 acc;
-    static constexpr int WAVE = 32, ACCN = 8;
+    static constexpr int WAVE = 32, ACCN = 8, KPL = W::KPL;
     __device__ static int kBase(int lane)
     {
         return W::kBase(lane);
@@ -96,7 +146,7 @@ struct K5CoopMfma
     typedef typename K5WmmaElem<T>::e e;
     typedef e frag __attribute__((ext_vector_type(4)));
     typedef float acc __attribute__((ext_vector_type(4)));
-    static constexpr int WAVE = 64, ACCN = 4;
+    static constexpr int WAVE = 64, ACCN = 4, KPL = 4;
     __device__ static int kBase(int lane)
     {
         return (lane >> 4) * 4;
@@ -141,7 +191,12 @@ struct K5CoopCfg
     static constexpr int JW = BT * 8 / A::WAVE; // waves of jobs per chunk
     static constexpr int JT = JW > WAVES ? JW / WAVES : 1; // jobs per thread
     static constexpr int KWP = KW < 2 ? KW : 2; // K wave groups per epilogue pass
-    static constexpr int ZB = 4 * 2 * 16 * KWP * BT; // floats per epilogue pass
+    // Z row stride (floats): on CDNA the accumulator lanes 16 apart write rows 4 apart, which a
+    // BT stride puts on one bank; BT + 4 spreads them over the 64 banks -- where that does not
+    // grow the block's LDS past the V buffers (64 KiB parts).
+    static constexpr int ZS
+        = A::WAVE == 64 && 4 * 2 * 16 * KWP * (BT + 4) * 4 <= 2 * VB * 2 ? BT + 4 : BT;
+    static constexpr int ZB = 4 * 2 * 16 * KWP * ZS; // floats per epilogue pass
     static constexpr int LDSB = 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
     // latency-bound, so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the
@@ -170,9 +225,10 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const long long inElems = static_cast<long long>(a.n) * a.ci * a.hi * a.wi;
     const __amdgpu_buffer_rsrc_t rIn
         = k5Rsrc(a.in, (inElems * static_cast<long long>(sizeof(T)) + 3) / 4 * 4);
+    const int kbs = (cgo + 15) / 16;
     const __amdgpu_buffer_rsrc_t rU = k5Rsrc(a.u,
-                                             static_cast<long long>(a.groups) * 16 * cgo * cgiPad
-                                                 * static_cast<long long>(sizeof(T)));
+                                             static_cast<long long>(a.groups) * 16 * kbs * 16
+                                                 * cgiPad * static_cast<long long>(sizeof(T)));
     const int tid = threadIdx.x, lane = tid % WAVE;
     // Wave-uniform role.
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
@@ -180,10 +236,19 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const int col = lane & 15;
     T* out = static_cast<T*>(a.out);
     const unsigned chunkBytes = static_cast<unsigned>(16 * chanStride) * sizeof(T);
+    // V swizzle (CDNA): tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other
+    // half of their 8 channel-pair dwords: the transform's dword stores (16 tiles x 4 pairs a
+    // wave) and the B reads (16 tiles x 4 two-dword pairs) then hit 64 distinct banks.
+    auto vSwz = [](int tile) __attribute__((always_inline))
+    {
+        return WAVE == 64 ? ((tile >> 3) & 1) << 2 : 0;
+    };
 
-    // A fragment lane offset (bytes) within a U row block: k row = col, channels kBase.
-    const unsigned uLane = static_cast<unsigned>(col * cgiPad + W::kBase(lane)) * sizeof(T);
-    const unsigned binBytes = static_cast<unsigned>(cgo) * cgiPad * sizeof(T);
+    // A fragment lane offset (bytes) within a U unit (k5CoopFilterTransform): the lane's KPL
+    // elements (gfx11's wave32 lanes 16-31 repeat rows 0-15).
+    const unsigned uLane
+        = static_cast<unsigned>((W::KPL == 16 ? lane % 16 : lane) * W::KPL) * sizeof(T);
+    constexpr unsigned UNIT = 256 * sizeof(T);
 
     for(long long item = blockIdx.x; item < items; item += gridDim.x)
     {
@@ -421,10 +486,10 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                     for(int b = 0; b < 16; ++b)
                         vout[b] = k5WregPack<T>(o[0][b], o[1][b]);
                 }
-                // V[bin][tile][channel]: dword (bin * BT + tile) * 8 + channel pair.
+                // V[bin][tile][channel]: dword (bin * BT + tile) * 8 + channel pair (swizzled).
 #pragma unroll
                 for(int b = 0; b < 16; ++b)
-                    Vw[(b * BT + tl[q]) * 8 + cp[q]] = vout[b];
+                    Vw[(b * BT + tl[q]) * 8 + (cp[q] ^ vSwz(tl[q]))] = vout[b];
             }
         };
 
@@ -439,23 +504,27 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 
         // A fragments for this wave: bins 4 * row + b, out channels kRow0 + m * 16 + col.
         const int kRow0 = k0 + kw * 16 * MT;
+        // Unit (g, bin 4 row + b, k block kRow0 / 16 + m, chunk ch).
+        const int nChU = cgiPad / 16;
         const unsigned uWave
-            = static_cast<unsigned>((g * 16 + 4 * row) * cgo + kRow0) * cgiPad * sizeof(T);
+            = static_cast<unsigned>(((g * 16 + 4 * row) * kbs + kRow0 / 16) * nChU) * UNIT;
+        const unsigned binBytes = static_cast<unsigned>(kbs * nChU) * UNIT;
         frag ufr[4][MT];
         auto loadU = [&](int ch, int b) __attribute__((always_inline))
         {
 #pragma unroll
             for(int m = 0; m < MT; ++m)
             {
-                const unsigned so = uWave + b * binBytes
-                                    + static_cast<unsigned>(m * 16 * cgiPad + ch * 16) * sizeof(T);
+                const unsigned so
+                    = uWave + b * binBytes + static_cast<unsigned>(m * nChU + ch) * UNIT;
                 ufr[b][m] = W::loadA(rU, uLane, so);
             }
         };
         // B fragment: tile n * 16 + col of bin, channels kBase.
         auto loadB = [&](const unsigned* Vs, int bin, int n) __attribute__((always_inline))
         {
-            const unsigned* p = Vs + ((bin * BT + n * 16 + col) * 16 + W::kBase(lane)) / 2;
+            const unsigned* p
+                = Vs + (bin * BT + n * 16 + col) * 8 + ((W::kBase(lane) / 2) ^ vSwz(col));
             return W::loadB(p);
         };
 
@@ -555,8 +624,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                             const float z0 = acc[0][m][n][e] + acc[1][m][n][e] + acc[2][m][n][e];
                             const float z1 = acc[1][m][n][e] - acc[2][m][n][e] - acc[3][m][n][e];
                             const int kk = (kw % KWP) * 16 + W::dRow(lane, e), tt = n * 16 + col;
-                            Zs[((row * 2 + 0) * 16 * KWP + kk) * BT + tt] = z0;
-                            Zs[((row * 2 + 1) * 16 * KWP + kk) * BT + tt] = z1;
+                            Zs[((row * 2 + 0) * 16 * KWP + kk) * C::ZS + tt] = z0;
+                            Zs[((row * 2 + 1) * 16 * KWP + kk) * C::ZS + tt] = z1;
                         }
                 }
                 k5cLdsBarrier();
@@ -574,7 +643,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                     for(int i = 0; i < 4; ++i)
 #pragma unroll
                         for(int s = 0; s < 2; ++s)
-                            z[i][s] = Zs[((i * 2 + s) * 16 * KWP + kk) * BT + eTt];
+                            z[i][s] = Zs[((i * 2 + s) * 16 * KWP + kk) * C::ZS + eTt];
                     float y[2][2];
 #pragma unroll
                     for(int s = 0; s < 2; ++s)
