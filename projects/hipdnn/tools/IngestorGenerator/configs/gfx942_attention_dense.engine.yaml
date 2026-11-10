@@ -388,9 +388,9 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   # The tile rules and the window translation are restated by hand from the rocKE Python.
-  # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy
-  # until the guard is lifted; the Python no longer declines such windows. The
-  # LDS budget is not restated. Matching and dispatch are shared with gfx950
+  # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy,
+  # not restated Python (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
+  # The LDS budget is not restated. Matching and dispatch are shared with gfx950
   # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
   # tile, geometry, window, stats (LSE) and launch-grid hooks.
   - name: matcher
