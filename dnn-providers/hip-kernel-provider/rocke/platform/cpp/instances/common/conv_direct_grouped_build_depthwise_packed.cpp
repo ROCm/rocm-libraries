@@ -30,6 +30,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 namespace
 {
@@ -187,12 +188,6 @@ void dwp_load_cols(dwp_ctx& c, rocke_value_t* hi, rocke_value_t* row_ok, vals_t&
     }
 }
 
-void dwp_set_err(rocke_ir_builder_t* b)
-{
-    if(b->status == ROCKE_OK)
-        b->status = ROCKE_ERR_VALUE;
-}
-
 } // namespace
 
 /* Python: _build_direct_depthwise_packed(spec, arch). */
@@ -205,10 +200,14 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
         return NULL;
     if(arch == NULL)
         arch = "gfx950";
-    if(rocke_direct_depthwise_validate(spec, reason, sizeof reason) != ROCKE_OK
-       || !rocke_direct_depthwise_is_valid_spec(spec, arch, reason, sizeof reason))
+    if(rocke_direct_depthwise_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        dwp_set_err(b);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
+    if(!rocke_direct_depthwise_is_valid_spec(spec, arch, reason, sizeof reason))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseSpec for %s: %s", arch, reason);
         return NULL;
     }
 

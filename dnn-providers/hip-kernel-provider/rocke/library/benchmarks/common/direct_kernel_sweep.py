@@ -46,6 +46,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
+from benchmarks.common.tf32_verify import TF32_VERIFY_TOL
 from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
@@ -69,10 +70,12 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DGRAD_RTC_VGPR_FILL,
     DGRAD_WAVES,
     DIRECT_CAPABILITIES,
+    DIRECT_COMPILE_DTYPES,
     DIRECT_DIRECTIONS,
     DIRECT_DTYPE,
     DIRECT_DTYPES,
     DOUBLE_BUFFER,
+    GROUPED_FOLD_K32,
     DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD,
     DW_BLOCK_WAVES,
@@ -99,9 +102,14 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     dgrad_rtc_k_atoms,
     dgrad_rtc_spills,
     dgrad_rtc_vgprs,
+    dgrad_waves,
+    direct_dtype_triple,
     direct_job_for_identity,
     direct_kernel_for_job,
+    direct_storage_dtype,
     probe_problem,
+    tf32_is_emulated,
+    tf32_narrow_reason,
     wgrad_reduce_identity,
     wgrad_waves,
 )
@@ -127,6 +135,28 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
 )
+
+# --verify bound on the peak-normalised error max|out-ref| / max(max|ref|, 1)
+# against an IEEE fp32 reference. The two TF32 rows, native (gfx942) and
+# emulated (gfx950), are tf32_verify.TF32_VERIFY_TOL, shared with the
+# implicit-GEMM driver. The scalar-FMA kernels run a tf32 problem in fp32 and
+# clear either bound.
+DIRECT_VERIFY_TOL = {
+    "fp16": 5e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-4,
+    **TF32_VERIFY_TOL,
+}
+
+
+def direct_verify_tol(dtype: str, arch: str) -> float:
+    """``--verify`` bound for a direct kernel of problem dtype ``dtype``."""
+    if dtype == "tf32":
+        return DIRECT_VERIFY_TOL[
+            "tf32_emulated" if tf32_is_emulated(arch) else "tf32_native"
+        ]
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return DIRECT_VERIFY_TOL[dtype]
 
 
 def _caps_worker(payload):
@@ -462,12 +492,26 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     return DirectStep(
         kernel_name=meta["kernel_name"],
         hsaco_path=hsaco_path,
-        signature=conv_direct_args_signature(identity.dtype_a, direction=direction),
+        # The ABI takes the storage type: a tf32 kernel's tensors are fp32.
+        signature=conv_direct_args_signature(
+            direct_storage_dtype(identity.dtype_a), direction=direction
+        ),
         grid=grid,
         block=block,
         buffers=buffers,
         conv_args=ConvArgs.from_problem(problem, direction=direction),
     )
+
+
+def _image_bytes(problem) -> Tuple[int, int]:
+    """Bytes of one image of ``problem``'s activation and of its output, in
+    the storage type (fp32 for an fp32 or tf32 problem)."""
+    from kernels.common.conv_direct_grouped import _elem_bytes
+
+    eb = _elem_bytes(getattr(problem, "dtype", DIRECT_DTYPE))
+    in_img = eb * problem.H * problem.W * problem.total_c
+    out_img = eb * problem.Ho * problem.Wo * problem.total_k
+    return in_img, out_img
 
 
 def _batch_chunks(problem) -> Optional[List[int]]:
@@ -482,8 +526,7 @@ def _batch_chunks(problem) -> Optional[List[int]]:
     """
     from kernels.common.conv_direct_nongrouped import _OOB_BASE
 
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     per_launch = _OOB_BASE // max(in_img, out_img)
     if problem.N <= per_launch or per_launch < 1:
         return None
@@ -525,6 +568,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
+    why = tf32_narrow_reason(variant, problem, knobs, arch)
+    if why:
+        return None, why
     spec, why = direct_spec_for_problem(
         variant, problem, knobs, arch, identity.wave_size
     )
@@ -726,8 +772,7 @@ def _batch_split_plan(
     )
     if knobs["tile_w"] not in widths:
         return None, f"tile_w={knobs['tile_w']} does not fit Wo={problem.Wo}"
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     steps = []
     n0 = 0
     for n in chunks:

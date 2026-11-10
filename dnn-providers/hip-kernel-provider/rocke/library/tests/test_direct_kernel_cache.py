@@ -1082,6 +1082,37 @@ def test_large_batch_is_split_into_launches(cache):
         assert values["p_N"] == 4
 
 
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+def test_large_fp32_batch_views_use_4_byte_elements(tmp_path, dtype):
+    """fp32 / tf32 store 4-byte elements, so the per-chunk windows of the
+    same batch advance twice as far as fp16's and it takes three launches."""
+    jobs = dks.enumerate_direct_jobs(
+        arch=_ARCH,
+        target=ArchTarget.from_gfx(_ARCH),
+        directions=("fwd",),
+        dtype=dtype,
+    )
+    cache = _InMemoryEntriesCache(tmp_path, _ARCH, [j.identity for j in jobs])
+    problem = _problem(N=8, H=768, W=768, groups=1, cpg=256, kpg=128, dtype=dtype)
+    assert dks._batch_chunks(problem) == [3, 3, 2]
+    plans = _nongrouped(dks.direct_plans(cache, problem, "fwd", _ARCH)[0])
+    assert plans
+    in_img = 4 * 768 * 768 * 256
+    out_img = 4 * 768 * 768 * 128
+    for plan in plans:
+        assert [st.views for st in plan.steps] == [
+            ((0, 3 * in_img), None, (0, 3 * out_img)),
+            ((3 * in_img, 3 * in_img), None, (3 * out_img, 3 * out_img)),
+            ((6 * in_img, 2 * in_img), None, (6 * out_img, 2 * out_img)),
+        ]
+        values = dks.launch_values(
+            plan.steps[2], {"x": 0x1000, "w": 0x2000, "y": 0x3000}, {"w": 1 << 20}
+        )
+        assert values["A"] == 0x1000 + 6 * in_img
+        assert values["D_bytes"] == 2 * out_img
+        assert values["p_N"] == 2
+
+
 def test_nongrouped_grid_skips_spilling_tiles(jobs):
     """Tiles that would spill are not cached, and the cut leaves both atoms and
     both strides covered."""

@@ -54,6 +54,28 @@ static rocke_value_t* rocke_dconv_wgrad__tr_read(rocke_dconv_wgrad_ctx_t* ctx,
     rocke_value_t* indices[2];
     int rd;
 
+    if(ctx->F32_IO)
+    {
+        /* fp32: VEC_CH ds_read_b32 down the lane's column (no tr read). */
+        rocke_value_t* elems[8];
+        rocke_value_t* c_shift = rocke_b_const_i32(b, row_shift * ctx->F32_ROW);
+        rocke_value_t* inner = rocke_b_add(b, ctx->gather_flat, c_shift);
+        base = rocke_b_add(b, part_off, inner);
+        for(int j = 0; j < ctx->VEC_CH; ++j)
+        {
+            rocke_value_t* at = base;
+            if(j != 0)
+            {
+                rocke_value_t* c_j = rocke_b_const_i32(b, j * ctx->F32_ROW);
+                at = rocke_b_add(b, base, c_j);
+            }
+            rocke_value_t* ix[2] = {ctx->c0, at};
+            rocke_value_t* one = rocke_b_smem_load_vN(b, smem, ix, 2, rocke_f32(), 1);
+            elems[j] = rocke_b_vec_extract(b, one, 0);
+        }
+        return rocke_b_vec_pack(b, elems, ctx->VEC_CH, rocke_f32());
+    }
+
     /* base = part_off + (tr_flat + row_shift*TR_N) */
     {
         rocke_value_t* c_shift = rocke_b_const_i32(b, row_shift * ctx->TR_N);
@@ -106,7 +128,7 @@ static rocke_value_t* rocke_dconv_wgrad__lds_run(rocke_dconv_wgrad_ctx_t* ctx,
                                                  rocke_value_t* row)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* mul_row = rocke_b_mul(b, row, ctx->c_TR_N);
+    rocke_value_t* mul_row = rocke_b_mul(b, row, ctx->c_ROW);
     rocke_value_t* inner = rocke_b_add(b, mul_row, ctx->c_ld_ch);
     return rocke_b_add(b, part_off, inner);
 }
@@ -123,6 +145,51 @@ static rocke_value_t* rocke_dconv_wgrad__dy_pass_sp(rocke_dconv_wgrad_ctx_t* ctx
     }
     c_off = rocke_b_const_i32(b, pass_idx * ctx->ROWS_PER_PASS);
     return rocke_b_add(b, ctx->c_ld_sp, c_off);
+}
+
+/* _store_run(smem, idx, vec): one lane's LD_VEC-wide run -- a single
+ * ds_write, or for fp32 the widest pieces its row alignment allows. */
+static void rocke_dconv_wgrad__store_run(rocke_dconv_wgrad_ctx_t* ctx,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* idx,
+                                         rocke_value_t* vec)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(!ctx->F32_IO || ctx->F32_ST_VEC == ctx->VEC_CH)
+    {
+        rocke_value_t* ix[2] = {ctx->c0, idx};
+        rocke_b_smem_store_vN(b, smem, ix, 2, vec, ctx->LD_VEC);
+        return;
+    }
+    for(int i = 0; i < ctx->VEC_CH; i += ctx->F32_ST_VEC)
+    {
+        rocke_value_t* elems[8];
+        for(int j = 0; j < ctx->F32_ST_VEC; ++j)
+            elems[j] = rocke_b_vec_extract(b, vec, i + j);
+        rocke_value_t* piece = rocke_b_vec_pack(b, elems, ctx->F32_ST_VEC, rocke_f32());
+        rocke_value_t* at = idx;
+        if(i != 0)
+        {
+            rocke_value_t* c_i = rocke_b_const_i32(b, i);
+            at = rocke_b_add(b, idx, c_i);
+        }
+        rocke_value_t* ix[2] = {ctx->c0, at};
+        rocke_b_smem_store_vN(b, smem, ix, 2, piece, ctx->F32_ST_VEC);
+    }
+}
+
+/* _issue_load(rsrc, safe_off): LD_VEC contiguous elements from DRAM (two
+ * dwordx4 for fp32 x 8). */
+static rocke_value_t* rocke_dconv_wgrad__issue_load(rocke_dconv_wgrad_ctx_t* ctx,
+                                                    rocke_value_t* rsrc,
+                                                    rocke_value_t* safe_off)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(ctx->F32_IO)
+        return rocke_dconv_load_elems(b, ctx->dtype, rsrc, safe_off, ctx->c0, ctx->VEC_CH);
+    if(ctx->is_bf16)
+        return rocke_b_buffer_load_vN_bf16(b, rsrc, safe_off, ctx->c0, ctx->LD_VEC / 2);
+    return rocke_b_buffer_load_vN_f16(b, rsrc, safe_off, ctx->c0, ctx->LD_VEC / 2);
 }
 
 /* _issue_delta(ho_val, ho_ok): start the DRAM reads of one dY row; writes the
@@ -173,10 +240,7 @@ static bool rocke_dconv_wgrad__issue_delta(rocke_dconv_wgrad_ctx_t* ctx,
 
         safe_off
             = rocke_b_select(b, both_ok, rocke_b_mul(b, off, ctx->c_half_bytes), ctx->oob_sentinel);
-        out[pass_idx]
-            = ctx->is_bf16
-                  ? rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_off, ctx->c0, ctx->LD_VEC / 2)
-                  : rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_off, ctx->c0, ctx->LD_VEC / 2);
+        out[pass_idx] = rocke_dconv_wgrad__issue_load(ctx, ctx->a_rsrc, safe_off);
     }
     return true;
 }
@@ -186,15 +250,12 @@ static bool rocke_dconv_wgrad__issue_delta(rocke_dconv_wgrad_ctx_t* ctx,
 static void rocke_dconv_wgrad__commit_delta(rocke_dconv_wgrad_ctx_t* ctx,
                                             rocke_value_t* const* vecs)
 {
-    rocke_ir_builder_t* b = ctx->b;
     int pass_idx;
     for(pass_idx = 0; pass_idx < ctx->DY_PASSES; ++pass_idx)
     {
-        rocke_value_t* indices[2];
         rocke_value_t* sp = rocke_dconv_wgrad__dy_pass_sp(ctx, pass_idx);
-        indices[0] = ctx->c0;
-        indices[1] = rocke_dconv_wgrad__lds_run(ctx, ctx->dy_wave_off_f16, sp);
-        rocke_b_smem_store_vN(b, ctx->dy_lds, indices, 2, vecs[pass_idx], ctx->LD_VEC);
+        rocke_value_t* idx = rocke_dconv_wgrad__lds_run(ctx, ctx->dy_wave_off_f16, sp);
+        rocke_dconv_wgrad__store_run(ctx, ctx->dy_lds, idx, vecs[pass_idx]);
     }
 }
 
@@ -244,10 +305,7 @@ static bool rocke_dconv_wgrad__issue_s_strip(rocke_dconv_wgrad_ctx_t* ctx,
         both_ok = rocke_b_land(b, rocke_b_land(b, hi_ok, ctx->strip_col_ok[pass_idx]), x_ok);
         safe
             = rocke_b_select(b, both_ok, rocke_b_mul(b, off, ctx->c_half_bytes), ctx->oob_sentinel);
-        out[pass_idx]
-            = ctx->is_bf16
-                  ? rocke_b_buffer_load_vN_bf16(b, ctx->b_rsrc, safe, ctx->c0, ctx->LD_VEC / 2)
-                  : rocke_b_buffer_load_vN_f16(b, ctx->b_rsrc, safe, ctx->c0, ctx->LD_VEC / 2);
+        out[pass_idx] = rocke_dconv_wgrad__issue_load(ctx, ctx->b_rsrc, safe);
     }
     return true;
 }
@@ -259,15 +317,12 @@ static bool rocke_dconv_wgrad__issue_s_strip(rocke_dconv_wgrad_ctx_t* ctx,
 static void rocke_dconv_wgrad__commit_s_strip(rocke_dconv_wgrad_ctx_t* ctx,
                                               rocke_value_t* const* vecs)
 {
-    rocke_ir_builder_t* b = ctx->b;
     int pass_idx;
     for(pass_idx = 0; pass_idx < ctx->STRIP_PASSES_PER_WAVE; ++pass_idx)
     {
-        rocke_value_t* indices[2];
-        indices[0] = ctx->c0;
-        indices[1]
+        rocke_value_t* idx
             = rocke_dconv_wgrad__lds_run(ctx, ctx->s_strip_off_f16, ctx->strip_cols[pass_idx]);
-        rocke_b_smem_store_vN(b, ctx->s_strip_lds, indices, 2, vecs[pass_idx], ctx->LD_VEC);
+        rocke_dconv_wgrad__store_run(ctx, ctx->s_strip_lds, idx, vecs[pass_idx]);
     }
 }
 
@@ -396,13 +451,24 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     ctx->TR_K_L = ctx->WO_BLOCK / 4;
     /* ds_read_b64_tr_b16 (4/lane) or ds_load_tr16_b128 (8/lane) per fragment. */
     ctx->N_TR_READS = ctx->W32 ? ctx->FRAG / 8 : ctx->VEC_CH / 4;
-    ctx->LDS_SIZE_DY = ctx->WO_BLOCK * ctx->TR_N;
+    /* fp32 / tf32 storage (wave64 only): padded rows + ds_read_b32 gathers. */
+    ctx->dtype = rocke_direct_conv_problem_dtype(&ctx->p);
+    ctx->F32_IO = rocke_dconv_is_f32_storage(ctx->dtype);
+    ctx->F32_ROW = 0;
+    ctx->F32_ST_VEC = 0;
+    if(ctx->F32_IO)
+    {
+        ctx->F32_ROW = ctx->TR_N + (ctx->VEC_CH == 8 ? 2 : 4);
+        ctx->F32_ST_VEC = (ctx->F32_ROW * 4) % 16 ? 2 : (ctx->VEC_CH < 4 ? ctx->VEC_CH : 4);
+    }
+    ctx->ROW_STRIDE = ctx->F32_IO ? ctx->F32_ROW : ctx->TR_N;
+    ctx->LDS_SIZE_DY = ctx->WO_BLOCK * ctx->ROW_STRIDE;
 
     ctx->STRIP_PASSES = (ctx->STRIP_COLS + ctx->ROWS_PER_PASS - 1) / ctx->ROWS_PER_PASS;
     ctx->STRIP_GROUPS = (ctx->WAVES_K < ctx->STRIP_PASSES) ? ctx->WAVES_K : ctx->STRIP_PASSES;
     ctx->STRIP_PASSES_PER_WAVE = (ctx->STRIP_PASSES + ctx->STRIP_GROUPS - 1) / ctx->STRIP_GROUPS;
     ctx->STRIP_COLS_PAD = ctx->STRIP_PASSES_PER_WAVE * ctx->STRIP_GROUPS * ctx->ROWS_PER_PASS;
-    ctx->STRIP_PER_Q = ctx->STRIP_COLS_PAD * ctx->TR_N;
+    ctx->STRIP_PER_Q = ctx->STRIP_COLS_PAD * ctx->ROW_STRIDE;
     if(ctx->STRIP_PASSES_PER_WAVE > ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES)
     {
         if(b->status == ROCKE_OK)
@@ -421,7 +487,7 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
 
     /* io_type = _io_type(p.dtype): dY and X are f16 or bf16. dW is always
      * fp32 -- the split-K reduction lands through fp32 global atomics. */
-    ctx->io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+    ctx->io_type = rocke_dconv_io_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
     if(ctx->io_type == NULL)
     {
         return false; /* builder sticky error already set by rocke_b_io_ir_type */
@@ -452,7 +518,8 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
         ctx->c_cpg = rocke_b_const_i32(b, ctx->p.cpg);
         ctx->c_kpg = rocke_b_const_i32(b, ctx->p.kpg);
     }
-    ctx->c_half_bytes = rocke_b_const_i32(b, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    ctx->c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(ctx->dtype));
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     ctx->c_H = ctx->params.p_Hi;
     ctx->c_Ho = ctx->params.p_Ho;
@@ -690,6 +757,10 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     /* Rows one load pass covers: WO_BLOCK on wave64, 16 on wave32. */
     ctx->c_rows_per_pass = ctx->W32 ? rocke_b_const_i32(b, ctx->ROWS_PER_PASS) : ctx->c_WO_BLOCK;
 
+    /* LDS row stride of both tiles, in elements (padded for fp32). */
+    ctx->c_ROW = ctx->F32_IO ? rocke_b_const_i32(b, ctx->F32_ROW) : ctx->c_TR_N;
+
+    /* fp32 storage is wave64 only (the validator refuses it on wave32). */
     if(ctx->W32)
     {
         /* ds_load_tr16_b128 transposes an 8x8 block within each group of 8
@@ -707,6 +778,13 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
             rocke_value_t* lhs = rocke_b_mul(b, ctx->tr_row, ctx->c_TR_N);
             ctx->tr_flat = rocke_b_add(b, lhs, tr_col);
         }
+    }
+    else if(ctx->F32_IO)
+    {
+        /* Gather lane address: row (lane / 16) * VEC_CH, column lane % 16. */
+        rocke_value_t* c_st = rocke_b_const_i32(b, ctx->VEC_CH * ctx->F32_ROW);
+        rocke_value_t* m = rocke_b_mul(b, ctx->c4, c_st);
+        ctx->gather_flat = rocke_b_add(b, m, ctx->q_in_lane);
     }
     else
     {
@@ -894,6 +972,11 @@ void rocke_dconv_wgrad_row_loop(rocke_dconv_wgrad_ctx_t* ctx)
                 {
                     ctx->acc[r][s] = rocke_b_mma(
                         b, ctx->wmma_op_id, dy_vec, x_vecs[s], ctx->acc[r][s], NULL, 0);
+                }
+                else if(ctx->F32_IO)
+                {
+                    ctx->acc[r][s] = rocke_dconv_mma_f32_logical(
+                        b, ctx->arch, ctx->dtype, 16, dy_vec, x_vecs[s], ctx->acc[r][s]);
                 }
                 else if(ctx->spec->mfma_k == 32)
                 {

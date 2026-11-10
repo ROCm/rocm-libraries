@@ -1594,8 +1594,9 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
         const char* scalar;
         const char* bc;
         rocke_ll_need(L, "raw.ptr.buffer.store.i32");
-        scalar = rocke_ll_fresh(L, "bsf32sc");
+        /* bc before scalar: the Python lowerer's fresh-name order. */
         bc = rocke_ll_fresh(L, "bsf32bc");
+        scalar = rocke_ll_fresh(L, "bsf32sc");
         rocke_ll_emitf(
             L, "  %s = extractelement <1 x float> %s, i32 0", scalar, rocke_ll_operand(L, val));
         rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);

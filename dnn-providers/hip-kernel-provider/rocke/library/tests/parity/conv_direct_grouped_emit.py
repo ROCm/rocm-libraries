@@ -23,10 +23,13 @@
 # cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
 # DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
 # DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
-# per-axis padding, from index 201 the gfx1250 wave32 and image-per-block
-# DirectConvWgradSpec, from index 232 DirectDepthwiseWgradSpec and from index
-# 239 the small-C wgrad stems of the AOT grid), builds the kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
-# prints
+# per-axis padding, from index 201 the fp32-storage (fp32 / tf32)
+# DirectNongroupedConvSpec, from index 218 the fp32-storage configs of every
+# grouped kernel that serves them, see _f32_spec, from index 318 the gfx1250
+# wave32 and image-per-block DirectConvWgradSpec, from index 349
+# DirectDepthwiseWgradSpec and from index 356 the small-C wgrad stems of the
+# AOT grid), builds the kernel via the matching build_direct_conv_* function
+# (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
 import sys
@@ -492,6 +495,125 @@ def _wgrad_direct_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
+# fp32-storage non-grouped configs (problem.dtype "fp32" / "tf32"), indices
+# 201..217. Each pins one branch of the fp32 path of build_direct_conv_nongrouped
+# on both CDNA targets: the TF32 atom (gfx950: one emulated BF16x3 xf32 atom per
+# 8-element fragment, a 4-element one zero-padded to it; gfx942: native xf32
+# atoms, 2 elements each, split and packed) against the exact fp32 atoms (one
+# scalar per 32x32x2 / 16x16x4); the two-plane weight LDS of an 8-element
+# fragment and the one-plane one of a 4-element fragment; dwordx4 staging,
+# reads and stores; the 4-float pad and the kernel-name tag of any other pad;
+# stride 2, dilation, 1x1 / 5x5 filters, partial tiles, double buffering, the
+# swizzle and iglp / waves_per_eu knobs. 213..217 are specs both engines must
+# reject: split-C, grouped, a 2-float pad and an fp32 A past the masked-access
+# offset (4-byte elements).
+# ---------------------------------------------------------------------------
+_NONGROUPED_F32_CFG_BASE = 201
+
+# The geometry the fp32 configs share unless they override it: the
+# conflict-free 4-float pad and a tile whose 4-byte staging fits gfx942's
+# 64 KiB of LDS.
+_NONGROUPED_F32_BASE = dict(tile_h=4, tile_k=32, ck=16, waves_m=1, lds_pad=4)
+
+# (arch, problem args, spec overrides), in index order.
+_NONGROUPED_F32_CFGS = (
+    # 0..3: 32x32x16, 8-element fragment, both dtypes on both arches.
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    # 4: gfx950 TF32 on a 4-element fragment (zero-padded to the emulated
+    # atom), stride 2, double-buffered LDS, no swizzle.
+    (
+        "gfx950",
+        dict(N=1, H=24, W=40, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, chiplet_swizzle=False),
+    ),
+    # 5: gfx942 TF32 on a 4-element fragment (two native atoms), double
+    # buffered.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=32, K=64, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, tile_h=2),
+    ),
+    # 6: fp32 16x16x32 on partial H / W tiles, waves_per_eu without iglp, and
+    # a 12-float pad (named p12).
+    (
+        "gfx950",
+        dict(N=1, H=10, W=40, C=64, K=64, dtype="fp32"),
+        dict(
+            atom="16x16x32",
+            tile_w=16,
+            ck=32,
+            waves_m=2,
+            iglp=None,
+            waves_per_eu=2,
+            lds_pad=12,
+        ),
+    ),
+    # 7: gfx942 TF32 16x16x32 (four native 16x16x8 atoms), stride 2.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="16x16x32", ck=32, tile_h=2, tile_w=16),
+    ),
+    # 8: gfx950 TF32 16x16x16 (zero-padded to 16x16x32), 1x1 filter, a
+    # partial K tile.
+    (
+        "gfx950",
+        dict(N=2, H=14, W=14, C=64, K=96, KH=1, KW=1, PAD=0, dtype="tf32"),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 9: gfx942 fp32 16x16x16, both axes dilated.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, PAD=2, dtype="fp32", dil_h=2, dil_w=2),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 10: gfx950 TF32, stride 2 with column dilation and the 16-bit pad of 8
+    # floats (named p8).
+    (
+        "gfx950",
+        dict(N=1, H=32, W=32, C=64, K=64, PAD=2, stride=2, dtype="tf32", dil_w=2),
+        dict(lds_pad=8),
+    ),
+    # 11: gfx942 fp32 32x32x8, stride 2, two channel-tile waves, no pad (p0).
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=128, stride=2, dtype="fp32"),
+        dict(atom="32x32x8", tile_h=2, tile_k=64, waves_m=2, lds_pad=0),
+    ),
+    # 12: gfx950 fp32, a 5x5 filter under a 64-wide tile over four waves,
+    # iglp 1.
+    (
+        "gfx950",
+        dict(N=1, H=20, W=64, C=128, K=64, KH=5, KW=5, PAD=2, dtype="fp32"),
+        dict(tile_h=8, tile_w=64, waves_n=4, iglp=1),
+    ),
+    # 13..16: must reject. split-C and the grouped mode are 16-bit only.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(split_c=2)),
+    ("gfx942", dict(N=1, H=16, W=32, C=64, K=64, dtype="fp32"), dict(grouped=True)),
+    # A 2-float pad is 8 bytes: ds_read_b128 needs 16.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(lds_pad=2)),
+    # A of 2**29 elements fits as fp16 but is 2 GiB in fp32.
+    ("gfx950", dict(N=16384, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+)
+
+
+def _nongrouped_f32_spec(idx: int):
+    """Return (spec, arch) for fp32-storage config ``idx`` (emitted as
+    ``_NONGROUPED_F32_CFG_BASE + idx``), or None past the last one."""
+    if not 0 <= idx < len(_NONGROUPED_F32_CFGS):
+        return None
+    arch, pa, kw = _NONGROUPED_F32_CFGS[idx]
+    pa = dict(pa)
+    p = _nongrouped_p(
+        pa.pop("N"), pa.pop("H"), pa.pop("W"), pa.pop("C"), pa.pop("K"), **pa
+    )
+    return _nongrouped_s(p, **{**_NONGROUPED_F32_BASE, **kw}), arch
+
+
+# ---------------------------------------------------------------------------
 # Depthwise forward on a wave32 target (gfx1250), indices 166..178: the
 # preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
 # the preloading kernel at wave_size 64: a logical wave of 64 threads, which
@@ -649,6 +771,241 @@ def _wave32_spec(idx: int):
     return None
 
 
+# fp32-storage configs of the grouped kernels (problem dtype "fp32": exact
+# fp32 math; "tf32": TF32 MMA operands), indices 218.., after the non-grouped
+# fp32 ones. Each MFMA kernel
+# kind runs on gfx942 (native XF32) and gfx950 (BF16x3 emulation) at both
+# dtypes, with fold_k32 on and off where the kernel has it.
+_F32_CFG_BASE = 218
+_F32_ARCHES = ("gfx942", "gfx950")
+_F32_DTYPES = ("fp32", "tf32")
+
+
+def _f32_axes(i: int):
+    """(arch, dtype) of the i-th (0..3) arch x dtype pair."""
+    return _F32_ARCHES[i // 2], _F32_DTYPES[i % 2]
+
+
+def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1, stride=1):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _f32dw(dtype, *, groups=64, KH=3, PAD=1):
+    """A depthwise (cpg = kpg = 1) fp32-storage problem, square KH x KH filter."""
+    return _f32p(groups, 1, 1, dtype, N=2, H=14, W=14, KH=KH, KW=KH, PAD=PAD)
+
+
+def _f32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_F32_CFG_BASE + idx``, or None."""
+    # 0..7: 16c, (arch, dtype) x fold_k32 on / off.
+    if idx < 8:
+        arch, dt = _f32_axes(idx // 2)
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, dt), block_groups=8, fold_k32=idx % 2 == 0
+        )
+        return ("16c", spec, arch)
+    # 8: 16c single-buffered over two q-subtiles.
+    if idx == 8:
+        spec = DirectConv16cSpec(
+            problem=_f32p(8, 16, 16, "tf32"),
+            block_q=32,
+            block_groups=4,
+            double_buffer=False,
+            fold_k32=False,
+        )
+        return ("16c", spec, "gfx950")
+    # 9: both engines reject: the fp32 row ring is over gfx942's LDS.
+    if idx == 9:
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, "fp32", W=64), block_q=64, block_groups=8
+        )
+        return ("16c", spec, "gfx942")
+    # 10..13: 8c, 14..17: 32c, each (arch, dtype).
+    if idx < 14:
+        arch, dt = _f32_axes(idx - 10)
+        return ("8c", DirectConv8cSpec(problem=_f32p(16, 8, 8, dt)), arch)
+    if idx < 18:
+        arch, dt = _f32_axes(idx - 14)
+        return ("32c", DirectConv32cSpec(problem=_f32p(8, 32, 32, dt)), arch)
+    # 18: 8c single-buffered over two q-subtiles; 19: 32c single-buffered.
+    if idx == 18:
+        spec = DirectConv8cSpec(
+            problem=_f32p(16, 8, 8, "tf32"), block_q=32, double_buffer=False
+        )
+        return ("8c", spec, "gfx950")
+    if idx == 19:
+        spec = DirectConv32cSpec(problem=_f32p(8, 32, 32, "fp32"), double_buffer=False)
+        return ("32c", spec, "gfx942")
+    # 20..23: both engines reject 4c, (arch, dtype): no 4x4 TF32 / fp32 atom.
+    if idx < 24:
+        arch, dt = _f32_axes(idx - 20)
+        return ("4c", DirectConv4cSpec(problem=_f32p(16, 4, 4, dt)), arch)
+    # 24..31: the generic DirectConvSpec, (arch, dtype) x fold_k32 on / off.
+    if idx < 32:
+        arch, dt = _f32_axes((idx - 24) // 2)
+        fold = idx % 2 == 0
+        spec = DirectConvSpec(
+            problem=_f32p(4, 32 if fold else 16, 16, dt),
+            block_groups=1,
+            block_h=4,
+            fold_k32=fold,
+        )
+        return ("generic", spec, arch)
+    # 32..37: generic knobs: a partial K-atom and M-tile (cpg=kpg=4, the
+    # 4c refusal's replacement), the waves_k cross-wave reduction, runtime
+    # channels, a runtime K loop over partial atoms, the persistent grid with
+    # an LDS column pad, and a fused-weights spec both engines reject.
+    table = {
+        32: lambda: (
+            DirectConvSpec(problem=_f32p(16, 4, 4, "tf32"), block_groups=1, block_h=4),
+            "gfx950",
+        ),
+        33: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 32, 16, "fp32"), block_groups=1, block_h=4, waves_k=2
+            ),
+            "gfx942",
+        ),
+        34: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_channels=True,
+                k_atoms=1,
+                m_tiles=1,
+            ),
+            "gfx950",
+        ),
+        35: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 20, 12, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_k_loop=True,
+            ),
+            "gfx942",
+        ),
+        36: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "fp32"),
+                block_groups=1,
+                block_h=4,
+                persistent_grid=True,
+                lds_pad=8,
+            ),
+            "gfx950",
+        ),
+        37: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                dgrad_fused_weights=True,
+            ),
+            "gfx942",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is not None:
+        spec, arch = sel()
+        return ("generic", spec, arch)
+    # 38..41: the MFMA dgrad weight transpose, (arch, dtype).
+    if idx < 42:
+        arch, dt = _f32_axes(idx - 38)
+        spec = DirectTransposeWeightsDgradSpec(problem=_f32p(2, 24, 40, dt))
+        return ("transpose", spec, arch)
+    # 42..49: the W_coa reorganize, (arch, dtype) x fold_k32 on / off.
+    if idx < 50:
+        arch, dt = _f32_axes((idx - 42) // 2)
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(2, 24, 64, dt), fold_k32=idx % 2 == 0
+        )
+        return ("reorganize", spec, arch)
+    # 50: runtime-channel transpose; 51: runtime-channel fold_k32 reorganize.
+    if idx == 50:
+        spec = DirectTransposeWeightsDgradSpec(
+            problem=_f32p(1, 48, 40, "tf32"), runtime_channels=True
+        )
+        return ("transpose", spec, "gfx950")
+    if idx == 51:
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(1, 24, 64, "fp32"), fold_k32=True, runtime_channels=True
+        )
+        return ("reorganize", spec, "gfx942")
+    # 52..59: the MFMA wgrad, (arch, dtype) x mfma_k 32 / 16 (gfx942 too: the
+    # fp32 gathers need no transpose read).
+    if idx < 60:
+        arch, dt = _f32_axes((idx - 52) // 2)
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, dt), mfma_k=32 if idx % 2 == 0 else 16
+        )
+        return ("wgrad", spec, arch)
+    # 60: K/C/Q wave splits; 61: runtime channels; 62: a 5x5 filter over
+    # ragged channel tiles.
+    if idx == 60:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(4, 64, 64, "tf32"),
+            waves_k=2,
+            waves_c=2,
+            waves_q=2,
+            ho_per_block=3,
+        )
+        return ("wgrad", spec, "gfx950")
+    if idx == 61:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, "tf32"), runtime_channels=True
+        )
+        return ("wgrad", spec, "gfx942")
+    if idx == 62:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 24, 20, "fp32", KH=5, KW=5, PAD=2),
+            mfma_k=16,
+            ho_per_block=2,
+        )
+        return ("wgrad", spec, "gfx950")
+    # 63..94: the scalar-FMA kernels, each (arch, dtype); fp32 and tf32 run the
+    # same exact fp32 math and share the "f32" kernel name.
+    scalar = (
+        ("dgrad", lambda dt: DirectConvDgradSpec(problem=_f32p(8, 16, 16, dt), block_q=16, block_groups=8)),
+        ("dw_dgrad", lambda dt: DirectDepthwiseDgradSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_dgrad_stream", lambda dt: DirectDepthwiseDgradStreamSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw", lambda dt: DirectDepthwiseSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt), block_w=8, block_h=2)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt, KH=5, PAD=2), block_w=8, block_h=2, dgrad=True)),
+        ("dwcol", lambda dt: DirectDepthwiseColSpec(problem=_f32dw(dt), block_h=8, block_w=2, block_waves=1, dtype=dt)),
+        ("spatial", lambda dt: DirectDepthwiseSpatialSpec(problem=_f32dw(dt, groups=16), block_waves=1)),
+    )  # fmt: skip
+    if idx < 63 + 4 * len(scalar):
+        kind, make = scalar[(idx - 63) // 4]
+        arch, dt = _f32_axes((idx - 63) % 4)
+        return (kind, make(dt), arch)
+    # 95..97: both engines reject the channel-packed (cpl > 1) depthwise
+    # kernels for fp32 storage; 98: the column kernel's dtype resolves
+    # "TF32" (any case) to f32 storage; 99: scalar dgrad at stride 2.
+    table = {
+        95: lambda: ("dw", DirectDepthwiseSpec(problem=_f32dw("fp32"), block_w=8, block_waves=1, cpl=2), "gfx950"),
+        96: lambda: ("dw_dgrad_stream", DirectDepthwiseDgradStreamSpec(problem=_f32dw("tf32"), block_w=8, block_waves=1, cpl=2), "gfx942"),
+        97: lambda: ("dw_tiled", DirectDepthwiseTiledSpec(problem=_f32dw("tf32"), block_w=8, block_h=2, cpl=2), "gfx950"),
+        98: lambda: ("dwcol", DirectDepthwiseColSpec(problem=_f32dw("tf32"), block_h=8, block_w=2, block_waves=1, dtype="TF32"), "gfx950"),
+        99: lambda: ("dgrad", DirectConvDgradSpec(problem=_f32p(8, 16, 8, "tf32", stride=2), block_q=16, block_groups=8), "gfx950"),
+    }  # fmt: skip
+    sel = table.get(idx)
+    return None if sel is None else sel()
+
+
 def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):
     return DirectConvProblem(
         N=N,
@@ -769,18 +1126,18 @@ def _dw_dgrad_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# gfx1250 (wave32) direct wgrad, indices 201..231: the WMMA 16x16x32 port of
+# gfx1250 (wave32) direct wgrad, indices 318..348: the WMMA 16x16x32 port of
 # build_direct_conv_wgrad, the image-per-block variant with register blocking
-# and multi-row LDS staging, and two specs both engines must reject (201..208);
+# and multi-row LDS staging, and two specs both engines must reject (318..325);
 # then the image-per-block row split (row_blocks) and the TDM-staged LDS ring
-# (tdm_stages), with two more must-reject specs (209..216); then the
-# replicated two-stage scratch (ws_replicas) and its must-reject (217..219);
+# (tdm_stages), with two more must-reject specs (326..333); then the
+# replicated two-stage scratch (ws_replicas) and its must-reject (334..336);
 # then the LDS-staged coalesced epilogue (lds_epilogue) and its two
-# must-reject specs (220..224); then the small-channel variant (small_c) and
-# its three must-reject specs (225..231).
+# must-reject specs (337..341); then the small-channel variant (small_c) and
+# its three must-reject specs (342..348).
 # A ragged W (37) leaves a partial last wo tile.
 # ---------------------------------------------------------------------------
-_WGRAD_W32_CFG_BASE = 201
+_WGRAD_W32_CFG_BASE = 318
 
 
 def _wgrad_w32_spec(idx: int):
@@ -1915,11 +2272,11 @@ def _nongrouped_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# Direct depthwise wgrad (DirectDepthwiseWgradSpec), indices 232..238: wave32
+# Direct depthwise wgrad (DirectDepthwiseWgradSpec), indices 349..355: wave32
 # gfx1250 and wave64 gfx950 builds over the filter-row split, the carried X
 # window and the prefetch, then three specs both engines must reject.
 # ---------------------------------------------------------------------------
-_DW_WGRAD_CFG_BASE = 232
+_DW_WGRAD_CFG_BASE = 349
 
 
 def _dw_wgrad_spec(idx: int):
@@ -2015,11 +2372,11 @@ def _dw_wgrad_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# gfx1250 small-C wgrad stems of the AOT grid, indices 239..241: a C=4 3x3
+# gfx1250 small-C wgrad stems of the AOT grid, indices 356..358: a C=4 3x3
 # stride-1 stem on the 16-wave vec_x=4 / sub_steps=4 tile with the uniform wave
 # index off, the stride-1 and the unpadded stride-2 C=3 3x3 stems.
 # ---------------------------------------------------------------------------
-_WGRAD_STEM_CFG_BASE = 239
+_WGRAD_STEM_CFG_BASE = 356
 
 
 def _wgrad_stem_spec(idx: int):
@@ -2606,6 +2963,16 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _F32_CFG_BASE:
+        sel = _f32_spec(idx - _F32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_F32_CFG_BASE:
+        sel = _nongrouped_f32_spec(idx - _NONGROUPED_F32_CFG_BASE)
+        if sel is not None:
+            return ("nongrouped", *sel)
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WAVE32_CFG_BASE:
         sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
         if sel is not None:

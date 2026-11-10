@@ -51,10 +51,11 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  *   lds_row = b.add(atom_mn_base, mn_in_atom)
  *   lds_col = b.add(k_tile_base, k_in_atom)
  *   if frag_len <= 8:
- *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len)
+ *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype)
  *   frag = None
  *   for off in range(0, frag_len, 8):
- *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8)
+ *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8,
+ *                               smem_dtype=smem_dtype)
  *       frag = chunk if frag is None else b.vec_concat(frag, chunk)
  *   return frag
  * ====================================================================== */
@@ -172,18 +173,19 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len)
+                                              int frag_len,
+                                              const rocke_type_t* smem_dtype)
 {
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
     if(frag_len <= 8)
-        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len);
+        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype);
 
     rocke_value_t* frag = NULL;
     for(int off = 0; off < frag_len; off += 8)
     {
         rocke_value_t* col = rocke_b_add(b, lds_col, rocke_b_const_i32(b, off));
-        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8);
+        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8, smem_dtype);
         frag = (frag == NULL) ? chunk : rocke_b_vec_concat(b, frag, chunk);
     }
     return frag;
@@ -256,8 +258,14 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
+            a_rows[mi] = rocke_conv_emit_frag_smem_load(b,
+                                                        A_src,
+                                                        a_row_in_atom,
+                                                        a_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->a_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
@@ -279,8 +287,14 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            b_cols[ni] = rocke_conv_emit_frag_smem_load(
-                b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
+            b_cols[ni] = rocke_conv_emit_frag_smem_load(b,
+                                                        B_src,
+                                                        b_col_in_atom,
+                                                        b_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->b_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         int flat = 0;
@@ -398,7 +412,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
             else
             {
-                a_rows[mi] = rocke_conv_emit_smem_load(b, A_src, a_row, col_base, ctx->a_per_lane);
+                a_rows[mi] = rocke_conv_load_mma_operand(
+                    b, A_src, a_row, col_base, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
             }
         }
 
@@ -427,7 +442,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 b,
                 warp_n_off,
                 rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-            b_cols[ni] = rocke_conv_emit_smem_load(b, B_src, b_row, col_base, ctx->b_per_lane);
+            b_cols[ni] = rocke_conv_load_mma_operand(
+                b, B_src, b_row, col_base, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
 
         int flat = 0;
@@ -441,9 +457,13 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
         }
 
-        /* schedule.emit_after_mfma_step(b, ds_read_count=mfmas_m + mfmas_n,
-         *                               mfma_count=mfmas_m * mfmas_n) */
+        /* schedule.emit_after_mfma_step(
+         *     b, ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+         *     mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma) */
         rocke_schedule_policy_emit_after_mfma_step(
-            &ctx->schedule, b, ctx->mfmas_m + ctx->mfmas_n, ctx->mfmas_m * ctx->mfmas_n);
+            &ctx->schedule,
+            b,
+            (ctx->mfmas_m + ctx->mfmas_n) * ctx->ds_reads_per_frag,
+            ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma);
     }
 }
