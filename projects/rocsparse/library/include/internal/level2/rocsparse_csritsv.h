@@ -385,7 +385,9 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
 *  entries are zero. With \p host_tol, the iteration is done only if
 *  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
-*  if it is done and to 0 otherwise, and only \p host_history[0] is written.
+*  if it is done and to 0 otherwise. \p host_history[0] is the initial residual and, if the
+*  iteration is done and \p host_nmaxiter[0] was at least 2, \p host_history[1] is zero, as for a
+*  non-empty matrix.
 *
 *  @param[in]
 *  handle         handle to the rocSPARSE library context queue.
@@ -689,7 +691,9 @@ ROCSPARSE_EXPORT rocsparse_status
 *  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
 *  entries are zero. With \p host_tol, the iteration is done only if
 *  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
-*  if it is done and to 0 otherwise, and only \p host_history[0] is written.
+*  if it is done and to 0 otherwise. \p host_history[0] is the initial residual and, if the
+*  iteration is done and \p host_nmaxiter[0] was at least 2, \p host_history[1] is zero, as for a
+*  non-empty matrix.
 *  \p host_nfreeiter is ignored.
 *
 *  @param[in]

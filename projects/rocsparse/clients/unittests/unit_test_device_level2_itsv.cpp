@@ -610,8 +610,10 @@ namespace
                 // limit is returned unchanged. Otherwise y = alpha * x for a unit diagonal,
                 // with or without a history array, and history[0] is the initial residual
                 // ||alpha * x - 0||_inf. With a tolerance the step is exact, so one iteration
-                // is reported. Without one all the iterations are run as for a non-empty
-                // matrix: the limit is returned unchanged and the remaining residuals are zero.
+                // is reported and, as for a non-empty matrix, history[1] is zero when the limit
+                // allows a second iteration. Without one all the iterations are run as for a
+                // non-empty matrix: the limit is returned unchanged and the remaining residuals
+                // are zero.
                 if(diag == rocsparse_diag_type_unit)
                 {
                     float initial_residual = 0.0f;
@@ -660,7 +662,8 @@ namespace
                                         EXPECT_EQ(hist[0], stepped ? initial_residual : -1.0f);
                                         for(rocsparse_int i = 1; i < 5; ++i)
                                         {
-                                            const bool zero = stepped && !with_tol && i < limit;
+                                            const bool zero
+                                                = stepped && i < limit && (!with_tol || i == 1);
                                             EXPECT_EQ(hist[i], zero ? 0.0f : -1.0f)
                                                 << "history[" << i << "]";
                                         }
@@ -1134,7 +1137,8 @@ namespace
                     {
                         EXPECT_EQ(hist[0], initial_residual);
                         for(size_t i = 1; i < hist.size(); ++i)
-                            EXPECT_EQ(hist[i], with_tol ? -1.0f : 0.0f) << "history[" << i << "]";
+                            EXPECT_EQ(hist[i], (with_tol && i > 1) ? -1.0f : 0.0f)
+                                << "history[" << i << "]";
                     }
                 }
     }

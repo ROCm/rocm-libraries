@@ -306,6 +306,10 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             if(breakable)
             {
                 host_nmaxiter[0] = (host_nrm[0] > host_tol[0]) ? 1 : 0;
+                if(recordable && host_nmaxiter[0] == 1 && nmaxiter > 1)
+                {
+                    host_history[1] = static_cast<rocsparse::floating_data_t<T>>(0);
+                }
             }
             else if(recordable)
             {
