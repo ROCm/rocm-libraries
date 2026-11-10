@@ -92,6 +92,7 @@ namespace
             arg.K[0]       = a2a_gemm_bound_for_world(env.world);
             arg.a2a_extent = arg.K[0];
             arg.a2a_world  = uint8_t(env.world);
+            arg.norm_check = 1;
             return arg;
         }
 
