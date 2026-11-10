@@ -42,7 +42,9 @@ one to `IMPORTANT` or above, also run step 3.
      binary, run the mutant under that configuration or return `UNVERIFIED`. If none does, run no mutant: return
      `CONFIRMED` only on that link-graph evidence plus the absence of any registered test that exercises the path, and say
      in **Proof** that no mutant ran.
-4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
+4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim. A `design` finding is never `BLOCKING`
+   ([../policy.md](../policy.md) *Design findings*): a verifier who believes one must block writes it as a `VER` defect with its own
+   proof (`verify/VER<batch>.md`) and sets the design finding's tier at `IMPORTANT` at most.
 
 ## Threads
 
