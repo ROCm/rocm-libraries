@@ -86,8 +86,15 @@ def test_accepts_non_atomic_streamk3():
   assert tdmStoreRejectReason(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0)) is None
 
 
-def test_accepts_multiple_buffer_dynamic_gsu():
-  assert tdmStoreRejectReason(_state(GlobalSplitU=-1, UseBias=1, UseScaleAlphaVec=1)) is None
+_GSU_ALGORITHMS = [("MultipleBuffer", 0), ("SingleBuffer", 0), ("MultipleBufferSingleKernel", 0), ("AtomicDest", 0),
+                   ("MultipleBufferSingleKernel", 1)]
+
+
+@pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
+def test_accepts_dynamic_gsu(algorithm, aga):
+  """GlobalSplitU=-1 with every algorithm and AdaptiveGemmGSUA: its GSU == 1 branch stores D directly."""
+  assert tdmStoreRejectReason(_state(GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm, AdaptiveGemmGSUA=aga,
+                                     UseBias=1, UseScaleAlphaVec=1)) is None
 
 
 @pytest.mark.parametrize("overrides", [
@@ -114,7 +121,6 @@ def test_disabled_is_not_validated():
 
 
 _OUTPUT = "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
-_GSU_DYNAMIC = "TDMStoreInst supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _ACROSS_TILES = \
   "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
@@ -129,9 +135,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"ComputeDataType": DataType("h")}, _OUTPUT),
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
-  ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "SingleBuffer"}, _GSU_DYNAMIC),
-  ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"}, _GSU_DYNAMIC),
-  ({"GlobalSplitU": -1, "AdaptiveGemmGSUA": 1}, _GSU_DYNAMIC),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
   ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ClusterDim": [2, 1]}, _ACROSS_TILES),
   (dict(_STREAMK, PrefetchAcrossPersistent=1), _ACROSS_TILES),
@@ -539,19 +542,27 @@ def test_store_vector_width_16_splits_32_byte_vectors(gp_gfx1250, gfx1250_iim, a
     assert set(coords.values()) == {2}, (beta, lines[:4])
 
 
-def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """GlobalSplitU=-1 with bias and ScaleAlphaVec: the direct and the OptNLL store go through the TDM
-  block, and the copy of the GSU>1 partials keeps buffer_store."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=-1,
-                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1})
+@pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
+def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, algorithm, aga):
+  """GlobalSplitU=-1 with bias and ScaleAlphaVec, for every algorithm and AdaptiveGemmGSUA: the GSU == 1 branch
+  and the OptNLL store go through the TDM block, and no block of the GSU > 1 branch does; that branch keeps
+  its buffer_store or buffer atomics. AtomicDest runs without the vectors, which develop rejects with it (the
+  epilogue would run per GSU slice), and with the even AssertFree0ElementMultiple of packed bf16 atomics."""
+  extra = {"AssertFree0ElementMultiple": 2} if algorithm == "AtomicDest" else \
+    {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm,
+                       AdaptiveGemmGSUA=aga, **extra)
   assert sol.get("Valid"), capsys.readouterr().out
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
     assert sorted(direct["tdm"]) == sorted(direct["then"]) and direct["nonEdgeTdm"] == 1 and not direct["buffer"]
-  assert stores[("OptNLL_MB", "0")]["tdm"] == [8] and not stores[("OptNLL_MB", "0")]["buffer"]
-  partials = stores[("MB", "0")]
-  assert not partials["tdm"] and partials["stores"] > 0
+  optNLL = [path for path in stores if path[0].startswith("OptNLL")]
+  assert optNLL and all(stores[path]["tdm"] == [8] for path in optNLL), optNLL
+  partials = [path for path in stores if not path[0].startswith(("GSU1", "OptNLL"))]
+  assert partials and not any(stores[path]["tdm"] or stores[path]["nonEdgeTdm"] for path in partials), partials
+  assert sum(len(stores[path]["tdm"]) + stores[path]["nonEdgeTdm"] for path in stores) == asm.count("tensor_store_from_lds ")
+  assert any(stores[path]["stores"] for path in partials) or re.search(r"^\s*buffer_atomic\S* ", asm, re.M)
 
 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
