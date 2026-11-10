@@ -34,6 +34,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Backward Data | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| Causal Conv1d | FP16, BFP16, FP32 x/weight/bias/y/states; INT32, INT64 `cu_seqlens` and `state_indices` | x `[T, C]`, weight `[C, W]`, states `[N or P, C, W - 1]` | CPU Reference | Token-packed sequences; `weight[c, W - 1]` multiplies the current token; absent `initial_state` is zeros; every initial state is read before any final state is written, so `final_state` may share `initial_state`'s buffer; IDENTITY or SILU; sums in FP32; state row out of range or two sequences writing one row throws; ragged tensors rejected |
 | Matmul | FP16, BFP16, FP32 | Any rank >= 2 | CPU Reference | Batch dims broadcast; ragged tensors rejected |
 | MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected |
 | MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference |  |
@@ -76,6 +77,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Forward | `ConvolutionFwdPlanBuilder` | `ConvolutionFwdSignatureKey` | Forward convolution |
 | Convolution Backward Data | `ConvolutionBwdPlanBuilder` | `ConvolutionBwdSignatureKey` | Data gradient computation |
 | Convolution Backward Weights | `ConvolutionWrwPlanBuilder` | `ConvolutionWrwSignatureKey` | Weight gradient computation |
+| Causal Conv1d | `CausalConv1dPlanBuilder` | `CausalConv1dSignatureKey` | Depthwise causal 1-D convolution over token-packed sequences with a carried (optionally pooled, in-place) state |
 
 ### Matmul Operations
 

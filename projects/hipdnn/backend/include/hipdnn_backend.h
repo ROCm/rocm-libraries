@@ -53,6 +53,7 @@
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnCausalConv1dActivation.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnMoeGroupedMatmulMode.h"

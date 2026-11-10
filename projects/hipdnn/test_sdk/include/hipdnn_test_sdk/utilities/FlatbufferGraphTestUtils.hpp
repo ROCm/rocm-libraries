@@ -3751,6 +3751,85 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
     return builder;
 }
 
+/// One CausalConv1d node: x [5, 3] (uid 1), weight [3, 4] (uid 2), cu_seqlens [3] INT32
+/// (uid 3, N = 2), y [5, 3] (uid 4), SILU activation. With withState, also bias [3] (uid 5),
+/// a state pool initial_state [4, 3, 3] (uid 6) addressed by state_indices [2] INT32
+/// (uid 7), and final_state [4, 3, 3] (uid 8).
+inline flatbuffers::FlatBufferBuilder createValidCausalConv1dGraph(bool withState = true)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> tokenDims = {5, 3};
+    const std::vector<int64_t> tokenStrides = {3, 1};
+    const std::vector<int64_t> weightDims = {3, 4};
+    const std::vector<int64_t> weightStrides = {4, 1};
+    const std::vector<int64_t> cuSeqlensDims = {3};
+    const std::vector<int64_t> stateIndicesDims = {2};
+    const std::vector<int64_t> biasDims = {3};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> stateDims = {4, 3, 3};
+    const std::vector<int64_t> stateStrides = {9, 3, 1};
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &tokenStrides, &tokenDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, 2, "weight", DataType::FLOAT, &weightStrides, &weightDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, 3, "cu_seqlens", DataType::INT32, &unitStrides, &cuSeqlensDims));
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 4, "y", DataType::FLOAT, &tokenStrides, &tokenDims));
+    if(withState)
+    {
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 5, "bias", DataType::FLOAT, &unitStrides, &biasDims));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 6, "initial_state", DataType::FLOAT, &stateStrides, &stateDims));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 7, "state_indices", DataType::INT32, &unitStrides, &stateIndicesDims));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 8, "final_state", DataType::FLOAT, &stateStrides, &stateDims));
+    }
+
+    const auto optionalUid = [withState](int64_t uid) {
+        return withState ? ::flatbuffers::Optional<int64_t>(uid) : ::flatbuffers::nullopt;
+    };
+    auto causalConv1dAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateCausalConv1dAttributes(
+            builder,
+            1,
+            2,
+            3,
+            4,
+            optionalUid(5),
+            optionalUid(6),
+            optionalUid(7),
+            optionalUid(8),
+            hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation::SILU);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "causal_conv1d",
+        DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CausalConv1dAttributes,
+        causalConv1dAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
+                                                                               "test",
+                                                                               DataType::FLOAT,
+                                                                               DataType::FLOAT,
+                                                                               DataType::FLOAT,
+                                                                               &tensorAttributes,
+                                                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 /// One Softmax node: p [2, 3, 5] -> s [2, 3, 5]. With withStats, also the log-sum-exp
 /// stats [2, 3, 1] (uid 3) reported in log2 units (stats_use_log2).
 inline flatbuffers::FlatBufferBuilder createValidSoftmaxGraph(bool withStats = true)

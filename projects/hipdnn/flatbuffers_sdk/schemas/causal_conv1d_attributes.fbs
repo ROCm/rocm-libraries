@@ -1,0 +1,41 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Depthwise causal 1-D convolution with a carried state, as used by Mamba and Gated DeltaNet
+// layers. cuDNN exposes this only as cudnn.ops.causal_conv1d, not as a graph node, so the
+// backend names carry the _EXT suffix. Inputs are token-packed like GdnAttributes:
+// x [T, C] holds N sequences with offsets cu_seqlens [N + 1]. For sequence n and channel c,
+// let xs be the W - 1 state columns followed by the sequence's tokens (W = kernel width):
+//   y[t, c] = act(bias[c] + sum_{j < W} w[c, j] * xs[t + j, c])
+//   final_state[n, c, :] = the last W - 1 entries of xs
+// (Dao-AILab cross-correlation convention: w[c, W - 1] multiplies the current token.)
+// The state is [N, C, W - 1], oldest column first; absent initial_state means zeros. With
+// state_indices [N], initial_state and final_state are a pool [P, C, W - 1] addressed per
+// sequence. final_state may be bound to initial_state's buffer for an in-place update
+// (hipDNN requires unique tensor UIDs, not unique device pointers). Decoding one token per
+// sequence is T = N with cu_seqlens = [0, 1, ..., N].
+enum CausalConv1dActivation : byte {
+    IDENTITY = 0,
+    SILU     = 1,
+}
+
+table CausalConv1dAttributes {
+    // Required tensor UIDs
+    x_tensor_uid:          long (cache_uid);  // [T, C]
+    weight_tensor_uid:     long (cache_uid);  // [C, W]
+    cu_seqlens_tensor_uid: long (cache_uid);  // [N + 1], INT32 or INT64
+    y_tensor_uid:          long (cache_uid);  // [T, C]
+
+    // Optional tensor UIDs
+    bias_tensor_uid:          long = null (cache_uid);  // [C]
+    initial_state_tensor_uid: long = null (cache_uid);  // [N, C, W - 1]
+    state_indices_tensor_uid: long = null (cache_uid);  // [N], requires initial_state
+    final_state_tensor_uid:   long = null (cache_uid);  // [N, C, W - 1] (output)
+
+    activation: CausalConv1dActivation = IDENTITY;
+}

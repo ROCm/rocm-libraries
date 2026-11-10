@@ -941,4 +941,49 @@ void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMat
         *elementCount = 1;
     }
 }
+
+void setCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation& target,
+                               hipdnnBackendAttributeType_t attributeType,
+                               int64_t elementCount,
+                               const void* arrayOfElements,
+                               const char* errorPrefix)
+{
+    checkSetArgs(
+        HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnCausalConv1dActivation_t activation;
+    std::memcpy(&activation, arrayOfElements, sizeof(activation));
+    target = toSdkCausalConv1dActivation(activation);
+}
+
+void getCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation source,
+                               hipdnnBackendAttributeType_t attributeType,
+                               int64_t requestedElementCount,
+                               int64_t* elementCount,
+                               void* arrayOfElements,
+                               const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    const auto activation = fromSdkCausalConv1dActivation(source);
+    std::memcpy(arrayOfElements, &activation, sizeof(activation));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
 } // namespace hipdnn_backend

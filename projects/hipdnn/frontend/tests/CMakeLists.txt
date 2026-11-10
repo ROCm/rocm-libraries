@@ -88,6 +88,9 @@ add_executable(
     TestPagedCacheStoreAttributes.cpp
     TestPagedCacheStoreNode.cpp
     TestGraphPagedCacheStore.cpp
+    TestCausalConv1dAttributes.cpp
+    TestCausalConv1dNode.cpp
+    TestGraphCausalConv1d.cpp
     TestGatherAttributes.cpp
     TestGatherNode.cpp
     TestGraphGather.cpp

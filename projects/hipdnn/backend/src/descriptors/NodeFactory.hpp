@@ -9,6 +9,7 @@
 #include "BatchnormOperationDescriptor.hpp"
 #include "BlockScaleDequantizeOperationDescriptor.hpp"
 #include "BlockScaleQuantizeOperationDescriptor.hpp"
+#include "CausalConv1dOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"

@@ -177,6 +177,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/topk_attributes.fbs
         schemas/gather_attributes.fbs
         schemas/paged_cache_store_attributes.fbs
+        schemas/causal_conv1d_attributes.fbs
     )
     hipdnn_generate_flatbuffer_headers(
         TARGET hipdnn_flatbuffers_sdk

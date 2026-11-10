@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/CausalConv1dAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -736,6 +737,18 @@ void graphBindings(nb::module_& m)
                  return nb::make_tuple(outputs[0], outputs[1]);
              })
         .def("paged_cache_store", &graph::Graph::paged_cache_store)
+        .def("causal_conv1d",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                std::shared_ptr<graph::TensorAttributes> weight,
+                std::shared_ptr<graph::TensorAttributes> cuSeqlens,
+                graph::CausalConv1dAttributes attributes) {
+                 const auto outputs = graph.causal_conv1d(std::move(x),
+                                                          std::move(weight),
+                                                          std::move(cuSeqlens),
+                                                          std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
         .def("custom_op", &graph::Graph::custom_op)
 #ifdef HIPDNN_ENABLE_SDPA
         .def("sdpa",

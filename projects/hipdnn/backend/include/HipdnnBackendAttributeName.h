@@ -1564,6 +1564,44 @@ typedef enum
     /** @} */
 
     /**
+     * @name Causal Conv1d Operation Attributes (4400-4499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Token-packed input tensor [T, C] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_X_EXT = 4400,
+
+    /** @brief Depthwise weight tensor [C, W] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_WEIGHT_EXT = 4401,
+
+    /** @brief Sequence offsets tensor [N + 1] (INT32 or INT64) */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_CU_SEQLENS_EXT = 4402,
+
+    /** @brief Output tensor [T, C] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_Y_EXT = 4403,
+
+    /** @brief Optional bias tensor [C] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_BIAS_EXT = 4404,
+
+    /** @brief Optional initial state tensor [N or P, C, W - 1] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_INITIAL_STATE_EXT = 4405,
+
+    /** @brief Optional state pool row per sequence [N] (INT32 or INT64) */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_STATE_INDICES_EXT = 4406,
+
+    /** @brief Optional final state output tensor [N or P, C, W - 1] */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_FINAL_STATE_EXT = 4407,
+
+    /** @brief Activation (HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT) */
+    HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_ACTIVATION_EXT = 4408,
+
+    /** @brief Compute data type (HIPDNN_TYPE_DATA_TYPE) */
+    HIPDNN_ATTR_CAUSAL_CONV1D_COMP_TYPE_EXT = 4409,
+
+    /** @} */
+
+    /**
      * @name RoPE Forward Operation Attributes (3900-3999)
      * Attributes for HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR
      * @{

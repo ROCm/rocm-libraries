@@ -15,6 +15,7 @@
 #include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
+#include <hipdnn_flatbuffers_sdk/data_objects/causal_conv1d_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
@@ -235,6 +236,19 @@ void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMat
                              int64_t* elementCount,
                              void* arrayOfElements,
                              const char* errorPrefix);
+
+void setCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation& target,
+                               hipdnnBackendAttributeType_t attributeType,
+                               int64_t elementCount,
+                               const void* arrayOfElements,
+                               const char* errorPrefix);
+
+void getCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation source,
+                               hipdnnBackendAttributeType_t attributeType,
+                               int64_t requestedElementCount,
+                               int64_t* elementCount,
+                               void* arrayOfElements,
+                               const char* errorPrefix);
 
 // setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
 // This works with std::optional<T> members because flatbuffers aliases Optional to

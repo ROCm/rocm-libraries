@@ -867,7 +867,7 @@ TEST(TestEngineFeatures, EveryNodeTypePublishesItsOperands)
             EXPECT_GT(operands, 0U);
         }
     }
-    EXPECT_EQ(visited, 30U);
+    EXPECT_EQ(visited, 31U);
 }
 
 TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)
@@ -1521,6 +1521,16 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{2, 3, 8}, {2, 3, 4}, {2, 3, 4}}, topk);
          },
          48.0},
+        // 2 * W (4) * y.numel (8 * 4 = 32).
+        {[] {
+             CausalConv1dAttributesT conv;
+             conv.x_tensor_uid = 1;
+             conv.weight_tensor_uid = 2;
+             conv.cu_seqlens_tensor_uid = 3;
+             conv.y_tensor_uid = 4;
+             return single({{8, 4}, {4, 4}, {3}, {8, 4}}, conv);
+         },
+         256.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)

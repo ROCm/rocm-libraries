@@ -586,6 +586,16 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesGatherNode)
     EXPECT_EQ(node->getNodeType(), NodeType::GATHER);
 }
 
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesCausalConv1dNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::CAUSAL_CONV1D);
+}
+
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesRopeNode)
 {
     const GraphAttributes graphAttrs;

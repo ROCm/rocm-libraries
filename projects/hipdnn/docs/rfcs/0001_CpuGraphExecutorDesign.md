@@ -109,6 +109,7 @@ The Signature Key system provides unique identification for operation configurat
 │  - BatchnormTrainSignatureKey                               │
 │  - BlockScaleQuantizeSignatureKey                           │
 │  - BlockScaleDequantizeSignatureKey                         │
+│  - CausalConv1dSignatureKey                                 │
 │  - ConvolutionFwdSignatureKey                               │
 │  - ConvolutionBwdSignatureKey                               │
 │  - ConvolutionWrwSignatureKey                               │

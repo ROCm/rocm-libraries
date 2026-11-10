@@ -117,6 +117,9 @@ typedef enum
     /** @brief MoE grouped matmul mode enumeration (hipdnnMoeGroupedMatmulMode_t) */
     HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE = 31,
 
+    /** @brief Causal conv1d activation enumeration (hipdnnCausalConv1dActivation_t, extension) */
+    HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT = 32,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

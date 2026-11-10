@@ -135,6 +135,10 @@ void typesBindings(nb::module_& m)
         .value("GATHER", MoeGroupedMatmulMode::GATHER)
         .value("SCATTER", MoeGroupedMatmulMode::SCATTER);
 
+    nb::enum_<CausalConv1dActivation>(m, "CausalConv1dActivation")
+        .value("IDENTITY", CausalConv1dActivation::IDENTITY)
+        .value("SILU", CausalConv1dActivation::SILU);
+
     nb::enum_<NormFwdPhase>(m, "NormFwdPhase")
         .value("NOT_SET", NormFwdPhase::NOT_SET)
         .value("INFERENCE", NormFwdPhase::INFERENCE)

@@ -643,6 +643,40 @@ def build_paged_cache_store_graph():
     return graph, x, slot_mapping, container
 
 
+def build_causal_conv1d_graph():
+    """Build a causal conv1d: x [6, 4] in N = 2 sequences (cu_seqlens [3] INT32), weight [4, 3],
+    bias [4], initial_state [2, 4, 2], SILU, with the final state requested.
+
+    Returns (graph, x, weight, cu_seqlens, bias, initial_state, y, final_state).
+    """
+    graph = create_float_graph()
+    x = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
+    x.set_name("x")
+    weight = hipdnn.Tensor.create([4, 3], hipdnn.DataType.FLOAT)
+    weight.set_name("weight")
+    cu_seqlens = hipdnn.Tensor.create([3], hipdnn.DataType.INT32)
+    cu_seqlens.set_name("cu_seqlens")
+    bias = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+    bias.set_name("bias")
+    initial_state = hipdnn.Tensor.create([2, 4, 2], hipdnn.DataType.FLOAT)
+    initial_state.set_name("initial_state")
+
+    attributes = (
+        hipdnn.CausalConv1dAttributes()
+        .set_bias(bias)
+        .set_initial_state(initial_state)
+        .set_activation(hipdnn.CausalConv1dActivation.SILU)
+        .set_output_final_state(True)
+    )
+    y, final_state = graph.causal_conv1d(x, weight, cu_seqlens, attributes)
+    y.set_name("y")
+    y.set_output(True)
+    final_state.set_name("final_state")
+    final_state.set_output(True)
+
+    return graph, x, weight, cu_seqlens, bias, initial_state, y, final_state
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

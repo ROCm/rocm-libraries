@@ -15,6 +15,7 @@
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+#include <hipdnn_frontend/node/CausalConv1dNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
@@ -126,6 +127,10 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::TopkNode>(graph::TopkAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT:
         return {std::make_shared<graph::RopeNode>(graph::RopeAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT:
+        return {
+            std::make_shared<graph::CausalConv1dNode>(graph::CausalConv1dAttributes{}, graphAttrs),
+            {}};
     case HIPDNN_OPERATION_TYPE_MATMUL_EXT:
         return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT:

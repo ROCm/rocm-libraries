@@ -66,6 +66,8 @@ add_executable(
     IntegrationMoeGroupedMatmulDescriptorLowering.cpp
     IntegrationPagedCacheStoreDescriptorLifting.cpp
     IntegrationPagedCacheStoreDescriptorLowering.cpp
+    IntegrationCausalConv1dDescriptorLifting.cpp
+    IntegrationCausalConv1dDescriptorLowering.cpp
     IntegrationTopkDescriptorLifting.cpp
     IntegrationTopkDescriptorLowering.cpp
     IntegrationRopeDescriptorLifting.cpp

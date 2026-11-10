@@ -4,6 +4,7 @@
 #pragma once
 
 #include "HipdnnAttentionImplementation.h"
+#include "HipdnnCausalConv1dActivation.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
@@ -14,6 +15,7 @@
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include "HipdnnResampleMode.h"
+#include <hipdnn_flatbuffers_sdk/data_objects/causal_conv1d_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
@@ -77,5 +79,11 @@ hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode
     toSdkMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode);
 hipdnnMoeGroupedMatmulMode_t
     fromSdkMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode);
+
+// Converts between C-API hipdnnCausalConv1dActivation_t and SDK CausalConv1dActivation enum values.
+hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation
+    toSdkCausalConv1dActivation(hipdnnCausalConv1dActivation_t mode);
+hipdnnCausalConv1dActivation_t fromSdkCausalConv1dActivation(
+    hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation mode);
 
 } // namespace hipdnn_backend
