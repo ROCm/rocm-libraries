@@ -64,7 +64,7 @@ from gemm_utils import (  # noqa: E402
     expand_sweep,
     setup_multiple_gemm_dispatchers,
 )
-from ctypes_utils import listed_warp_tiles  # noqa: E402
+from ctypes_utils import get_build_dir, listed_warp_tiles  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 from smi_utils import detect_gpu_ids  # noqa: E402
 
@@ -213,8 +213,74 @@ def load_problems(path, variant):
     return DEFAULT_PROBLEMS
 
 
+class _Workers:
+    """The measurement subprocesses of one call of ``benchmark_on_devices`` or
+    ``run_repeats``. An interrupt of the main thread (Ctrl-C, or SIGTERM that
+    the adaptive search raises as KeyboardInterrupt) stops the whole
+    measurement before it propagates: no further batch starts, running workers
+    are killed and reaped, the device threads are joined, and a batch cut
+    short is not reported."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.idle = threading.Condition(self.lock)  # no device thread active
+        self.procs = set()
+        self.active = 0  # device threads running device_thread
+        self.cancelled = False
+
+    def start(self, *args, **kwargs):
+        """``subprocess.Popen(*args, **kwargs)``, or None once cancelled."""
+        with self.lock:
+            if self.cancelled:
+                return None
+            proc = subprocess.Popen(*args, **kwargs)
+            self.procs.add(proc)
+            return proc
+
+    def done(self, proc):
+        with self.lock:
+            self.procs.discard(proc)
+
+    def run(self, devices, device_thread):
+        """Run ``device_thread(device_id)`` per device and wait for them. On
+        an interrupt, also one while the threads start, every device thread
+        that got going has returned before it propagates; one whose start the
+        interrupt cut short, or that never started, runs nothing."""
+
+        def guarded(device_id):
+            with self.lock:
+                if self.cancelled:
+                    return
+                self.active += 1
+            try:
+                device_thread(device_id)
+            finally:
+                with self.lock:
+                    self.active -= 1
+                    self.idle.notify_all()
+
+        threads = []
+        try:
+            for d in devices:
+                threads.append(threading.Thread(target=guarded, args=(d,), daemon=True))
+                threads[-1].start()
+            for t in threads:
+                t.join()
+        except BaseException:
+            with self.lock:
+                self.cancelled = True
+                for proc in self.procs:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                self.idle.wait_for(lambda: self.active == 0)
+            raise
+
+
 def _run_batch_on_device(
-    device_id, unit, args, worker_path, base_env, extra=None, failures=None
+    device_id, unit, args, worker_path, base_env, extra=None, failures=None,
+    workers=None,
 ):
     """Run one (problem, kernel-batch) unit in a device-pinned subprocess.
 
@@ -224,6 +290,8 @@ def _run_batch_on_device(
     counts kernels the worker reported as unsupported for the problem. When
     ``failures`` is a list, one FAILURE_FIELDS dict is appended to it per failed
     kernel, and per kernel reported as unsupported (kind ``unsupported``).
+    ``workers``, if given, is the ``_Workers`` that starts the subprocess; once
+    it is cancelled the unit is not run and the result is empty.
     """
     prob_idx, prob_dict, batch = unit
     M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
@@ -271,13 +339,15 @@ def _run_batch_on_device(
     rows, lines, n_fail, n_skip = [], [], 0, 0
     proc = None
     try:
-        proc = subprocess.Popen(
+        proc = (subprocess.Popen if workers is None else workers.start)(
             [sys.executable, str(worker_path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=env,
         )
+        if proc is None:
+            return rows, lines, n_fail, n_skip
         stdout_bytes, _ = proc.communicate(
             input=payload.encode("utf-8"),
             timeout=args.kernel_timeout * len(batch),
@@ -381,6 +451,9 @@ def _run_batch_on_device(
         n_fail += len(batch)
         for _, cfg, _ in batch:
             _fail(cfg.name, "batch-error", e)
+    finally:
+        if workers is not None and proc is not None:
+            workers.done(proc)
 
     return rows, lines, n_fail, n_skip
 
@@ -556,17 +629,21 @@ def run_repeats(plan, count, problems, built_kernels, devices, run_args):
             i = index[name]
             work.put((rep, (p, prob_dict, [(i, *built_kernels[i])])))
     stats = {"ok": 0, "failed": 0}
+    workers = _Workers()
 
     def device_thread(device_id):
-        while True:
+        while not workers.cancelled:
             try:
                 rep, unit = work.get_nowait()
             except queue.Empty:
                 return
             fails = []
             rows, _, n_fail, n_skip = _run_batch_on_device(
-                device_id, unit, rargs, worker_path, base_env, failures=fails
+                device_id, unit, rargs, worker_path, base_env, failures=fails,
+                workers=workers,
             )
+            if workers.cancelled:
+                return
             with io_lock:
                 for r in rows:
                     writer.writerow(
@@ -594,13 +671,7 @@ def run_repeats(plan, count, problems, built_kernels, devices, run_args):
                 stats["ok"] += len(rows)
                 stats["failed"] += n_fail + n_skip
 
-    threads = [
-        threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    workers.run(devices, device_thread)
     return stats["ok"], stats["failed"]
 
 
@@ -668,10 +739,11 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
     io_lock = threading.Lock()
     stats = {"measurements": 0, "failures": 0, "skipped": 0}
     t0 = time.perf_counter()
+    workers = _Workers()
 
     def device_thread(device_id):
         q = work_q if pinned is None else pinned[device_id]
-        while True:
+        while not workers.cancelled:
             try:
                 unit = q.get_nowait()
             except queue.Empty:
@@ -681,8 +753,11 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
             fails = [] if record_failures else None
             kw = {} if fails is None else {"failures": fails}
             rows, lines, n_fail, n_skip = _run_batch_on_device(
-                device_id, unit, args, worker_path, base_env, extra, **kw
+                device_id, unit, args, worker_path, base_env, extra, **kw,
+                workers=workers,
             )
+            if workers.cancelled:
+                return
             with io_lock:
                 for ln in lines:
                     print(ln)
@@ -698,15 +773,10 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
                 stats["skipped"] += n_skip
             q.task_done()
 
-    threads = [
-        threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    csv_file.close()
+    try:
+        workers.run(devices, device_thread)
+    finally:
+        csv_file.close()
     stats["seconds"] = time.perf_counter() - t0
     return stats
 
@@ -1147,6 +1217,7 @@ def main():
             problem_key=problem_key,
             load_pairs=load_pair_list,
             build_reason=build_failure_summary,
+            build_dir=get_build_dir(),
         )
         context = {
             "arch": arch,

@@ -1712,13 +1712,14 @@ HOST_LOCK, HOST_LOCK_DIR = "ck_search_host.lock", None
 _NO_HOST_LOCK = set()  # lock files this process reported it cannot open
 
 
-def _open_host_lock(path) -> int:
-    """A read-only descriptor of the lock file ``path``, created (mode 0666,
-    so other users' runs can open it) when missing. An existing file is
-    opened without O_CREAT: where fs.protected_regular is set (the default on
-    most Linux hosts), O_CREAT on another user's file in a sticky directory
-    such as /tmp is refused even though the file exists."""
-    for flags in (os.O_RDONLY, os.O_RDONLY | os.O_CREAT | os.O_EXCL, os.O_RDONLY):
+def _open_host_lock(path, access: int = os.O_RDONLY) -> int:
+    """A descriptor (``access``: read-only, or O_RDWR for an exclusive lock on
+    NFS, which needs a writable file) of the lock file ``path``, created
+    (mode 0666, so other users' runs can open it) when missing. An existing
+    file is opened without O_CREAT: where fs.protected_regular is set (the
+    default on most Linux hosts), O_CREAT on another user's file in a sticky
+    directory such as /tmp is refused even though the file exists."""
+    for flags in (access, access | os.O_CREAT | os.O_EXCL, access):
         try:
             fd = os.open(path, flags, 0o666)
         except (FileNotFoundError, FileExistsError) as e:  # missing, or created meanwhile
@@ -1732,25 +1733,26 @@ def _open_host_lock(path) -> int:
 
 
 @contextlib.contextmanager
-def host_lock(exclusive: bool, log=None, what: str = ""):
-    """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds.
+def file_lock(path, exclusive: bool, log=None, what: str = "", unlocked: str = "",
+              name: str = "lock", access: int = os.O_RDONLY):
+    """Hold an flock on the lock file ``path`` (the ``name`` in log lines,
+    opened with ``access``, see ``_open_host_lock``): ``exclusive``, or shared.
     One ``log`` line when it has to wait for another run (``what`` it waits
     for). Without fcntl it does not lock; with a lock file it cannot open it
-    does not either, and logs that once per process."""
-    path = os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK)
+    does not either, and logs that once per process (``unlocked``: what is
+    then not kept apart)."""
     try:
         import fcntl
 
-        fd = _open_host_lock(path)
+        fd = _open_host_lock(path, access)
     except ImportError:
         yield
         return
     except OSError as e:
         if log is not None and path not in _NO_HOST_LOCK:
             _NO_HOST_LOCK.add(path)
-            log(f"  [search] NOTE: cannot open the host lock {path} ({e.strerror or e}); "
-                "this run's builds and preparations are not kept apart from other "
-                "search runs'")
+            log(f"  [search] NOTE: cannot open the {name} {path} ({e.strerror or e}); "
+                f"{unlocked}")
         yield
         return
     try:
@@ -1759,11 +1761,21 @@ def host_lock(exclusive: bool, log=None, what: str = ""):
             fcntl.flock(fd, mode | fcntl.LOCK_NB)
         except OSError:
             if log is not None:
-                log(f"  [search] waiting for {what or 'another search run on this host'}")
+                log(f"  [search] waiting for {what}")
             fcntl.flock(fd, mode)
         yield
     finally:
         os.close(fd)
+
+
+@contextlib.contextmanager
+def host_lock(exclusive: bool, log=None, what: str = ""):
+    """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds."""
+    with file_lock(os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK),
+                   exclusive, log, what or "another search run on this host",
+                   "this run's builds and preparations are not kept apart from "
+                   "other search runs'", "host lock"):
+        yield
 
 
 def prepare_limit_s(allowance_s) -> int:
@@ -1821,21 +1833,25 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                                              host_memory_error(needs[key], budget))
                         continue
                 todo.pop(0)
-                files = []  # the worker's stdout and stderr
-                try:
-                    while len(files) < 2:
-                        files.append(tempfile.TemporaryFile())
-                    with tempfile.TemporaryFile() as stdin:
-                        stdin.write(payloads[key].encode())
-                        stdin.seek(0)
-                        proc = subprocess.Popen(argv, stdin=stdin, stdout=files[0],
-                                                stderr=files[1], env=env)
-                except OSError as e:
-                    for f in files:
-                        f.close()
-                    out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
-                    continue
-                running[key] = (proc, files, time.monotonic())
+                files = []  # the worker's stdin, stdout and stderr
+                # A search run's interrupt arriving while Popen starts the
+                # worker is raised once the worker is in running, where the
+                # cleanup below kills it.
+                with interrupts_held():
+                    try:
+                        while len(files) < 3:
+                            files.append(tempfile.TemporaryFile())
+                        files[0].write(payloads[key].encode())
+                        files[0].seek(0)
+                        t0 = time.monotonic()
+                        running[key] = (subprocess.Popen(argv, stdin=files[0],
+                                                         stdout=files[1],
+                                                         stderr=files[2], env=env),
+                                        files, t0)
+                    except OSError as e:
+                        for f in files:
+                            f.close()
+                        out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
             time.sleep(poll_s)
             for key, (proc, files, t0) in list(running.items()):
                 took = time.monotonic() - t0
@@ -1846,15 +1862,19 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                     proc.kill()
                 proc.wait()
                 del running[key]
-                text, stderr = [_drain(f) for f in files]
+                files[0].close()
+                text, stderr = [_drain(f) for f in files[1:]]
                 out[key] = _prepared(proc.returncode, text, took,
                                      f"no result in {limits[key]:g} s" if killed else "",
                                      stderr)
                 if out[key]["stored"]:
                     kept += (keeps or {}).get(key, 0)
     finally:
-        for proc, files, _ in running.values():
+        # Each is killed before any is waited for: a second interrupt during a
+        # wait leaves none running, only some not yet reaped.
+        for proc, _, _ in running.values():
             proc.kill()
+        for proc, files, _ in running.values():
             proc.wait()
             for f in files:
                 f.close()
@@ -1935,6 +1955,29 @@ def check_search_options(args, conflicts=(), required=()) -> SearchSettings:
     return settings
 
 
+# The signal _interrupt_handler held back in the main thread inside
+# interrupts_held (the first one), and how deep that nests.
+_HELD = {"depth": 0, "signum": None}
+
+
+@contextlib.contextmanager
+def interrupts_held():
+    """Hold back the KeyboardInterrupt that ``_interrupt_handler`` raises
+    (a search run's SIGTERM, and its SIGINT while that has Python's default
+    handler) inside the block, and raise it when the block ends. Main thread
+    only, where the handler runs. A process started inside, between the
+    system call and the return of Popen, is then in the caller's bookkeeping
+    before the interrupt unwinds it."""
+    _HELD["depth"] += 1
+    try:
+        yield
+    finally:
+        _HELD["depth"] -= 1
+        if not _HELD["depth"] and _HELD["signum"] is not None:
+            signum, _HELD["signum"] = _HELD["signum"], None
+            raise KeyboardInterrupt(f"signal {signum}")
+
+
 def _interrupt_handler(pid: int):
     """A signal handler raising KeyboardInterrupt in process ``pid`` only. A
     process forked from it (a build pool's worker) inherits the handler; there
@@ -1948,6 +1991,10 @@ def _interrupt_handler(pid: int):
         if os.getpid() != pid:
             signal.signal(signum, signal.SIG_DFL)
             os.kill(os.getpid(), signum)
+            return
+        if _HELD["depth"]:
+            if _HELD["signum"] is None:
+                _HELD["signum"] = signum
             return
         raise KeyboardInterrupt(f"signal {signum}")
 

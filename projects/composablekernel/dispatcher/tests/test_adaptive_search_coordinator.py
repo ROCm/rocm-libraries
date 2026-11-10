@@ -15,6 +15,7 @@ No GPU or compiler needed. Run: python3 -m pytest -q tests/test_adaptive_search_
 """
 
 import argparse
+import contextlib
 import hashlib
 import itertools
 import json
@@ -2248,6 +2249,67 @@ def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypa
         os.kill(int(pidfile.read_text()), 0)
 
 
+def test_prepare_host_data_kills_every_worker_on_a_second_interrupt(monkeypatch):
+    # A second Ctrl-C while the first one's cleanup waits for a worker to end
+    # leaves none running: each was killed before any was waited for.
+    procs = []
+
+    class Popen(subprocess.Popen):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            procs.append(self)
+
+        def wait(self, timeout=None):
+            if timeout is None:  # the cleanup's wait (this test's have a timeout)
+                raise KeyboardInterrupt
+            return super().wait(timeout)
+
+    def sleep(s):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(AS, "subprocess", argparse.Namespace(Popen=Popen))
+    monkeypatch.setattr(AS, "time", argparse.Namespace(monotonic=time.monotonic,
+                                                       sleep=sleep))
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _prep({k: {"sleep": 60} for k in "ab"}, width=2)
+        assert [p.wait(timeout=30) for p in procs] == [-signal.SIGKILL] * 2
+    finally:
+        for p in procs:
+            p.kill()
+            subprocess.Popen.wait(p)
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_prepare_host_data_kills_a_worker_interrupted_inside_popen(monkeypatch, sig):
+    # A search run's SIGTERM or Ctrl-C arriving inside Popen, after the worker
+    # was spawned but before Popen returned: it is held back until the
+    # worker is recorded, so the cleanup kills and reaps it.
+    pids, real = [], subprocess.Popen._execute_child
+
+    def spawn(self, *a, **kw):
+        real(self, *a, **kw)
+        pids.append(self.pid)
+        os.kill(os.getpid(), sig)
+        for _ in range(100):  # the handler runs here, inside Popen
+            time.sleep(0.001)
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", spawn)
+    old = signal.signal(sig, AS._interrupt_handler(os.getpid()))
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _prep({"a": {"sleep": 60}}, width=1)
+        assert len(pids) == 1
+        with pytest.raises(ChildProcessError):  # killed and reaped
+            os.waitpid(pids[0], os.WNOHANG)
+    finally:
+        signal.signal(sig, old)
+        for pid in pids:  # without the fix the worker is still running
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+
+
 @pytest.mark.parametrize("record, calls, want", [
     (None, 4, 365),
     ({"ok": True, "stored": True, "seconds": 339.0}, 4, 365),
@@ -2265,6 +2327,25 @@ def test_call_allowance_is_never_below_the_ops_allowance(record, calls, want):
     # failed one measured nothing.
     assert AS.call_allowance_s(365, record, calls) == want
     assert AS.prepare_limit_s(365) == 10 * 365 + 60
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                    reason="needs a directory this user cannot write")
+def test_a_host_cache_that_cannot_be_created_is_left_out(tmp_path):
+    # An existing host_cache.dir the run cannot write: one warning line and
+    # no cache (it is optional), instead of a traceback before the search.
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    lines = []
+    try:
+        with HC.run_cache(AS.HostCacheSettings(str(ro), 1.0, 1.0), lines.append) as cache:
+            assert cache is None
+    finally:
+        ro.chmod(0o755)
+    assert len(lines) == 1, lines
+    assert lines[0].startswith(f"  Host cache: WARNING: cannot create it under {ro} (")
+    assert lines[0].endswith("; the run goes on without it") and list(ro.iterdir()) == []
 
 
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path, monkeypatch):
