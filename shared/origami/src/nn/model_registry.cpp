@@ -148,12 +148,7 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
 
 }  // namespace
 
-model_handle_t load_model(const std::string& path) {
-  if (const char* override_path = std::getenv("ORIGAMI_NN_WEIGHTS")) {
-    return load_tilewright_manifest(override_path);
-  }
-  return load_tilewright_manifest(path);
-}
+model_handle_t load_model(const std::string& path) { return load_tilewright_manifest(path); }
 
 model_handle_t load_model_by_index(const std::string& logic_stem,
                                    backend_id_t backend,

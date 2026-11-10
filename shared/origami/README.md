@@ -412,7 +412,7 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 // models.tilewright >= 0 on success; -1 if stem not in index
 ```
 
-For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
+To load a single manifest directly (for example in a test), pass its path to `origami::nn::load_model`.
 
 
 ### Runtime Configuration
@@ -440,7 +440,6 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | Variable | Description |
 |----------|-------------|
 | `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) |
-| `ORIGAMI_NN_WEIGHTS` | Tests: override path to a `.tilewright.yaml` manifest |
 | `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
 | `ORIGAMI_TW_CELL` | Debug: force TWREC cell index (overrides routing); also via `rank_options.nn.force_cell` |
 
