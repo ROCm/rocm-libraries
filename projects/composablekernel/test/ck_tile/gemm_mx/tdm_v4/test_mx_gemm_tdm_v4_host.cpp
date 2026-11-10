@@ -100,6 +100,28 @@ TEST(MxGemmTdmV4Host, LaneChunksTileTheKStep)
     }
 }
 
+// The cluster multicast masks hold exactly the workgroups sharing the coordinate, with bit
+// x + y * cluster_x for workgroup (x, y), for every cluster of at most 16 workgroups.
+TEST(MxGemmTdmV4Host, ClusterMasksHoldTheWorkgroupsSharingACoordinate)
+{
+    for(index_t cx = 1; cx <= 16; ++cx)
+        for(index_t cy = 1; cx * cy <= 16; ++cy)
+            for(index_t x = 0; x < cx; ++x)
+                for(index_t y = 0; y < cy; ++y)
+                {
+                    uint32_t same_x = 0;
+                    uint32_t same_y = 0;
+                    for(index_t j = 0; j < cy; ++j)
+                        for(index_t i = 0; i < cx; ++i)
+                        {
+                            same_x |= static_cast<uint32_t>(i == x) << (i + j * cx);
+                            same_y |= static_cast<uint32_t>(j == y) << (i + j * cx);
+                        }
+                    EXPECT_EQ(ck_tile::cluster_mask_same_x(cx, cy, x), same_x);
+                    EXPECT_EQ(ck_tile::cluster_mask_same_y(cx, y), same_y);
+                }
+}
+
 // The policy builds the spec from a Problem and a tuning, both ways of writing a tuning agree,
 // and the compile-time validator and name follow.
 struct MafLateTuning : ck_tile::MxTdmV4DefaultTuning

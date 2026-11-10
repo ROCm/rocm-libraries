@@ -187,24 +187,6 @@ CK_TILE_HOST_DEVICE constexpr void tdm_patch_steps_left(TdmDesc& d, uint32_t ste
     d.g1[2] = (d.g1[2] & 0xFFFFu) | (steps_left << 16);
     d.g1[3] = (d.g1[3] & 0xFFFF0000u) | (steps_left >> 16);
 }
-
-/// Cluster multicast masks (bit i is the workgroup whose cluster flat id, x + y * cluster_x, is
-/// i). Grid x walks N tiles and y walks M tiles: workgroups with the same cluster x share B, those
-/// with the same y share A.
-CK_TILE_HOST_DEVICE constexpr uint32_t
-cluster_b_mask(index_t cluster_x, index_t cluster_y, index_t cluster_wx)
-{
-    uint32_t col_bits = 0;
-    for(index_t row = 0; row < cluster_y; ++row)
-        col_bits |= 1u << (row * cluster_x);
-    return col_bits << cluster_wx;
-}
-
-CK_TILE_HOST_DEVICE constexpr uint32_t cluster_a_mask(index_t cluster_x, index_t cluster_wy)
-{
-    return ((1u << cluster_x) - 1u) << (cluster_wy * cluster_x);
-}
-
 } // namespace mx_tdm_v4
 
 /**
@@ -401,8 +383,10 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             if constexpr(kHasCluster)
             {
-                b_mask = mx_tdm_v4::cluster_b_mask(kClusterX, kClusterY, c.cluster_wx);
-                a_mask = mx_tdm_v4::cluster_a_mask(kClusterX, c.cluster_wy);
+                // Grid x walks N tiles and y walks M tiles: workgroups with the same cluster x
+                // share B, those with the same y share A.
+                b_mask = cluster_mask_same_x(kClusterX, kClusterY, c.cluster_wx);
+                a_mask = cluster_mask_same_y(kClusterX, c.cluster_wy);
             }
         }
 
