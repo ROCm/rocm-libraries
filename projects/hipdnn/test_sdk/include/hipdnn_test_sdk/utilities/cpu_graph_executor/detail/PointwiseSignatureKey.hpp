@@ -323,6 +323,11 @@ private:
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
         addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,

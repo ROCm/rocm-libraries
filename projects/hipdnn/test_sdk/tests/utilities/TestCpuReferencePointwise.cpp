@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -112,6 +113,37 @@ protected:
 
         auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    // A [1,1,1,4] row divided by a broadcast [1,1,1,1] divisor (top-k renormalisation shape).
+    void testBinaryDivideBroadcastOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 1});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        // Exact in every fixture type, including INT8.
+        const std::array<float, 4> numerators{6.0f, -3.0f, 9.0f, 0.0f};
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            input1.setHostValue(
+                safeTestTypeCast<Input1Type>(numerators[static_cast<size_t>(i)]), 0, 0, 0, i);
+        }
+        input2.setHostValue(safeTestTypeCast<Input2Type>(3.0f), 0, 0, 0, 0);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        const std::array<float, 4> quotients{2.0f, -1.0f, 3.0f, 0.0f};
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(quotients[static_cast<size_t>(i)]), 0, 0, 0, i);
+        }
+
+        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1714,6 +1746,11 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinaryMaxOperation)
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryMinOperation)
 {
     this->testBinaryMinOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideBroadcastOperation)
+{
+    this->testBinaryDivideBroadcastOperation();
 }
 
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddOperationSanityValidation)
