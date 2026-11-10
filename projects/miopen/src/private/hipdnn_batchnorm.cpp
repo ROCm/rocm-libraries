@@ -200,7 +200,7 @@ const char* CheckForwardParams(const BnProblem& problem,
         return "x and y must have the same data type";
     // MIOpen reshapes a 5-D x to a packed 4-D descriptor before it tests, so it
     // never rejects a 5-D x here. CheckSupported declines a non-packed one.
-    if(training && checkShape && xInfo.dims.size() < 5 && !IsPacked(xInfo))
+    if(training && checkShape && xInfo.dims.size() != 5 && !IsPacked(xInfo))
         return "x must be packed";
     if(xInfo.dims.size() < 3)
         return "batchnorm needs at least 3 dimensions";
