@@ -65,42 +65,6 @@ CK_TILE_DEVICE void fence()
     sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
 }
 
-/// llvm.amdgcn.s.cluster.barrier as inline asm: the workgroup barrier, then its first wave joins
-/// the cluster barrier. A plain workgroup barrier without a cluster.
-template <bool HasCluster>
-CK_TILE_DEVICE void cluster_sync()
-{
-#if defined(__gfx125__)
-    if constexpr(HasCluster)
-        asm volatile("s_barrier_signal_isfirst -1\n"
-                     "s_barrier_wait -1\n"
-                     "s_cbranch_scc0 1\n"
-                     "s_barrier_signal -3\n"
-                     "s_barrier_wait -3" ::
-                         : "scc", "memory");
-    else
-        __builtin_amdgcn_s_barrier();
-#endif
-}
-
-/// Wave 0 alone signals the cluster barrier, with no LDS drain.
-CK_TILE_DEVICE void cluster_signal_wave0([[maybe_unused]] index_t wave)
-{
-#if defined(__gfx125__)
-    asm volatile("s_cmp_eq_u32 %0, 0\n"
-                 "s_cbranch_scc0 1\n"
-                 "s_barrier_signal -3" ::"s"(wave)
-                 : "scc", "memory");
-#endif
-}
-
-CK_TILE_DEVICE void cluster_wait()
-{
-#if defined(__gfx125__)
-    asm volatile("s_barrier_wait -3" ::: "memory");
-#endif
-}
-
 /// `v`, opaque to LLVM: a scalar it can no longer factor out of the expressions using it.
 CK_TILE_DEVICE index_t opaque_scalar(index_t v)
 {
@@ -865,7 +829,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             if constexpr(kHasCluster)
             {
                 mx_tdm_v4::fence();
-                mx_tdm_v4::cluster_signal_wave0(c.wave);
+                cluster_barrier_signal_wave0(c.wave);
                 mx_tdm_v4::fence();
             }
         }
@@ -889,7 +853,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             mx_tdm_v4::fence();
             if constexpr(kHasCluster)
-                mx_tdm_v4::cluster_wait();
+                cluster_barrier_wait();
             // No wave drained its reads of this buffer before the signal; the workgroup barrier
             // publishes them here.
             s_wait_dscnt_pinned<kLatePending>();
@@ -1101,7 +1065,10 @@ struct GemmPipelineAgBgCrCompTDMV4
         CK_TILE_DEVICE void Main(CVec (&acc)[kNumAcc])
         {
             Hoist();
-            mx_tdm_v4::cluster_sync<kHasCluster>();
+            if constexpr(kHasCluster)
+                cluster_barrier();
+            else
+                s_barrier();
             Issue(0, 0);
             // With one tile, buffer 1 gets tile 0 again and is never read.
             Issue(ClampK(kTileK), 1);
@@ -1158,7 +1125,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             // peers' loads write here too.
             s_wait_tensorcnt<0>();
             if constexpr(kHasCluster)
-                mx_tdm_v4::cluster_sync<true>();
+                cluster_barrier();
         }
     };
 

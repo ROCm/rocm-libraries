@@ -16,6 +16,7 @@
 #include "ck_tile/core/arch/amd_wave_read_first_lane.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/barrier.hpp"
+#include "ck_tile/core/arch/cluster_barrier.hpp"
 #include "ck_tile/core/arch/generic_memory_space_atomic.hpp"
 #include "ck_tile/core/arch/inst_prefetch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
