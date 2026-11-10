@@ -1,12 +1,12 @@
 {
   "compute_data_type": "float",
-  "intermediate_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
   "io_data_type": "${case.io_data_type}",
-  "is_override_shape_enabled": false,
-  "name": "ConvFwdBiasActivTest",
+  "is_override_shape_enabled": "${case.override_shape}",
+  "name": "ConvFwdFusionTest",
   "nodes": [
     {
-      "compute_data_type": "float",
+      "compute_data_type": "${case.attributes.conv_compute}",
       "inputs": {
         "w_tensor_uid": 4,
         "x_tensor_uid": 5
@@ -16,21 +16,21 @@
         "y_tensor_uid": 0
       },
       "parameters": {
-        "conv_mode": "CROSS_CORRELATION",
-        "dilation": "${case.attributes.parameters__dilation}",
-        "post_padding": "${case.attributes.parameters__post_padding}",
-        "pre_padding": "${case.attributes.parameters__pre_padding}",
-        "stride": "${case.attributes.parameters__stride}"
+        "conv_mode": "${case.attributes.conv_mode}",
+        "dilation": "${case.attributes.dilation}",
+        "post_padding": "${case.attributes.post_padding}",
+        "pre_padding": "${case.attributes.pre_padding}",
+        "stride": "${case.attributes.stride}"
       },
       "type": "ConvolutionFwdAttributes"
     },
     {
-      "compute_data_type": "${case.attributes.n1__compute_data_type}",
+      "compute_data_type": "float",
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 0,
-        "in_1_tensor_uid": 3,
+        "in_0_tensor_uid": "${case.attributes.bias_in_0}",
+        "in_1_tensor_uid": "${case.attributes.bias_in_1}",
         "in_2_tensor_uid": null,
         "operation": "add",
         "relu_lower_clip": null,
@@ -49,16 +49,16 @@
       "compute_data_type": "float",
       "inputs": {
         "axis_tensor_uid": null,
-        "elu_alpha": null,
+        "elu_alpha": "${case.attributes.act_elu_alpha}",
         "in_0_tensor_uid": 1,
         "in_1_tensor_uid": null,
         "in_2_tensor_uid": null,
-        "operation": "relu_fwd",
-        "relu_lower_clip": "${case.attributes.n2__relu_lower_clip}",
-        "relu_lower_clip_slope": "${case.attributes.n2__relu_lower_clip_slope}",
-        "relu_upper_clip": "${case.attributes.n2__relu_upper_clip}",
-        "softplus_beta": null,
-        "swish_beta": null
+        "operation": "${case.attributes.act_operation}",
+        "relu_lower_clip": "${case.attributes.act_relu_lower_clip}",
+        "relu_lower_clip_slope": "${case.attributes.act_relu_lower_clip_slope}",
+        "relu_upper_clip": "${case.attributes.act_relu_upper_clip}",
+        "softplus_beta": "${case.attributes.act_softplus_beta}",
+        "swish_beta": "${case.attributes.act_swish_beta}"
       },
       "name": "Pointwise_2",
       "outputs": {
@@ -74,7 +74,7 @@
       "name": "ConvolutionFprop_0::Y",
       "strides": "${case.strides}",
       "uid": 0,
-      "virtual": true
+      "virtual": "${case.attributes.conv_y_virtual}"
     },
     {
       "data_type": "${case.data_type}",
