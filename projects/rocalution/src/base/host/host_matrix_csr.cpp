@@ -1284,7 +1284,6 @@ namespace rocalution
             {
                 ++aj;
             }
-            assert(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] == ai);
             return aj;
         };
 
@@ -1293,6 +1292,11 @@ namespace rocalution
         {
             ValueType value    = cast_in->vec_[ai];
             PtrType   diag_idx = diagonal(ai);
+
+            if(diag_idx == this->mat_.row_offset[ai + 1] || this->mat_.col[diag_idx] != ai)
+            {
+                return false;
+            }
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1346,7 +1350,6 @@ namespace rocalution
             {
                 ++aj;
             }
-            assert(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] == ai);
             return aj;
         };
 
@@ -1355,6 +1358,11 @@ namespace rocalution
         {
             ValueType value    = cast_in->vec_[ai];
             PtrType   diag_idx = diagonal(ai);
+
+            if(diag_idx == this->mat_.row_offset[ai + 1] || this->mat_.col[diag_idx] != ai)
+            {
+                return false;
+            }
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {

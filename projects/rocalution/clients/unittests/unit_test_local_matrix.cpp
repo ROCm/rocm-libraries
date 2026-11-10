@@ -3372,6 +3372,31 @@ TEST(local_matrix_preconditions, ic_factorize_of_a_row_without_a_diagonal_ends_t
     }
 }
 
+// The host LLSolve looks for the diagonal of each row instead of reading past the
+// row, or past the values in the last row, when it is missing
+TEST(local_matrix_preconditions, host_ll_solve_of_a_row_without_a_diagonal_ends_the_program)
+{
+    for(int row : {1, 2})
+    {
+        SCOPED_TRACE(row == 2 ? "the last row" : "an inner row");
+        // clang-format off
+        std::vector<double> D = {
+             4,  0, 0,
+            -1,  4, 0,
+             0, -1, 4,
+        };
+        // clang-format on
+        D[4 * row] = 0;
+
+        auto A   = make_local_matrix(Backend::Host, from_dense(3, 3, D));
+        auto b   = make_local_vector(Backend::Host, std::vector<double>(3, 1.0));
+        auto inv = make_local_vector(Backend::Host, std::vector<double>(3, 0.25));
+        auto x   = make_local_vector(Backend::Host, std::vector<double>(3, 0.0));
+        EXPECT_LOGGED_EXIT(A->LLSolve(*b, x.get()), "LocalMatrix::LLSolve\\(\\) failed");
+        EXPECT_LOGGED_EXIT(A->LLSolve(*b, *inv, x.get()), "LocalMatrix::LLSolve\\(\\) failed");
+    }
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 
