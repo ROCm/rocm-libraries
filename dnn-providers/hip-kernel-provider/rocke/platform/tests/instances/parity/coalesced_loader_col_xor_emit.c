@@ -54,6 +54,8 @@ static const case_t CASES[] = {
     {"partial48", 16, 48, 64, 8, false, 0, PATH_LOAD, true, {1, 3, 3, 3}},
     /* rejected: one 64-column chunk per row; the flip bit needs two */
     {"one_chunk64", 64, 64, 256, 8, false, 0, PATH_LOAD, true, {0, 0, 6, 3}},
+    /* rejected: a ragged 36-column row (4 whole chunks of 8 plus 4 columns) */
+    {"ragged36", 64, 36, 64, 4, false, 0, PATH_LOAD, true, {1, 3, 3, 3}},
 };
 static const int NUM_CASES = sizeof(CASES) / sizeof(CASES[0]);
 

@@ -272,6 +272,20 @@ def test_loader_refuses_a_row_of_partial_xor_groups():
         )
 
 
+def test_loader_refuses_a_row_of_partial_chunks():
+    # 36 columns = 4 whole 8-column chunks (one whole XOR group) plus 4
+    # columns; only the ragged-row clause catches it. Without it the tail's
+    # stores land up to column 59, outside the row.
+    with pytest.raises(ValueError, match="row does not hold whole groups"):
+        CoalescedTileLoader(
+            tile_rows=64,
+            tile_cols=36,
+            block_size=64,
+            load_vec=4,
+            col_xor=lds_col_xor_params(32),
+        )
+
+
 @pytest.mark.parametrize(
     "cols, chunk",
     [(16, 8), (32, 8), (64, 8), (128, 8), (8, 4), (16, 4), (32, 4), (64, 4)],

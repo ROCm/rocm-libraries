@@ -12,7 +12,8 @@ the ``"row"`` transpose-on-store scatter, the scalar store, the split
 must be rejected by both engines (``load_vec`` wider than the swizzle chunk),
 and one leaves ``col_xor`` unset as the unswizzled control. The cases after it
 set an explicit tuple both engines must refuse: an i32 shift by 32 (row or
-flip) and rows that do not hold whole XOR groups.
+flip), rows that do not hold whole XOR groups and a row that is not a
+whole number of chunks.
 
 Config index = case * len(ARCHES) + arch_index. Every builder call is its own
 statement in the order the C emitter issues it: each call consumes an SSA id,
@@ -48,6 +49,8 @@ CASES = (
     ("partial48", 16, 48, 64, 8, "col", 0, "load", (1, 3, 3, 3)),
     # rejected: one 64-column chunk per row; the flip bit needs two
     ("one_chunk64", 64, 64, 256, 8, "col", 0, "load", (0, 0, 6, 3)),
+    # rejected: a ragged 36-column row (4 whole chunks of 8 plus 4 columns)
+    ("ragged36", 64, 36, 64, 4, "col", 0, "load", (1, 3, 3, 3)),
 )
 
 
