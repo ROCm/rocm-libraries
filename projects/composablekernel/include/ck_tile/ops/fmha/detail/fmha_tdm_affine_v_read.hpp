@@ -71,14 +71,23 @@ struct FmhaTdmAffineVRead
             FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
         }
         else
-        {
-            static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
-            auto address = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
-            address.byte_address =
-                base.byte_address +
-                ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
-            FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
-        }
+            LoadRowMajor<IAccess, VPhysicalStride>(dst, window, base);
+    }
+
+    private:
+    template <index_t IAccess,
+              index_t VPhysicalStride = 144,
+              typename DistributedTensor,
+              typename TileWindow>
+    CK_TILE_DEVICE static void LoadRowMajor(DistributedTensor& dst,
+                                            const TileWindow& window,
+                                            const FmhaTdmPreparedKRead::Address& base)
+    {
+        static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
+        auto address         = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
+        address.byte_address = base.byte_address +
+                               ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
+        FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
     }
 };
 
