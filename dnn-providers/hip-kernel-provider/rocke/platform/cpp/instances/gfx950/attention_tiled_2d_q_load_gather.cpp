@@ -627,16 +627,6 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
     /* Page ids of the first tile and of the one after it, carried into the
      * loop; iteration i then reads the ids of tile i + 2. */
     const bool page_prefetch = rocke_gfx950_attn2d_page_prefetch(ctx);
-    if(page_prefetch && ctx->N_BLOCKS_PER_TILE > ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES)
-    {
-        B->status = ROCKE_ERR_VALUE;
-        snprintf(B->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "%d pages per tile exceed the %d carried page ids",
-                 ctx->N_BLOCKS_PER_TILE,
-                 ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES);
-        return;
-    }
     if(page_prefetch)
     {
         rocke_value_t* c_one = rocke_b_const_i32(B, 1);

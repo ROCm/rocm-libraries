@@ -88,10 +88,10 @@ extern "C" {
 #define ROCKE_GFX950_ATTN2D_MAX_ACCS 64
 /* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS + cur_buf,
  * plus 2 carried page ids per page of a tile (MAX_PREFETCH_PAGES). */
-#define ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS 160
-/* Pages per tile whose ids the KV loop carries (Python's PAGE_PREFETCH), T / BS:
- * the parity configs reach 288 / 16. */
-#define ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES 32
+#define ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS 128
+/* Most pages per tile whose ids the KV loop carries (Python's PAGE_PREFETCH has the
+ * same limit); tiles of more pages read their ids in place. */
+#define ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE 16
 /* QK / PV K-iters (HD/QK_K_STEP or T/PV_K_STEP); HD<=256, T<=128 -> <=16. */

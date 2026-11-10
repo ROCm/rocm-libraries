@@ -98,6 +98,8 @@ from kernels.common._attention_kv_seq_tail import (
 )
 
 
+# Most pages per tile whose ids the KV loop carries (C twin: ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES).
+MAX_PREFETCH_PAGES = 16
 MFMA_M = 16
 MFMA_N = 16
 
@@ -2160,13 +2162,14 @@ def build_unified_attention_2d_tiled(
     block_table_max_idx = block_table_max_idx_of(
         b, seq_base, seq_len, BS, num_seqs_p, bt_stride_p
     )
-    # A copy takes its page base in ``soffset``, and the loop carries the page
-    # ids of the current and the next tile and reads the ids of the tile after
-    # next one iteration ahead, so no copy waits on a table read issued just
-    # before it. Reading a multi-page tile's ids in place instead keeps them
-    # live across the loop, which spills on specs that also hold Q in
-    # registers. The schedules that load two tiles ahead (the K ring, grouped
-    # KV2) read in place.
+    # The loop carries the page ids of the current and the next tile and reads
+    # the ids of the tile after next one iteration ahead, so no copy waits on a
+    # table read issued just before it; with carried ids a copy's page base goes
+    # in ``soffset`` (a 64-bit cache: one resource per page). Reading a
+    # multi-page tile's ids in place instead keeps them live across the loop,
+    # which spills on specs that also hold Q in registers. The schedules that
+    # load two tiles ahead (the K ring, grouped KV2) and tiles of more than
+    # MAX_PREFETCH_PAGES pages read in place, with the base in ``voffset``.
     page_copies = PagedKVCopies(
         b,
         block_size=BS,
@@ -2198,7 +2201,13 @@ def build_unified_attention_2d_tiled(
         and page_copies.wave_part_in_page
         and page_copies.uniform_blocks
     )
-    PAGE_PREFETCH = PAGE_COPIES and not RING3 and not GROUPED_KV2
+    PAGE_PREFETCH = (
+        PAGE_COPIES
+        and not RING3
+        and not GROUPED_KV2
+        and N_BLOCKS_PER_TILE <= MAX_PREFETCH_PAGES
+    )
+    page_copies.page_base_in_soffset = PAGE_PREFETCH or N_BLOCKS_PER_TILE == 1
     # Page ids already read for a tile, by the tile index value.
     tile_pages = {}
     if FAST_PAGED_KV_DESC:

@@ -197,12 +197,9 @@ static bool rocke__page_copies(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     const int halves_per_call = rocke__kv_halves_per_call(ctx);
     const int wave_halves = halves_per_call / ctx->NUM_WARPS;
-    const int page_halves = ctx->BS * ctx->HD;
-    const bool uniform_blocks
-        = ctx->N_BLOCKS_PER_TILE == 1
-          || (halves_per_call <= page_halves && page_halves % halves_per_call == 0);
-    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && page_halves % wave_halves == 0
-           && uniform_blocks;
+    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && (ctx->BS * ctx->HD) % wave_halves == 0
+           && rocke_kv_page_copies_uniform_blocks(
+               ctx->BS, ctx->HD, halves_per_call, ctx->N_BLOCKS_PER_TILE);
 }
 
 /* The paged-KV descriptor's indirect lookup for page `blk` of a tile: one guarded
@@ -220,13 +217,14 @@ static rocke_value_t*
                                  ctx->N_BLOCKS_PER_TILE);
 }
 
-/* A copy takes its page base in soffset, and the loop carries the page ids of
- * the current and the next tile and reads the ids of the tile after next one
- * iteration ahead (Python PAGE_PREFETCH). The C++ port has no deep K ring
+/* The loop carries the page ids of the current and the next tile and reads the
+ * ids of the tile after next one iteration ahead (Python PAGE_PREFETCH), up to
+ * MAX_PREFETCH_PAGES pages per tile. The C++ port has no deep K ring
  * (kv_ring_depth != 2 is refused). */
 bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return rocke__page_copies(ctx) && !ctx->GROUPED_KV2;
+    return rocke__page_copies(ctx) && !ctx->GROUPED_KV2
+           && ctx->N_BLOCKS_PER_TILE <= ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES;
 }
 
 void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
@@ -320,7 +318,7 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
 
     /* Python page_copies (emits nothing): the page addressing of the bf16/fp16
-     * K/V copies, page base in soffset. */
+     * K/V copies; page_base_in_soffset is set once the predicates are known. */
     {
         rocke_kv_page_copies_t* pc = &ctx->page_copies;
         memset(pc, 0, sizeof(*pc));
@@ -344,6 +342,10 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pc->page_base_in_soffset = true;
         rocke_kv_page_copies_init(pc);
         ctx->PAGE_COPIES = rocke__page_copies(ctx);
+        /* Page base in soffset where the ids are carried or the tile is one page;
+         * multi-page tiles that read their ids in place keep it in voffset. */
+        pc->page_base_in_soffset
+            = rocke_gfx950_attn2d_page_prefetch(ctx) || ctx->N_BLOCKS_PER_TILE == 1;
     }
 
     (void)rocke__bytes_per_buf;

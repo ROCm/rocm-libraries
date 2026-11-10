@@ -67,6 +67,18 @@ typedef struct rocke_kv_tile_pages
     rocke_value_t** rsrc;
 } rocke_kv_tile_pages_t;
 
+/* uniform_blocks: every wave's part of each copy lies in the same block of the tile. A pure
+ * function of the geometry, for callers that decide before the helper exists. */
+static inline bool rocke_kv_page_copies_uniform_blocks(int block_size,
+                                                       int head_size,
+                                                       int halves_per_call,
+                                                       int blocks_per_tile)
+{
+    const int page_halves = block_size * head_size;
+    return blocks_per_tile == 1
+           || (halves_per_call <= page_halves && page_halves % halves_per_call == 0);
+}
+
 static inline void rocke_kv_page_copies_init(rocke_kv_page_copies_t* pc)
 {
     const int page_halves = pc->block_size * pc->head_size;
@@ -76,9 +88,8 @@ static inline void rocke_kv_page_copies_init(rocke_kv_page_copies_t* pc)
     pc->whole_row_copies
         = pc->halves_per_call % pc->head_size == 0 && pc->copy_tokens > 0
           && (pc->block_size % pc->copy_tokens == 0 || pc->copy_tokens % pc->block_size == 0);
-    pc->uniform_blocks
-        = pc->blocks_per_tile == 1
-          || (pc->halves_per_call <= page_halves && page_halves % pc->halves_per_call == 0);
+    pc->uniform_blocks = rocke_kv_page_copies_uniform_blocks(
+        pc->block_size, pc->head_size, pc->halves_per_call, pc->blocks_per_tile);
     pc->lane_within_b = NULL;
     pc->copy_tok_b = NULL;
     pc->page_stride_i64 = NULL;
