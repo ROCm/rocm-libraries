@@ -663,8 +663,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
     case Variant::WMMA:
     case Variant::WREG:
-    case Variant::COOP:
         uBytes = groups * 16 * cgo * divUp(cgi, 16) * 16 * eb;
+        break;
+    case Variant::COOP:
+        // Fragment-major units of 16 out channels (k5CoopFilterTransform).
+        uBytes = groups * 16 * divUp(cgo, 16) * 16 * divUp(cgi, 16) * 16 * eb;
         break;
     case Variant::SREG:
     {

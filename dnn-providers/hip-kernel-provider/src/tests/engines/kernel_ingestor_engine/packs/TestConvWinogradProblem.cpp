@@ -1054,6 +1054,21 @@ TEST(TestConvWinogradPlan, RegisterValuPadsTheFilterBufferByOneKBlock)
     EXPECT_EQ(plan->mainThreads, 256u);
 }
 
+TEST(TestConvWinogradPlan, CooperativeFilterBufferHoldsWholeSixteenChannelUnits)
+{
+    // K 6 and C 4 both pad to one 16 x 16 unit per position (k5CoopFilterTransform), fp16.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto config = conv_winograd::configOf(kernelOf(coop("gfx9", 1), "HALF"));
+    ASSERT_TRUE(config.has_value());
+    const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->uBytes, size_t{16 * 16 * 16 * 2});
+}
+
 TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)
 {
     auto shape = baseShape();

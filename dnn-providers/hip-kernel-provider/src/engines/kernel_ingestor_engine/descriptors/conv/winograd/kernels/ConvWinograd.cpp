@@ -162,7 +162,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
+    k5CoopFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR, CONV_WINO_COOP_ATOM::KPL>(a);
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
