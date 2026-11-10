@@ -22,6 +22,11 @@ only ordered create/extend procedure.
 - PyYAML >= 6.0
 - Jinja2 >= 3.1
 
+The `engine.heuristics` binding tests also run `uhd_gen promote` itself, which needs
+`uhd_gen`'s requirements (`../uhd_gen/requirements.txt`: numpy, pandas, pyarrow among them).
+Without them those tests skip; with `HIPDNN_REQUIRE_UHD_GEN_TESTS` set to anything but `0`
+(as CMake's `HIPDNN_REQUIRE_UHD_GEN_TESTS` option does) they fail instead.
+
 ## Setup
 
 ```bash
@@ -385,7 +390,8 @@ generator writes the UED too, so record the same binding in the config, or the n
 regeneration drops it (and the regeneration gate's byte compare fails):
 
 1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
-2. Add them to `engine.heuristics`, in the order promote added them. For a registry-driven
+2. Add them to `engine.heuristics`, as the list promote wrote into the bundle's UED (one
+   fixed order: the metric-less UHD first, then by metric name). For a registry-driven
    engine put them in the manifest's `engine` block (`configs/<bundle>.engine.yaml`) **and**
    the selection (`configs/<bundle>.yaml`): `registry_enumerator.py` copies the manifest's
    `engine` into every config it writes, and regeneration gate g4 requires the selection's

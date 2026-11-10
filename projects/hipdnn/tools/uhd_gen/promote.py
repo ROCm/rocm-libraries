@@ -1077,34 +1077,45 @@ def _rebind(
     `holder` is the UED, or the slot of a slotted engine, whose `role` map is edited.
     A role holds one UHD per metric (a metric-less model replaces the metric-less one), and the
     metric lives only in each UHD, so every bound UHD must be installed in this tree to be
-    classified.
+    classified. The list is in one fixed order, the metric-less UHD first and then by metric
+    name (`binding_order`), so a generator that derives the binding writes the same value.
     """
     where = f"{role}.{arch}"
     value = holder.get(role, {}).get(arch)
     current = [] if value is None else _role_value(value, where)
 
-    def same_metric(ref: str) -> bool:
+    def metric_of(ref: str) -> str | None:
         if ref == identity:
-            return True
+            return metric
         path = installed_ids.get(ref)
         if path is None:
             raise PromoteError(
                 f"{where} binds UHD {ref}, which is not installed in this descriptor "
                 "tree; its score.metric decides whether this promotion replaces it"
             )
-        return _score_metric(_load_json(path, "bound UHD")) == metric
+        return _score_metric(_load_json(path, "bound UHD"))
 
-    replaced = [ref for ref in current if same_metric(ref)]
+    metrics = {ref: metric_of(ref) for ref in current}
+    replaced = [ref for ref in current if ref == identity or metrics[ref] == metric]
     if len(replaced) > 1:
         raise PromoteError(
             f"{where} already binds {len(replaced)} UHDs for metric "
             f"{metric or '(none)'} ({', '.join(replaced)}); at most one is allowed"
         )
-    # In place, so a replacement keeps its position; a new metric is appended.
-    bound = [identity if ref in replaced else ref for ref in current]
-    if not replaced:
-        bound.append(identity)
+    metrics[identity] = metric
+    bound = sorted(
+        [ref for ref in current if ref not in replaced] + [identity],
+        key=lambda ref: binding_order(metrics[ref]),
+    )
     return bound, replaced
+
+
+def binding_order(metric: str | None) -> tuple[bool, str]:
+    """Sort key of a UHD in a role's list: the metric-less one first, then by metric name.
+
+    Order has no runtime meaning (the loader indexes a list by each UHD's metric); one fixed
+    order lets promote and the descriptor generators write byte-identical bindings."""
+    return (metric is not None, metric or "")
 
 
 def _role_references(path: Path, document: dict):

@@ -684,6 +684,13 @@ endif()
                 )
             endif()
 
+            # test_generator.py's promote-parity cases import uhd_gen, so they skip without
+            # its requirements (allow_skip) unless the build requires uhd_gen's suites, as
+            # the uhd_gen entries above do.
+            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+                list(APPEND _hipdnn_ingestor_pytest_env "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+            endif()
+
             if(DEFINED TEST_ENVIRONMENT)
                 list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})
             endif()

@@ -3702,15 +3702,21 @@ class TestHeuristicBindings:
     def _promote():
         """uhd_gen's promote module, so a binding is checked against promote itself and not
         a copy of its output: a change in what promote writes fails here. Skips without
-        uhd_gen's requirements unless the build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS),
-        as uhd_gen's own suites do."""
+        uhd_gen's requirements unless the build requires them, as uhd_gen's own suites do:
+        uhd_gen's `prerequisites_required()` reads HIPDNN_REQUIRE_UHD_GEN_TESTS."""
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+        from uhd_gen.conftest import prerequisites_required
+
+        if prerequisites_required():
             from uhd_gen import promote
 
             return promote
         return pytest.importorskip("uhd_gen.promote")
 
+    @pytest.mark.allow_skip(
+        reason="needs uhd_gen's requirements (numpy, pandas, pyarrow); "
+        "HIPDNN_REQUIRE_UHD_GEN_TESTS makes them required"
+    )
     @pytest.mark.parametrize(
         "role, arch, metric",
         [
