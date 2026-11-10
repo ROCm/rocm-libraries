@@ -58,11 +58,11 @@ struct MxGemmTdmV4Kernel
     using Problem   = typename Pipeline::Problem;
     using Policy    = typename Pipeline::Policy;
     using ODataType = typename Pipeline::ODataType;
-    using Epilogue  = MxAlphaBetaEpilogue<Pipeline,
-                                          Traits::kStoreWidth,
-                                          Traits::kEdgeM,
-                                          Traits::kEdgeN,
-                                          Traits::kWideD>;
+    using Epilogue  = MxAlphaBetaEpilogue<MxAlphaBetaEpilogueProblem<Pipeline,
+                                                                     Traits::kStoreWidth,
+                                                                     Traits::kEdgeM,
+                                                                     Traits::kEdgeN,
+                                                                     Traits::kWideD>>;
 
     static constexpr index_t kBlockSize = Pipeline::kThreads;
     static constexpr MxTdmV4Spec kSpec  = Pipeline::kSpec;
