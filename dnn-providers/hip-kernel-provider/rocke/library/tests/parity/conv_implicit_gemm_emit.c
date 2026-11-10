@@ -518,6 +518,75 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
     }
 }
 
+/* TF32 compute (mma_dtype "tf32"): fp32 storage, each LDS fragment bitcast to
+ * vec<tf32xN> for the arch's TF32 atom -- native XF32 on gfx942 (16x16x8,
+ * 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16). 64x64x32 tile,
+ * 2x2 warps. Keep in lockstep with _tf32_spec() in conv_implicit_gemm_emit.py
+ * (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    /* idx: is_3d, depthwise, arch, warp tile m=n, k, pipeline, epilogue */
+    static const struct
+    {
+        int is_3d;
+        int depthwise;
+        const char* arch;
+        int m;
+        int k;
+        const char* pipeline;
+        const char* epilogue;
+    } cfgs[] = {
+        {0, 0, "gfx950", 16, 32, "mem", "cshuffle"}, /* 54 */
+        {0, 0, "gfx950", 32, 16, "compv4", "default"}, /* 55 */
+        {0, 0, "gfx942", 16, 8, "compv3", "cshuffle"}, /* 56 */
+        {0, 0, "gfx942", 32, 4, "compv4", "default"}, /* 57 */
+        {1, 0, "gfx950", 16, 32, "compv3", "cshuffle"}, /* 58 */
+        {1, 0, "gfx942", 16, 8, "mem", "default"}, /* 59 */
+        {0, 0, "gfx950", 32, 16, "mem", "cshuffle"}, /* 60: async_dma */
+        {0, 0, "gfx942", 32, 4, "compv4", "cshuffle"}, /* 61: unroll_k */
+        {0, 0, "gfx950", 16, 32, "basic", "default"}, /* 62 */
+        {0, 1, "gfx942", 16, 8, "mem", "cshuffle"}, /* 63: group_merge=4 */
+        {0, 0, "gfx942", 16, 32, "mem", "cshuffle"}, /* 64: rejected */
+        {0, 0, "gfx950", 16, 32, "mem", "cshuffle"}, /* 65: lds_k_pad=2, rejected */
+    };
+    const int i = idx - 54;
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    if(cfgs[i].is_3d)
+        spec->problem
+            = rocke_conv_problem_make_3d(1, 4, 6, 6, 32, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    else if(cfgs[i].depthwise)
+    {
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->group_merge = 4;
+    }
+    else
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 32, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = cfgs[i].m;
+    spec->warp_tile_n = cfgs[i].m;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->async_dma = (idx == 60);
+    spec->unroll_k = (idx == 61);
+    if(idx == 65)
+    {
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 2;
+    }
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -528,6 +597,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     if(idx >= 40 && idx <= 53)
     {
         if(make_cfg_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 54 && idx <= 65)
+    {
+        if(make_cfg_tf32(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)
