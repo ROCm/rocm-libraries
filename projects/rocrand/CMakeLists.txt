@@ -46,12 +46,14 @@ cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover n
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 
 if (NOT DEFINED ENV{ROCM_PATH})
-#Path to ROCm installation
-  set(ENV{ROCM_PATH} "/opt/rocm")
+    #Path to ROCm installation
+    set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
 
-# Install prefix
-set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
+if(NOT WIN32)
+    # Install prefix
+    set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
+endif()
 
 if(WIN32)
     set(CPACK_SOURCE_GENERATOR "ZIP")
