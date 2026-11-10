@@ -139,14 +139,11 @@ if(NOT HIPCONV_OFFLOAD_LTO)
     list(APPEND HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
-# ASAN's stack instrumentation and the resulting image-layout growth on hipconv's many
-# explicit template instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB
-# range, failing libMIOpen.so's link. hipconv contributes object files/a static archive
-# to that one link, not a link of its own, so only the compile step needs this override.
-# hipconv v0.5.0 (see HIPCONV_VERSION) defines this option natively; this is a stopgap
-# until that sync lands, matching its name/semantics so the sync is a no-op here.
-option(HIPCONV_DISABLE_ASAN
-    "Disable ASAN instrumentation for hipconv only, while the rest of MIOpen keeps full ASAN/TSAN coverage" OFF)
+# Compile hipconv without ASAN instrumentation, for a consumer built with -fsanitize=address.
+#
+# ASAN stack instrumentation of hipconv's many template instantiations can push an R_X86_64_PC32
+# relocation out of range when the consumer links hipconv's static archive into its shared library.
+option(HIPCONV_DISABLE_ASAN "Compile hipconv without ASAN instrumentation" OFF)
 set(HIPCONV_SANITIZER_COMPILE_OPTIONS "")
 if(HIPCONV_DISABLE_ASAN)
     set(HIPCONV_SANITIZER_COMPILE_OPTIONS -fno-sanitize=address)
@@ -247,9 +244,7 @@ set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
 add_dependencies(hipconv hipconv_version)
 foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
-    if(HIPCONV_SANITIZER_COMPILE_OPTIONS)
-        target_compile_options(${_target} PRIVATE ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
-    endif()
+    target_compile_options(${_target} PRIVATE ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
 endforeach()
 
 target_include_directories(hipconv PRIVATE src)

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 
 namespace hipconv::cdna4::direct_flex
 {
@@ -388,9 +389,13 @@ inline int64_t span_input(const ConvParams& par)
             std::max({static_cast<int64_t>(par.stride_h),
                       static_cast<int64_t>(par.stride_d) * par.h - row_end,
                       static_cast<int64_t>(par.d - (par.e - 1) * par.stride_d) * par.h - row_end});
+        // OffsetTable::origin's clamp can put the base this far before the first tap row
+        // (docs/algorithms/details/direct/direct-flex-offset-tables.md).
+        const int64_t clamp_gap =
+            static_cast<int64_t>(std::abs(par.pad_d)) * par.h + std::max(par.pad_h, 0);
         const int64_t span = (rows - 1) * advance +
                              static_cast<int64_t>(par.kd - 1) * par.dilation_d * par.h +
-                             (par.kh - 1) * par.dilation_h + 1;
+                             (par.kh - 1) * par.dilation_h + 1 + clamp_gap;
         return span * par.w * par.c;
     }
     const int64_t advance = std::max<int64_t>(par.stride_h, par.h - (par.p - 1) * par.stride_h);

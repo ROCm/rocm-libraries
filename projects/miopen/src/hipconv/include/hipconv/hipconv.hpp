@@ -49,11 +49,18 @@ HIPCONV_API std::string_view config_version();
 //
 // Looks the name up in the registry, which is identical in every build. Makes no HIP calls.
 // If the binary has no device code for the GPU, launch() fails with hipErrorNoBinaryForGpu or
-// hipErrorInvalidDeviceFunction.
+// hipErrorInvalidDeviceFunction; has_device_code reports in advance whether the binary has it.
 HIPCONV_API std::optional<ArchHandle> resolve_arch(std::string_view name);
 
 // Same as resolve_arch.
 HIPCONV_API std::optional<ArchHandle> find_arch(std::string_view name);
+
+// Whether the loaded binary holds hipconv's device code for HIP device hip_device.
+//
+// False for an index that names no device. Makes hip_device current for one query and restores
+// the calling thread's current device. Clears the HIP error its own failed calls raise. The answer
+// is cached per device.
+HIPCONV_API bool has_device_code(int hip_device);
 
 // Returns the name of every architecture in the registry, in registry order. resolve_arch
 // accepts each.

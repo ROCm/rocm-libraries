@@ -117,8 +117,9 @@ public:
                 static_cast<int>(detail::magic_div(*e_div, static_cast<uint32_t>(plane0))));
             const int d0     = (plane0 - img0 * e) * sd - pd;
             const int h0     = (row_x0 - plane0 * p) * kp.sh - ph;
-            const int d_base = std::max(d0, 0);
-            const int h_base = d0 < 0 ? 0 : std::max(h0, 0);
+            const int d_base = std::min(std::max(d0, 0), static_cast<int>(dp.d));
+            const int h_base =
+                d0 < 0 || d0 >= dp.d ? 0 : std::min(std::max(h0, 0), static_cast<int>(kp.h));
             return Base{img0,
                         h_base,
                         ((static_cast<int64_t>(img0) * dp.d + d_base) * kp.h + h_base) * kp.w *
@@ -132,7 +133,8 @@ public:
                 detail::magic_div(*g.q_div, static_cast<uint32_t>(t.x0 * kp.rebase_in))));
             const int img0   = __builtin_amdgcn_readfirstlane(
                 static_cast<int>(detail::magic_div(*g.p_div, static_cast<uint32_t>(row_x0))));
-            const int h_base = std::max((row_x0 - img0 * g.p) * kp.sh - g.ph, 0);
+            const int h_base =
+                std::min(std::max((row_x0 - img0 * g.p) * kp.sh - g.ph, 0), static_cast<int>(kp.h));
             return Base{img0, h_base, (static_cast<int64_t>(img0) * kp.h + h_base) * kp.w * kp.c};
         }
         const auto x0    = static_cast<uint32_t>(t.x0 * (hot ? hot->rebase_in : kp.rebase_in));
@@ -141,7 +143,8 @@ public:
         const auto row = static_cast<uint32_t>(row_x0);
         const int img0 = __builtin_amdgcn_readfirstlane(
             static_cast<int>(hot ? hot->p_div.div(row) : detail::magic_div(kp.p_div, row)));
-        const int h_base = std::max((row_x0 - img0 * kp.p) * kp.sh - kp.ph, 0);
+        const int h_base =
+            std::min(std::max((row_x0 - img0 * kp.p) * kp.sh - kp.ph, 0), static_cast<int>(kp.h));
         return Base{img0, h_base, (static_cast<int64_t>(img0) * kp.h + h_base) * kp.w * kp.c};
     }
 

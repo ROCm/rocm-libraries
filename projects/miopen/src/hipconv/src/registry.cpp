@@ -1,5 +1,6 @@
 #include "hipconv/hipconv.hpp"
 #include "conv_kernel.h"
+#include "device_runtime.h"
 #include "algorithm.h"
 #include "arch_registry.h"
 #include "hip_util.h"
@@ -7,6 +8,8 @@
 #include "registry.h"
 #include "tolerance.h"
 
+#include <array>
+#include <atomic>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -15,7 +18,8 @@
 namespace hipconv
 {
 
-// Never launched: gives each GPU of the build a code object (docs/multi-arch-convergence.md).
+// Never launched: gives each GPU of the build a code object (docs/multi-arch-convergence.md),
+// which has_device_code queries.
 __global__ void device_code_anchor() {}
 
 namespace
@@ -72,6 +76,38 @@ std::vector<std::string_view> arch_names()
 std::optional<ArchHandle> resolve_arch(std::string_view name)
 {
     return find_arch(name);
+}
+
+bool has_device_code(int hip_device)
+{
+    enum : signed char
+    {
+        unknown = 0,
+        present = 1,
+        absent  = -1
+    };
+    static constexpr int max_cached_devices = 64;
+    static std::array<std::atomic<signed char>, max_cached_devices> cache{};
+
+    if(hip_device < 0)
+        return false;
+    const void* anchor = reinterpret_cast<const void*>(&device_code_anchor);
+    if(hip_device >= max_cached_devices)
+    {
+        const auto found = kernel_loads_on(anchor, hip_device);
+        return found.has_value() && *found;
+    }
+    auto& slot = cache[static_cast<std::size_t>(hip_device)];
+    if(const auto known = slot.load(std::memory_order_relaxed); known != unknown)
+        return known == present;
+    // A failed HIP call says nothing about the code object, so it is not cached.
+    const auto found = kernel_loads_on(anchor, hip_device);
+    if(!found.has_value())
+        return false;
+    signed char known = unknown;
+    if(slot.compare_exchange_strong(known, *found ? present : absent, std::memory_order_relaxed))
+        return *found;
+    return known == present;
 }
 
 std::vector<ConvKernelHandle> get_valid_configs(const Device& device,
