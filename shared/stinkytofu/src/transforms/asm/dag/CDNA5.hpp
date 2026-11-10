@@ -1904,9 +1904,15 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
     return true;
 }
 
-// Method 1: permit a reset-time WMMA burst only when the first in-region matrix consumer remains
-// more than ten WMMA windows after the latest planned issue of every ds_load it needs. The burst
-// length is predicted from the same latency/issue/blocked-cycle queue model used at run time.
+// Method 1: decide once at each queue reset whether to permit its WMMA burst. The reset's
+// scheduling snapshot predicts the burst with the run-time queue model and predicts required
+// ds_load issue windows with the completed DS plan. Later ready-set hazards and credit retirement
+// are intentionally outside this estimate, so the realized schedule may differ. This decision
+// remains fixed for this reset, but every actual pick still obeys DAG readiness and queue credits;
+// a later reset takes a new snapshot and decides independently.
+//
+// Permit the burst only when the first in-region matrix consumer remains more than ten WMMA
+// windows after the latest predicted issue of every ds_load it needs.
 bool CDNA5ReadyQueue::queueFillHasConsumerDistance() {
     if (!dsSpread_.active() || !regionDag_) return true;
 
