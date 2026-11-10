@@ -24,8 +24,8 @@ class _StubLinker:
         self.input_types = []
         # buildAssemblyCodeObjectFiles names its code objects through
         # compilerTargetOf(name, linker.path). None means "no compiler to ask",
-        # which still resolves build aliases but leaves every other spec alone --
-        # no subprocess, and the same names these snapshots were taken with.
+        # which leaves every spec alone -- no subprocess, and the same names
+        # these snapshots were taken with.
         self.path = None
 
     def __call__(self, objFiles, coFileRaw, threads=None):
