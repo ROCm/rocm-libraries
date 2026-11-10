@@ -112,6 +112,7 @@ MfmaConfig configOf(const KernelDefinition& kernel)
     config.atom = kernel.getIntMetadata("atom");
     config.kh = kernel.getIntMetadata("kh");
     config.kw = kernel.getIntMetadata("kw");
+    config.stride = kernel.getIntMetadata("stride");
     config.waves = kernel.getIntMetadata("waves");
     config.depth = kernel.getIntMetadata("depth");
     config.fold = kernel.getIntMetadata("fold");
@@ -122,11 +123,14 @@ MfmaConfig configOf(const KernelDefinition& kernel)
 std::optional<DepthwiseValuProblem> problemFor(const MatchContext& context, ConvDirection direction)
 {
     auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(context, direction);
-    // 1-D (as height 1) and 2-D, channels-last, unit stride and dilation (backward data: its
-    // forward form), 16-bit.
+    // 1-D (as height 1) and 2-D, channels-last, unit dilation, stride 1 on both axes or (forward)
+    // 2 on both (backward data: its unit-stride forward form), 16-bit.
+    const auto stridesServed = [](const ConvDepthwiseValuArgs& a) {
+        return a.dh == 1 && a.dw == 1 && a.sh == a.sw && (a.sh == 1 || a.sh == 2);
+    };
     if(!problem.has_value() || problem->ndims != 2
-       || problem->layout != DepthwiseLayout::CHANNELS_LAST || !problem->unitStrideAndDilation
-       || problem->gatherOnly
+       || problem->layout != DepthwiseLayout::CHANNELS_LAST || problem->gatherOnly
+       || !stridesServed(problem->args)
        || (problem->base.dataType != data_objects::DataType::HALF
            && problem->base.dataType != data_objects::DataType::BFLOAT16))
     {
@@ -310,9 +314,10 @@ public:
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_DWM_TYPE", elementTypeFor(kernel.getStringMetadata("dtype")));
         options.add("CONV_DWM_FLIP", std::string(launch->flip ? "1" : "0"));
-        const std::array<std::pair<const char*, int64_t>, 6> fields{{{"ATOM", config.atom},
+        const std::array<std::pair<const char*, int64_t>, 7> fields{{{"ATOM", config.atom},
                                                                      {"KH", config.kh},
                                                                      {"KW", config.kw},
+                                                                     {"STRIDE", config.stride},
                                                                      {"WAVES", config.waves},
                                                                      {"DEPTH", config.depth},
                                                                      {"FOLD", config.fold}}};

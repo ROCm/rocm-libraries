@@ -19,7 +19,7 @@
  *
  * The problem is the VALU depthwise engines' (parseDepthwiseValuProblem): forward, and unit-stride
  * backward data as the forward convolution of dy with the filter reflected. These kernels serve
- * its 2-D channels-last unit-stride, unit-dilation 16-bit form. Kept apart from the dispatch code
+ * its 2-D channels-last, unit-dilation 16-bit form at stride 1 or (forward) 2. Kept apart from the dispatch code
  * so every gate can be tested without a device.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_depthwise_mfma
@@ -34,6 +34,8 @@ struct MfmaConfig
     /// Compile-time filter extent.
     int64_t kh = 0;
     int64_t kw = 0;
+    /// The stride along both axes: 1, or 2 (forward only).
+    int64_t stride = 0;
     /// Waves per block, 8 channels each.
     int64_t waves = 0;
     /// Input rows in flight.
@@ -71,7 +73,8 @@ bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16);
  * Reads and gates every field of @p config: the layout, the atom, the filter extent against the
  * problem's, the waves against the channels, the depth, the fold, the rows, the LDS, and that
  * the folded images' bytes stay within the 32-bit buffer offsets. The problem must be 2-D,
- * channels-last, unit stride and dilation (backward data: its forward form).
+ * channels-last, unit dilation, with the config's stride on both axes (backward data: its
+ * unit-stride forward form).
  */
 std::optional<MfmaLaunch> mfmaLaunchFor(const conv_depthwise_valu::DepthwiseValuProblem& problem,
                                         const MfmaConfig& config);

@@ -28,6 +28,10 @@
       "type": "int"
     },
     {
+      "name": "stride",
+      "type": "int"
+    },
+    {
       "name": "waves",
       "type": "int"
     },

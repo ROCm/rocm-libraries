@@ -29,6 +29,7 @@
 //   CONV_DWM_ATOM    32: v_mfma_f32_16x16x32 f16/bf16 (gfx950); 16: v_mfma_f32_16x16x16 f16 /
 //                    bf16_1k (gfx908 f16, gfx90a, gfx94x, gfx950)
 //   CONV_DWM_KH/KW   filter extent
+//   CONV_DWM_STRIDE  the stride along both axes (1 or 2; backward data runs at 1)
 //   CONV_DWM_WAVES   waves per block (8 channels each)
 //   CONV_DWM_DEPTH   input rows in flight
 //   CONV_DWM_FOLD    images sharing the 32 output columns (1, 2 or 4)
@@ -48,6 +49,9 @@
 #endif
 #ifndef CONV_DWM_KW
 #error "CONV_DWM_KW must give the filter width"
+#endif
+#ifndef CONV_DWM_STRIDE
+#define CONV_DWM_STRIDE 1
 #endif
 #ifndef CONV_DWM_WAVES
 #define CONV_DWM_WAVES 8
@@ -128,7 +132,7 @@ __device__ inline void ldsBarrier()
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
-template <class T, int KA, int KH, int KW, int WB, int D, int F, bool FLIP>
+template <class T, int KA, int KH, int KW, int S, int WB, int D, int F, bool FLIP>
 __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
 {
     using Am = Atom<T, KA>;
@@ -136,15 +140,20 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
     typedef T v4 __attribute__((ext_vector_type(4)));
     typedef T v8 __attribute__((ext_vector_type(8)));
     constexpr int P = Am::P, KPL = Am::KPL;
-    constexpr int KWP = (KW + P) / P; // passes per filter row: ceil((kw + 1) / P)
+    constexpr int KWP = (KW + S + P - 1) / P; // passes per filter row: ceil((kw + S) / P)
     constexpr int SW = 32 / F; // output columns per image segment
-    constexpr int LWS = SW + P * KWP; // staged input columns per segment
+    constexpr int LWS = S * SW + P * KWP; // staged input columns per segment
     constexpr int LW = F * LWS;
     constexpr int NT = 64 * WB;
     constexpr int NL = (LW * WB + NT - 1) / NT; // staged granules per thread per row
     constexpr int NO = (32 * WB + NT - 1) / NT; // stored granules per thread per row
     constexpr int KM = WB < 8 ? WB - 1 : 7; // LDS swizzle key mask (granules per bank row)
-    constexpr int U = lcm(lcm(KH, D), 2); // unroll: accumulator ring, register ring, LDS
+    constexpr int RING = (KH + S - 1) / S; // live output rows
+    // Unroll: accumulator ring (S * RING input rows), register ring (D), LDS input row (2) and
+    // output row (2 completions, 2 S input rows) parities all static.
+    constexpr int U = lcm(lcm(S * RING, D), 2 * S);
+    // Added to step offsets so their divisions and remainders stay non-negative.
+    constexpr int BIAS = 2 * S * RING * KH;
     __shared__ __attribute__((aligned(16))) T inL[2][LW * WB * 8];
     __shared__ __attribute__((aligned(16))) T outL[2][32 * WB * 8];
 
@@ -172,7 +181,7 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
 #pragma unroll
         for(int ph = 0; ph < KWP; ++ph)
         {
-            const int s = P * ph + pos - q;
+            const int s = P * ph + pos - S * q;
             T v = (T)0.0f;
             if(s >= 0 && s < KW && kc >= chOff && kc < chOff + KPL)
                 v = w[((long)(c0 + kc) * KH + (FLIP ? KH - 1 - r : r)) * KW
@@ -202,12 +211,12 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
     for(int i = 0; i < NL; ++i)
     {
         const int e = tid + i * NT, pxa = e / WB, gc = e % WB, f = pxa / LWS;
-        const int ix = x0 - a.pw + pxa % LWS;
+        const int ix = S * x0 - a.pw + pxa % LWS;
         stOn[i] = pxa < LW;
         stOff[i] = stOn[i] && ix >= 0 && ix < a.wi
                        ? (unsigned)((f * imgE + (long)ix * a.c + cB + gc * 8) * (long)sizeof(T))
                        : CONV_DWM_OOB;
-        stLds[i] = (pxa * WB + (gc ^ ((pxa >> 1) & KM))) * 8;
+        stLds[i] = (pxa * WB + (gc ^ ((pxa >> S) & KM))) * 8;
     }
     const unsigned rowB = (unsigned)((long)a.wi * a.c * (long)sizeof(T));
     auto gload = [&](int iy, v8* d) {
@@ -234,8 +243,8 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
 #pragma unroll
         for(int ph = 0; ph < KWP; ++ph)
         {
-            const int pxa = f * LWS + 2 * j - f * SW + pos + P * ph;
-            bSlot[ph] = (pxa * WB + (wave ^ ((pxa >> 1) & KM))) * 8 + chOff;
+            const int pxa = f * LWS + S * (2 * j - f * SW) + pos + P * ph;
+            bSlot[ph] = (pxa * WB + (wave ^ ((pxa >> S) & KM))) * 8 + chOff;
         }
     }
     // The accumulator lane holds channels 4 (g % 2) .. + 3 of output column 2j + g / 2.
@@ -269,13 +278,14 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
                     0);
     };
 
-    f4 acc[KH];
+    f4 acc[RING];
 #pragma unroll
-    for(int r = 0; r < KH; ++r)
+    for(int r = 0; r < RING; ++r)
         acc[r] = f4{0.0f, 0.0f, 0.0f, 0.0f};
-    // Step s reads input row oy0 - ph + s; output row oy0 + s - (kh - 1) completes in it.
-    const int steps = (oy1 - oy0) + KH - 1;
-    const int iyBase = oy0 - a.ph;
+    // Step s reads input row S oy0 - ph + s. Filter row r of it feeds output row oy0 + (s - r) / S
+    // when S divides s - r; output row oy0 + o completes in step S o + kh - 1.
+    const int steps = S * (oy1 - oy0 - 1) + KH;
+    const int iyBase = S * oy0 - a.ph;
     v8 stg[D][NL];
     {
         v8 first[NL];
@@ -299,31 +309,39 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
 #pragma unroll
             for(int r = 0; r < KH; ++r)
             {
-                const int slot = ((t - r) % KH + KH) % KH;
+                if((t - r + BIAS) % S != 0)
+                    continue;
+                const int slot = (t - r + BIAS) / S % RING;
 #pragma unroll
                 for(int ph = 0; ph < KWP; ++ph)
                     acc[slot] = Am::mma(A[r][ph], bf[ph], acc[slot]);
             }
-            const int done = (t + 1) % KH;
-            // Element-wise narrowing: __builtin_convertvector kept every ring entry live (+40 VGPRs).
-            v4 o;
+            // A completed output row goes to the LDS row of its parity.
+            if((t - (KH - 1) + BIAS) % S == 0)
+            {
+                const int done = (t - (KH - 1) + BIAS) / S % RING;
+                const int parity = (t - (KH - 1) + BIAS) / S & 1;
+                // Element-wise narrowing: __builtin_convertvector kept every ring entry live.
+                v4 o;
 #pragma unroll
-            for(int v = 0; v < 4; ++v)
-                o[v] = (T)acc[done][v];
-            *reinterpret_cast<v4*>(&outL[t & 1][oSlot]) = o;
-            acc[done] = f4{0.0f, 0.0f, 0.0f, 0.0f};
+                for(int v = 0; v < 4; ++v)
+                    o[v] = (T)acc[done][v];
+                *reinterpret_cast<v4*>(&outL[parity][oSlot]) = o;
+                acc[done] = f4{0.0f, 0.0f, 0.0f, 0.0f};
+            }
             lwrite((t + 1) & 1, stg[(t + 1) % D]);
             gload(iyBase + s + 1 + D, stg[(t + 1) % D]);
-            // The row the previous step finished (t > 0 is compile-time: no branch past the first).
-            if(t > 0 || sb > 0)
-                ostore((t + 1) & 1, oy0 + s - KH);
+            // The row the previous step completed (t > 0 is compile-time: no branch past the
+            // first step).
+            if((t - KH + BIAS) % S == 0 && (t > 0 || sb > 0))
+                ostore((t - KH + BIAS) / S & 1, oy0 + (s - KH) / S);
             ldsBarrier();
             if(s + 1 >= steps)
                 goto drained;
         }
     }
 drained:
-    ostore((steps - 1) & 1, oy1 - 1);
+    ostore((oy1 - oy0 - 1) & 1, oy1 - 1);
 }
 
 } // namespace conv_depthwise_mfma
@@ -337,6 +355,7 @@ extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
                                        CONV_DWM_ATOM,
                                        CONV_DWM_KH,
                                        CONV_DWM_KW,
+                                       CONV_DWM_STRIDE,
                                        CONV_DWM_WAVES,
                                        CONV_DWM_DEPTH,
                                        CONV_DWM_FOLD,

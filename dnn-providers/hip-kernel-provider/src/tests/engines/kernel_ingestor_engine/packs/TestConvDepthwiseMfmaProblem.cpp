@@ -50,7 +50,7 @@ struct Fields
 {
     std::string dtype = "HALF";
     std::string direction = "FWD";
-    MfmaConfig config{"NHWC", 32, 3, 3, 4, 2, 1, 16};
+    MfmaConfig config{"NHWC", 32, 3, 3, 1, 4, 2, 1, 16};
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
@@ -67,6 +67,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
                        {"atom", c.atom},
                        {"kh", c.kh},
                        {"kw", c.kw},
+                       {"stride", c.stride},
                        {"waves", c.waves},
                        {"depth", c.depth},
                        {"fold", c.fold},
@@ -159,6 +160,15 @@ TEST(TestConvDepthwiseMfmaGraphMatch, ServesUnitStrideChannelsLast16Bit)
     }
 }
 
+TEST(TestConvDepthwiseMfmaGraphMatch, ServesStrideTwoForwardOnly)
+{
+    auto strided = baseShape();
+    strided.stride = {2, 2};
+    EXPECT_TRUE(graphAccepts(strided, ConvDirection::FORWARD));
+    // Strided backward data is a gather (the VALU engines' phases), not this forward form.
+    EXPECT_FALSE(graphAccepts(strided, ConvDirection::BACKWARD_DATA));
+}
+
 TEST(TestConvDepthwiseMfmaGraphMatch, DeclinesWhatTheKernelDoesNotRun)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -167,9 +177,12 @@ TEST(TestConvDepthwiseMfmaGraphMatch, DeclinesWhatTheKernelDoesNotRun)
         auto channelsFirst = baseShape();
         channelsFirst.channelsLast = false;
         EXPECT_FALSE(graphAccepts(channelsFirst, direction));
-        auto strided = baseShape();
-        strided.stride = {2, 2};
-        EXPECT_FALSE(graphAccepts(strided, direction));
+        auto mixed = baseShape();
+        mixed.stride = {1, 2};
+        EXPECT_FALSE(graphAccepts(mixed, direction));
+        auto stride3 = baseShape();
+        stride3.stride = {3, 3};
+        EXPECT_FALSE(graphAccepts(stride3, direction));
         auto dilated = baseShape();
         dilated.dilation = {1, 2};
         EXPECT_FALSE(graphAccepts(dilated, direction));
@@ -269,6 +282,23 @@ TEST(TestConvDepthwiseMfmaKernelMatch, FilterWidthMustMatch)
     fields.config.kw = 5;
     EXPECT_FALSE(admits(fields));
     EXPECT_TRUE(admits(fields, depthwise(32, {9, 20}, {3, 5})));
+}
+
+TEST(TestConvDepthwiseMfmaKernelMatch, StrideMustMatchTheProblems)
+{
+    auto strided = baseShape();
+    strided.stride = {2, 2};
+    Fields fields;
+    fields.config.stride = 2;
+    EXPECT_TRUE(admits(fields, strided));
+    EXPECT_FALSE(admits(fields));
+    fields.config.stride = 1;
+    EXPECT_FALSE(admits(fields, strided));
+    for(const int64_t stride : {0, 3})
+    {
+        fields.config.stride = stride;
+        EXPECT_FALSE(admits(fields)) << stride;
+    }
 }
 
 TEST(TestConvDepthwiseMfmaKernelMatch, WavesArePowersOfTwoDividingTheChannels)
@@ -385,6 +415,22 @@ TEST(TestConvDepthwiseMfmaLaunch, SizesTheGridAndCarriesTheProblem)
     EXPECT_EQ(launch->args.ph, 1);
     EXPECT_EQ(launch->args.pw, 1);
     EXPECT_FALSE(launch->flip);
+}
+
+TEST(TestConvDepthwiseMfmaLaunch, StrideTwoStagesTwiceTheColumns)
+{
+    Fields fields;
+    fields.config.stride = 2;
+    auto shape = depthwise(64, {17, 40}, {3, 3});
+    shape.stride = {2, 2};
+    const auto launch = launchOf(fields, shape);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->args.ho, 9);
+    EXPECT_EQ(launch->args.wo, 20);
+    // 2 images x 1 row chunk x 1 column tile x 2 channel blocks.
+    EXPECT_EQ(launch->grid, 2 * 1 * 1 * 2);
+    // 2 x 32 + 4 x 2 staged columns and 32 output columns, two of each, 16 B per wave.
+    EXPECT_EQ(conv_depthwise_mfma::mfmaLdsBytes(fields.config), 2 * (72 + 32) * 4 * 16);
 }
 
 TEST(TestConvDepthwiseMfmaLaunch, BackwardDataRunsTheReflectedForwardForm)

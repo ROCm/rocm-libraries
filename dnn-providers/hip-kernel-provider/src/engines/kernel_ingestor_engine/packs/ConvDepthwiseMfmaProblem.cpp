@@ -39,8 +39,8 @@ bool isPowerOfTwoUpTo(int64_t value, int64_t limit)
 int64_t mfmaLdsBytes(const MfmaConfig& config)
 {
     const int64_t positions = config.atom / 8;
-    const int64_t passes = (config.kw + positions) / positions;
-    const int64_t columns = config.fold * (32 / config.fold + positions * passes);
+    const int64_t passes = (config.kw + config.stride + positions - 1) / positions;
+    const int64_t columns = config.fold * (config.stride * (32 / config.fold) + positions * passes);
     // Two staged input rows and two output rows, 16 bytes per (column, wave).
     return 2 * (columns + 32) * config.waves * 16;
 }
@@ -68,11 +68,18 @@ std::optional<MfmaLaunch> mfmaLaunchFor(const DepthwiseValuProblem& problem,
                                         const MfmaConfig& config)
 {
     if(config.layout != "NHWC" || problem.layout != DepthwiseLayout::CHANNELS_LAST
-       || problem.ndims != 2 || !problem.unitStrideAndDilation || problem.gatherOnly)
+       || problem.ndims != 2 || problem.gatherOnly)
     {
         return std::nullopt;
     }
     const auto& a = problem.args;
+    // The run convolution's stride on both axes (backward data runs its unit-stride forward
+    // form; a strided one is gatherOnly), unit dilation.
+    if((config.stride != 1 && config.stride != 2) || a.sh != config.stride || a.sw != config.stride
+       || a.dh != 1 || a.dw != 1)
+    {
+        return std::nullopt;
+    }
     if((config.atom != 16 && config.atom != 32) || config.kh < 1 || config.kw < 1
        || config.kh != a.kh || config.kw != a.kw)
     {

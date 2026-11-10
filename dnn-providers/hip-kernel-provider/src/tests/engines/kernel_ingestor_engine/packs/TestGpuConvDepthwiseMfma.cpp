@@ -39,7 +39,7 @@
  * skipped). The cases cover every catalog filter at 128 channels (every wave count), narrow and
  * odd extents against the 32-column tile and the folded images, a batch the fold does not
  * divide, channel counts of one wave, asymmetric and zero padding, unit-stride backward data (the
- * forward form with the filter reflected) and true convolution. A host-only test checks that
+ * forward form with the filter reflected), true convolution, and stride 2 forward. A host-only test checks that
  * every config serves some case. The CPU reference is cross-correlation only, so true convolution
  * reflects the filter around it.
  */
@@ -301,6 +301,21 @@ std::vector<DeviceCase> deviceCases()
     {
         cases.push_back({cases[i].name, cases[i].shape, BWD});
     }
+    // Stride 2, forward only (strided backward data is a gather the VALU engines run): every
+    // strided catalog filter at 128 channels, one wave of channels with odd extents, a batch of 3
+    // without padding.
+    const auto strided = [](ConvShape shape) {
+        shape.stride = {2, 2};
+        return shape;
+    };
+    cases.push_back(
+        {"S2K3C128", strided(depthwise(128, {17, 37}, {3, 3}, {1, 1}, {1, 1}, true)), FWD});
+    cases.push_back(
+        {"S2K5C128", strided(depthwise(128, {13, 20}, {5, 5}, {2, 2}, {1, 1}, true)), FWD});
+    cases.push_back({"S2K5C8", strided(depthwise(8, {9, 11}, {5, 5}, {2, 2}, {1, 1}, true)), FWD});
+    auto stridedUnpadded = strided(depthwise(64, {16, 66}, {3, 3}, {0, 0}, {1, 1}, true));
+    stridedUnpadded.n = 3;
+    cases.push_back({"S2K3Pad0N3", stridedUnpadded, FWD});
     return cases;
 }
 
