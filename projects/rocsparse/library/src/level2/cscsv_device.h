@@ -32,148 +32,13 @@
 namespace rocsparse
 {
     template <uint32_t NUM_LANES, typename T>
-    __device__ __forceinline__ T cscsv_group_broadcast(T v)
+    ROCSPARSE_DEVICE_ILF T cscsv_group_broadcast(T v)
     {
         return __shfl(v, 0, NUM_LANES);
     }
 
-    // For each batch instance, resets the dependency counters from the analysis and starts the
-    // partial sums at alpha * x. The solve does not read x, so x and y may be the same vector.
-    template <uint32_t BLOCKSIZE, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void cscsv_init_kernel(J       m,
-                           int64_t batch_count,
-                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                           int64_t alpha_stride,
-                           const J* __restrict__ dependency_count,
-                           const T* __restrict__ x,
-                           int64_t x_inc,
-                           int64_t x_stride,
-                           J* __restrict__ rem,
-                           T* __restrict__ sum,
-                           bool is_host_mode)
-    {
-        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            i < m * batch_count;
-            i += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
-        {
-            const int64_t batch = i / m;
-            const int64_t row   = i % m;
-            const T       alpha
-                = is_host_mode ? alpha_union.value : alpha_union.pointer[batch * alpha_stride];
-            rem[i] = dependency_count[row];
-            sum[i] = alpha * x[batch * x_stride + row * x_inc];
-        }
-    }
-
-    // Tasks per column: one per chunk of NUM_LANES * ITEMS entries, at least one.
-    template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void cscsv_count_tasks_kernel(int64_t m,
-                                  const I* __restrict__ csc_col_ptr,
-                                  int64_t chunk,
-                                  I* __restrict__ task_count)
-    {
-        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
-            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
-        {
-            const int64_t len = csc_col_ptr[col + 1] - csc_col_ptr[col];
-            task_count[col]   = static_cast<I>(
-                rocsparse::max(static_cast<int64_t>(1), (len + chunk - 1) / chunk));
-        }
-    }
-
-    // One thread per nonzero, so that a long column does not serialize the analysis.
-    template <uint32_t BLOCKSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void cscsv_analysis_entries_kernel(int64_t m,
-                                       const I* __restrict__ csc_col_ptr,
-                                       const J* __restrict__ csc_row_ind,
-                                       I* __restrict__ csc_diag_ind,
-                                       J* __restrict__ dependency_count,
-                                       rocsparse_index_base idx_base,
-                                       rocsparse_fill_mode  fill_mode)
-    {
-        const int64_t nnz   = csc_col_ptr[m] - idx_base;
-        const bool    lower = (fill_mode == rocsparse_fill_mode_lower);
-        for(int64_t k = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; k < nnz;
-            k += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
-        {
-            // Largest column c with csc_col_ptr[c] <= k.
-            int64_t lo = 0;
-            int64_t hi = m;
-            while(hi - lo > 1)
-            {
-                const int64_t mid = (lo + hi) / 2;
-                if(csc_col_ptr[mid] - idx_base <= k)
-                {
-                    lo = mid;
-                }
-                else
-                {
-                    hi = mid;
-                }
-            }
-            const int64_t col = lo;
-            const int64_t row = csc_row_ind[k] - idx_base;
-            if(row == col)
-            {
-                csc_diag_ind[col] = static_cast<I>(k);
-            }
-            else if(lower ? (row > col) : (row < col))
-            {
-                rocsparse::atomic_add(&dependency_count[row], static_cast<J>(1));
-            }
-        }
-    }
-
-    // Structural zero pivot: the first column without a diagonal entry.
-    template <uint32_t BLOCKSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void cscsv_analysis_pivot_kernel(int64_t m,
-                                     const I* __restrict__ csc_diag_ind,
-                                     J* __restrict__ zero_pivot,
-                                     rocsparse_index_base idx_base,
-                                     rocsparse_diag_type  diag_type)
-    {
-        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
-            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
-        {
-            if(diag_type == rocsparse_diag_type_non_unit && csc_diag_ind[col] < 0)
-            {
-                rocsparse::atomic_min(zero_pivot, static_cast<J>(col + idx_base));
-            }
-        }
-    }
-
-    // Tasks in elimination order: column order, reversed for an upper triangle.
-    template <uint32_t BLOCKSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void cscsv_expand_tasks_kernel(int64_t m,
-                                   const I* __restrict__ csc_col_ptr,
-                                   const I* __restrict__ task_ptr,
-                                   int64_t chunk,
-                                   int64_t num_tasks,
-                                   bool    reverse,
-                                   J* __restrict__ task_col,
-                                   I* __restrict__ task_begin,
-                                   rocsparse_index_base idx_base)
-    {
-        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
-            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
-        {
-            const I begin = csc_col_ptr[col] - idx_base;
-            for(I t = task_ptr[col]; t < task_ptr[col + 1]; ++t)
-            {
-                const int64_t pos = reverse ? (num_tasks - 1 - t) : t;
-                task_col[pos]     = static_cast<J>(col);
-                task_begin[pos]   = begin + static_cast<I>((t - task_ptr[col]) * chunk);
-            }
-        }
-    }
-
     // Task t of the solve, run by a group of NUM_LANES lanes.
-    template <uint32_t NUM_LANES, uint32_t ITEMS, typename I, typename J, typename T>
+    template <uint32_t NUM_LANES, uint32_t NUM_ITEMS, typename I, typename J, typename T>
     ROCSPARSE_DEVICE_ILF void cscsv_solve_task(int64_t  t,
                                                uint32_t lid,
                                                const I* __restrict__ csc_col_ptr,
@@ -218,10 +83,10 @@ namespace rocsparse
             }
         }
 
-        J    rows[ITEMS];
-        T    vals[ITEMS];
-        bool deps[ITEMS];
-        for(uint32_t i = 0; i < ITEMS; ++i)
+        J    rows[NUM_ITEMS];
+        T    vals[NUM_ITEMS];
+        bool deps[NUM_ITEMS];
+        for(uint32_t i = 0; i < NUM_ITEMS; ++i)
         {
             const int64_t k = static_cast<int64_t>(kbeg) + lid + i * NUM_LANES;
             rows[i]         = (k < col_end) ? csc_row_ind[k] - idx_base : col;
@@ -254,7 +119,7 @@ namespace rocsparse
                     y[col * y_inc] = yc;
                 }
 
-                for(uint32_t i = 0; i < ITEMS; ++i)
+                for(uint32_t i = 0; i < NUM_ITEMS; ++i)
                 {
                     if(deps[i])
                     {
@@ -265,14 +130,14 @@ namespace rocsparse
                 // One release for all the additions of this lane.
                 rocsparse::release_done_row_data();
 
-                for(uint32_t i = 0; i < ITEMS; ++i)
+                for(uint32_t i = 0; i < NUM_ITEMS; ++i)
                 {
                     if(deps[i])
                     {
-                        __scoped_atomic_fetch_sub(&rem[rows[i]],
-                                                  static_cast<J>(1),
-                                                  __ATOMIC_RELAXED,
-                                                  __MEMORY_SCOPE_DEVICE);
+                        rocsparse::atomic_fetch_sub(&rem[rows[i]],
+                                                    static_cast<J>(1),
+                                                    __ATOMIC_RELAXED,
+                                                    __MEMORY_SCOPE_DEVICE);
                     }
                 }
                 done = true;
@@ -289,7 +154,7 @@ namespace rocsparse
     // groups that are already running.
     template <uint32_t BLOCKSIZE,
               uint32_t NUM_LANES,
-              uint32_t ITEMS,
+              uint32_t NUM_ITEMS,
               typename I,
               typename J,
               typename T>
@@ -336,22 +201,22 @@ namespace rocsparse
             const int64_t t = first + wid;
             if(t < num_tasks)
             {
-                rocsparse::cscsv_solve_task<NUM_LANES, ITEMS>(t,
-                                                              lid,
-                                                              csc_col_ptr,
-                                                              csc_row_ind,
-                                                              csc_val,
-                                                              csc_diag_ind,
-                                                              task_col,
-                                                              task_begin,
-                                                              y,
-                                                              y_inc,
-                                                              rem,
-                                                              sum,
-                                                              zero_pivot,
-                                                              idx_base,
-                                                              fill_mode,
-                                                              diag_type);
+                rocsparse::cscsv_solve_task<NUM_LANES, NUM_ITEMS>(t,
+                                                                  lid,
+                                                                  csc_col_ptr,
+                                                                  csc_row_ind,
+                                                                  csc_val,
+                                                                  csc_diag_ind,
+                                                                  task_col,
+                                                                  task_begin,
+                                                                  y,
+                                                                  y_inc,
+                                                                  rem,
+                                                                  sum,
+                                                                  zero_pivot,
+                                                                  idx_base,
+                                                                  fill_mode,
+                                                                  diag_type);
             }
 
             if(!clamped)

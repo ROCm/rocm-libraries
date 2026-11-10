@@ -24,13 +24,14 @@
 
 #pragma once
 
+#include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_handle.hpp"
 
 namespace rocsparse
 {
     static constexpr uint32_t s_cscsv_blocksize = 256;
     // Entries per lane of a task.
-    static constexpr uint32_t s_cscsv_items = 4;
+    static constexpr uint32_t s_cscsv_num_items = 4;
 
     typedef rocsparse_status (*cscsv_analysis_launch_t)(rocsparse_handle     handle,
                                                         int64_t              m,
@@ -48,28 +49,27 @@ namespace rocsparse
                                                 rocsparse_indextype                 i_type,
                                                 rocsparse_indextype                 j_type);
 
-    typedef rocsparse_status (*cscsv_build_tasks_launch_t)(rocsparse_handle     handle,
-                                                           int64_t              m,
-                                                           const void*          csc_col_ptr,
-                                                           rocsparse_index_base idx_base,
-                                                           rocsparse_fill_mode  fill_mode,
-                                                           uint32_t             num_lanes,
-                                                           void**               task_col,
-                                                           void**               task_begin,
-                                                           int64_t*             num_tasks,
-                                                           void*                buffer);
+    typedef rocsparse_status (*cscsv_build_tasks_t)(rocsparse_handle     handle,
+                                                    int64_t              m,
+                                                    const void*          csc_col_ptr,
+                                                    rocsparse_index_base idx_base,
+                                                    rocsparse_fill_mode  fill_mode,
+                                                    uint32_t             num_lanes,
+                                                    rocsparse_cscsv_info info,
+                                                    void*                buffer);
 
-    rocsparse_status cscsv_build_tasks_launch_find(rocsparse::cscsv_build_tasks_launch_t* launch,
-                                                   rocsparse_indextype                    i_type,
-                                                   rocsparse_indextype                    j_type);
+    rocsparse_status cscsv_build_tasks_find(rocsparse::cscsv_build_tasks_t* build,
+                                            rocsparse_indextype             i_type,
+                                            rocsparse_indextype             j_type);
 
-    // Size of the temporaries of cscsv_build_tasks_launch_t, taken from the analysis buffer.
-    typedef rocsparse_status (*cscsv_build_tasks_buffer_size_launch_t)(rocsparse_handle handle,
-                                                                       int64_t          m,
-                                                                       size_t* buffer_size);
+    // Size of the temporaries of cscsv_build_tasks_t, taken from the analysis buffer.
+    typedef rocsparse_status (*cscsv_build_tasks_buffer_size_t)(rocsparse_handle handle,
+                                                                int64_t          m,
+                                                                size_t*          buffer_size);
 
-    rocsparse_status cscsv_build_tasks_buffer_size_launch_find(
-        rocsparse::cscsv_build_tasks_buffer_size_launch_t* launch, rocsparse_indextype i_type);
+    rocsparse_status
+        cscsv_build_tasks_buffer_size_find(rocsparse::cscsv_build_tasks_buffer_size_t* launch,
+                                           rocsparse_indextype                         i_type);
 
     typedef rocsparse_status (*cscsv_init_launch_t)(rocsparse_handle handle,
                                                     int64_t          m,
@@ -114,6 +114,24 @@ namespace rocsparse
                                              rocsparse_indextype              i_type,
                                              rocsparse_indextype              j_type,
                                              rocsparse_datatype               t_type);
+
+    // Buffer of the solve without transpose: ticket, remaining dependencies and partial sums of
+    // each batch instance.
+    struct cscsv_solve_buffer_t
+    {
+        size_t ticket_size{};
+        size_t rem_size{};
+        size_t sum_size{};
+        size_t size() const
+        {
+            return ticket_size + rem_size + sum_size;
+        }
+    };
+
+    cscsv_solve_buffer_t cscsv_solve_buffer(int64_t             m,
+                                            int64_t             batch_count,
+                                            rocsparse_indextype j_type,
+                                            rocsparse_datatype  t_type);
 
     // Lanes per task: smallest power of two >= min_lanes, at least 2, at most the wavefront size.
     uint32_t cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size);

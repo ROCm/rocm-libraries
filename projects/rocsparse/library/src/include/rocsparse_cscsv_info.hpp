@@ -24,9 +24,7 @@
 
 #pragma once
 
-#include "rocsparse_control.hpp"
 #include "rocsparse_csrsv_info.hpp"
-#include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_trm_data_t.hpp"
 
@@ -38,85 +36,44 @@ struct _rocsparse_cscsv_info : rocsparse::trm_data_t
 {
 protected:
     rocsparse::singular_info_t m_singularity_numeric_exact{};
-    // Number of unknowns each unknown depends on, per fill mode.
-    void* m_dependency_count[2]{};
-    // Tasks of the solve per fill mode: column and first entry of each task.
+    // Per fill mode, indexed by fill_index: number of unknowns each unknown depends on, and the
+    // tasks of the solve (column and first entry of each task).
+    void*    m_dependency_count[2]{};
     int64_t  m_num_tasks[2]{};
     uint32_t m_num_lanes[2]{};
     void*    m_task_col[2]{};
     void*    m_task_begin[2]{};
     // Transposed CSR analysis, shared with the matrix info with rocsparse_analysis_policy_reuse.
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
+    // Whether the last analysis is the CSC one rather than the transposed CSR one.
+    bool m_csc_analysis{};
 
-    // Operation of the last analysis: none for the CSC analysis, otherwise the transposed one.
-    rocsparse_operation m_analyzed_operation{rocsparse_operation_none};
+    static_assert(rocsparse_fill_mode_lower == 0 && rocsparse_fill_mode_upper == 1,
+                  "the fill mode indexes the per fill mode arrays");
+    static int fill_index(rocsparse_fill_mode fill_mode)
+    {
+        return static_cast<int>(fill_mode);
+    }
 
 public:
     _rocsparse_cscsv_info()                             = default;
     _rocsparse_cscsv_info(const _rocsparse_cscsv_info&) = delete;
     _rocsparse_cscsv_info& operator=(const _rocsparse_cscsv_info&) = delete;
-
-    ~_rocsparse_cscsv_info()
-    {
-        bool allocated = false;
-        for(int f = 0; f < 2; ++f)
-        {
-            allocated |= (this->m_dependency_count[f] != nullptr)
-                         || (this->m_task_col[f] != nullptr) || (this->m_task_begin[f] != nullptr);
-        }
-        if(allocated)
-        {
-            // hipFree does not wait for pending work on hipMallocAsync memory since HIP 7.0.
-            WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-        }
-        for(int f = 0; f < 2; ++f)
-        {
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_col[f]));
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_begin[f]));
-        }
-    }
+    ~_rocsparse_cscsv_info();
 
     // Copies the CSC analysis of that; the transposed analysis is linked by the caller.
-    void copy(const _rocsparse_cscsv_info* that, hipStream_t stream)
-    {
-        this->trm_data_t::copy(that, stream);
-        this->m_analyzed_operation = that->m_analyzed_operation;
-        for(int f = 0; f < 2; ++f)
-        {
-            this->m_num_tasks[f] = that->m_num_tasks[f];
-            this->m_num_lanes[f] = that->m_num_lanes[f];
-            const rocsparse_fill_mode fill_mode
-                = (f == 0) ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
-            const rocsparse::trm_info_t* trm = that->get(rocsparse_operation_none, fill_mode);
-            if(trm == nullptr)
-            {
-                continue;
-            }
-            const size_t sizeof_I = rocsparse::indextype_sizeof(trm->get_offset_indextype());
-            const size_t sizeof_J = rocsparse::indextype_sizeof(trm->get_index_indextype());
-            copy_array(
-                &this->m_dependency_count[f], that->m_dependency_count[f], sizeof_J * trm->get_m());
-            copy_array(&this->m_task_col[f], that->m_task_col[f], sizeof_J * that->m_num_tasks[f]);
-            copy_array(
-                &this->m_task_begin[f], that->m_task_begin[f], sizeof_I * that->m_num_tasks[f]);
-        }
-    }
+    void copy(const _rocsparse_cscsv_info* that, hipStream_t stream);
 
-    static void copy_array(void** dest, const void* src, size_t size)
-    {
-        if(*dest != nullptr)
-        {
-            WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(*dest));
-            *dest = nullptr;
-        }
-        if(src != nullptr && size > 0)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(dest, size));
-            THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(*dest, src, size, hipMemcpyDeviceToDevice));
-        }
-    }
+    // Replaces the dependency counts and the task arrays of a fill mode by arrays of the given
+    // sizes, allocated on the stream.
+    rocsparse_status
+        allocate_dependency_count(rocsparse_fill_mode fill_mode, size_t size, hipStream_t stream);
+    rocsparse_status allocate_tasks(rocsparse_fill_mode fill_mode,
+                                    int64_t             num_tasks,
+                                    uint32_t            num_lanes,
+                                    size_t              sizeof_col,
+                                    size_t              sizeof_begin,
+                                    hipStream_t         stream);
 
     rocsparse::singular_info_t* get_singularity_numeric_exact()
     {
@@ -131,55 +88,29 @@ public:
             batch_count, indextype, stream));
     }
 
-    const void* get_dependency_count(rocsparse_fill_mode fill_mode) const
+    void* get_dependency_count(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
-    }
-
-    void* get_dependency_count(rocsparse_fill_mode fill_mode)
-    {
-        return this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
-    }
-
-    void** get_ref_dependency_count(rocsparse_fill_mode fill_mode)
-    {
-        return &this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
+        return this->m_dependency_count[fill_index(fill_mode)];
     }
 
     int64_t get_num_tasks(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_num_tasks[fill_mode == rocsparse_fill_mode_upper];
+        return this->m_num_tasks[fill_index(fill_mode)];
     }
 
     uint32_t get_num_lanes(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_num_lanes[fill_mode == rocsparse_fill_mode_upper];
+        return this->m_num_lanes[fill_index(fill_mode)];
     }
 
-    void set_tasks(rocsparse_fill_mode fill_mode, int64_t num_tasks, uint32_t num_lanes)
+    void* get_task_col(rocsparse_fill_mode fill_mode) const
     {
-        this->m_num_tasks[fill_mode == rocsparse_fill_mode_upper] = num_tasks;
-        this->m_num_lanes[fill_mode == rocsparse_fill_mode_upper] = num_lanes;
+        return this->m_task_col[fill_index(fill_mode)];
     }
 
-    const void* get_task_col(rocsparse_fill_mode fill_mode) const
+    void* get_task_begin(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_task_col[fill_mode == rocsparse_fill_mode_upper];
-    }
-
-    const void* get_task_begin(rocsparse_fill_mode fill_mode) const
-    {
-        return this->m_task_begin[fill_mode == rocsparse_fill_mode_upper];
-    }
-
-    void** get_ref_task_col(rocsparse_fill_mode fill_mode)
-    {
-        return &this->m_task_col[fill_mode == rocsparse_fill_mode_upper];
-    }
-
-    void** get_ref_task_begin(rocsparse_fill_mode fill_mode)
-    {
-        return &this->m_task_begin[fill_mode == rocsparse_fill_mode_upper];
+        return this->m_task_begin[fill_index(fill_mode)];
     }
 
     rocsparse_csrsv_info get_csrsv_info()
@@ -197,26 +128,19 @@ public:
         this->m_csrsv_info = value;
     }
 
-    void set_analyzed_operation(rocsparse_operation value)
+    void set_csc_analysis(bool value)
     {
-        this->m_analyzed_operation = value;
+        this->m_csc_analysis = value;
+    }
+
+    // Whether the last analysis is the transposed CSR one.
+    bool uses_csrsv_info() const
+    {
+        return !this->m_csc_analysis && this->m_csrsv_info != nullptr;
     }
 
     // Pivots of the analysis that was performed, CSC or transposed.
-    rocsparse::pivot_info_t* get_symbolic_pivot()
-    {
-        return (this->m_analyzed_operation != rocsparse_operation_none
-                && this->m_csrsv_info != nullptr)
-                   ? static_cast<rocsparse::pivot_info_t*>(this->m_csrsv_info.get())
-                   : static_cast<rocsparse::pivot_info_t*>(this);
-    }
-
-    rocsparse::singular_info_t* get_exact_pivot()
-    {
-        return (this->m_analyzed_operation != rocsparse_operation_none
-                && this->m_csrsv_info != nullptr)
-                   ? this->m_csrsv_info->get_singularity_numeric_exact()
-                   : &this->m_singularity_numeric_exact;
-    }
+    rocsparse::pivot_info_t*    get_symbolic_pivot();
+    rocsparse::singular_info_t* get_exact_pivot();
 };
 typedef _rocsparse_cscsv_info* rocsparse_cscsv_info;

@@ -36,6 +36,18 @@ uint32_t rocsparse::cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
     return num_lanes;
 }
 
+rocsparse::cscsv_solve_buffer_t rocsparse::cscsv_solve_buffer(int64_t             m,
+                                                              int64_t             batch_count,
+                                                              rocsparse_indextype j_type,
+                                                              rocsparse_datatype  t_type)
+{
+    rocsparse::cscsv_solve_buffer_t buffer;
+    buffer.ticket_size = rocsparse::align_size(sizeof(int32_t) * batch_count);
+    buffer.rem_size = rocsparse::align_size(rocsparse::indextype_sizeof(j_type) * m * batch_count);
+    buffer.sum_size = rocsparse::align_size(rocsparse::datatype_sizeof(t_type) * m * batch_count);
+    return buffer;
+}
+
 rocsparse_status rocsparse::cscsv_check_matrix(rocsparse_const_spmat_descr A)
 {
     ROCSPARSE_CHECKARG(0, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
@@ -64,9 +76,9 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
         buffer_size[0] = 0;
         if(A->cols > 0)
         {
-            rocsparse::cscsv_build_tasks_buffer_size_launch_t launch;
+            rocsparse::cscsv_build_tasks_buffer_size_t launch;
             RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::cscsv_build_tasks_buffer_size_launch_find(&launch, A->col_type));
+                rocsparse::cscsv_build_tasks_buffer_size_find(&launch, A->col_type));
             RETURN_IF_ROCSPARSE_ERROR(launch(handle, A->cols, buffer_size));
         }
         return rocsparse_status_success;
@@ -91,13 +103,9 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
     if(trans == rocsparse_operation_none)
     {
-        // Ticket, remaining dependencies and partial sums of each batch instance.
-        const int64_t m           = A->cols;
-        const int64_t batch_count = y->batch_count;
         buffer_size[0]
-            = rocsparse::align_size(sizeof(int32_t) * batch_count)
-              + rocsparse::align_size(rocsparse::indextype_sizeof(A->row_type) * m * batch_count)
-              + rocsparse::align_size(rocsparse::datatype_sizeof(A->data_type) * m * batch_count);
+            = rocsparse::cscsv_solve_buffer(A->cols, y->batch_count, A->row_type, A->data_type)
+                  .size();
         return rocsparse_status_success;
     }
     _rocsparse_mat_descr   descr_csr;

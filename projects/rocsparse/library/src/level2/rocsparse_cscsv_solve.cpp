@@ -67,7 +67,7 @@ namespace rocsparse
             batch_index += hipGridDim_y)
         {
 
-            rocsparse::cscsv_solve_device<BLOCKSIZE, NUM_LANES, rocsparse::s_cscsv_items>(
+            rocsparse::cscsv_solve_device<BLOCKSIZE, NUM_LANES, rocsparse::s_cscsv_num_items>(
                 num_tasks,
                 csc_col_ptr,
                 csc_row_ind,
@@ -86,6 +86,35 @@ namespace rocsparse
                 diag_type);
             // The next batch instance reuses the shared ticket of the block.
             __syncthreads();
+        }
+    }
+
+    // For each batch instance, resets the dependency counters from the analysis and starts the
+    // partial sums at alpha * x. The solve does not read x, so x and y may be the same vector.
+    template <uint32_t BLOCKSIZE, typename J, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void cscsv_init_kernel(J       m,
+                           int64_t batch_count,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                           int64_t alpha_stride,
+                           const J* __restrict__ dependency_count,
+                           const T* __restrict__ x,
+                           int64_t x_inc,
+                           int64_t x_stride,
+                           J* __restrict__ rem,
+                           T* __restrict__ sum,
+                           bool is_host_mode)
+    {
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            i < m * batch_count;
+            i += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        {
+            const int64_t batch = i / m;
+            const int64_t row   = i % m;
+            const T       alpha
+                = is_host_mode ? alpha_union.value : alpha_union.pointer[batch * alpha_stride];
+            rem[i] = dependency_count[row];
+            sum[i] = alpha * x[batch * x_stride + row * x_inc];
         }
     }
 
@@ -325,14 +354,6 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
         const int64_t             m           = A->cols;
         const rocsparse_indextype J_type      = A->row_type;
 
-        size_t required_buffer_size{};
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::cscsv_solve_buffer_size(handle, trans, A, x, y, &required_buffer_size));
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((buffer_size_in_bytes < required_buffer_size)
-                                                   ? rocsparse_status_invalid_size
-                                                   : rocsparse_status_success,
-                                               "the buffer of the CSC solve is too small");
-
         const rocsparse::trm_info_t* trm_info
             = info->get(rocsparse_operation_none, descr->fill_mode);
         if(trm_info == nullptr)
@@ -351,17 +372,18 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
             return rocsparse_status_success;
         }
 
-        char*        ptr               = reinterpret_cast<char*>(buffer);
-        int32_t*     ticket            = reinterpret_cast<int32_t*>(ptr);
-        const size_t ticket_size_bytes = rocsparse::align_size(sizeof(int32_t) * batch_count);
-        ptr += ticket_size_bytes;
+        const rocsparse::cscsv_solve_buffer_t layout
+            = rocsparse::cscsv_solve_buffer(m, batch_count, J_type, A->data_type);
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((buffer_size_in_bytes < layout.size())
+                                                   ? rocsparse_status_invalid_size
+                                                   : rocsparse_status_success,
+                                               "the buffer of the CSC solve is too small");
+        char*    ptr    = reinterpret_cast<char*>(buffer);
+        int32_t* ticket = reinterpret_cast<int32_t*>(ptr);
+        void*    rem    = ptr + layout.ticket_size;
+        void*    sum    = ptr + layout.ticket_size + layout.rem_size;
 
-        void* rem = ptr;
-        ptr += rocsparse::align_size(rocsparse::indextype_sizeof(J_type) * m * batch_count);
-
-        void* sum = ptr;
-
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(ticket, 0, ticket_size_bytes, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(ticket, 0, layout.ticket_size, stream));
 
         rocsparse::cscsv_init_launch_t init_launch;
         RETURN_IF_ROCSPARSE_ERROR(
@@ -504,51 +526,4 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                                             y->batch_count,
                                                             false));
     return rocsparse_status_success;
-}
-
-rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
-                                             rocsparse_cscsv_info info,
-                                             rocsparse_indextype  indextype,
-                                             void*                position)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-    if(info == nullptr)
-    {
-        return rocsparse::csrsv_zero_pivot(handle, nullptr, indextype, position);
-    }
-    if(info->get_csrsv_info() == nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::singularity_get_position_async(handle,
-                                                      1,
-                                                      info,
-                                                      info->get_singularity_numeric_exact(),
-                                                      nullptr,
-                                                      handle->pointer_mode,
-                                                      indextype,
-                                                      position));
-
-        // position lives where the handle's pointer mode says it does.
-        const hipMemcpyKind kind = (handle->pointer_mode == rocsparse_pointer_mode_host)
-                                       ? hipMemcpyHostToHost
-                                       : hipMemcpyDeviceToHost;
-
-        int64_t p = -1;
-        if(indextype == rocsparse_indextype_i32)
-        {
-            int32_t p32;
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemcpyAsync(&p32, position, sizeof(int32_t), kind, handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
-            p = p32;
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemcpyAsync(&p, position, sizeof(int64_t), kind, handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
-        }
-        return (p != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success;
-    }
-    return rocsparse::csrsv_zero_pivot(handle, info->get_csrsv_info(), indextype, position);
 }
