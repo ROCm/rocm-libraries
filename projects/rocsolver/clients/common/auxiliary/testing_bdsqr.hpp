@@ -460,6 +460,69 @@ void bdsqr_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
+// Relative error of the singular values (no vectors) computed by rocsolver, against LAPACK in double
+// precision on the same input, for the bidiagonal of a random m-by-n Gaussian matrix, m = 1.2 n
+// (d_i ~ chi(m - i) and e_i ~ chi(n - 1 - i): the distribution of its Golub-Kahan bidiagonal).
+// The QR iterations apply many plane rotations, so a small bias of the rotations (c^2 + s^2 != 1
+// on average) accumulates, and the error grows well beyond that of LAPACK's xBDSQR.
+template <typename T>
+void bdsqr_accuracy(const rocblas_handle handle,
+                    const rocblas_fill uplo,
+                    const rocblas_int n,
+                    double* max_err)
+{
+    using S = decltype(std::real(T{}));
+    host_strided_batch_vector<S> hD(n, 1, n, 1);
+    host_strided_batch_vector<S> hE(n, 1, n, 1);
+    host_strided_batch_vector<rocblas_int> hInfo(1, 1, 1, 1);
+    device_strided_batch_vector<S> dD(n, 1, n, 1);
+    device_strided_batch_vector<S> dE(n, 1, n, 1);
+    device_strided_batch_vector<T> dVUC(1, 1, 1, 1);
+    device_strided_batch_vector<rocblas_int> dInfo(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dD.memcheck());
+    CHECK_HIP_ERROR(dE.memcheck());
+    CHECK_HIP_ERROR(dVUC.memcheck());
+    CHECK_HIP_ERROR(dInfo.memcheck());
+
+    rocblas_seedrand();
+    const rocblas_int m = n + n / 5;
+    std::vector<double> D(n), E(n), work(4 * n);
+    for(rocblas_int i = 0; i < n; ++i)
+    {
+        hD[0][i] = S(std::sqrt(std::chi_squared_distribution<double>(m - i)(rocblas_rng)));
+        hE[0][i] = (i < n - 1)
+            ? S(std::sqrt(std::chi_squared_distribution<double>(n - 1 - i)(rocblas_rng)))
+            : S(0);
+        D[i] = hD[0][i];
+        E[i] = hE[0][i];
+    }
+    CHECK_HIP_ERROR(dD.transfer_from(hD));
+    CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+    CHECK_ROCBLAS_ERROR(rocsolver_bdsqr(handle, uplo, n, 0, 0, 0, dD.data(), dE.data(), dVUC.data(),
+                                        1, dVUC.data(), 1, dVUC.data(), 1, dInfo.data()));
+    CHECK_HIP_ERROR(hD.transfer_from(dD));
+    CHECK_HIP_ERROR(hInfo.transfer_from(dInfo));
+
+    rocblas_int info;
+    cpu_bdsqr(uplo, n, 0, 0, 0, D.data(), E.data(), (double*)nullptr, 1, (double*)nullptr, 1,
+              (double*)nullptr, 1, work.data(), &info);
+    EXPECT_EQ(info, 0);
+    EXPECT_EQ(hInfo[0][0], 0);
+    *max_err = 1;
+    if(info != 0 || hInfo[0][0] != 0)
+        return;
+
+    // the singular values are sorted in decreasing order in both
+    double num = 0, den = 0;
+    for(rocblas_int i = 0; i < n; ++i)
+    {
+        num += (double(hD[0][i]) - D[i]) * (double(hD[0][i]) - D[i]);
+        den += D[i] * D[i];
+    }
+    *max_err = std::sqrt(num / den);
+}
+
 template <typename T>
 void testing_bdsqr(Arguments& argus)
 {
@@ -475,6 +538,7 @@ void testing_bdsqr(Arguments& argus)
     rocblas_int ldv = argus.get<rocblas_int>("ldv", nv > 0 ? n : 1);
     rocblas_int ldu = argus.get<rocblas_int>("ldu", nu > 0 ? nu : 1);
     rocblas_int ldc = argus.get<rocblas_int>("ldc", nc > 0 ? n : 1);
+    rocblas_int accuracy = argus.get<rocblas_int>("accuracy", 0);
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     rocblas_int hot_calls = argus.iters;
@@ -490,6 +554,20 @@ void testing_bdsqr(Arguments& argus)
                               rocblas_status_success);
 
         EXPECT_EQ(alg_mode, rocsolver_alg_mode_hybrid);
+    }
+
+    // accuracy of the singular values against a reference in double precision
+    if(accuracy)
+    {
+        double max_error = 1;
+        bdsqr_accuracy<T>(handle, uplo, n, &max_error);
+        // (in single precision, the error with unbiased rotations is about 20 to 25 machine
+        // epsilons for n = 1000 and 75 to 125 for n = 4000, as with LAPACK's SBDSQR; biased
+        // rotations gave 150 to 370 and 600 to 1350)
+        if(argus.unit_check)
+            ROCSOLVER_TEST_CHECK(T, max_error, n / 16);
+        argus.validate_consumed();
+        return;
     }
 
     // check non-supported values
