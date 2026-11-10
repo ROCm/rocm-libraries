@@ -1770,6 +1770,9 @@ struct ConfigEmbeddingTable
     // path rank the whole vocab and check applicability lazily (IsArgsSupported) without
     // FillValidKernels. Empty for v1/v2 tables and for sentinel rows (kernel_id == "").
     std::vector<std::pair<std::string, std::vector<float>>> vocab;
+    // Parallel to `vocab`: the same embeddings as a contiguous matrix, so the scorer consumes them
+    // directly instead of copying every embedding out of `vocab` on each selection call.
+    std::vector<std::vector<float>> vocab_embeddings;
 };
 
 // Build the byte key for an encoded-param vector (exact match, collision-free).
@@ -1917,7 +1920,10 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                         break;
                     }
                     if(!kid.empty()) // skip sentinel rows (no kernel_id)
+                    {
                         table.vocab.emplace_back(std::move(kid), ordered_emb[r]);
+                        table.vocab_embeddings.push_back(ordered_emb[r]);
+                    }
                 }
                 if(!vocab_ok)
                 {
@@ -1927,6 +1933,7 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                         << " has a truncated kernel-id block; disabling lazy-applicability "
                            "vocab (table fast path still available)");
                     table.vocab.clear();
+                    table.vocab_embeddings.clear();
                 }
             }
             if(!table.present)
@@ -1963,6 +1970,19 @@ GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
         return empty;
     }
     return GetConfigEmbeddingTable(arch, solver).vocab;
+}
+
+// Embeddings for GetConfigEmbeddingVocab, as a contiguous matrix (same order), so the scorer reads
+// them directly instead of copying every embedding per selection call.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::vector<float>>&
+GetConfigEmbeddingMatrix(const std::string& arch, const std::string& solver)
+{
+    if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
+    {
+        static const std::vector<std::vector<float>> empty;
+        return empty;
+    }
+    return GetConfigEmbeddingTable(arch, solver).vocab_embeddings;
 }
 
 } // namespace candidate_selection

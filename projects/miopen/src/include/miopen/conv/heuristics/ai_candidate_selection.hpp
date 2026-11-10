@@ -86,6 +86,11 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
 MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
 GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver);
 
+/// Embeddings for GetConfigEmbeddingVocab as a contiguous matrix (same order), so the scorer reads
+/// them in place instead of copying every embedding out of the vocab per selection call.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::vector<float>>&
+GetConfigEmbeddingMatrix(const std::string& arch, const std::string& solver);
+
 /// Rank-then-lazy-applicability candidate selection. Ranks the whole precomputed config vocabulary
 /// by the two-tower score (input encoder + stored config embeddings -- no FillValidKernels, no
 /// fdeep config encoder), then walks the ranking best-first and returns the first candidate

@@ -1140,11 +1140,10 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
                                                       std::to_string(vocab.size()) + " vocab)");
             const auto& model           = GetCandidateSelectionModel(arch, solver);
             const auto encoded_features = model.EncodeInputFeatures(features);
-            std::vector<std::vector<float>> vocab_embeddings;
-            vocab_embeddings.reserve(vocab.size());
-            for(const auto& entry : vocab)
-                vocab_embeddings.push_back(entry.second);
-            scored = model.SelectBestCandidateIndices(encoded_features, vocab_embeddings);
+            // Score the cached embedding matrix in place (parallel to `vocab`) instead of copying
+            // every embedding out of the vocab on each call.
+            scored = model.SelectBestCandidateIndices(encoded_features,
+                                                      GetConfigEmbeddingMatrix(arch, solver));
         }
 
         // Walk best-first, checking applicability lazily; this span + the check count show how much
