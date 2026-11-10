@@ -139,6 +139,30 @@
           "sha256": "c4129d1bc452b2c0c5e15772aed9df0b617f59b09449b40c2eaebf4b571364aa",
           "status": "ok"
         },
+        "gemm/gfx1201/t128x128x64_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 98937,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x128x64_compv4_swz_db1wg_fp16_t128x128x64_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "245ebedda41ae935313316c0d1af2169efb72e7e0e800567641d7e4e08440a5e",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x256x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 119693,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x256x32_compv4_swz_db1wg_fp16_t128x256x32_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "4c86836a49f768ebd7390df261ace7ba72c4a585b6552dea04637a5d49be118d",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t256x128x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 120196,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t256x128x32_compv4_swz_db1wg_fp16_t256x128x32_w4x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "5ccb190891461a2b9bf214c1a1b03cb5ab37a50b41134d70d235bb076fb179ca",
+          "status": "ok"
+        },
         "gemm/gfx1201/t32x32x16": {
           "arch": "gfx1201",
           "bytes": 16093,
@@ -425,6 +449,30 @@
           "sha256": "54a5e50fa5ce7c1ca6c37349ff3ccda41c82a11619705f6d00cb29f82f28a863",
           "status": "ok"
         },
+        "gemm/gfx1201/t128x128x64_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 98944,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x128x64_compv4_swz_db1wg_fp16_t128x128x64_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "e5c415d6382349c70c119be50c318569241f71057b7a686f27fcc24217bc3c12",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x256x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 119700,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x256x32_compv4_swz_db1wg_fp16_t128x256x32_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "a0cdc281d6f68402075068841209036551e276add0f65a904fb5047796f2a04b",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t256x128x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 120203,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t256x128x32_compv4_swz_db1wg_fp16_t256x128x32_w4x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "e1d95d347f3d282141818bce4dc557ec30231db52855c5633c164f749598005e",
+          "status": "ok"
+        },
         "gemm/gfx1201/t32x32x16": {
           "arch": "gfx1201",
           "bytes": 16100,
@@ -709,6 +757,30 @@
           "family": "gemm",
           "kernel_name": "irhash_gemm_1201_compv4_swz_lsam_gm4_kst8x4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4",
           "sha256": "5a6ae9d4d016c824ad8b0e9fc949cbe7496d016a165c4fbd308b42ccdf40222c",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x64_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 99008,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x128x64_compv4_swz_db1wg_fp16_t128x128x64_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "efe7b61ca2ac1cba00a1e8b6f842f7d2ee8057df673e60b3e095606739f59f48",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x256x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 119764,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x256x32_compv4_swz_db1wg_fp16_t128x256x32_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "684d76ca14e95c694adcadd8c5b6d9d7095e90c6af49ac33001d12657cee3ec9",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t256x128x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 120267,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t256x128x32_compv4_swz_db1wg_fp16_t256x128x32_w4x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "8ab21d4bc4f2213d90672768c660794e8cb99ef8d6b952bc95a6af71eed6cff2",
           "status": "ok"
         },
         "gemm/gfx1201/t32x32x16": {
@@ -1026,6 +1098,30 @@
           "family": "gemm",
           "kernel_name": "irhash_gemm_1201_compv4_swz_lsam_gm4_kst8x4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4",
           "sha256": "5a6ae9d4d016c824ad8b0e9fc949cbe7496d016a165c4fbd308b42ccdf40222c",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x64_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 99008,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x128x64_compv4_swz_db1wg_fp16_t128x128x64_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "efe7b61ca2ac1cba00a1e8b6f842f7d2ee8057df673e60b3e095606739f59f48",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x256x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 119764,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t128x256x32_compv4_swz_db1wg_fp16_t128x256x32_w2x4x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "684d76ca14e95c694adcadd8c5b6d9d7095e90c6af49ac33001d12657cee3ec9",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t256x128x32_compv4_swz_db1wg": {
+          "arch": "gfx1201",
+          "bytes": 120267,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_t256x128x32_compv4_swz_db1wg_fp16_t256x128x32_w4x2x1_wt16x16x16_compv4_intrawave_default_lsam_gm4_kst8x4_db1wg",
+          "sha256": "8ab21d4bc4f2213d90672768c660794e8cb99ef8d6b952bc95a6af71eed6cff2",
           "status": "ok"
         },
         "gemm/gfx1201/t32x32x16": {

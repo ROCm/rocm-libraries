@@ -15,6 +15,12 @@ from rocke.dispatch.gemm.support import (
     request_shape_supported,
     support_query_from_universal_spec,
 )
+from rocke.instances.common.gemm_universal import (
+    DataSpec,
+    TileSpec,
+    TraitSpec,
+    UniversalGemmSpec,
+)
 from rocke.tests.arch_marks import COVERED_ARCHES
 
 
@@ -87,6 +93,53 @@ class TestGemmSupportPredicates(unittest.TestCase):
         ok, why = gemm_config_supported(replace(q, epilogue="cshuffle"))
         self.assertFalse(ok)
         self.assertIn("WMMA path supports only the 'default' epilogue", why)
+
+    def _one_wg_query(self, tile=(128, 128, 64, 2, 4), **traits):
+        tm, tn, tk, wm, wn = tile
+        spec = UniversalGemmSpec(
+            name="support_db1wg",
+            tile=TileSpec(tm, tn, tk, wm, wn, 1, 16, 16, 16),
+            trait=TraitSpec(
+                pipeline="compv4",
+                epilogue="default",
+                lds_db_allow_1wg=True,
+                **traits,
+            ),
+            data=DataSpec(),
+            wave_size=32,
+        )
+        return support_query_from_universal_spec(spec, arch="gfx1201")
+
+    def test_one_workgroup_budget_accepts_exact_capacity(self):
+        for tile in ((128, 128, 64, 2, 4), (256, 128, 32, 4, 2)):
+            with self.subTest(tile=tile):
+                self.assertEqual(
+                    gemm_config_supported(self._one_wg_query(tile)), (True, "ok")
+                )
+
+    def test_one_workgroup_budget_charges_both_padded_stages(self):
+        # The unpadded double buffer exactly fills 64 KiB; a pad on each row
+        # must fail, even though the legacy single-stage estimate still fits.
+        self.assertFalse(gemm_config_supported(self._one_wg_query(lds_k_pad=1))[0])
+        self.assertTrue(
+            gemm_config_supported(
+                self._one_wg_query((256, 128, 32, 4, 2), lds_k_pad=8)
+            )[0]
+        )
+        self.assertFalse(
+            gemm_config_supported(self._one_wg_query((256, 128, 64, 4, 2)))[0]
+        )
+
+    def test_one_workgroup_policy_cannot_escape_its_arch_or_pipeline(self):
+        q = self._one_wg_query()
+        for bad in (
+            replace(q, arch="gfx1151"),
+            replace(q, pipeline="mem"),
+            replace(q, direct_to_lds=True),
+            replace(self._cdna_query("gfx950"), lds_db_allow_1wg=True),
+        ):
+            with self.subTest(query=bad):
+                self.assertFalse(gemm_config_supported(bad)[0])
 
     def test_request_shape_support_respects_padding_flags(self):
         for arch in COVERED_ARCHES:

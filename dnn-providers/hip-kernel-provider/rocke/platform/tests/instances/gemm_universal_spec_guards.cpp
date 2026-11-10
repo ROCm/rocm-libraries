@@ -100,6 +100,19 @@ void gfx1201_tile(Spec& s)
     s.block_size = 128;
 }
 
+/* Exactly 64 KiB for two padded-free A/B buffers; the default two-workgroup
+ * budget cannot double-buffer it. */
+void gfx1201_db1wg_tile(Spec& s)
+{
+    gfx1201_tile(s);
+    s.tile.tile_m = 128;
+    s.tile.tile_n = 128;
+    s.tile.tile_k = 64;
+    s.trait.pipeline = "compv4";
+    s.trait.lds_db_allow_1wg = true;
+    s.trait.lds_store_after_mma = true;
+}
+
 void run(const Case& c)
 {
     Spec s = base_spec();
@@ -213,6 +226,76 @@ int main()
              s.trait.k_stagger_step = 4;
          },
          nullptr},
+        {"one-workgroup double buffer at 64 KiB", "gfx1201", gfx1201_db1wg_tile, nullptr},
+        {"64 KiB double buffer still needs opt-in",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.trait.lds_db_allow_1wg = false;
+         },
+         "lds_store_after_mma needs the WMMA compv4 double-buffered K loop"},
+        {"one-workgroup double buffer exceeds 64 KiB",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.tile.tile_n = 192;
+         },
+         "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"},
+        {"one-workgroup double buffer charges row padding",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.trait.lds_k_pad = 1;
+         },
+         "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"},
+        {"one-workgroup double buffer fits with row padding",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.tile.tile_k = 32;
+             s.trait.lds_k_pad = 16;
+         },
+         nullptr},
+        {"one-workgroup policy on an already-fitting tile",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+             s.trait.lds_db_allow_1wg = true;
+         },
+         nullptr},
+        {"one-workgroup policy on mem",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.lds_db_allow_1wg = true;
+             s.trait.lds_store_after_mma = true;
+         },
+         "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"},
+        {"one-workgroup policy off gfx1201",
+         "gfx950",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.tile.warp_tile_m = 32;
+             s.tile.warp_tile_n = 32;
+             s.wave_size = 64;
+             s.block_size = 256;
+         },
+         "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"},
+        {"one-workgroup policy with direct-to-LDS retains earlier rejection",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.trait.direct_to_lds = true;
+         },
+         "WMMA path does not support direct_to_lds on gfx1201"},
+        {"one-workgroup policy with cshuffle retains earlier rejection",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_db1wg_tile(s);
+             s.trait.epilogue = "cshuffle";
+         },
+         "WMMA path supports the 'cshuffle' epilogue only on gfx1250, not gfx1201"},
         {"lds_store_after_mma on mem",
          "gfx1201",
          [](Spec& s) {

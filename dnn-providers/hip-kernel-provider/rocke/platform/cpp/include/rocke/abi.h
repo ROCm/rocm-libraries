@@ -122,8 +122,9 @@ extern "C" {
  *     uniform_wave at its end, which changes its size.
  * 16: rocke_gemm_trait_spec_t gained the WMMA K-loop placement, raster and
  *     stagger fields (lds_store_after_mma, group_m, k_stagger,
- *     k_stagger_step), which changes its size again. */
-#define ROCKE_ABI_VERSION 16
+ *     k_stagger_step), which changes its size again.
+ * 17: rocke_gemm_trait_spec_t gained lds_db_allow_1wg, changing its layout. */
+#define ROCKE_ABI_VERSION 17
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

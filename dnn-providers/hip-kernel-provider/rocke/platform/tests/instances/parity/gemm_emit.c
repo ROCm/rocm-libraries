@@ -697,6 +697,45 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->batched = false;
         break;
     }
+    case 38: /* one-workgroup LDS double buffer, 128x128x64 */
+    case 39: /* one-workgroup LDS double buffer, 256x128x32 */
+    case 40: /* one-workgroup LDS double buffer, 128x256x32 */
+    {
+        static const struct
+        {
+            const char* name;
+            int tm, tn, tk, wm, wn;
+        } cfgs[] = {
+            {"test_gfx1201_compv4_db1wg_128x128x64", 128, 128, 64, 2, 4},
+            {"test_gfx1201_compv4_db1wg_256x128x32", 256, 128, 32, 4, 2},
+            {"test_gfx1201_compv4_db1wg_128x256x32", 128, 256, 32, 2, 4},
+        };
+        const int i = idx - 38;
+        spec->name = cfgs[i].name;
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = cfgs[i].tm,
+                                              .tile_n = cfgs[i].tn,
+                                              .tile_k = cfgs[i].tk,
+                                              .warp_m = cfgs[i].wm,
+                                              .warp_n = cfgs[i].wn,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue = "default";
+        spec->trait.lds_swizzle = true;
+        spec->trait.lds_db_allow_1wg = true;
+        spec->trait.lds_store_after_mma = true;
+        spec->trait.group_m = 4;
+        spec->trait.k_stagger = 8;
+        spec->trait.k_stagger_step = 4;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 32;
+        spec->block_size = 32 * cfgs[i].wm * cfgs[i].wn;
+        spec->batched = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -704,7 +743,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-37
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-40
  * gfx1201; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -716,7 +755,7 @@ static const char* arch_for(int idx)
     {
         return "gfx1250";
     }
-    if(idx >= 33 && idx <= 37)
+    if(idx >= 33 && idx <= 40)
     {
         return "gfx1201";
     }
@@ -727,7 +766,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..37>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..40>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

@@ -346,6 +346,10 @@ class TraitSpec:
     # output.
     k_stagger: int = 0
     k_stagger_step: int = 1
+    # Let gfx1201's WMMA compv4 double buffer use the full LDS budget of one
+    # resident workgroup instead of reserving room for two. Explicit opt-in;
+    # actual padded row bytes must still fit the device's LDS capacity.
+    lds_db_allow_1wg: bool = False
 
 
 @dataclass(frozen=True)
@@ -438,6 +442,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 # path), so fp8 with bf16 C and fp8 with fp16 C are two symbols
                 # and every other kernel keeps its name.
                 f"c{self.data.dtype_c}": self.data.dtype_c != self.data.dtype_a,
+                "db1wg": tr.lds_db_allow_1wg,
             },
         )
 
@@ -624,7 +629,7 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
       the A/B element size (1 for the fp8/bf8 operands).
     * ``db`` — whether the compv4 software-pipelined double buffer is
       enabled (compv4, direct epilogue, not DTL, and the doubled buffer
-      still fits 2 WG/CU).
+      still fits the requested 2 WG/CU, or 1 WG/CU with ``lds_db_allow_1wg``).
     * ``two_buf`` — whether the AB LDS is double-buffered at all
       (``dtl_prefetch`` ping-pong OR ``db``).
 
@@ -643,12 +648,13 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     lds_pad = 0 if spec.trait.direct_to_lds else spec.trait.lds_k_pad
     ab_single = (t.tile_m + t.tile_n) * (t.tile_k + lds_pad) * _elem_bytes(spec)
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
-    db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
+    resident_wgs = 1 if spec.trait.lds_db_allow_1wg else 2
+    db_fits = (2 * ab_single) * resident_wgs <= lds_cap
     db = (
         spec.trait.pipeline == "compv4"
         and spec.trait.epilogue != "cshuffle"
         and not spec.trait.direct_to_lds
-        and db_fits_2wg
+        and db_fits
     )
     two_buf = bool(spec.trait.dtl_prefetch) or db or _tdm_pipelined(spec.trait)
     return ab_single, db, two_buf
@@ -893,6 +899,11 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # K loop; without it they would be silently inert. Both are measured on the
     # WMMA path only, which keeps the MFMA compv4 HotLoop schedule untouched.
     _, _db, _ = _ab_lds_plan(spec, arch)
+    if spec.trait.lds_db_allow_1wg:
+        if arch != "gfx1201" or family != "wmma" or not _db:
+            return False, (
+                "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"
+            )
     if spec.trait.lds_store_after_mma:
         if family != "wmma" or not _db:
             return False, (

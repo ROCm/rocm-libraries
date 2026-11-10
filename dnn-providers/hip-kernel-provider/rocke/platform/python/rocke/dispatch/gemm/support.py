@@ -46,6 +46,8 @@ class GemmSupportQuery:
     dtl_prefetch: bool = False
     active_tile_skip: bool = False
     chiplet_swizzle: bool = False
+    lds_k_pad: int = 0
+    lds_db_allow_1wg: bool = False
 
 
 def support_query_from_universal_spec(
@@ -78,6 +80,8 @@ def support_query_from_universal_spec(
         dtl_prefetch=tr.dtl_prefetch,
         active_tile_skip=tr.active_tile_skip,
         chiplet_swizzle=tr.chiplet_swizzle,
+        lds_k_pad=tr.lds_k_pad,
+        lds_db_allow_1wg=tr.lds_db_allow_1wg,
     )
 
 
@@ -122,12 +126,18 @@ def _lds_bytes(q: GemmSupportQuery) -> float:
     # truth) intentionally does NOT add double-buffer or C-shuffle bytes here,
     # so we don't either -- the previous DSL estimate was strictly more gating.
     tm, tn, tk = q.cta_tile
+    if q.lds_db_allow_1wg:
+        # This opt-in is a physical double-buffer budget, including the pad
+        # on every row, not the legacy single-stage pipeline estimate.
+        return 2 * (tm + tn) * (tk + q.lds_k_pad) * _dtype_bytes(q.dtype_a)
     matrix_a = tm * tk * _dtype_bytes(q.dtype_a)
     matrix_b = tn * tk * _dtype_bytes(q.dtype_b)
     return matrix_a + matrix_b
 
 
 def _lds_capacity(q: GemmSupportQuery) -> int:
+    if q.lds_db_allow_1wg:
+        return _LDS_CAPACITY_LIMITS["default"]
     return _LDS_CAPACITY_LIMITS.get(q.pipeline, _LDS_CAPACITY_LIMITS["default"])
 
 
@@ -226,6 +236,16 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
                 return False, f"WMMA path does not support {label} on {q.arch}"
 
     lds_used = _lds_bytes(q)
+    if q.lds_db_allow_1wg and (
+        q.arch != "gfx1201"
+        or family != "wmma"
+        or q.pipeline != "compv4"
+        or q.direct_to_lds
+        or lds_used > target.lds_capacity_bytes
+    ):
+        return False, (
+            "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"
+        )
     lds_cap = min(_lds_capacity(q), target.lds_capacity_bytes)
     if lds_used > lds_cap:
         return (

@@ -68,8 +68,27 @@ def _spec(tile, dtype, **traits):
     ids=["128x128x32-f16", "128x64x32-bf16"],
 )
 def test_gfx1201_wmma_kloop_traits_numeric(tile, dtype, traits, grid):
+    _check_numeric(tile, dtype, _TRAITS[traits], grid)
+
+
+@arch_specific(
+    ("gfx1201",),
+    reason="the one-workgroup LDS double buffer is admitted on gfx1201 only",
+)
+@pytest.mark.parametrize("grid", _GRIDS, ids=lambda g: "x".join(map(str, g)))
+@pytest.mark.parametrize("dtype", ("f16", "bf16"))
+@pytest.mark.parametrize(
+    "tile",
+    ((128, 128, 64, 2, 4), (256, 128, 32, 4, 2), (128, 256, 32, 2, 4)),
+    ids=("128x128x64-w2x4", "256x128x32-w4x2", "128x256x32-w2x4"),
+)
+def test_gfx1201_wmma_db1wg_numeric(tile, dtype, grid):
+    _check_numeric(tile, dtype, dict(lds_db_allow_1wg=True, **_TRAITS["all"]), grid)
+
+
+def _check_numeric(tile, dtype, traits, grid):
     arch = current_device_arch_in(("gfx1201",))
-    spec = _spec(tile, dtype, **_TRAITS[traits])
+    spec = _spec(tile, dtype, **traits)
     assert is_valid_spec(spec, arch=arch) == (True, "ok")
     tile_m, tile_n, tile_k = tile[:3]
     m, n, k = grid[0] * tile_m, grid[1] * tile_n, grid[2] * tile_k
@@ -92,6 +111,6 @@ def test_gfx1201_wmma_kloop_traits_numeric(tile, dtype, traits, grid):
         expected = exact.astype(np.float16).astype(np.float64)
     for engine in available_engines():
         llvm_ir = lower_universal_gemm(spec, engine, arch=arch)
-        result = launch_universal_gemm(llvm_ir, spec, a, bt, arch=arch, c=c)
+        result = launch_universal_gemm(llvm_ir, spec, a, bt, arch=arch, c=c.copy())
         got = bf16_to_f32(result).astype(np.float64) if dtype == "bf16" else result
         np.testing.assert_array_equal(got.astype(np.float64), expected, err_msg=engine)
