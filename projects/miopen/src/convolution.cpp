@@ -451,8 +451,9 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         // With perf-db access disabled, GetSolutions() reports the solver's GetWorkspaceSize().
         const auto workspace_size = solutions.front().workspace_size;
 #if MIOPEN_USE_GEMM
-        // A find-db record of a GEMM solver must not bypass the dilated workspace budget that
-        // GetWorkSpaceSizeGEMM applies on the path below.
+        // The find-db record picks the solver; its workspace is recomputed above, but returning
+        // it here would skip the dilated workspace budget that GetWorkSpaceSizeGEMM applies on
+        // the path below.
         if(solutions.front().algorithm == miopenConvolutionAlgoGEMM && IsDilated(problem))
         {
             const auto budget = DilatedGemmWorkspaceBudget(ctx);
