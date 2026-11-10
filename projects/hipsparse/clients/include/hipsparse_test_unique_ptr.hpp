@@ -394,60 +394,6 @@ namespace hipsparse_test
         }
     };
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
-    struct spgemm_struct
-    {
-        hipsparseSpGEMMDescr_t descr = nullptr;
-
-        spgemm_struct(const spgemm_struct&) = delete;
-        spgemm_struct& operator=(const spgemm_struct&) = delete;
-
-        spgemm_struct()
-        {
-            throw_if_hipsparse_error("hipsparseSpGEMM_createDescr",
-                                     hipsparseSpGEMM_createDescr(&descr));
-        }
-
-        ~spgemm_struct()
-        {
-            if(descr != nullptr)
-            {
-                log_if_hipsparse_error("hipsparseSpGEMM_destroyDescr",
-                                       hipsparseSpGEMM_destroyDescr(descr));
-            }
-        }
-    };
-#endif
-
-    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
-    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
-    // clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-    // clang-format on
-    struct spgeam_struct
-    {
-        hipsparseSpGEAMDescr_t descr = nullptr;
-
-        spgeam_struct(const spgeam_struct&) = delete;
-        spgeam_struct& operator=(const spgeam_struct&) = delete;
-
-        spgeam_struct()
-        {
-            throw_if_hipsparse_error("hipsparseSpGEAM_createDescr",
-                                     hipsparseSpGEAM_createDescr(&descr));
-        }
-
-        ~spgeam_struct()
-        {
-            if(descr != nullptr)
-            {
-                log_if_hipsparse_error("hipsparseSpGEAM_destroyDescr",
-                                       hipsparseSpGEAM_destroyDescr(descr));
-            }
-        }
-    };
-#endif
-
 } // namespace hipsparse_test
 
 using hipsparse_unique_ptr = std::unique_ptr<void, void (*)(void*)>;
