@@ -25,7 +25,8 @@
     "xcd",
     "align",
     "ns",
-    "bpu"
+    "bpu",
+    "wq"
   ],
   "behavior_notes": [
     "runtime_compilation"

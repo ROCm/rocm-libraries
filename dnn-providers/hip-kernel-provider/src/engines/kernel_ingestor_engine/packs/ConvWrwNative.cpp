@@ -38,8 +38,10 @@
  *        kernels.
  *
  * The kernel (descriptors/conv/wrw/kernels) is a row-direct implicit GEMM on K1's matrix-core
- * atoms (MFMA on gfx908 to gfx950, WMMA on gfx11 and gfx12), with an FMA row ring for exact
- * fp32 where there is no fp32 matrix core: x and dy are read in place
+ * atoms (MFMA on gfx908 to gfx950, WMMA on gfx11 and gfx12), with FMA loops for exact fp32
+ * where there is no fp32 matrix core and, on gfx950, a direct loop for 16-bit channels-last
+ * unit-stride layers (LDS DMA, swizzled transpose reads, an 8-wave ping-pong, a persistent
+ * grid): x and dy are read in place
  * (packed channels-first or channels-last), every filter-width tap of a block's filter rows
  * accumulates in registers, and the reduction over images and output positions is split over
  * blocks into fp32 partials in the workspace, which ConvWrwReduce (the same source under a
@@ -98,6 +100,7 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.xcd = kernel.getIntMetadata("xcd");
     config.align = kernel.getIntMetadata("align");
     config.ns = kernel.getIntMetadata("ns");
+    config.wq = kernel.getIntMetadata("wq");
     config.bpu = kernel.getIntMetadata("bpu");
     return config;
 }

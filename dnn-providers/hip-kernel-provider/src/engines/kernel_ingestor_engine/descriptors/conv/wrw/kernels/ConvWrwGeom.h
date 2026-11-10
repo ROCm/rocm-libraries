@@ -21,6 +21,80 @@ constexpr int k3DivUp(int a, int b)
     return (a + b - 1) / b;
 }
 
+// Direct loop (5): rows of c channels in LDS, [column][channel] with the 4-channel groups of
+// column x XOR-rotated by 4 g(x), g taking three bits of x (candidate r: bits 3,1,0 / 1,3,0 /
+// 0,1,3, masked to c / 16 - 1). A rotation is conflict-free when every half-wave of every
+// ds_read_b64_tr_b16 of a 16 x 32 fragment (16-lane groups at columns 8 apart, 4 lanes of
+// 4-channel groups per column), at every column shift the loop reads, hits 32 distinct 8-byte
+// slots modulo 32.
+constexpr int k3dBit(int r, int i)
+{
+    return r == 0   ? (i == 0   ? 3
+                       : i == 1 ? 1
+                                : 0)
+           : r == 1 ? (i == 0   ? 1
+                       : i == 1 ? 3
+                                : 0)
+                    : (i == 0   ? 0
+                       : i == 1 ? 1
+                                : 3);
+}
+
+constexpr int k3dRot(int r, int c, int x)
+{
+    const unsigned p = static_cast<unsigned>(x);
+    return static_cast<int>(((p >> k3dBit(r, 0)) & 1u) | (((p >> k3dBit(r, 1)) & 1u) << 1)
+                            | (((p >> k3dBit(r, 2)) & 1u) << 2))
+           & (c / 16 - 1);
+}
+
+constexpr bool k3dConflictFree(int r, int c, int shifts)
+{
+    const int c4 = c / 4;
+    for(int cb = 0; cb < c4; cb += 4)
+        for(int sh = 0; sh < shifts; ++sh)
+            for(int ph = 0; ph < 2; ++ph)
+                for(int rd = 0; rd < 2; ++rd)
+                {
+                    unsigned seen = 0;
+                    for(int l = ph * 32; l < ph * 32 + 32; ++l)
+                    {
+                        const int x = (l / 16) * 8 + rd * 4 + (l % 16) / 4 + sh;
+                        const int off = (x * c4 + ((cb + l % 4) ^ (4 * k3dRot(r, c, x)))) % 32;
+                        if(seen & (1u << off))
+                            return false;
+                        seen |= 1u << off;
+                    }
+                }
+    return true;
+}
+
+/// The first conflict-free rotation for rows of c channels read at column shifts 0 .. shifts -
+/// 1, or -1: c must be a power of two from 32 to 512.
+constexpr int k3dRotation(int c, int shifts)
+{
+    if(c < 32 || c > 512 || (c & (c - 1)) != 0)
+        return -1;
+    for(int r = 0; r < 3; ++r)
+        if(k3dConflictFree(r, c, shifts))
+            return r;
+    return -1;
+}
+
+/// Columns of a direct-loop x row: the strip's 32 plus the taps' reach, rounded up to whole
+/// 16-byte DMA rounds of the row (512 elements).
+constexpr int k3dXCols(int bc, int s, int dw)
+{
+    return k3DivUp((32 + (s - 1) * dw) * bc, 512) * 512 / bc;
+}
+
+/// 16-byte DMA loads a direct-loop wave issues per row (x and dy rounds over the item's waves).
+constexpr int k3dLoads(int bc, int bk, int wq, int s, int dw)
+{
+    const int nw = 8 / wq;
+    return k3DivUp(k3dXCols(bc, s, dw) * bc / 512, nw) + k3DivUp(32 * bk / 512, nw);
+}
+
 /// Static LDS bytes of a config. loop 0/1 matrix core (K3Tiles, two buffers), 2 LDS DMA (NS
 /// slots), 4 FMA output rows (two buffers of a dy chunk and FR windows), 3 FMA (an R + 1 row dy ring and two x windows). eb: element bytes; wave: lanes per
 /// wave; fr: the filter rows a loop-0 block stages, the filter height otherwise.
@@ -40,8 +114,20 @@ constexpr long long k3LdsBytes(int loop,
                                [[maybe_unused]] int tc,
                                int vec,
                                int align,
-                               int ns)
+                               int ns,
+                               int wq = 0)
 {
+    if(loop == 5)
+    {
+        // ns ring slots of wq items' x and dy rows plus a drain round; the waves_q sum's
+        // fp32 staging (wq - 1 items x the item's waves x s fc fk float4 per lane).
+        const long long slot
+            = static_cast<long long>(wq) * (k3dXCols(bc, s, dw) * bc + 32 * bk) + 512;
+        const long long fc = bc / (16 * wc), fk = bk / (16 * wk);
+        const long long red
+            = wq > 1 ? static_cast<long long>(wq - 1) * (8 / wq) * s * fc * fk * 64 * 16 : 0;
+        return ns * slot * eb + red;
+    }
     if(loop == 4)
     {
         const int win = (bq - 1) * sw + (s - 1) * dw + 1;

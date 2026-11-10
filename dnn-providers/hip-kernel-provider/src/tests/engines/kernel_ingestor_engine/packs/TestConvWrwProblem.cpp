@@ -414,7 +414,7 @@ struct ConfigFields
     int64_t atomId = 4;
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
-    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2;
+    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0;
 };
 
 /// The base config as the output-rows loop.
@@ -463,6 +463,22 @@ ConfigFields fmaFields()
     return f;
 }
 
+/// gfx950's direct loop: 16 x 16 x 32 atom, rows kept channels-last, 64 x 64 tile on 2 x 2 waves
+/// by 2 items (waves_q), 3 ring slots.
+ConfigFields directFields()
+{
+    ConfigFields f;
+    f.atom = "mfma16x32_f16";
+    f.atomId = 8;
+    f.loop = 5;
+    f.layout = 2;
+    f.ns = 3;
+    f.wq = 2;
+    f.xcd = 1;
+    f.bpu = 1;
+    return f;
+}
+
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                                                        const std::string& dtype)
 {
@@ -488,7 +504,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"xcd", f.xcd},
                        {"align", f.align},
                        {"ns", f.ns},
-                       {"bpu", f.bpu}};
+                       {"bpu", f.bpu},
+                       {"wq", f.wq}};
     return kernel;
 }
 
@@ -515,6 +532,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.tk = f.tk;
     c.tc = f.tc;
     c.bpu = f.bpu;
+    c.wq = f.wq;
     return c;
 }
 
@@ -711,7 +729,8 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 5; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 6; }},
+        {"WqOffTheDirectLoop", [](ConfigFields& f) { f.wq = 1; }},
         {"LoopNegative", [](ConfigFields& f) { f.loop = -1; }},
         {"LayoutNotTheGraphs", [](ConfigFields& f) { f.layout = 1; }},
         {"LayoutUnknown", [](ConfigFields& f) { f.layout = 3; }},
@@ -805,6 +824,65 @@ std::vector<ConfigRefusal> configRefusals()
                      dmaTrFields,
                      "gfx950",
                      channelsLastShape});
+    // The direct loop (gfx950): waves_q 1, 2 or 4 over 8 waves, transpose-read rows, a 16 x 16 x
+    // 32 atom, 32 columns per item, 2 to 5 ring slots, bpu 1, unit width stride and height
+    // dilation, channel tiles with a conflict-free rotation.
+    const auto direct = [&](std::string name, std::function<void(ConfigFields&)> mutate) {
+        cases.push_back(
+            {std::move(name), std::move(mutate), directFields, "gfx950", channelsLastShape});
+    };
+    direct("DirectWqThree", [](ConfigFields& f) { f.wq = 3; });
+    direct("DirectWqZero", [](ConfigFields& f) { f.wq = 0; });
+    direct("DirectWavesNotEight", [](ConfigFields& f) { f.wq = 1; });
+    direct("DirectOnChannelsLastTransposedIntoLds", [](ConfigFields& f) { f.layout = 1; });
+    direct("DirectOn32x16Atom", [](ConfigFields& f) {
+        f.atom = "mfma32x16_f16";
+        f.atomId = 10;
+    });
+    // Eight items side by side: 8 waves of one fragment each, which fits only a pointwise row.
+    cases.push_back({"DirectWqEight",
+                     [](ConfigFields& f) {
+                         f.wq = 8;
+                         f.wk = 1;
+                         f.wc = 1;
+                         f.bk = 32;
+                         f.bc = 32;
+                     },
+                     [] {
+                         auto f = directFields();
+                         f.fr = 1;
+                         f.s = 1;
+                         return f;
+                     },
+                     "gfx950",
+                     [] {
+                         auto shape = channelsLastShape();
+                         shape.filter = {1, 1};
+                         shape.prePadding = {0, 0};
+                         shape.postPadding = {0, 0};
+                         return shape;
+                     }});
+    direct("DirectBq64", [](ConfigFields& f) { f.bq = 64; });
+    direct("DirectSlotsOne", [](ConfigFields& f) { f.ns = 1; });
+    // Six slots fit the LDS with one item (no waves_q staging).
+    cases.push_back({"DirectSlotsSix",
+                     [](ConfigFields& f) { f.ns = 6; },
+                     [] {
+                         auto f = directFields();
+                         f.wq = 1;
+                         f.wk = 4;
+                         return f;
+                     },
+                     "gfx950",
+                     channelsLastShape});
+    direct("DirectBpuTwo", [](ConfigFields& f) { f.bpu = 2; });
+    direct("DirectBcNotPowerOfTwo", [](ConfigFields& f) { f.bc = 96; });
+    direct("DirectBkNotPowerOfTwo", [](ConfigFields& f) { f.bk = 96; });
+    direct("DirectBc16NoRotation", [](ConfigFields& f) {
+        f.bc = 16;
+        f.wc = 1;
+        f.wq = 4;
+    });
     // The FMA ring: "fma" exactly on loop 3, its thread tile, no waves, no XCD order.
     cases.push_back({"MatrixAtomOnTheFmaRing",
                      [](ConfigFields& f) {
@@ -928,6 +1006,106 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(dmaFields(), "gfx950"));
     EXPECT_TRUE(admits(trFields(), "gfx950", channelsLastShape()));
     EXPECT_TRUE(admits(fmaFields(), "gfx1100", floatShape()));
+    EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
+}
+
+TEST(TestConvWrwKernelMatch, TheDirectLoopServesItsOwnShapes)
+{
+    // Starting points of the direct refusals that change the shape: they hold on the direct
+    // loop's own form of each (unit height dilation, unit width stride), and the bf16 atom.
+    auto dilatedWidth = channelsLastShape();
+    dilatedWidth.dilation = {1, 2};
+    dilatedWidth.prePadding = {1, 2};
+    dilatedWidth.postPadding = {1, 2};
+    auto f = directFields();
+    f.dw = 2;
+    EXPECT_TRUE(admits(f, "gfx950", dilatedWidth));
+    // Waves_q 1 and 4 with their own wave splits; 2 and 5 ring slots.
+    f = directFields();
+    f.wq = 1;
+    f.wk = 4;
+    EXPECT_TRUE(admits(f, "gfx950", channelsLastShape()));
+    f = directFields();
+    f.bc = 32;
+    f.wc = 1;
+    f.wq = 4;
+    EXPECT_TRUE(admits(f, "gfx950", channelsLastShape()));
+    for(const int64_t ns : {2, 5})
+    {
+        f = directFields();
+        f.ns = ns;
+        EXPECT_TRUE(admits(f, "gfx950", channelsLastShape())) << ns;
+    }
+    // A one-row filter takes any height dilation.
+    auto tall = channelsLastShape();
+    tall.filter = {1, 3};
+    tall.prePadding = {0, 1};
+    tall.postPadding = {0, 1};
+    tall.dilation = {3, 1};
+    f = directFields();
+    f.fr = 1;
+    EXPECT_TRUE(admits(f, "gfx950", tall));
+    // A taller filter needs unit height dilation, and the width stride is 1.
+    auto dilatedHeight = channelsLastShape();
+    dilatedHeight.dilation = {2, 1};
+    dilatedHeight.prePadding = {2, 1};
+    dilatedHeight.postPadding = {2, 1};
+    EXPECT_FALSE(admits(directFields(), "gfx950", dilatedHeight));
+    auto strided = widthStride2Shape();
+    strided.channelsLast = true;
+    f = directFields();
+    f.sw = 2;
+    EXPECT_FALSE(admits(f, "gfx950", strided));
+}
+
+TEST(TestConvWrwDirectPlan, CellsForFewTilesRunsForMany)
+{
+    // flux n8 c256 k128 768^2 on 64 x 128 tiles: 4 tiles, 64 splits of 3 items, 256 workgroups.
+    const auto flux = conv_wrw::directPlanFor(
+        4, 8, 768, 24, 3, int64_t{9} * 256 * 128 * 4, 256, int64_t{64} * 128 * 9 * 32);
+    EXPECT_EQ(flux.walk, 0);
+    EXPECT_EQ(flux.segs, 1);
+    EXPECT_EQ(flux.items, 192);
+    EXPECT_EQ(flux.per, 3);
+    EXPECT_EQ(flux.splits, 64);
+    EXPECT_EQ(flux.grid, 256);
+    // sdxl n8 c1280 k1280 96^2: 200 tiles run 19 units a workgroup, 3 pieces at most per tile.
+    const auto sdxl = conv_wrw::directPlanFor(
+        200, 8, 96, 3, 3, int64_t{9} * 1280 * 1280 * 4, 256, int64_t{64} * 128 * 9 * 32);
+    EXPECT_EQ(sdxl.walk, 1);
+    EXPECT_EQ(sdxl.segs, 1);
+    EXPECT_EQ(sdxl.items, 24);
+    EXPECT_EQ(sdxl.per, 19);
+    EXPECT_EQ(sdxl.splits, 3);
+    EXPECT_EQ(sdxl.grid, 253);
+    // One tall narrow plane: row segments of at least 4 rows spread it.
+    const auto narrow = conv_wrw::directPlanFor(
+        1, 1, 40, 1, 3, int64_t{9} * 64 * 64 * 4, 256, int64_t{64} * 64 * 9 * 32);
+    EXPECT_GT(narrow.segs, 1);
+    EXPECT_GE(narrow.segRows, 4);
+    EXPECT_GE(narrow.segs * narrow.segRows, 40);
+    EXPECT_EQ(narrow.items, narrow.segs);
+}
+
+TEST(TestConvWrwLaunch, TheDirectLoopLaunchesItsPlan)
+{
+    const auto launch = launchOf(directFields(), channelsLastShape(), "gfx950", 256);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->block, 512u);
+    EXPECT_EQ(launch->gridY, 1u);
+    EXPECT_EQ(launch->gridZ, 1u);
+    // 1 tile (c 24, k 40 in one 64 x 64 tile), 2 images, 1 column block: the planner's segments.
+    const auto plan = conv_wrw::directPlanFor(
+        1, 2, 10, 1, 3, int64_t{9} * 40 * 24 * 4, 256, int64_t{64} * 64 * 9 * 32);
+    EXPECT_EQ(launch->gridX, static_cast<unsigned>(plan.grid));
+    EXPECT_EQ(launch->args.segs, plan.segs);
+    EXPECT_EQ(launch->args.segRows, plan.segRows);
+    EXPECT_EQ(launch->args.walk, plan.walk);
+    EXPECT_EQ(launch->args.steps, plan.items);
+    EXPECT_EQ(launch->args.stepsPerSplit, plan.per);
+    EXPECT_EQ(launch->args.splits, plan.splits);
+    EXPECT_EQ(launch->args.trackLen, 0);
+    EXPECT_EQ(launch->workspaceBytes, static_cast<size_t>(plan.splits) * 9 * 40 * 24 * 4);
 }
 
 TEST(TestConvWrwKernelMatch, TransposeReadsServeEveryMatrixLoopOnGfx950)
@@ -1539,6 +1717,11 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(fmaRows), 4), 2 * (32 * 36 + 3 * 40 * 68) * 4);
     fmaRows.vec = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(fmaRows), 4), 2 * (32 * 36 + 3 * 34 * 68) * 4);
+    // Direct loop, 64 x 64 by 2 items: 3 slots of 2 items' x rows (34 columns rounded to 40, a
+    // whole 512-element round) and dy rows (32 x 64), plus a drain round; the waves_q sum
+    // stages 1 item x 4 waves x 3 taps x 2 x 2 fragments of 64 float4.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(directFields()), 2),
+              3 * (2 * (40 * 64 + 32 * 64) + 512) * 2 + 1 * 4 * 3 * 2 * 2 * 64 * 16);
 }
 
 TEST(TestConvWrwDefines, EveryFieldIsADefine)
@@ -1546,16 +1729,22 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
     auto f = dmaFields();
     const auto defines
         = conv_wrw::compileDefinesFor(DataType::BFLOAT16, configOf(f), "K1AtomMfma32Bf16X16");
-    ASSERT_EQ(defines.size(), 19u);
+    ASSERT_EQ(defines.size(), 20u);
     EXPECT_EQ(defines[0], (std::pair<std::string, std::string>{"CONV_K3_T", "unsigned short"}));
     EXPECT_EQ(defines[1],
               (std::pair<std::string, std::string>{"CONV_K3_ATOM", "K1AtomMfma32Bf16X16"}));
     EXPECT_EQ(defines[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "2"}));
     EXPECT_EQ(defines[13], (std::pair<std::string, std::string>{"CONV_K3_TK", "0"}));
     EXPECT_EQ(defines[18], (std::pair<std::string, std::string>{"CONV_K3_NS", "2"}));
+    EXPECT_EQ(defines[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "0"}));
+    const auto direct
+        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(directFields()), "K1AtomMfmaF16X32");
+    ASSERT_EQ(direct.size(), 20u);
+    EXPECT_EQ(direct[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "5"}));
+    EXPECT_EQ(direct[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "2"}));
     // The FMA ring names no atom.
     const auto fma = conv_wrw::compileDefinesFor(DataType::FLOAT, configOf(fmaFields()), "");
-    ASSERT_EQ(fma.size(), 18u);
+    ASSERT_EQ(fma.size(), 19u);
     EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_K3_T", "float"}));
     EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "3"}));
     EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));

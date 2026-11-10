@@ -45,7 +45,8 @@
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, in fp32, fp16 and bf16 (matrix-core loops, gfx950's DMA ring and transpose reads,
  * the fp32 FMA ring wherever widths are whole vectors, and the fp32 FMA output rows for any
- * stride and any width): channels-first and channels-last, 1-D, 2-D and 3-D,
+ * stride and any width, and gfx950's direct loop on 16-bit channels-last unit-stride cases):
+ * channels-first and channels-last, 1-D, 2-D and 3-D,
  * groups, stride 2, dilation (2, 3 along the width, 12 for the deeplab rows), padding below, at
  * and past the filter, odd channel counts and partial tiles, both dw layouts under either
  * activation layout, and true convolution. Each compiled config's static LDS is checked against
@@ -181,6 +182,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.xcd = kernel.getIntMetadata("xcd");
     c.align = kernel.getIntMetadata("align");
     c.ns = kernel.getIntMetadata("ns");
+    c.wq = kernel.getIntMetadata("wq");
     return c;
 }
 
@@ -312,6 +314,9 @@ std::vector<DeviceCase> deviceCases()
         {"Nchw3x3", conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
         {"Nchw3x3Aligned", conv(16, 32, {9, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
         {"Nhwc3x3", conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"Nhwc3x3Wide", conv(64, 96, {21, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"ThreeDNhwc3x3x3",
+         conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},
         {"GroupedNhwc3x3", conv(24, 48, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 3)},
         {"ThreeD3x3x3",
@@ -466,9 +471,10 @@ void runCase(const DeviceCase& deviceCase)
             // The declared LDS is the host's; the kernel never takes more than the device has.
             EXPECT_GE(compiled, host);
             EXPECT_LE(compiled, conv_wrw::ldsLimitOf(device.gcnArchName));
-            if(config.loop == conv_wrw::LOOP_RING_DMA)
+            if(config.loop == conv_wrw::LOOP_RING_DMA || config.loop == conv_wrw::LOOP_DIRECT)
             {
-                // The unused stages are one-element arrays, which may or may not be allocated.
+                // The unused stages / ring slots are one-element arrays, which may or may not be
+                // allocated.
                 EXPECT_LE(compiled, host + 32);
             }
             else
@@ -557,25 +563,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 19> KNOBS{"atom_id",
-                                                       "loop",
-                                                       "layout",
-                                                       "bk",
-                                                       "bc",
-                                                       "bq",
-                                                       "fr",
-                                                       "s",
-                                                       "sw",
-                                                       "dw",
-                                                       "wk",
-                                                       "wc",
-                                                       "tk",
-                                                       "tc",
-                                                       "vec",
-                                                       "xcd",
-                                                       "align",
-                                                       "ns",
-                                                       "bpu"};
+    static constexpr std::array<const char*, 20> KNOBS{
+        "atom_id", "loop", "layout", "bk", "bc",  "bq",  "fr",    "s",  "sw",  "dw",
+        "wk",      "wc",   "tk",     "tc", "vec", "xcd", "align", "ns", "bpu", "wq"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -614,6 +604,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         for(const char* arch : ARCHS)
         {
             const bool gfx950Only = config.loop == conv_wrw::LOOP_RING_DMA
+                                    || config.loop == conv_wrw::LOOP_DIRECT
                                     || config.layout == conv_wrw::LAYOUT_CHANNELS_LAST_TR;
             if(!conv_igemm::atomRunsOn(config.atom, arch)
                || (gfx950Only && std::string(arch) != "gfx950"))
@@ -627,7 +618,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5}));
 }
 
 } // namespace

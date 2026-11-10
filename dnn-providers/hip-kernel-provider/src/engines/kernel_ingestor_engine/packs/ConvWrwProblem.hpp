@@ -77,6 +77,7 @@ inline constexpr int64_t LOOP_RING = 1; ///< row ring, height stride 1
 inline constexpr int64_t LOOP_RING_DMA = 2; ///< row ring with LDS DMA (gfx950)
 inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
 inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
+inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persistent grid)
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -113,9 +114,12 @@ struct WrwConfig
     int64_t xcd = 0;
     /// 1: row-aligned units (loop 1, channels-first, width stride 1).
     int64_t align = 0;
-    /// LDS stages of loop 2 (2 to 4); 0 for the other loops.
+    /// LDS stages of loop 2 (2 to 4), ring slots of loop 5 (2 to 5); 0 for the other loops.
     int64_t ns = 0;
-    /// The split planner's target blocks per dispatch unit (1, 2 or 4): host-side only.
+    /// Loop 5: items a workgroup runs side by side (waves_q: 1, 2 or 4; wk wc wq = 8); else 0.
+    int64_t wq = 0;
+    /// The split planner's target blocks per dispatch unit (1, 2 or 4; 1 for loop 5, whose
+    /// persistent grid has one workgroup per unit): host-side only.
     int64_t bpu = 0;
 };
 
@@ -193,6 +197,42 @@ int64_t splitsWanted(int64_t blocksXY,
                      int64_t partialElems,
                      int64_t dispatchUnits);
 
+/// The direct loop's work (loop 5): units are (channel tile, item), an item one image plane's
+/// 32-column block over a segment of its rows; a persistent grid of about one workgroup per
+/// dispatch unit takes them in pieces of `per` items.
+struct DirectPlan
+{
+    int64_t segs = 1; ///< row segments per image plane
+    int64_t segRows = 0; ///< rows per segment
+    int64_t walk = 0; ///< 0 cells (tile fastest, whole splits), 1 equal runs of units
+    int64_t items = 0; ///< items per tile
+    int64_t per = 0; ///< items per piece (walk 0) / units per workgroup (walk 1)
+    int64_t splits = 0; ///< partials slots
+    int64_t grid = 0; ///< workgroups
+};
+
+/**
+ * @brief The direct loop's plan for @p tiles channel tiles over @p planes image planes of
+ *        @p rows input rows and @p colBlocks 32-column blocks, a filter of @p filterRows rows,
+ *        partials of @p partialBytes per split, on @p units dispatch units, @p tileMacs
+ *        multiply-adds per tile and input row of a block (bc bk s fr x 32).
+ *
+ * Walk 0 (cells) when the tiles leave each unit a whole split (2 tiles <= units): splits =
+ * min(max(1, units / tiles), items), per = ceil(items / splits). Else walk 1: per = ceil(tiles
+ * items / units) units of work per workgroup, splits the most workgroups any tile spans. The
+ * row segments (1 to 64, at least 4 rows each) minimise the modelled time: the busiest
+ * workgroup's rows (each segment adds fr + 1) at tileMacs per row plus the partials' traffic;
+ * ties keep fewer segments.
+ */
+DirectPlan directPlanFor(int64_t tiles,
+                         int64_t planes,
+                         int64_t rows,
+                         int64_t colBlocks,
+                         int64_t filterRows,
+                         int64_t partialBytes,
+                         int64_t units,
+                         int64_t tileMacs);
+
 /**
  * @brief The launch of @p config on @p problem on @p device, or nullopt when the config does
  *        not compute it correctly or cannot launch it there.
@@ -212,6 +252,12 @@ int64_t splitsWanted(int64_t blocksXY,
  * the LDS within the device's; images of at least one vector (channels-first); the grids within
  * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2 or 4. The splits follow
  * splitsWanted at bpu blocks per unit, so a device that reports no dispatch units is declined.
+ *
+ * Loop 5 (direct): gfx950, layout 2, a 16 x 16 x 32 atom, bq 32, wq 1, 2 or 4 with wk wc wq =
+ * 8 (512 threads), ns 2 to 5 with (ns - 2) loads per row within 63, unit width stride, unit
+ * height dilation (or a one-row filter), bc and bk powers of two from 32 to 512 whose rows have a
+ * conflict-free rotation (ConvWrwGeom.h), bpu 1; its grid follows directPlanFor. Every other
+ * loop takes wq 0.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
