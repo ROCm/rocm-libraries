@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from test_adaptive_search_coordinator import (
-    ABCD, AS, TE_OPS, FakeAdapter, ck_search, events, json_pairs, rec, run, settings, strict,
+    ABCD, AS, TE_OPS, FakeAdapter, ck_search, events, json_pairs, rec, run, scripted,
+    settings, strict,
 )
 
 sys.path.insert(0, str(TE_OPS / "gemm"))
@@ -125,6 +126,59 @@ def test_race_all_fail_has_no_discovery_fallback(tmp_path):
                         confirm={"mode": "race", "fresh_calls": 5})
     assert summary.winners == {} and summary.exit_code == 1
     assert "no finalist passed" in summary.unresolved["P1"]
+
+
+@pytest.mark.parametrize("mode", ["fixed", "race"])
+@pytest.mark.parametrize("discovered", [True, False])
+def test_confirmation_preserves_failure_reasons_and_accounting(tmp_path, mode, discovered):
+    ad = DeviceAdapter(
+        {"P1": ABCD, "empty": []},
+        script={} if discovered else {("P1", k): ["numeric_fail"] for k in "AB"},
+        confirm_script={("P1", k): [("ok", 1.0), ("timeout", None)] for k in "AB"},
+    )
+    logs = []
+    co = AS.SearchCoordinator(
+        ad, settings(confirm={"mode": mode, "fresh_calls": 5}), tmp_path / "out",
+        strategy_factory=scripted({"P1": [["A", "B"]]})[0],
+        log=logs.append,
+    )
+    result = co.run()
+    assert result.winners == {} and result.exit_code == 1
+    expected = 4 if discovered else 0
+    assert result.counts["confirm_calls"] == co.ledger.confirm_calls == expected
+    assert len(events(tmp_path / "out", "confirm")) == expected
+    assert result.unresolved["empty"] == "no eligible candidates"
+    if discovered:
+        assert "A: ok,timeout" in result.unresolved["P1"]
+        assert "B: ok,timeout" in result.unresolved["P1"]
+        assert any("confirming 2 finalist(s)" in line for line in logs)
+    else:
+        assert "no verified discovery measurement (search:" in result.unresolved["P1"]
+
+
+def test_race_single_finalist_uses_minimum_calls(tmp_path):
+    summary, _, co = run(
+        tmp_path, DeviceAdapter({"P1": ABCD}), {"P1": [["A"]]},
+        confirm={"mode": "race", "fresh_calls": 9},
+    )
+    assert summary.winners == {"P1": "A"}
+    assert summary.counts["confirm_calls"] == co.ledger.confirm_calls == 3
+
+
+def test_race_failure_after_a_statistical_look_preserves_survivor_accounting(tmp_path):
+    ad = DeviceAdapter(
+        {"P1": ABCD},
+        confirm_script={("P1", "A"): [("ok", 1.0)] * 3 + [("timeout", None)]},
+    )
+    result, _, co = run(tmp_path, ad, {"P1": [["A", "B"]]},
+                        confirm={"mode": "race", "fresh_calls": 9})
+    meta = strict(tmp_path / "out" / "summary.json")
+    assert result.winners == {"P1": "B"}
+    assert result.counts["confirm_calls"] == co.ledger.confirm_calls == 8
+    assert len(events(tmp_path / "out", "confirm")) == 8
+    assert meta["confirmation"]["P1"]["failed"] == {"A": "timeout"}
+    assert meta["confirmation"]["P1"]["looks"] == 2
+    assert meta["winners"]["P1"]["calls_ms"] == [1.0] * 4
 
 
 @pytest.mark.parametrize("device", ["", "other"])
@@ -260,7 +314,9 @@ def comparison(tmp_path):
     class Adapter(DeviceAdapter):
         def context(self):
             return {**super().context(),
-                    "domain_sha256": hashlib.sha256(json.dumps(problems).encode()).hexdigest()}
+                    "domain_sha256": hashlib.sha256(json.dumps(problems).encode()).hexdigest(),
+                    "sources": {"ck_commit": "test-commit", "sha256": {"config": "test-hash"}},
+                    "measurement": {"host_cache": None}}
 
     for case in json.loads(manifest.read_text())["runs"]:
         summary = AS.SearchCoordinator(
@@ -319,7 +375,10 @@ def test_comparison_reports_missing_and_failed_runs_without_quality_bias(compari
     assert rows["diverse_warm"]["control_relative_quality"] == ""
 
 
-@pytest.mark.parametrize("change", ["settings", "domain", "prior", "input"])
+@pytest.mark.parametrize("change", [
+    "settings", "domain", "prior", "input", "source_commit", "source_hash",
+    "host_cache", "warm_count",
+])
 def test_comparison_rejects_mismatched_experiments(comparison, change):
     case = next(c for c in json.loads(comparison.read_text())["runs"] if c["arm"] == "broad_prior")
     path = Path(case["output_dir"]) / "run.json"
@@ -330,11 +389,103 @@ def test_comparison_rejects_mismatched_experiments(comparison, change):
         meta["context"]["domain_sha256"] = "different"
     elif change == "input":
         meta["warm_start_sha256"][next(iter(meta["warm_start_sha256"]))] = "changed"
+    elif change in ("source_commit", "source_hash"):
+        sources = meta["context"]["sources"]
+        if change == "source_commit":
+            sources["ck_commit"] = "changed"
+        else:
+            sources["sha256"]["config"] = "changed"
+    elif change == "host_cache":
+        meta["context"]["measurement"]["host_cache"] = {"dir": "cache"}
+    elif change == "warm_count":
+        meta["problems"]["128x128x128"]["warm_start"].pop()
     else:
         meta["problems"]["128x128x128"]["prior_entries"] -= 1
     path.write_text(json.dumps(meta))
     with pytest.raises(ValueError):
         compare.summarize(comparison, io.StringIO())
+
+
+@pytest.mark.parametrize("arm, interrupted", [
+    ("broad_prior", False), ("baseline", False), ("confirmation_control", False),
+    ("portfolio_control", True),
+])
+def test_comparison_retains_real_setup_failed_arms_and_controls(comparison, arm, interrupted):
+    manifest = strict(comparison)
+    case = next(c for c in manifest["runs"] if c["arm"] == arm)
+    case["output_dir"] += "-failed"
+
+    class SetupFailure(DeviceAdapter):
+        def context(self):
+            if interrupted:
+                raise KeyboardInterrupt
+            raise RuntimeError("device unavailable during setup")
+
+    result = AS.SearchCoordinator(
+        SetupFailure({"P1": ABCD}), case["config"], case["output_dir"],
+        pair_loader=json_pairs, prior_loader=read_ranked_csv,
+    ).run()
+    expected_exit = 130 if interrupted else 1
+    expected_error = "interrupted" if interrupted else "device unavailable"
+    assert result.exit_code == expected_exit and expected_error in result.error
+    meta = strict(Path(case["output_dir"]) / "run.json")
+    assert not {"context", "problems", "warm_start_sha256"} & set(meta)
+    comparison.write_text(json.dumps(manifest))
+    output = io.StringIO()
+    assert compare.summarize(comparison, output) == 1
+    rows = {r["arm"]: r for r in csv.DictReader(io.StringIO(output.getvalue()))}
+    assert len(rows) == 9
+    assert rows[arm]["status"] == "setup_failed"
+    assert rows[arm]["exit_code"] == str(expected_exit)
+    assert expected_error in rows[arm]["error"]
+    assert rows[arm]["problems"] == rows[arm]["control_relative_quality"] == ""
+    for row in rows.values():
+        if row["control_arm"] == arm:
+            assert row["paired_winners"] == row["control_relative_quality"] == ""
+    assert any(r["status"] == "complete" for r in rows.values())
+
+
+def test_comparison_failed_search_still_validates_successful_setup(comparison):
+    case = next(c for c in strict(comparison)["runs"] if c["arm"] == "broad_prior")
+    directory = Path(case["output_dir"])
+    meta = strict(directory / "run.json")
+    meta["error"] = "a later search error does not excuse changed inputs"
+    meta["warm_start_sha256"] = {}
+    (directory / "run.json").write_text(json.dumps(meta))
+    summary = strict(directory / "summary.json")
+    summary.update(status="no_winner", exit_code=1, winners={}, error=meta["error"])
+    (directory / "summary.json").write_text(json.dumps(summary))
+    with pytest.raises(ValueError, match="warm/prior inputs changed"):
+        compare.summarize(comparison, io.StringIO())
+
+
+def test_comparison_allows_per_run_cache_directories(comparison):
+    for case in strict(comparison)["runs"]:
+        path = Path(case["output_dir"]) / "run.json"
+        meta = strict(path)
+        meta["context"]["measurement"]["host_cache"] = {
+            "dir": str(path.parent / "host-cache"), "max_entry_bytes": 100,
+            "max_total_bytes": 1000,
+        }
+        path.write_text(json.dumps(meta))
+    assert compare.summarize(comparison, io.StringIO()) == 0
+
+
+def test_comparison_same_winner_does_not_hide_timing_drift(comparison):
+    case = next(c for c in strict(comparison)["runs"] if c["arm"] == "broad_prior")
+    path = Path(case["output_dir"]) / "summary.json"
+    summary = strict(path)
+    for winner in summary["winners"].values():
+        winner["median_ms"] *= 2
+        winner["calls_ms"] = [v * 2 for v in winner["calls_ms"]]
+    path.write_text(json.dumps(summary))
+    output = io.StringIO()
+    assert compare.summarize(comparison, output) == 0
+    row = next(r for r in csv.DictReader(io.StringIO(output.getvalue()))
+               if r["arm"] == "broad_prior")
+    assert row["same_winners"] == row["paired_winners"] == "2"
+    assert float(row["control_relative_quality"]) == pytest.approx(0.5)
+
 
 
 def test_comparison_refuses_invalid_baseline_and_existing_output(tmp_path):

@@ -623,6 +623,11 @@ or keep the default `shared` seed policy.
 The following controls leave the PR14938 defaults unchanged. They are
 experiments, not demonstrated GPU speedups.
 
+Default-mode output is not byte-identical: `summary.json` also records `phase_s`
+and `confirmation` (empty in fixed mode), `run.json` records `warm_start_sha256`,
+and its context records `timing_environment`. These are additive diagnostics;
+the default search and fixed-confirmation policies are unchanged.
+
 | Technique | Enable | Baseline |
 |---|---|---|
 | Broad predictor prior | Selector `--ranked_top_k 0`; search `warm_start.ranked_csv` and `use_prior: true` | Ranked CSV truncated to selector `top_k`; no prior unless requested |
@@ -729,9 +734,13 @@ for case in json.loads(Path("comparison/manifest.json").read_text())["runs"]:
     result = subprocess.run(common + [
         "--search-config", case["config"], "--search-output-dir", case["output_dir"],
     ])
-    if result.returncode:
+    if result.returncode not in (0, 1):
         raise SystemExit(f"{case['arm']} seed {case['seed']} failed: {result.returncode}")
 ```
+
+Exit 1 is an ordinary partial/no-winner result: keep running the remaining arms
+and retain that failure in the summary. Interruptions and invalid invocations
+stop the matrix; do not silently continue them.
 
 Do not pass either shortlist as the driver's `--pairs`: that would restrict
 the domain rather than supply warm starts. Reuse the generated baseline
@@ -744,12 +753,30 @@ python compare_search.py summarize comparison/manifest.json > comparison/results
 
 The CSV keeps each seed separate, includes failures/missing runs, counts
 exhaustive fallbacks, and refuses changed settings/inputs/domains/execution contexts
-or a purported full prior with missing eligible entries. It reports
+or a purported full prior with missing eligible entries. Context checks include
+the recorded source commit/content hashes and host-cache mode; each problem must
+have the same actual warm-start count as its control. Warm candidate identities
+and prior inputs may intentionally differ by arm, but each arm's inputs must
+match its prepared hashes. These checks cover recorded provenance, not unrecorded
+device state such as clocks.
+
+Setup failures are retained as `status=setup_failed` with the original error and
+exit code, without inventing domain counts or paired metrics. A failed control
+also leaves paired metrics unavailable; other runs are still summarized.
+Successful-setup records remain subject to all comparison checks.
+
+The CSV reports
 `control_relative_quality` as the geometric mean of
 `control_confirmed_ms / arm_confirmed_ms`, only when both runs have winners
 for every problem. Race uses `confirmation_control`; `portfolio_tpe` uses
 `portfolio_control`; other arms use `baseline`. Values above one mean faster
 than that control, **not** better than a verified exhaustive reference.
+`same_winners` counts identical kernel identities among `paired_winners`;
+their ratio is winner agreement (undefined when there are no paired winners).
+The raw timing ratio still includes same-winner problems. Sequential runs can
+have timing drift, and race/control medians can use different sample counts
+(for example, three versus nine), so even identical winners need not give a
+unit ratio. This descriptive ratio is not isolated evidence of selection quality.
 An incomplete matrix exits nonzero; partial runs are never silently dropped.
 
 Use longer, independent, interleaved remeasurement of the union of finalists
