@@ -95,6 +95,7 @@ def test_accepts_multiple_buffer_dynamic_gsu():
   {"StoreRemapVectorWidth": -1},
   {"UseBias": 1},
   {"UseScaleAlphaVec": 1},
+  {"UseScaleAlphaVec": 5},
   {"UseScaleAB": "Scalar"},
   {"UseScaleAB": "Vector"},
   {"ActivationType": "relu"},
@@ -104,7 +105,7 @@ def test_accepts_multiple_buffer_dynamic_gsu():
 ])
 def test_accepts_supported_options(overrides):
   """AdaptiveGemm, the automatic StoreRemapVectorWidth (-1, which Solution resolves and checks), the
-  epilogue vectors along M, ScaleAB and the activations."""
+  epilogue vectors along M, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB and the activations."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -150,6 +151,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"UseBias": 2}, _ALONG_M),
   ({"UseBias": 3}, _ALONG_M),
   ({"UseScaleAlphaVec": 2}, _ALONG_M),
+  ({"UseScaleAlphaVec": 6}, _ALONG_M),
   ({"NumThreads": 96}, "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"),
 ])
 def test_rejects_unsupported(overrides, reason):
@@ -554,6 +556,14 @@ def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, 
                        VectorWidthA=1)
   assert not sol.get("Valid") and asm is None
   assert "TDMStoreInst does not support StoreRemapVectorWidth" in capsys.readouterr().out
+
+
+def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """UseScaleAlphaVec 5 is the vector along M with the device-scalar bit, which only changes how the vector
+  preload selects alpha, so a level-2 kernel stores through the TDM block as with UseScaleAlphaVec 1."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
 
 
 def _cacheTokens(line):
