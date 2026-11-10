@@ -551,6 +551,47 @@ TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
 
 namespace
 {
+    // A rocRoller Stream-K probe kernel that reads its grid and its data-parallel
+    // tile count, on the 1024^3 dummy problem with square macrotiles.
+    KernelInvocation rocRollerStreamKLaunch(uint32_t tile)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+        solution.customKernel.args.push_back(
+            {CustomArgType::uint32, CustomArgSemantic::RR_SKNumDPTiles});
+        solution.customKernel.macrotile = TensileLite::dim3(tile, tile, 128);
+        solution.customKernel.grid      = {
+            CustomGridSize::RocRollerStreamKGrid, CustomGridSize::One, CustomGridSize::One};
+
+        auto              problem = dummyProblem();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+        return solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+    }
+}
+
+// The launch grid and the numWGs kernarg are one value, and a rocRoller Stream-K
+// kernel does not launch where its grid would leave data-parallel tiles.
+TEST(CustomKernelTest, RocRollerStreamKLaunchRefusesDataParallelTiles)
+{
+    // No occupancy is recorded, so the grid is the CU count.
+    constexpr uint32_t cus = TensileLite::testing::_SPX_CU;
+
+    // 64 tiles of 128x128: fewer than the grid, so all of them are Stream-K.
+    auto const fits = rocRollerStreamKLaunch(128);
+    EXPECT_EQ(fits.numWorkGroups.x, cus);
+    ASSERT_EQ(fits.args.size(), 2 * sizeof(uint32_t));
+    uint32_t args[2] = {};
+    std::memcpy(args, fits.args.data(), sizeof(args));
+    EXPECT_EQ(args[0], cus);
+    EXPECT_EQ(args[1], 0u);
+
+    // 4096 tiles of 16x16: two or more per workgroup.
+    EXPECT_THROW(rocRollerStreamKLaunch(16), std::runtime_error);
+}
+
+namespace
+{
     char const fusedPeerFlag = 0;
     char const fusedCounter  = 0;
 

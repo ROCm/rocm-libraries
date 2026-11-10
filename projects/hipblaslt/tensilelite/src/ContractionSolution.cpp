@@ -3468,6 +3468,24 @@ namespace TensileLite
                     customKernel.macrotile.y,
                     customKernel.macrotile.z,
                     rrSKGrid);
+                // rocRoller's data-parallel tile loop steps by the unrolled K-loop
+                // counter, so a launch with data-parallel tiles hangs or computes
+                // wrong results. They appear once the grid is at most half the tile
+                // count; refuse the launch rather than run it.
+                if(skKernargs->numDPTiles != 0)
+                    throw std::runtime_error(concatenate(
+                        "rocRoller Stream-K kernel ",
+                        customKernel.name,
+                        " cannot run data-parallel tiles: grid ",
+                        rrSKGrid,
+                        " is too small for problem ",
+                        problem.problemSizes()[0],
+                        "x",
+                        problem.problemSizes()[1],
+                        " with macrotile ",
+                        customKernel.macrotile.x,
+                        "x",
+                        customKernel.macrotile.y));
             }
             return *skKernargs;
         };
