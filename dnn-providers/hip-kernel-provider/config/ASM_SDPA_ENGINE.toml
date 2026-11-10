@@ -1,6 +1,6 @@
 # Integration test configuration for ASM_SDPA_ENGINE
 # Filters use GTest-style globs: * matches any sequence of characters
-# Later entries take precedence over earlier ones when multiple filters match
+# The first matching skip entry wins; the last matching tolerance override wins.
 
 [meta]
 version = 1
@@ -925,7 +925,7 @@ filters = [
 ]
 reason = "ALMIOPEN-3043: a negative or zero attention scale gives NaN in O"
 
-# SdpaFwdPlan cases with a block mask or a caller dropout mask.
+# SdpaFwdPlan cases with a block mask or a caller dropout mask: whole folders, matched by pattern.
 [[test_skips]]
 filters = [
     "full_SdpaFwdPlan_Bm_Bias_ScBv.*",
@@ -934,7 +934,7 @@ filters = [
 ]
 reason = "ALMIOPEN-3123: a caller dropout mask or a block mask is accepted and ignored"
 
-# SdpaFwdPlan cases with a block mask or a caller dropout mask.
+# SdpaFwdPlan cases with a block mask or a caller dropout mask: single cases, listed by name, from folders that also hold cases this entry does not skip.
 [[test_skips]]
 filters = [
     "comprehensive_SdpaFwdPlan_Bm_Bias_DMask_DScBv.bf16_092a0d4372d33032",
@@ -1665,14 +1665,11 @@ reason = "ALMIOPEN-3041: a head-dim stride other than 1 is accepted and treated 
 filters = [
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_019f0fa26ef1e160",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_175ec81d9caea4b4",
-    "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_57bf8a2223b248c9",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_7639e2aea9a1de03",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_9d604e5a20103fe4",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_9f545cac3608d27e",
-    "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_cf8e60dd1fb23f12",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_d48f4f3740ffa485",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_db1052a8ce961d11",
-    "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_f4395a85e6d467fe",
     "comprehensive_SdpaFwdPlan_Bm_Bias_DMask_DScBv.bf16_0a7bd0a9ed6d967e",
     "comprehensive_SdpaFwdPlan_Bm_Bias_Stats.bf16_5fe95982d7210223",
     "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_6b3d974cacb70a0e",
@@ -1712,15 +1709,11 @@ filters = [
     "standard_SdpaFwdPlan_Bias_Sink.bf16_07263eb4df68bcbe",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_0a61774fe0062c4a",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_119eeed56f718fc7",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_16846401c68275ff",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_1d247bac98b0ed9e",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_21fe51bee70e4648",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_24de5fdb0fc41839",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_2be816a017eeb624",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_3247816d01a54f3c",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_3b14e8e7a9952075",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_4269ac24a3ffa993",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_4adb90a67ca84116",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_4db5b292b72c7a8f",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_4eb41eee1d2a8d41",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_513e30413f9590be",
@@ -1731,28 +1724,23 @@ filters = [
     "standard_SdpaFwdPlan_Bias_Sink.bf16_70a4cb6f716a87d8",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_71fd37833dce6192",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_7738d829bd282c58",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_775c8fe8b0e264d6",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_79ea516de7afcea0",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_80313a87ec1cea4e",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_80fcab078f472278",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_819cd331ff244fd5",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_831f3d87352a21a4",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_844515d0a89ca9b3",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_87fd8d4465cf6d60",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_8d58bbe1d5495c49",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_8fc4e3523e690df2",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_943693a1b5d47d1f",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_9c569f1700d0fa58",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_9e7e7618f5064b44",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_a082547cdc8b2cca",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_a48bb4ad7f373e5e",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_b43970da1f956201",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_b92320d7931f1d79",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_bbcd355d8b4ad29f",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_c5bec32e5b98100d",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_c80588e1ac49d606",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_dd3429b26d36e445",
-    "standard_SdpaFwdPlan_Bias_Sink.bf16_e1c5f9c175bfa77f",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_f20022071490cf25",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_f2d5daae84713785",
     "standard_SdpaFwdPlan_Bias_Sink.bf16_f81c18c7fcfa0ea1",
@@ -1923,7 +1911,7 @@ filters = [
 ]
 reason = "ALMIOPEN-3042: Stats is written with only the head stride, so other Stats layouts are wrong"
 
-# SdpaFwdPlan cases that request the Max and Sum-exp outputs.
+# SdpaFwdPlan cases that request the Max and Sum-exp outputs: whole folders, matched by pattern.
 [[test_skips]]
 filters = [
     "*_SdpaFwdPlan_Bias_Stats_Max.*",
@@ -1959,7 +1947,7 @@ filters = [
 ]
 reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never written"
 
-# SdpaFwdPlan cases that request the Max and Sum-exp outputs.
+# SdpaFwdPlan cases that request the Max and Sum-exp outputs: single cases, listed by name, from folders that also hold cases this entry does not skip.
 [[test_skips]]
 filters = [
     "comprehensive_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_04aaeb532be478df",
