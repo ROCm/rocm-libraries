@@ -79,9 +79,9 @@ stay because the plan and the generator cite them.
 |---|---|
 | The forward op | `sdpa-fwd.md` (ALMIOPEN-2893) |
 | cuDNN backward features with no schema field: sinks and dSink (ALMIOPEN-3020), `rng_dump`, `score_mod`, `max_total_seq_len_q/kv`, `deterministic_algorithm(true)`, the FP8 backward node, paged K/V, block-sparse masks | frontend unit tests of rule R0 (`SdpaBackwardAttributes.hpp:565-629`) |
-| Engine knobs (accumulator type, rounding mode); kernel-internal tests | provider unit tests; the kernel project |
+| Engine knobs (accumulator type, rounding mode); kernel-internal tests | provider tests: the unit tests check knob plumbing and declines; the provider GPU test `IntegrationGpuSdpaBackward.cpp` checks the A16 accumulator against the CPU reference; the kernel project |
 | Exhaustive generation and fuzzing; release-train testing | the separate tool (§7); release readiness |
-| The provider-local C++ test `IntegrationGpuSdpaBackward.cpp` | retired by the bundle PR that lands this plan |
+| The provider-local C++ test `IntegrationGpuSdpaBackward.cpp` | kept: it runs the engine knobs (A16), which no bundle sets, and gfx950 until gfx950 claims land |
 
 ---
 
@@ -908,11 +908,14 @@ claims name gfx942 only; gfx950 claims wait for a gfx950 run.
 | Bands | 64 < Dqk ≤ 128 | Dqk ≤ 128 |
 | dQ accumulator | A32 (FP32, default); A16 (16-bit) by knob | same |
 
-The accumulator comes from the engine knob `sdpa.bwd.accumulator_type` (`a32` or `a16`). The bundles
-run the default, A32; the knob is a provider unit test (Out of scope). The A16 kernels serve fewer
-graphs: on gfx942 they need Sq = Skv, Skv a multiple of 64 and matching Q/dO and K/V strides, and
-neither arch ships A16 kernels for every mask and head dim. Plan build fails with BAD_PARAM for an
-A16 request those kernels cannot serve.
+The accumulator comes from the engine knob `hipkernel.sdpa.bwd.accumulator_type` (`a32` or `a16`).
+The bundles run the default, A32. The provider GPU test `IntegrationGpuSdpaBackward.cpp` runs A32 and
+A16 on both architectures against the CPU backward reference (Out of scope here). It fills each input
+tensor from its own seed, checks each accumulator against its own tolerance, and has Smoke and
+Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942 they need Sq = Skv, Skv a multiple
+of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV tensor within 2^32 bytes, and
+neither arch ships A16 kernels for every mask and head dim. Plan build fails with BAD_PARAM for an A16
+request those kernels cannot serve.
 
 The engine declines:
 

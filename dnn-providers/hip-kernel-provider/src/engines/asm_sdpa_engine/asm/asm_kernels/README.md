@@ -12,9 +12,10 @@ v0.1.29.
 Every module is pinned in `aiter_pins.json`, keyed `<arch>/<module>`. For each
 forward and backward module the pin records the AITER release and commit of its
 objects, the AITER host code the engine mirrors, and the upstream rows or CSVs
-left out, with the reason. The `hipdnn-aiter-asm-sdpa-fwd-sync` skill generates
-the `SOURCE.md` of every module from its pin, so edit the pin, not the
-`SOURCE.md`.
+left out, with the reason. The `hipdnn-aiter-asm-sdpa-fwd-sync` skill writes the
+pin and generates every module's `SOURCE.md` from it; edit neither by hand.
+Change what a module leaves out with the skill's `plan --exclude`,
+`--drop-exclude` or `--include`, then `apply`.
 
 ## Directory layout notes
 
@@ -24,8 +25,19 @@ the `SOURCE.md` of every module from its pin, so edit the pin, not the
   and `MI300/` for every other gfx942 device, including MI300X and MI300A. gfx950 stores its
   objects flat.
 - **Backward kernels** (`fmha_v3_bwd/`): AITER stores these flat (no MI300/MI308 split) because
-  backward kernels only support bf16/fp16 (no fp8), so the same binary works on both MI300X and
-  MI300A. SHA256 manifests for each arch are recorded in the per-arch `SOURCE.md` files.
+  backward kernels only support bf16/fp16 (no fp8), so the same binary works on every gfx942
+  device, MI308X included. SHA256 manifests for each arch are recorded in the per-arch
+  `SOURCE.md` files.
+
+## Forward precision
+
+The gfx950 bf16 hd256 forward kernels (group mode only) multiply Q by
+scale × log2(e) and round the product to bf16 before QK^T. Their error grows
+with the attention scale. For inputs in [-1, 1], a model of this rounding keeps
+their error inside the 1e-2 bf16 tolerance of the GPU registry tests at the
+standard scale 1/sqrt(256), and puts it above 1e-2 at scale 1.0. The engine
+serves these kernels at any scale, as AITER does. The GPU registry tests run
+every forward row at scale 1/sqrt(hdim_q).
 
 ## Backward tables
 
@@ -35,8 +47,8 @@ post stages DQ_CONVERT and DQ_SHUFFLE (write dQ from the dQ accumulator). The
 engine builds its kernel registry from these tables. Column terms used below:
 
 - `atomic32` selects the dQ accumulator: 1 is **A32** (FP32, the default) and
-  0 is **A16** (16-bit). The engine knob `sdpa.bwd.accumulator_type` picks it
-  (`a32` or `a16`).
+  0 is **A16** (16-bit). The engine knob `hipkernel.sdpa.bwd.accumulator_type`
+  picks it (`a32` or `a16`).
 - `pssk` is 1 for a kernel that handles any sequence length (padded K/V
   sequence), and `pddv` is 1 for one that handles a head dim padded up to the
   row's head dim. A **psskddv** row has both set.
@@ -53,6 +65,12 @@ Not every row is dispatched:
 - **hd256 rows (gfx950):** vendored but not dispatched. Every hd256 row is a
   group row, and the engine declines head dims above 128 on gfx950 except
   D_qk = 192 with D_v = 128.
+- **hd64 and hd192 x hd192 batch rows (gfx950):** vendored but not
+  dispatched. AITER's gfx950 gate (`can_impl_fmha_v3_bwd_gfx950`) sends these
+  head dims to CK, and `isBatchShapeSupported` declines them too. The hd192
+  dq_convert and dq_shuffle rows are used: D_qk = 192 with D_v = 128 keys the
+  post stage on hdim_q 192. The hd192 odo rows are not used, because odo keys
+  on padded hdim_v (128).
 
 ## Verified Kernel Matrix
 
