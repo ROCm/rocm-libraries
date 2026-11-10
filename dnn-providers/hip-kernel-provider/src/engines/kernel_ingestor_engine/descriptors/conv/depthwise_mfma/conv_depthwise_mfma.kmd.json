@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "46308090-e22b-5555-9b90-ffb165d42b5d",
+  "name": "conv_depthwise_mfma config fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "int"
+    },
+    {
+      "name": "kh",
+      "type": "int"
+    },
+    {
+      "name": "kw",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "waves",
+      "type": "int"
+    },
+    {
+      "name": "depth",
+      "type": "int"
+    },
+    {
+      "name": "fold",
+      "type": "int"
+    },
+    {
+      "name": "rows",
+      "type": "int"
+    }
+  ]
+}

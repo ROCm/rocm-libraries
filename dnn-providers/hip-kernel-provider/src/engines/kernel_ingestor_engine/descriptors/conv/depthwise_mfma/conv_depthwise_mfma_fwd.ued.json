@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "id": "58623da9-396d-52fd-b298-bceae40c905b",
+  "name": "hipkernel:CONV_DEPTHWISE_MFMA_FWD",
+  "graph_match": {
+    "native": "hipkernel.conv_depthwise_mfma_fwd.graph_match"
+  },
+  "metadata": "46308090-e22b-5555-9b90-ffb165d42b5d",
+  "knobs": [
+    "atom",
+    "kh",
+    "kw",
+    "stride",
+    "waves",
+    "depth",
+    "fold",
+    "rows"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}
