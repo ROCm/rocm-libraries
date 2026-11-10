@@ -747,6 +747,36 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
+        # A rocRoller custom kernel is a pre-assembled object captured at one tile.
+        # It carries no generated edge handling in M and no partial-k-tile drain, so
+        # it is correct only where M is a whole number of its MacroTile0 and K a
+        # whole number of its DepthU. Without these predicates a GridBased lookup
+        # hands the kernel neighbouring sizes it was not captured for.
+        #
+        # Measured on gfx950 across the FP8, BF8 and FP4 families: with M % tile
+        # and K % depthU both zero the result is stable and correct; break either
+        # and the result is wrong and nondeterministic run to run.
+        #
+        # N is deliberately not constrained: N = 160, 192 and 320 against a
+        # 128-wide tile all verify clean, so the kernels do handle the N edge, and
+        # constraining it would reject working sizes. The rocRoller-off path
+        # (getRocRollerSelectedSolutions) guards all three; that is stricter than
+        # correctness requires.
+        customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+        if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
+            # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
+            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
+            # RR_GEMM_ prefix, which is how matchesRocRollerSelectedKernel in
+            # tensile_host.cpp identifies the same family. Other custom-kernel
+            # families are deliberately untouched: no equivalent measurement.
+            macroTile = customKernel.get('macrotile') or []
+            if len(macroTile) == 3:
+                tileM, _, depthU = macroTile
+                if tileM and tileM > 1:
+                    rv += [cls('Free0SizeMultiple', index=0, value=tileM)]
+                if depthU and depthU > 1:
+                    rv += [cls('BoundSizeMultiple', index=-1, value=depthU)]
+
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
         size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
