@@ -2840,7 +2840,8 @@ def _gfx1250_pipeline_supported(
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
-    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    comp_async layout and tdmstaged row-major C rules. ``dtype``/``warp_tile_k``
+    feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
     ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it.
     ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it."""

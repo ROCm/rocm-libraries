@@ -126,7 +126,7 @@ class GeneratedTileKernelInstance : public KernelInstance
         }
         else
         {
-            // TdmEpilogue overwrites C, so TDM cannot split K, and the kernel's own
+            // The TDM epilogues overwrite C, so TDM cannot split K, and the kernel's own
             // check accepts any k_batch. The preshuffle compute TDM launcher also
             // requires complete N/K tiles.
             if(problem.k_batch != 1)

@@ -5,7 +5,7 @@
 
 """
 CPU-only equivalence of the gfx1250 pipeline gates (non-MX comp_async,
-comp_tdm, comp_tdm_v2 and the tdm epilogue).
+comp_tdm, comp_tdm_v2 and the tdm / tdmstaged epilogues).
 
 The Tile Engine keeps its own copy of these rules
 (tile_engine/ops/gemm/gemm_validation_utils.py); the dispatcher uses
@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - TE tree not present
     te = None
 
 from arch_filter import ArchFilter  # noqa: E402
-from codegen_common import CommonTypeMappings  # noqa: E402
+from codegen_common import TDM_EPILOGUES, CommonTypeMappings  # noqa: E402
 
 try:
     import gemm_utils  # noqa: E402
@@ -58,15 +58,16 @@ PIPELINES = (
     "mem",
 )
 GATED_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
-EPILOGUES = ("cshuffle", "default", "tdm")
+EPILOGUES = ("cshuffle", "default") + TDM_EPILOGUES
 SCHEDULERS = ("intrawave", "interwave")
-LAYOUTS = ("rcr", "rrr", "crr", "ccr")
+# rcc: a column-major C, which only tdmstaged rejects.
+LAYOUTS = ("rcr", "rrr", "crr", "ccr", "rcc")
 PADS = tuple(itertools.product((False, True), repeat=3))
 DTYPES = ("fp16", "bf16", "fp8", "bf8")
 
 
 def _gated(pipeline, epilogue):
-    return pipeline in GATED_PIPELINES or epilogue == "tdm"
+    return pipeline in GATED_PIPELINES or epilogue in TDM_EPILOGUES
 
 
 def _te_accepts(pipeline, epilogue, scheduler, persistent, layout, pads, dtype, t):
@@ -321,30 +322,33 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
             )
 
     def test_tile_space(self):
-        """Every tile x wave x warp_tile_k x dtype for the legal trait of each
-        gated pipeline (LDS incl. TDM row padding, TDM C tile, 4-wave v2,
-        producer/consumer accumulator, 8-bit warp_tile_k and warp_tile_m/n
-        rules)."""
+        """Every tile x wave x warp_tile_k x dtype for the legal traits of each
+        gated pipeline, both TDM epilogues for the TDM pipelines (LDS incl. TDM
+        row padding, TDM C tile, 4-wave v2, producer/consumer accumulator,
+        8-bit warp_tile_k and warp_tile_m/n rules)."""
         mismatches = []
         compared = accepted = rejected = 0
         for t in _tile_space():
             for dtype in DTYPES:
                 if not self._baseline_ok("rcr", dtype, t, (True, True, True)):
                     continue
-                for pipe, (epi, sched, pads) in LEGAL_TRAITS.items():
-                    want = _te_accepts(pipe, epi, sched, False, "rcr", pads, dtype, t)
-                    got = _arch_filter_accepts(
-                        self.filt, pipe, epi, sched, "rcr", pads, dtype, t
-                    )
-                    if gemm_utils is not None:
-                        got = got and _gemm_utils_accepts(
+                for pipe, (legal_epi, sched, pads) in LEGAL_TRAITS.items():
+                    for epi in TDM_EPILOGUES if legal_epi == "tdm" else (legal_epi,):
+                        want = _te_accepts(
                             pipe, epi, sched, False, "rcr", pads, dtype, t
                         )
-                    compared += 1
-                    accepted += want
-                    rejected += not want
-                    if want != got:
-                        mismatches.append((pipe, dtype, t, want, got))
+                        got = _arch_filter_accepts(
+                            self.filt, pipe, epi, sched, "rcr", pads, dtype, t
+                        )
+                        if gemm_utils is not None:
+                            got = got and _gemm_utils_accepts(
+                                pipe, epi, sched, False, "rcr", pads, dtype, t
+                            )
+                        compared += 1
+                        accepted += want
+                        rejected += not want
+                        if want != got:
+                            mismatches.append((pipe, epi, dtype, t, want, got))
         self.assertGreater(compared, 1000)
         self.assertGreater(accepted, 0)
         self.assertGreater(rejected, 0)
