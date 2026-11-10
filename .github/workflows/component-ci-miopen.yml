@@ -176,7 +176,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
-          ref: b2099a6b8703c089134ad526253752d26bbbf43a # 2026-09-10
+          ref: 26a2330c02ea5f1191e67d877fe5761c040040fd # 2026-10-08
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
