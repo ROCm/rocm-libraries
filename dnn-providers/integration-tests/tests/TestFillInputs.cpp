@@ -700,6 +700,7 @@ struct SdpaBwdOptions
     bool offset = false;
     bool dropoutMask = false;
     bool dropoutScale = false;
+    bool dropoutScaleInv = false;
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -771,6 +772,11 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         tensors.push_back(CreateTensorAttributesDirect(
             b, 15, "dropout_scale", DataType::FLOAT, &scalarDims, &scalarDims));
     }
+    if(opts.dropoutScaleInv)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 16, "dropout_scale_inv", DataType::FLOAT, &scalarDims, &scalarDims));
+    }
 
     SdpaBackwardAttributesBuilder attrs(b);
     attrs.add_q_tensor_uid(1);
@@ -817,6 +823,10 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     if(opts.dropoutScale)
     {
         attrs.add_dropout_scale_tensor_uid(15);
+    }
+    if(opts.dropoutScaleInv)
+    {
+        attrs.add_dropout_scale_inv_tensor_uid(16);
     }
     auto bwd = attrs.Finish();
 
@@ -1114,17 +1124,18 @@ TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndOneOfSeedOrOffsetIsDerived)
     }
 }
 
-// Probability zero excuses the probability, seed and offset only: a dropout mask or scale tensor
-// the node names still means dropout, which the fill does not model.
+// Probability zero excuses the probability, seed and offset only: a dropout mask, scale or
+// scale-inverse tensor the node names still means dropout, which the fill does not model.
 TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndADropoutMaskOrScaleIsRefused)
 {
-    for(const bool mask : {true, false})
+    for(const std::string tensor : {"dropout mask", "dropout scale", "dropout scale inverse"})
     {
-        SCOPED_TRACE(mask ? "dropout mask" : "dropout scale");
+        SCOPED_TRACE(tensor);
         SdpaBwdOptions opts;
         opts.dropoutProbability = 0.0f;
-        opts.dropoutMask = mask;
-        opts.dropoutScale = !mask;
+        opts.dropoutMask = tensor == "dropout mask";
+        opts.dropoutScale = tensor == "dropout scale";
+        opts.dropoutScaleInv = tensor == "dropout scale inverse";
         const auto gr = buildSdpaBwdGraph(opts);
         const auto leafUids = gr.leafInputUids({7, 8, 9});
         auto inputs = makeTensorsFromGraph(gr, leafUids);
