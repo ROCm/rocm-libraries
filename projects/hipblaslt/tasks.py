@@ -71,7 +71,6 @@ def _supported_distros():
         sys.exit(2)
 
 
-
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if "VSINSTALLDIR" in os.environ:
@@ -143,7 +142,7 @@ def _setup_msvc_env():
 def _setup_clang_shims(build_subdir: Path):
     """Create clang.exe/clang++.exe hardlinks pointing to amdclang equivalents.
 
-    Tensile's toolchain validator looks for 'clang.exe' / 'clang++.exe' by name.
+    TensileLite's toolchain validator looks for 'clang.exe' / 'clang++.exe' by name.
     The ROCm Windows SDK ships these as 'amdclang.exe' / 'amdclang++.exe'.
     We create hardlinks in a shims directory and prepend it to PATH.
     """
@@ -166,7 +165,6 @@ def _setup_clang_shims(build_subdir: Path):
                 shutil.copy2(target, link)  # fallback: copy
         print(f"clang shim: {alias} -> {target}")
     os.environ["PATH"] = str(shims_dir) + os.pathsep + os.environ.get("PATH", "")
-
 
 
 def _rmtree(path: Path):
@@ -443,6 +441,7 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "no_compress": "Don't compress TensileLite assembly objects.",
         "keep_build_tmp": "Keep the temporary build artifacts.",
         "experimental": "Include 'Experimental' logic directories.",
+        "emit_occupancy_probe": "Emit the CU-occupancy probe in StreamK hybrid kernels.",
         "gemm_a2a_fusion": "Build experimental fused GEMM + all-to-all support.",
         "logic_filter": "Logic YAML filter (e.g. 'gfx942/Equality/*').",
         "legacy_hipblas_direct": "Enable legacy HIPBLAS_DIRECT mode.",
@@ -500,6 +499,7 @@ def build(
     clean=False,
     fortran_compiler=None,
     gemm_a2a_fusion=False,
+    emit_occupancy_probe=False,
 ):
     _supported_distros()
 
@@ -627,7 +627,7 @@ def build(
         new_cxx_flags = f"{(existing_cxx_flags + ' ').lstrip()}-DNOMINMAX --rocm-path={rocm_s}"
         cmake_opts.append(f'"-DCMAKE_CXX_FLAGS={new_cxx_flags}"')
 
-    # Tensile options
+    # TensileLite options
     if no_tensile:
         cmake_opts.append("-DHIPBLASLT_ENABLE_DEVICE=OFF")
     else:
@@ -652,6 +652,8 @@ def build(
         cmake_opts.append("-DTENSILELITE_NO_COMPRESS=ON")
     if experimental:
         cmake_opts.append("-DTENSILELITE_EXPERIMENTAL=ON")
+    if emit_occupancy_probe:
+        cmake_opts.append("-DTENSILELITE_EMIT_OCCUPANCY_PROBE=ON")
     if disable_marker:
         cmake_opts.append("-DHIPBLASLT_ENABLE_MARKER=OFF")
     if not enable_asm_comments:
@@ -691,7 +693,7 @@ def build(
             print("Could not find amdclang++/amdclang on PATH. Ensure ROCm SDK is installed.")
             sys.exit(1)
         # Lowercase the filename: shutil.which returns the filesystem case (e.g. .EXE),
-        # but Tensile's validator compares against lowercase extensions (.exe).
+        # but TensileLite's validator compares against lowercase extensions (.exe).
         def _normalized(p: str) -> str:
             pp = Path(p)
             return (pp.parent / pp.name.lower()).as_posix()

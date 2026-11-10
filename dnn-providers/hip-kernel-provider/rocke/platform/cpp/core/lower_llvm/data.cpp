@@ -5,12 +5,13 @@
  * rocke.core.lower_llvm. Defines the externs declared in
  * rocke/lower_llvm_internal.h:
  *
- *   - ROCKE_LL_DATALAYOUT / ROCKE_LL_TRIPLE          (Python _DATALAYOUT / _TRIPLE)
  *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
- *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
- *                                                (Python ..._LLVM23_OVERRIDES)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[]  (+ _COUNT)
+ *                                                (Python ..._LLVM24_OVERRIDES)
+ *   - rocke_ll_decl_text / rocke_ll_decl_at        (Python _decls_for_flavor)
+ *   - rocke_ll_matrix_decl_key_at                  (its matrix-call rung)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -20,68 +21,14 @@
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/matrix_calls_internal.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
+#include <string.h>
+
 namespace ckc
 {
-
-/* ---------------------------------------------------------------------- */
-/* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
-/* _DATALAYOUT_LLVM23 / _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED:    */
-/* two fields drift across LLVM flavors:                                    */
-/*   * buffer-resource address space (p8, the 128-bit buffer descriptor --   */
-/*     NOT the p7 fat pointer) gained an index-width field:                  */
-/*       LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                       */
-/*       LLVM 22 (ROCm 7.2):      e-...-p8:128:128:128:48-...                */
-/*   * ELF symbol-mangling spec (m:e): absent in LLVM 20 and LLVM 22,        */
-/*     present in LLVM 23 (ROCm 7.13+, AMD clang 23.0.0git):                 */
-/*       LLVM 20 / 22:  e-p:64:64-...                                        */
-/*       LLVM 23:       e-m:e-p:64:64-...                                    */
-/* Pick via rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.*/
-/* ---------------------------------------------------------------------- */
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM20
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM22
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
- * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
- * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
- * full rationale. Must stay byte-identical with it. */
-const char* const ROCKE_LL_DATALAYOUT_LLVM23
-    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Back-compat alias: callers that have not yet been flavor-threaded see the
- * LLVM20 form (the historical hardcoded value). New code keys on the flavor
- * via rocke_ll_datalayout_for_flavor / rocke_isa_datalayout. */
-const char* const ROCKE_LL_DATALAYOUT = ROCKE_LL_DATALAYOUT_LLVM20;
-
-const char* const ROCKE_LL_TRIPLE = "amdgcn-amd-amdhsa";
-
-/* Python _datalayout_for_flavor: LLVM20 returns the legacy p8 layout, LLVM23
- * returns its own m:e form, and anything else (incl. an unexpected value)
- * degrades to the modern LLVM22 form. */
-const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
-{
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)
-        return ROCKE_LL_DATALAYOUT_LLVM20;
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
-        return ROCKE_LL_DATALAYOUT_LLVM23;
-    return ROCKE_LL_DATALAYOUT_LLVM22;
-}
 
 /* ---------------------------------------------------------------------- */
 /* The base (LLVM20) intrinsic-declaration table (Python _INTRINSIC_DECLS) */
@@ -294,9 +241,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2f16",
-     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
@@ -309,6 +253,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sched.group.barrier",
      "declare void @llvm.amdgcn.sched.group.barrier(i32 immarg, i32 immarg, i32 immarg)"},
     {"s.setprio", "declare void @llvm.amdgcn.s.setprio(i16 immarg)"},
+    {"trap", "declare void @llvm.trap()"},
     {"s.waitcnt", "declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"},
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) nocapture "
@@ -334,6 +279,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.f16",
      "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    /* 1-byte buffer load and store (Python _INTRINSIC_DECLS, same position). */
+    {"raw.ptr.buffer.load.i8",
+     "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
+    {"raw.ptr.buffer.store.i8",
+     "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ptr addrspace(8) nocapture "
+     "writeonly, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
@@ -514,10 +466,25 @@ const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[] = {
 const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT
     = (int)(sizeof(ROCKE_LL_AV_B128_PTR_TYPES) / sizeof(ROCKE_LL_AV_B128_PTR_TYPES[0]));
 
+/* A memref.global_load* is a plain load, which reads through a global pointer
+ * or through a parameter declared addr_space="constant". It names the
+ * pointer's own type, so no entry needs a declare. */
+const rocke_ll_anyptr_space_t ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[] = {
+    {1, "ptr addrspace(1)"},
+    {4, "ptr addrspace(4)"},
+};
+const int ROCKE_LL_GLOBAL_LOAD_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_GLOBAL_LOAD_PTR_TYPES) / sizeof(ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[0]));
+
 /* ---------------------------------------------------------------------- */
-/* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */
-/* Same keys, different decl text.                                         */
+/* Per-generation overrides. Each array holds only the entries whose text  */
+/* changed AT that declaration ABI generation; a generation inherits every */
+/* older generation's arrays in rocke_ll_declaration_abi_t order           */
+/* (rocke_ll_decl_text below). Keys must exist in the base table; only the */
+/* declaration text differs.                                               */
 /* ---------------------------------------------------------------------- */
+
+/* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES). */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
     {"mfma.f32.16x16x32.fp8.fp8",
@@ -541,52 +508,125 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
 
-/* ---------------------------------------------------------------------- */
-/* LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES)            */
-/* Inherits the LLVM22 entries plus declarations whose ABI changed again. */
-/* ---------------------------------------------------------------------- */
+/* LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES): the named
+ * barrier pointers move from LDS addrspace(3) to addrspace(15). The LLVM22
+ * overrides reach this generation through inheritance. */
 
-const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
-    {"mfma.f32.16x16x32.fp8.fp8",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
-     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x32.bf8.bf8",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
-     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.32x32x16.fp8.fp8",
-     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
-     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.32x32x16.bf8.bf8",
-     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
-     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"make.buffer.rsrc.p1",
-     "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-     "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[] = {
+    {"s.barrier.init",
+     "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.signal.var",
+     "declare void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.join", "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"},
+    {"s.wakeup.barrier", "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"},
 };
 
-const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
-    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
-            / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
+const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT
+    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES)
+            / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[0]));
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
- * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count)
+/* One declaration ABI generation's own override array (Python
+ * _INTRINSIC_DECL_OVERRIDES_BY_ABI). LLVM20 is the base table itself and
+ * overrides nothing; LLVM23 has no text of its own today (Python
+ * _INTRINSIC_DECLS_LLVM23_OVERRIDES is empty), so it resolves through LLVM22.
+ * A generation whose ABI changes again gets its own array here. */
+const rocke_ll_decl_t* rocke_ll_declaration_abi_own_overrides(rocke_ll_declaration_abi_t abi,
+                                                              int* out_count)
 {
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM22)
+    if(abi == ROCKE_LL_DECLARATION_ABI_LLVM22)
     {
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
         return ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES;
     }
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    if(abi == ROCKE_LL_DECLARATION_ABI_LLVM24)
     {
         if(out_count)
-            *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
-        return ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES;
+            *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
+        return ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES;
     }
     if(out_count)
         *out_count = 0;
     return NULL;
+}
+
+/* The base-table index of `key`, or -1. */
+static int ll_base_decl_index(const char* key)
+{
+    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
+    {
+        if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* Python _decls_for_flavor, one key at a time: the text of the newest
+ * declaration ABI generation at or below the one `flavor`'s emission profile
+ * selects (rocke_ll_declaration_abi_t order) that overrides `key`, else the
+ * base text, else the declaration the first matrix call with that key derives
+ * for `flavor`. Lanes sharing a profile share one table. NULL for an
+ * unknown key or a flavor without a profile. */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key)
+{
+    const rocke_ll_emission_profile_t* profile = rocke_ll_emission_profile(flavor);
+    if(!profile || !key)
+        return NULL;
+    for(int abi = (int)profile->declarations; abi >= (int)ROCKE_LL_DECLARATION_ABI_LLVM20; abi--)
+    {
+        int n = 0;
+        const rocke_ll_decl_t* own
+            = rocke_ll_declaration_abi_own_overrides((rocke_ll_declaration_abi_t)abi, &n);
+        for(int j = 0; j < n; j++)
+        {
+            if(strcmp(own[j].key, key) == 0)
+                return own[j].decl;
+        }
+    }
+    int base = ll_base_decl_index(key);
+    if(base >= 0)
+        return ROCKE_LL_INTRINSIC_DECLS[base].decl;
+    int num_calls = 0;
+    const rocke_matrix_call_entry_t* calls = rocke_matrix_calls(&num_calls);
+    for(int i = 0; i < num_calls; i++)
+    {
+        if(strcmp(rocke_matrix_call_key(&calls[i].call), key) == 0)
+            return rocke_matrix_call_declaration(&calls[i].call, flavor);
+    }
+    return NULL;
+}
+
+/* The keys the matrix-call table adds to the base table, in the order Python
+ * _decls_for_flavor appends them: table order, first call per key, keys the
+ * base table already holds skipped. */
+const char* rocke_ll_matrix_decl_key_at(int index)
+{
+    int num_calls = 0;
+    const rocke_matrix_call_entry_t* calls = rocke_matrix_calls(&num_calls);
+    int seen = 0;
+    for(int i = 0; i < num_calls; i++)
+    {
+        const char* key = rocke_matrix_call_key(&calls[i].call);
+        bool earlier = ll_base_decl_index(key) >= 0;
+        for(int j = 0; j < i && !earlier; j++)
+            earlier = strcmp(rocke_matrix_call_key(&calls[j].call), key) == 0;
+        if(earlier)
+            continue;
+        if(seen == index)
+            return key;
+        seen++;
+    }
+    return NULL;
+}
+
+/* Python _decls_for_flavor(flavor).items()[index]: overrides only change the
+ * text of base keys, so the resolved table has the base table's keys in the
+ * base table's order. index is [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index)
+{
+    const char* key = ROCKE_LL_INTRINSIC_DECLS[index].key;
+    rocke_ll_decl_t out = {key, rocke_ll_decl_text(flavor, key)};
+    return out;
 }
 
 } /* namespace ckc */

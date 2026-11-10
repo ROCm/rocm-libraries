@@ -290,7 +290,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     writer.sgprPool.checkIn(tmpSgpr)
     return
 
-  if tileInfo.loadRatioGR >= 2.0:
+  # Non-dual-period kernels keep the original behavior: a GR load ratio >= 2.0
+  # skips the wave-partition LR offset.  The dual-period MXFP8 kernel reuses one
+  # 256-K scale epoch across ScaleReuse data iterations (load ratio >= 2.0) and
+  # DOES need the offset, so it is exempt from the early return.
+  if tileInfo.loadRatioGR >= 2.0 and not kernel.get("_DualPeriodMXFP8"):
     return
 
   wavesize = kernel["WavefrontSize"]
@@ -303,7 +307,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   partitionOffset = tileInfo.mmaTileShape[0] * tileInfo.localSubtileGrid[0]
   numRowsPerWave = wavesize // (subIterKBytes // loadWidth)
 
-  if tileInfo.loadRatioGR == 1.0:
+  if tileInfo.loadRatioGR >= 1.0:
     mWaves = kernel["MIWaveGroup"][0]
     if tc == 'A':
       module.add(VAndB32(dst=vgpr(waveId), src0=hex(mWaves - 1), src1=vgpr(waveId), comment="%s: waveId %% %d"%(tc, mWaves)))
@@ -696,7 +700,9 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
   module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
-  if writer.states.subtileLdsSwizzle:
+  needsLdsSwizzle = (writer.states.subtileLdsSwizzle and
+                     (not tileInfoA.isPreShuffled or not tileInfoB.isPreShuffled))
+  if needsLdsSwizzle:
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
     module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
@@ -712,8 +718,12 @@ def _lraTileAssignment_legacy(writer, kernel):
     module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
   else:
     module.add(VMulLOU32(dst=vgpr(rowOffset), src0=hex(ldsRowStride), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
-  _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
-  _computeLROffset(module, tileInfoB, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
+  for tileInfo in (tileInfoA, tileInfoB):
+    if tileInfo.isPreShuffled:
+      _computeLROffsetLinear(module, kernel, writer, tileInfo)
+    else:
+      _computeLROffset(module, tileInfo, colOffset, rowOffset,
+                       writer.states.subtileLdsSwizzle)
   writer.vgprPool.checkIn(tmpVgpr)
   _lraWavePartitioning_legacy(module, writer, kernel)
   for vgprId in range(len(tileInfoB.sharedVgprLROffset)):

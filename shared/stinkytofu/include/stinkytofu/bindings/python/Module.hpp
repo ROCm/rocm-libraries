@@ -145,13 +145,12 @@
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
-    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
     X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
-    X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
-    X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
+    X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
+    X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)
@@ -290,6 +289,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
+     * @brief Write uint64 metadata on the underlying Function.
+     *
+     * Occupancy-aware passes (InsertDelayAluPass) read
+     * kSigTotalVgprsMetaKey from here. toStinkyTofuModule stamps it; the
+     * logical-IR binding stamps the same key through this setter.
+     * @param key Metadata key
+     * @param value Metadata value
+     */
+    void setMetaDataU64(const std::string& key, uint64_t value);
+
+    /**
      * @brief Get the underlying Function
      *
      * This provides access to the internal Function representation.
@@ -377,6 +387,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void setGroupRange(const std::string& groupName, IntrusiveListIterator<IRBase> first,
                        IntrusiveListIterator<IRBase> last);
+
+    /**
+     * @brief Move a group endpoint off a node that is about to be deleted.
+     *
+     * ScopeAdaptor erases TEXTBLOCK comments while extracting a region. Another
+     * group's stored first/last may be that comment (an epilogue anchor can sit
+     * inside an earlier noLoadLoopBody span). Point the endpoint at a neighbor
+     * that stays alive: \p ifFirst when this node is the group's first, \p ifLast
+     * when it is the group's last. A null replacement leaves that side unchanged.
+     */
+    void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
 
     /**
      * @brief Get the ModuleOptions

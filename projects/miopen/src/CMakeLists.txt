@@ -22,11 +22,7 @@ endif()
 #     remain in the future)  perform final conversion (and rounding) of FP32
 #     to BF16 results. This affects the main functionality of the library.
 option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
-option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
 option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
-
-# Note: MIOPEN_FP8_IEEE_EXPONENT_BIAS can be defaulted by
-# cmake/MiopenCkCompileDefs.cmake to stay aligned with composable_kernel FP8 mode.
 
 configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
 
@@ -40,6 +36,67 @@ endif()
 
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
+
+# Embed a Windows VERSIONINFO resource into a DLL target. No resource-compiler
+# availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
+# usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
+#
+#   target            DLL target to attach the resource to.
+#   file_description  VERSIONINFO FileDescription field.
+#   internal_name     VERSIONINFO InternalName; also names the generated .rc and is used verbatim
+#                     for OriginalFilename as "${internal_name}.dll". Callers that override a
+#                     target's OUTPUT_NAME must pass a matching internal_name or the recorded
+#                     OriginalFilename will be wrong.
+#
+# Callable from any directory: add_custom_command(TARGET) below resolves in the caller's scope,
+# which is where ${target} is defined.
+function(miopen_embed_version_resource target file_description internal_name)
+    # Shared libraries only. ${_MIOPEN_IMPL_TARGET} is declared without an explicit SHARED, so it
+    # follows BUILD_SHARED_LIBS and becomes a static archive under -DBUILD_SHARED_LIBS=OFF or
+    # -DMIOPEN_EMBED_BUILD=ON (which forces it off). A VERSIONINFO resource in a static archive is
+    # meaningless -- the linker does not propagate it into the consuming binary -- and the
+    # POST_BUILD check below would be handed a .lib, which has no version resource to read, and
+    # would fail the build. Executables are skipped for a different reason: MIOpen.rc.in hardcodes
+    # FILETYPE VFT_DLL, so the resource would be wrong for one.
+    get_target_property(_type ${target} TYPE)
+    if(NOT WIN32 OR NOT _type MATCHES "^(SHARED|MODULE)_LIBRARY$")
+        return()
+    endif()
+    # Derived here rather than at directory scope so the function is self-contained and renders the
+    # same copyright year regardless of which directory calls it.
+    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
+    # rocm_setup_version leaves MIOpen_VERSION_TWEAK as "<short-sha>[-dirty]". Carrying the commit
+    # hash in the StringFileInfo strings is deliberate and matches hipDNN (RFC 0005); the binary
+    # FILEVERSION/PRODUCTVERSION fields are four 16-bit integers and keep 0. The "-dirty" marker is
+    # dropped so the DLL's bytes do not depend on working-tree cleanliness, which would make builds
+    # non-reproducible and could ship "-dirty" in a release artifact's metadata.
+    string(REGEX REPLACE "-dirty$" "" MIOPEN_RC_VERSION_TWEAK "${MIOpen_VERSION_TWEAK}")
+    set(MIOPEN_RC_FILE_DESCRIPTION "${file_description}")
+    set(MIOPEN_RC_INTERNAL_NAME "${internal_name}")
+    set(MIOPEN_RC_ORIGINAL_FILENAME "${internal_name}.dll")
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/src/MIOpen.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc"
+        @ONLY
+    )
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc")
+
+    # Verify the resource actually landed in the linked DLL. Done at build time rather than as a
+    # test so it also covers BUILD_TESTING=OFF release builds and rides along on the existing
+    # Windows build job without needing a GPU test machine. The target only exists when
+    # MIOPEN_VALIDATE_VERSIONINFO is ON and we are not cross-compiling (see the top-level
+    # CMakeLists.txt), so this guard carries that gating without repeating it.
+    if(TARGET win_versioninfo_check)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND win_versioninfo_check
+                    "${MIOpen_VERSION_MAJOR}.${MIOpen_VERSION_MINOR}.${MIOpen_VERSION_PATCH}"
+                    "$<TARGET_FILE:${target}>"
+            COMMENT "Verifying VERSIONINFO in $<TARGET_FILE_NAME:${target}>"
+            VERBATIM
+        )
+        add_dependencies(${target} win_versioninfo_check)
+    endif()
+endfunction()
 
 # Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
@@ -895,6 +952,8 @@ else()
         )
 endif()
 
+miopen_embed_version_resource(${_MIOPEN_IMPL_TARGET} "MIOpen Library" "${_MIOPEN_IMPL_TARGET}")
+
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # Rename the private library's public C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
@@ -907,8 +966,10 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
 
-    # Public wrapper library. src/private/wrapper.cpp defines extern "C"
-    # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
+    # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
+    # <miopen/miopen.h> by script/generate_wrapper_sources.py) and
+    # src/private/wrapper.cpp (the stubs that do more than pass a call through)
+    # define an extern "C" stub for every MIOPEN_EXPORT entry point in the header,
     # each routing through src/private/routing.cpp to either hipDNN or its
     # renamed _impl symbol in MIOpen_private. PUBLIC linkage
     # propagates the implementation's include directories and link interface to
@@ -917,8 +978,10 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # libMIOpen_private.so.
     add_library(MIOpen
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/wrapper_passthrough.cpp
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+    miopen_embed_version_resource(MIOpen "MIOpen Public Wrapper" MIOpen)
 
     # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
     # frontend configured to dlopen the backend at first use, so libMIOpen.so
@@ -940,10 +1003,11 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
     target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
 
-    # Deliberately excludes src/include: the wrapper must see only the public
-    # header and its own _impl declarations. Without that restriction a stub
-    # could include an internal C++ header and re-couple the public shim to
-    # types that are supposed to live behind libMIOpen_private.so.
+    # The wrapper is meant to see only the public header and its own _impl
+    # declarations: a stub that included an internal C++ header would re-couple
+    # the public shim to types that live behind libMIOpen_private.so. This
+    # target adds no src/include, but the PUBLIC link to the private target above
+    # brings it in, so the build does not enforce that rule.
     # CMAKE_BINARY_DIR/include holds the generated export.h and is listed here
     # rather than relied on from miopen_generate_export_header() further down,
     # so the target is complete at its point of definition even in a superbuild
@@ -960,17 +1024,19 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
 
     # The wrapper's only dependency is the private library, so every symbol it
-    # references must resolve at link time. This turns "new API added, stub
-    # written, rename #define forgotten" from a runtime failure into a link
-    # error -- the exported symbol set is unchanged in that case, so the
-    # public-ABI gate cannot catch it.
+    # references must resolve at link time. This turns a stub that calls an _impl
+    # function the private library does not define (a hand-written stub for a
+    # name missing from the rename list, say) from a runtime failure into a link
+    # error. A miopen.h entry point whose generated files are stale is not caught
+    # here, because no stub refers to it; generate_wrapper_sources.py --check and
+    # check_public_abi.py check-wrapper catch that.
     if(NOT WIN32 AND NOT APPLE)
         target_link_options(MIOpen PRIVATE "LINKER:--no-undefined")
     endif()
 
-    # The hand-maintained forwarding code is the part of this change most in
-    # need of automated checking, and clang_tidy_check() below runs against the
-    # implementation target only.
+    # The forwarding code, generated stubs included, is the part of this change
+    # most in need of automated checking, and clang_tidy_check() below runs
+    # against the implementation target only.
     clang_tidy_check(MIOpen)
 
     # The generated public export header (miopen_generate_export_header below)

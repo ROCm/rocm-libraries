@@ -970,7 +970,8 @@ output. We tested this directly: passing a per-lane swizzled LDS
 pointer to `raw_ptr_buffer_load_lds` corrupted the result, so swizzle
 has to be expressed in the address arithmetic of a lane-contiguous
 distribution, the way CK's tile descriptors do, not by handing the
-intrinsic an arbitrary LDS pointer.
+intrinsic an arbitrary LDS pointer. To swizzle a gfx9 async copy anyway, permute which
+source chunk each lane fetches (§6.4a).
 
 `AsyncTileLoader.choose_dwords` selects `{4, 3, 1}` only (the AMDGPU
 `raw_ptr_buffer_load_lds` intrinsic on this target does not accept 2
@@ -1094,6 +1095,26 @@ separate swizzle strategies. See
 [architecture reference](#21-target-architecture-reference) (§21.2) for
 the per-opcode conflict-period table.
 
+**gfx9 async DRAM→LDS copies: swizzle the source, not the destination.** On
+gfx942/gfx950 an async `buffer_load … lds` copy writes lane *n* of the wave to LDS
+slot *n*, so its destination address cannot be XORed (§6.3). Permute which global
+chunk each lane fetches instead. With 16-byte chunks, chunk `c` of row `r` is stored at
+LDS chunk `c ^ (r mod chunks_per_row)`. XOR is its own inverse, so the lane that writes
+LDS chunk `c` fetches global chunk `c ^ (r mod chunks_per_row)`, and every LDS reader
+applies the same permutation to its column. The copies stay contiguous and the tile
+needs no padding. `chunks_per_row` must be a power of two: otherwise the XOR can leave
+the row (with 24 chunks, row 8 and chunk 16 map to chunk 24). The 3D attention specs
+enforce it: `use_kv_lds_swizzle` needs `head_size / 8` (16-byte chunks of 2-byte
+elements) to be a power of two, so head size 192 (24 chunks) cannot use it. A loader
+that stages through registers can permute on the store instead (the gfx942 3D wide feed
+does, by default for decode at head size 64 and 128; at head size 128 it measured
+slightly faster alone, at head size 64 it has no A/B of its own: see the
+[3D decode case study](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md)),
+but §6.4 measured a manually swizzled layout with register-staged LDS writes to regress
+slightly, so A/B it on your loader. The 3D attention kernels' `use_kv_lds_swizzle` is
+the worked example (§12.1.K2). gfx1250's `global_load_async_to_lds` takes a per-lane LDS
+address and does not have this constraint.
+
 ### 6.5 Registers
 
 - Track VGPR and SGPR usage with `probe_occupancy.py`.
@@ -1118,6 +1139,17 @@ the per-opcode conflict-period table.
 - Use graph replay to separate cache behavior from launch overhead.
 - Do not tune only for warm cache unless production has warm cache.
 - Consider L2 prefetch only when the memory pattern is predictable.
+- Mark data that is read exactly once and is larger than the last-level cache (the K/V
+  of a large single-token decode, one-shot streams) non-temporal (`CACHE_STREAM` /
+  `"stream"`, which sets the NT bit only: `"nt"`
+  also sets SC0 and is a different policy; bits in
+  [`ir_model.md`](../ir_lowering/ir_model.md)) so it does not evict lines something
+  else will reuse. The 3D decode kernels' `kv_cache_policy` does this when every
+  sequence decodes, K/V is fp16/bf16 and the call reads more than the 256 MiB
+  last-level cache; smaller K/V keeps `"all"` so the next call can hit in it (§12.1.K2).
+- Judge a non-temporal hint on data that is *not* cache-resident between calls
+  (rotating buffers). Replaying the same small K/V keeps it warm for the baseline
+  and makes the hint look like a regression.
 
 ---
 
@@ -1239,7 +1271,8 @@ layout match, independent of the atom's compute throughput.
 - Ensure boundary lanes write zeros or that suppressed loads do not
   leave stale LDS.
 - Understand whether async instruction writes lane-contiguous or
-  arbitrary addresses (lane-contiguous on AMD; see Section 6.3).
+  arbitrary addresses (lane-contiguous for gfx9 `buffer_load … lds`; gfx1250's
+  `global_load_async_to_lds` takes a per-lane LDS address; see Sections 6.3 and 6.4a).
 - If arbitrary swizzle is needed, verify the intrinsic supports it.
 
 ### 8.3 Waits And Barriers
@@ -1862,6 +1895,11 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | `pipeline` | GEMM `TraitSpec` | `"mem"` / `"compv3"` / `"compv4"` | `mem` = single-buffer; `compv4` = double-buffered async DMA + MFMA overlap. Compv3 / compv4 trade LDS for latency hiding |
 | `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = same runtime `scf.for` K-loop as `"mem"` (load → sync → MFMA → sync per tile); it is mutually exclusive with `async_dma` but otherwise imposes no K-trip-count limit |
 | `scheduler` | GEMM `TraitSpec` | `"intrawave"` / `"interwave"` | Where the scheduler injects waits. Intrawave keeps producers and consumers in one wave; interwave splits them |
+| `tdm` / `tdm_depth` | GEMM `TraitSpec` (gfx1250, WMMA path) | False / 1; depth 1 to 4 | Load A and B into LDS with the Tensor Data Mover instead of per-lane loads. `tdm_depth` is the LDS buffer count: 1 unpipelined, 2 ping-pong, 3 or 4 a modular ring. Named `tdm{N}` in the kernel name. The base of the three K-loop knobs below |
+| `split_barrier` | GEMM `TraitSpec` (WMMA `mem` pipeline, with `tdm`, depth >= 2, `split_k == 1`) | False / True | Split the per-tile workgroup barrier into signal and wait, so the WMMAs of the tile overlap the wait. Named `spb` |
+| `tdm_alternate_issuers` | GEMM `TraitSpec` (with `tdm`, depth 2, at least four waves) | False / True | Give each LDS half its own pair of TDM issuer waves, taking the refill off the waiting waves' critical path. Named `alti` |
+| `tdm_early_refill` | GEMM `TraitSpec` (with `split_barrier` and `tdm_alternate_issuers`, depth 2) | False / True | Refill an LDS half as soon as every wave has read it. Named `erf` |
+| `ab_load_elem_bytes` | GEMM `TraitSpec` (not with `tdm`) | None (the operand's size) / 1 / 2 / 4 / 8 | Overrides the element width the A/B global loads are vectorised for, so two widths can be compared in one binary. TDM loads whole tiles and never reads it, so it is rejected with `tdm`. Named `abeb{N}` only when set |
 | `async_dma` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). It **pins the schedule**: forward conv and wgrad both build `SchedulePolicy.for_pipeline("async_dma")` (interwave, `s_setprio 1`) and ignore `spec.pipeline` on that leg, which is why the sweep pins the pipeline to `"mem"` there instead of compiling one body under five kernel names. Incompatible with `pipeline="basic"` (all conv families) and with `pipeline="wavelet"` (forward conv); rejected outright on dgrad by `is_valid_dgrad_spec` (the dgrad builder has no direct global→LDS path). A **swept axis**, not a run-level flag — unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the LDS pad to 0 (the intrinsic writes a packed lane-contiguous tile) and coarsens the load-width ladder to the chunk widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes. On wgrad it *requires* `lds_k_outer=True`; on dgrad it is *rejected* under `lds_k_outer` (the tilde builder has no direct global→LDS path). Python-unrolls the K loop, so it is bounded by `_MAX_UNROLLED_K_ITERS` |
 | `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for the statically-unrolled wgrad `async_dma` loop. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. `pipeline="basic"` no longer applies — it uses a runtime `scf.for` loop and is not bounded by this constant |
 | `unroll_k` | conv_implicit_gemm | False | Python-time unroll of the K loop. Bigger code, fewer waits. Rejected by `is_valid_dgrad_spec` (the dgrad builder has no unrolled loop) |
@@ -1883,6 +1921,7 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | `xcd_tiles` | DirectConv (`DirectConvSpec`, gfx950) | False / True | All workgroups of one image row band run on one XCD (`chiplet_transform_chunked_runtime`, chunk from the kernargs), so neighbouring group tiles share each pixel's cache lines. Needs `XCD_TILES_MIN_ROW_BANDS` row bands (re-checked on the real problem by `plan_for`). Pays only once the stores and banks are fixed (`stage_out`, `lds_pad`); the AOT cache builds the stack as one block (`DGRAD_FUSED_STREAM`) |
 | `dot2` / `mfma` | `DirectDepthwiseDgradWindowedSpec` (gfx950) | False / False | `dot2`: tap pairs on `arith.fdot2`, the window kept in 16 bits; for FMA-issue-bound 5-wide and larger filters, neutral on memory-bound 3x3. `mfma`: the Toeplitz form (one-hot weights x 8 channels per `mfma_f32_16x16x32`, LDS-staged dY windows and dX rows) moves the multiply-adds to the matrix core; a non-finite dY value then reaches its whole 8-channel group. `v_dot2c_f32_*` and `v_pk_fma_f32` save instructions but not multiply-add throughput, so a VALU-bound depthwise kernel needs the matrix core |
 | `prefetch_addr` | conv_implicit_gemm_wgrad | False | Carry each load's global byte offset across K-loop iterations. The AOT wgrad kernel is shape-generic, so its plain K loop derives every load chunk's address (runtime magic-number divides, stride products, bounds checks) ahead of the `buffer_load`s. With the flag each iteration issues all of the tile's reads from the carried offsets first, derives the next tile's offsets while they are in flight, then writes LDS. Costs one live VGPR per load chunk, so it suits small and medium tiles on latency-bound problems; large tiles keep the plain loop. Rejected with `async_dma`, `unroll_k` and WMMA (separate loop bodies). **Not a knob:** select it with `WgradConvSpec.default_prefetch_addr(*, arch, tile_m, tile_n, tile_k, lds_k_outer, wave_size, async_dma, unroll_k)` (gfx950 wave64, K-outer, `(tile_m + tile_n) * tile_k <= 320 * 64`), which the JIT sweep workers and the AOT job generator both call. |
+| `register_prefetch` | conv_implicit_gemm_wgrad (with `pipeline="compv3"` and `prefetch_addr`) | False | Goes one step further than plain `prefetch_addr` under `pipeline="compv3"` only (CK's compv3: one LDS buffer, the next tile prefetched into registers): a prologue stages the first tile, and each iteration issues the next tile's loads into registers while the current tile's MFMAs run out of LDS, then barriers and overwrites LDS. This changes the data dependency (LDS publishes a full iteration later), unlike plain `prefetch_addr`'s address-math-only reordering, so it is a separate flag rather than folded into `pipeline="compv3"` + `prefetch_addr`'s existing identity -- that combination's default (`register_prefetch=False`) stays on the plain loop every other pipeline here shares, and keeps its kernel name and cached binaries. Ignored (and untagged) off `pipeline="compv3"`. Tags `rpf`. |
 | `use_early_v_schedule` | Attention 2D | False | Issue current-V async copy before QK so V overlaps QK + softmax (§8.1, §17.4). Use only on no-SW prefill |
 | `prefetch distance` (implicit) | `pipeline` choice | — | More stages ⇒ better latency hiding but more LDS |
 | `helpers/pipeline.py::SoftwarePipeline.run_ping_pong` | helper | — | Manual prologue / steady / epilogue staging when you author your own kernel |
@@ -2017,6 +2056,8 @@ Per-arch facts belong in the arch references — see §21.
 | `blocks_per_cu` | `StreamKGemmSpec` | 1 | Persistent dispatch density |
 | `reduction` | `StreamKGemmSpec` | `Atomic` | `StreamKReductionStrategy.{Atomic, Reduction, AtomicWithFixup}` |
 | split-K | GEMM (not yet a spec field; available primitives) | — | `b.global_atomic_add_f32` for atomic split-K; `helpers/streamk.py` for the Stream-K macro tile decode |
+| `split_k` | `ImplicitGemmConvSpec` (fwd, gfx1250 WMMA) | 1 | `> 1` builds the one split-K forward binary (`splitk` tag); the degree is the `ks_count` kernarg. Slices store fp32 partial tiles into a `[ks_count][M][K]` workspace and `conv_fwd_split_k_reduce` (`degree` unrolls its fold) sums them deterministically. For small-M layers whose plain grid cannot fill the device; costs the workspace traffic and a second launch. `-1` resolves the degree (`select_split_k_fwd`; 1 where splitting does not pay); `--split-k 0 --split-k-degrees` sweeps others. Not with `async_dma`, `unroll_k`, `chiplet_swizzle`, `group_merge`, pointwise or 3-D |
+| `split_k_cluster` | `ImplicitGemmConvSpec` (fwd, gfx1250, llvm23) | 0 | `S` in 2..15 folds the S slices of a tile through a `(1, 1, S)` workgroup cluster and a cluster barrier instead of a Stage 2 launch (`skc<S>` tag, one binary per S). Needs `split_k > 1`, `mem`, `tile_n % 4 == 0`; launch with the same cluster shape |
 | Grouped GEMM persistent | `instances/grouped_gemm.py` | per-group launches | v2 persistent variant is a documented follow-up |
 | `streamk` | `WgradConvSpec` | `"off"` | `"dp_sk"` launches one CTA per data-parallel tile plus `streamk_ctas` stream-K CTAs; `"persistent"` launches only the pool and round-robins the data-parallel tiles. Both balance MAC iterations across CTAs instead of tiles, so a shape with few tiles and a long `wg_K` still fills the device. Mutually exclusive with `split_k` |
 | `streamk_reduction` | `WgradConvSpec` | `"linear"` | How CTAs sharing a tile combine partials. `"linear"`: the owner waits on each later contributor in turn and stores once. `"tree"`: pairwise fan-in, `ceil(log2)` rounds. Both are deterministic and need no dW pre-zeroing. `"atomic"`: f32 atomics into dW (fp32 only). `"workspace"`: f32 scratch atomics plus the Stage 2 reduce kernel |
@@ -2093,14 +2134,43 @@ them by hand only through an explicit tuning spec.
 
 | Field | Effect | Selected by / when to change |
 |---|---|---|
-| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough CTAs (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences |
-| `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few CTAs to fill the device; gfx942 `_gfx942_3d_tile_size_override` |
+| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough workgroups (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences; the rule is spelled out in [gfx950 §6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule) and [gfx942 §8.3](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule); tuning candidate `0` takes the count `_num_segments` picks (the split rule's, where it applies), so a sweep can include the dispatched config when it tunes at the dispatcher's `num_cus` (without one, tuning uses the architecture's full-part CU count); a count below about 100 can put the reduce kernel in a compiler-dependent slow zone ([case study §4](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)), so check the reduce's ISA when a sweep picks one |
+| `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few workgroups to fill the device (under revision, [case study §7](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#7-open-items)); gfx942 `_gfx942_3d_tile_size_override` |
 | `use_wide_kv_load` (gfx942) | Wide synchronous K/V loads instead of 4-byte async copies | `_enable_gfx942_3d_wide_kv_load`; relies on the compiler overlapping the loads, so large head sizes keep the async copies |
-| `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes, since each K/V byte is read once |
-| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; pays where LDS reads stall the loop (large tiles, gfx942) |
-| `use_wave_page_id_load` | The wave loads 64 page-table entries at once and each tile reads its page ids from registers | `_wave_page_id_load_3d`; takes the page-table load off the KV loop's critical path, which lets fewer CTAs per CU hide latency |
-| `use_decode_grid` | One CTA per sequence on grid x, no search over `query_start_len` | Derived (`_use_decode_grid`), legal only when every sequence has one query token; not a tuning axis |
+| `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes, K/V is fp16/bf16 (fp8 keeps `"all"`) and the call reads more than 256 MiB of K/V (the last-level cache; smaller K/V keeps `"all"` so the next call can hit in it), since each K/V byte is read once per call |
+| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; measured faster with gfx950 multi-page tiles and neutral with page-sized ones; gfx942 decode turns it on (head size 128: slightly faster alone and more with the page-id window; head size 64: no A/B of its own; head size 256 only together with `use_wave_page_id_load`, since alone it is slower under some compilers); gfx950 strided K/V measured slower with it, so automatic strided selection leaves it off |
+| `use_wave_page_id_load` | The wave loads 64 page-table entries at once and each tile reads its page ids from registers | `_wave_page_id_load_3d`; takes the page-table load off the KV loop's critical path, which lets fewer workgroups per CU hide latency |
+| `use_decode_grid` | One workgroup per sequence on grid x, no search over `query_start_len` | Derived (`_use_decode_grid`), legal only when every sequence has one query token; not a tuning axis |
 | `use_invariant_hoist` | Inert; kept so saved specs that set it still load | — |
+
+**Baked in, no field (already applied: a Step 0 sweep should not repeat them).** The
+segment and reduce kernels always do the following; there is nothing to flip:
+
+- **Transposed scores, register-resident P.** `S^T = K Q^T` gives each lane one query
+  row, so the softmax state is one `(m, l)` per lane and `P^T` is the B operand of
+  `O^T = V^T P^T` straight from registers, with no `P_lds`. The 2D rows in §12.1.K
+  (`use_transposed_qk_32x32`, `use_transposed_scalar_state`, `use_register_pv`) are the
+  same idea behind flags. In 2D, `use_register_pv` is a net regression on the 16×16
+  atom unless paired with `use_mfma_32x32` and `use_transposed_pv_tr_read` (§12.1.K);
+  the 3D kernels keep P in registers on 16×16 atoms without such a pairing, because the
+  transposed scores already have the layout PV needs as its B operand.
+- **`Q^T` read from LDS once**, before the KV loop; every tile's QK MFMAs reuse the
+  registers.
+- **One V LDS slot** (K stays double-buffered): `V(i)` is consumed in the iteration that
+  loads it, so a second slot never held a live tile.
+- **Native `exp2`** in the segment softmax and in the reduce kernel: one `v_exp_f32` in
+  place of the `llvm.exp2` lowering.
+- **gfx950: PV on `16x16x32` MFMAs** for tiles of 32 or more tokens.
+- **gfx950: page ids a tile ahead** for paged fp16/bf16 K/V (under revision,
+  [case study §7](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#7-open-items)).
+
+Derivations: [gfx950 ALGORITHM.md §5.1](../../../library/builders/gfx950/attention/ALGORITHM.md#51-inside-the-segment-kernel)
+and [gfx942 ALGORITHM.md §8](../../../library/builders/gfx942/attention/ALGORITHM.md#8-the-decode-path-3d-split-kv).
+Outcomes, caveats and the replay:
+[case study](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md). To
+re-measure one baked-in lever, A/B the series commit that added it against that
+commit's parent on `refs/pull/13492/head` (§6 there); the squash merge's first parent
+measures the whole series at once.
 
 #### 12.1.L Multi-XCD / chiplet grid swizzle
 
@@ -2388,6 +2458,24 @@ sweep CSVs.
   display kernel symbol is the same across two compile-time-constant
   variants, the cache can serve the wrong HSACO. Salt the kernel
   symbol with a shape hash before compile (see §12.2).
+- **16-bit split-K degree outgrows the atomic's rounding.** A packed
+  bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
+  dW on every add, so with same-sign partials the relative error grows
+  roughly linearly in the split degree, up to about
+  `degree * 2**-(fraction bits + 1)` (`2**-8` per add for bf16, which
+  has 7 fraction bits). A degree picked for CTA fill alone on a
+  small-channel, deep-reduction wgrad can pass on signed random
+  inputs and still miss the tolerance on all-positive ones. Cap the
+  16-bit degree from that bound, not from throughput, and test the cap
+  with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
+  gfx1250 caps bf16 at 12).
+- **Validator rule scoped to the wrong epilogue.** A store-width rule
+  written for the MFMA cshuffle epilogue also gated the WMMA split-K
+  epilogue, which never reads that width. Hand-built specs left the width
+  unset and passed, while every AOT cache job pins it, so the cache built
+  no split-K binary at all. Scope each validator rule to the code path
+  that consumes it, and test reachability through the AOT grid, not a
+  hand-built spec.
 
 ### 14.2 Performance Failures
 
@@ -2520,9 +2608,30 @@ An optimization is done when:
   good enough.
 - If compiler flags produce wrong answers, remove them even if
   another codebase uses them safely.
+- If attention PV reads V from LDS with narrow loads, a store-side
+  transpose that allows wide LDS reads may pay for its extra
+  registers (`use_cfvst` on gfx942 bf16 D128).
+- If the loop waits for the next K/V tile at its barriers and LDS has
+  room for a second K slot but not a second V slot, double-buffer K
+  only and prefetch next-tile V into registers (`lds_num_buffers=2`,
+  `v_reg_prefetch=True`). Each is independent; see the
+  [gfx942 bf16 D128 case study](../../../library/builders/gfx942/attention/prefill/gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
+- If a higher 16-bit split-K degree is faster, check it against the
+  atomic-rounding bound before raising the cap (§14.1): the speed comes
+  from accepting more rounding error. Only a wider dW dtype raises the
+  bound itself.
+- Sweep every 16-bit split-K degree per dtype, and compare it with the best
+  `split_k=1` kernel, before you set a cap. Do not assume two packed atomics
+  with the same instruction pattern behave alike. In a gfx1250 wgrad sweep
+  (`benchmark_implicit_gemm_conv.py --direction wgrad --verify`, once per
+  `--split-k` degree), bf16 timings kept improving up to the accuracy cap,
+  while no fp16 degree beat the unsplit kernel on a mid-size dW. That is a
+  timing observation only; the cause was not classified with hardware
+  counters. When no cap avoids such a loss, turn the automatic split off for
+  that dtype and leave the explicit degree as an opt-in.
 
 ### 16.2 Anti-patterns (what to avoid)
 

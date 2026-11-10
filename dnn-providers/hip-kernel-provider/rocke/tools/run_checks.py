@@ -58,7 +58,12 @@ LIBRARY = ROCKE / "library"
 PLATFORM_PYROOT = PLATFORM / "python"
 EMIT_COMMON_DIR = PLATFORM / "tests" / "instances" / "parity"
 
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+# The lowerer's compiler-lane registry is the source of truth. Importing it here
+# prevents a newly qualified lane from being silently omitted by the top-level
+# gate or rejected by --flavor.
+sys.path.insert(0, str(PLATFORM_PYROOT))
+from rocke.core.llvm_profile import LLVM_FLAVORS as FLAVORS  # noqa: E402
+
 STAGES = (
     "guard",
     "gate",

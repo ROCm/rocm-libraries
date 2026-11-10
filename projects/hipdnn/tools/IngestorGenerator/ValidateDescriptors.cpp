@@ -313,25 +313,30 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         {
             harvested.dispatch.try_emplace(dispatch.dispatchSymbol);
         }
-        for(const auto& pack : set.packs)
-        {
-            const auto bound = std::find_if(
-                set.dispatches.begin(), set.dispatches.end(), [&](const DispatchDescriptor& d) {
-                    return d.id == pack.dispatchId;
-                });
-            if(bound == set.dispatches.end() || pack.kernels.empty())
+        // A slotted engine's packs live on its slots (RFC 0021 §4), each bound to its own
+        // dispatch descriptor, so each dispatch symbol gets a stub with its pack's launch names.
+        const auto harvestPacks = [&](const std::vector<KernelDescriptorPack>& packs) {
+            for(const auto& pack : packs)
             {
-                continue;
-            }
-            auto& launches = harvested.dispatch[bound->dispatchSymbol];
-            if(!launches.has_value())
-            {
-                launches.emplace();
-                for(const auto& launch : pack.kernels.front().sources)
+                const auto bound = std::find_if(
+                    set.dispatches.begin(), set.dispatches.end(), [&](const DispatchDescriptor& d) {
+                        return d.id == pack.dispatchId;
+                    });
+                if(bound == set.dispatches.end() || pack.kernels.empty())
                 {
-                    launches->insert(launch.first);
+                    continue;
+                }
+                auto& launches = harvested.dispatch[bound->dispatchSymbol];
+                if(!launches.has_value())
+                {
+                    launches = launchNamesOf(pack.kernels.front().sources);
                 }
             }
+        };
+        harvestPacks(set.packs);
+        for(const auto& slot : set.slots)
+        {
+            harvestPacks(slot.packs);
         }
         // Every role, architecture and metric: the real provider registers all of them, so a
         // model left unregistered here would be falsely disabled.
@@ -350,6 +355,11 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         harvestRole(set.engine.sortKernelCatalog, /*uhdScorer=*/false);
         harvestRole(set.engine.predictEngine, /*uhdScorer=*/true);
         harvestRole(set.engine.predictApplicableKernels, /*uhdScorer=*/false);
+        // RFC 0021 §4: a slotted engine's rankers are authored on its slots.
+        for(const auto& slot : set.engine.slots)
+        {
+            harvestRole(slot.sortKernelCatalog, /*uhdScorer=*/false);
+        }
     }
     return harvested;
 }
@@ -393,8 +403,11 @@ void registerStubs(const HarvestedSymbols& harvested)
 }
 
 /// Binds one recorded sample's flattened scalars into a feature-extraction context.
+/// @param reserveWorkspace Leave `ws.*` bindings out, as a slotted engine's ranker features do
+///        (RFC 0021 §6).
 void bindSample(hipdnn_plugin_sdk::uhd::FeatureExtractionContext& context,
-                const nlohmann::json& bindings)
+                const nlohmann::json& bindings,
+                bool reserveWorkspace = false)
 {
     if(!bindings.is_object())
     {
@@ -402,6 +415,10 @@ void bindSample(hipdnn_plugin_sdk::uhd::FeatureExtractionContext& context,
     }
     for(const auto& [name, value] : bindings.items())
     {
+        if(reserveWorkspace && detail::isWorkspaceToken(name))
+        {
+            continue;
+        }
         if(value.is_null())
         {
             continue;
@@ -568,27 +585,60 @@ FeatureCheck checkEngineModel(const DescriptorSet& set,
     return checked;
 }
 
+/// Where a role-bound model is admitted: an unslotted engine, or one slot of a slotted engine
+/// (RFC 0021 §8), whose ranker sees only that slot's KMD fields, knobs, rankers and packs.
+struct SelectionScope
+{
+    /// The slot's name; empty for an unslotted engine and for engine-level roles.
+    std::string slot;
+    std::unordered_set<std::string> fields;
+    const std::vector<std::string>& knobs;
+    const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& heuristicsByMetric;
+    const std::vector<KernelDescriptorPack>& packs;
+};
+
+/// A slot ranker's feature signature must not read a `ws.*` token: the root is reserved for
+/// the shared-workspace region and kept out of every ranker feature row (RFC 0021 §6), so the
+/// reference could never be bound at runtime.
+void requireNoWorkspaceReference(const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor)
+{
+    if(const auto first = detail::firstWorkspaceReference(extractor); !first.empty())
+    {
+        throw std::invalid_argument("Feature reads '" + first
+                                    + "', a shared-workspace token a slotted engine reserves");
+    }
+}
+
 /// Kernel-scoped roles: the real `UhdKernelHeuristic::tryCreate`, then extraction for
 /// every candidate kernel the model would rank.
 /// @returns The feature rows extracted, or why extraction was skipped.
 FeatureCheck checkKernelModel(const DescriptorSet& set,
+                              const SelectionScope& scope,
                               const char* role,
                               const std::string& arch,
                               const DescriptorId& id,
                               const HeuristicDescriptor& model,
                               const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor,
-                              const std::unordered_set<std::string>& fields,
                               const nlohmann::json& samples)
 {
+    const bool slotted = !scope.slot.empty();
+    const std::string describedBy
+        = slotted ? set.engine.name + " slot '" + scope.slot + "'" : set.engine.name;
+    // The loader prunes a slot ranker reading a `ws.*` token, so name the reason here rather
+    // than only that the loader did not bind the model.
+    if(slotted)
+    {
+        requireNoWorkspaceReference(extractor);
+    }
     // A ranker the loader pruned is never loaded, as at runtime. predict_applicable_kernels
     // has no consumer and so no resolved binding; its model is loaded as authored.
     const auto& loadable
         = std::string_view(role) == "sort_kernel_catalog"
-              ? loaderBinding(set.heuristicsByMetric, role, model.score.metric, arch, id)
+              ? loaderBinding(scope.heuristicsByMetric, role, model.score.metric, arch, id)
               : model;
     // Force every artifact through the real loader, including non-default
     // architectures. No score function registered above is ever called.
-    if(!UhdKernelHeuristic::tryCreate(loadable, set.engine.name, set.engine.knobs, fields))
+    if(!UhdKernelHeuristic::tryCreate(loadable, describedBy, scope.knobs, scope.fields))
     {
         throw std::invalid_argument("Model load failed; see runtime diagnostics");
     }
@@ -602,7 +652,7 @@ FeatureCheck checkKernelModel(const DescriptorSet& set,
         hipdnn_plugin_sdk::uhd::FeatureExtractionContext context;
         if(sample != nullptr)
         {
-            bindSample(context, sample->at("bindings"));
+            bindSample(context, sample->at("bindings"), slotted);
         }
         else
         {
@@ -613,7 +663,7 @@ FeatureCheck checkKernelModel(const DescriptorSet& set,
             }
         }
         const auto target = sample == nullptr ? arch : sample->at("arch").get<std::string>();
-        for(const auto& pack : set.packs)
+        for(const auto& pack : scope.packs)
         {
             if(target != "default" && !archSupports(pack.arch, target))
             {
@@ -650,80 +700,100 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
     for(const auto& validated : validatedSets)
     {
         const auto& set = validated.set;
-        std::unordered_set<std::string> fields;
-        for(const auto& field : set.schema.fields)
-        {
-            fields.insert(field.name);
-        }
 
-        const auto checkModel
-            = [&](const char* role, const std::string& arch, const DescriptorId& id) {
-                  // A scoring role names one model per metric, so (role, arch, metric)
-                  // identifies a binding.
-                  nlohmann::json check{{"engine", set.engine.name},
-                                       {"role", role},
-                                       {"arch", arch},
-                                       {"metric", nullptr},
-                                       {"model", toString(id)},
-                                       {"success", false}};
-                  try
-                  {
-                      const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                      if(model == nullptr)
-                      {
-                          throw std::invalid_argument("Missing or invalid referenced UHD");
-                      }
-                      if(!model->score.metric.empty())
-                      {
-                          check["metric"] = model->score.metric;
-                      }
-                      const hipdnn_plugin_sdk::uhd::FeatureExtractor extractor(
-                          model->featuresSignature, model->categoricalEncoding);
-                      if(!extractor.validateAgainstKmdFields(fields))
-                      {
-                          throw std::invalid_argument("Feature references an undeclared KMD field");
-                      }
-                      if(!model->featuresSignature.empty()
-                         && extractor.getSignatureHash() != model->featuresHash)
-                      {
-                          throw std::invalid_argument("Feature contract hash mismatch");
-                      }
-                      const auto features
-                          = std::string_view(role)
-                                    == hipdnn_plugin_sdk::uhd::prediction_detail::ENGINE_ROLE
-                                ? checkEngineModel(set, arch, id, *model, samples)
-                                : checkKernelModel(
-                                      set, role, arch, id, *model, extractor, fields, samples);
-                      check["feature_rows_checked"] = features.rows;
-                      if(!features.skipped.empty())
-                      {
-                          check["feature_extraction_skipped"] = features.skipped;
-                          HIPDNN_PLUGIN_LOG_WARN("descriptor validator: engine='"
-                                                 << set.engine.name << "' role=" << role
-                                                 << " arch='" << arch << "' model=" << toString(id)
-                                                 << ": " << features.skipped);
-                      }
-                      check["scorer_execution"] = "loaded_not_called";
-                      check["success"] = true;
-                  }
-                  catch(const std::exception& error)
-                  {
-                      check["error"] = error.what();
-                      HIPDNN_PLUGIN_LOG_ERROR("descriptor validator: engine='"
-                                              << set.engine.name << "' role=" << role << " arch='"
-                                              << arch << "' model=" << toString(id) << ": "
-                                              << error.what());
-                  }
-                  checks.push_back(std::move(check));
-              };
-        const auto checkRole = [&](const char* role, const auto& references) {
-            forEachRoleModel(references, [&](const std::string& arch, const DescriptorId& id) {
-                checkModel(role, arch, id);
-            });
+        // Engine-level roles (`predict_engine`) read no slot's KMD, so a slotted engine
+        // declares no fields for them (RFC 0021 §9: the model names every slot's KMD).
+        const SelectionScope engineScope{
+            {}, set.schema.fieldNames(), set.engine.knobs, set.heuristicsByMetric, set.packs};
+
+        const auto checkModel = [&](const char* role,
+                                    const std::string& arch,
+                                    const DescriptorId& id,
+                                    const SelectionScope& scope) {
+            // A scoring role names one model per metric, so (role, arch, metric)
+            // identifies a binding; a slot ranker adds its slot.
+            nlohmann::json check{{"engine", set.engine.name},
+                                 {"role", role},
+                                 {"arch", arch},
+                                 {"metric", nullptr},
+                                 {"model", toString(id)},
+                                 {"success", false}};
+            if(!scope.slot.empty())
+            {
+                check["slot"] = scope.slot;
+            }
+            const std::string where
+                = scope.slot.empty() ? std::string{} : " slot='" + scope.slot + "'";
+            try
+            {
+                const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                if(model == nullptr)
+                {
+                    throw std::invalid_argument("Missing or invalid referenced UHD");
+                }
+                if(!model->score.metric.empty())
+                {
+                    check["metric"] = model->score.metric;
+                }
+                const hipdnn_plugin_sdk::uhd::FeatureExtractor extractor(
+                    model->featuresSignature, model->categoricalEncoding);
+                if(!extractor.validateAgainstKmdFields(scope.fields))
+                {
+                    throw std::invalid_argument("Feature references an undeclared KMD field");
+                }
+                if(!model->featuresSignature.empty()
+                   && extractor.getSignatureHash() != model->featuresHash)
+                {
+                    throw std::invalid_argument("Feature contract hash mismatch");
+                }
+                const auto features
+                    = std::string_view(role)
+                              == hipdnn_plugin_sdk::uhd::prediction_detail::ENGINE_ROLE
+                          ? checkEngineModel(set, arch, id, *model, samples)
+                          : checkKernelModel(
+                                set, scope, role, arch, id, *model, extractor, samples);
+                check["feature_rows_checked"] = features.rows;
+                if(!features.skipped.empty())
+                {
+                    check["feature_extraction_skipped"] = features.skipped;
+                    HIPDNN_PLUGIN_LOG_WARN("descriptor validator: engine='"
+                                           << set.engine.name << "'" << where << " role=" << role
+                                           << " arch='" << arch << "' model=" << toString(id)
+                                           << ": " << features.skipped);
+                }
+                check["scorer_execution"] = "loaded_not_called";
+                check["success"] = true;
+            }
+            catch(const std::exception& error)
+            {
+                check["error"] = error.what();
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor validator: engine='"
+                                        << set.engine.name << "'" << where << " role=" << role
+                                        << " arch='" << arch << "' model=" << toString(id) << ": "
+                                        << error.what());
+            }
+            checks.push_back(std::move(check));
         };
-        checkRole("sort_kernel_catalog", set.engine.sortKernelCatalog);
-        checkRole("predict_engine", set.engine.predictEngine);
-        checkRole("predict_applicable_kernels", set.engine.predictApplicableKernels);
+        const auto checkRole =
+            [&](const char* role, const auto& references, const SelectionScope& scope) {
+                forEachRoleModel(references, [&](const std::string& arch, const DescriptorId& id) {
+                    checkModel(role, arch, id, scope);
+                });
+            };
+        checkRole("sort_kernel_catalog", set.engine.sortKernelCatalog, engineScope);
+        // RFC 0021 §8: a slot's ranker is admitted against that slot's own scope.
+        for(size_t index = 0; index < set.slots.size() && index < set.engine.slots.size(); ++index)
+        {
+            const auto& slot = set.slots[index];
+            const SelectionScope slotScope{slot.name,
+                                           slot.schema.fieldNames(),
+                                           set.engine.slots[index].knobs,
+                                           slot.heuristicsByMetric,
+                                           slot.packs};
+            checkRole("sort_kernel_catalog", set.engine.slots[index].sortKernelCatalog, slotScope);
+        }
+        checkRole("predict_engine", set.engine.predictEngine, engineScope);
+        checkRole("predict_applicable_kernels", set.engine.predictApplicableKernels, engineScope);
     }
     return checks;
 }

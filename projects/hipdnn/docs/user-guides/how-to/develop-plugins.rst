@@ -302,7 +302,7 @@ The **Engine manager** is responsible for:
 For **Engine implementations**:
 
 - Each engine must have a globally unique ``int64_t`` identifier.
-- Implement ``isApplicable()`` to check if the engine solves the given graph.
+- Implement ``isApplicable()`` to check if the engine solves the given graph. Return ``false`` to decline a graph; that is the supported way to opt out. A ``std::exception`` thrown from ``isApplicable()`` is skipped with a warning for that engine; any other exception type ends the plugin's applicability query and the host skips the plugin. An error status from ``hipdnnEnginePluginGetApplicableEngineIds`` makes the host skip the plugin with a warning on the heuristic path, but when a caller pins one of the plugin's engines, the plugin's error is returned to that caller. A graph the engine accepts must be one it can build a plan for. If an engine that accepted a graph fails to create the plan (any failure from ``hipdnnEnginePluginCreateExecutionContext``), the frontend's default ``build_plans`` tolerates it: it logs a warning and tries the other ranked engines, scanning from the top, and fails with ``GRAPH_EXECUTION_PLAN_CREATION_FAILED`` only when no engine's plan builds. That tolerance is a safety net for a plugin bug, not a way to decline; fix the plugin or decline at ``isApplicable()``.
 - Create execution contexts for executing plans.
 
   - Handle operation-specific kernel launches.

@@ -293,6 +293,19 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# gfx1250 Stream-K configuration, compile flags, and verification regressions.
+add_test(
+    NAME dispatcher_test_streamk_gfx1250
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_gfx1250 PROPERTIES
+    LABELS "dispatcher;python;streamk;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # tile_engine GEMM sweep driver: --verify reference built from the kernel's
 # quantized inputs (fp8/bf8 included) and a non-zero exit on failed rows. CPU-only.
 add_test(
@@ -376,6 +389,35 @@ add_test(
 set_tests_properties(dispatcher_test_gemm_driver_fp32 PROPERTIES
     LABELS "dispatcher;python;gemm;validation"
     TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# tile_engine GEMM sweep driver measurement options: --build-timeout reaches every
+# codegen/compile/link step, --failures-csv records failed runs and builds,
+# --repeat-top re-times the fastest kernels. Build and GPU runner are mocked.
+add_test(
+    NAME dispatcher_test_gemm_driver_measurement
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_driver_measurement.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_driver_measurement PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# tile_engine GEMM sweep driver --list-pairs / --pairs: the listed pairs are what a
+# full run measures, and --pairs builds and measures only them. Mocked as above.
+add_test(
+    NAME dispatcher_test_gemm_driver_pairs
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_driver_pairs.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_driver_pairs PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 120
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
