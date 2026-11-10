@@ -115,9 +115,9 @@ def test_disabled_is_not_validated():
 
 _OUTPUT = "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
 _GSU_DYNAMIC = "TDMStoreInst supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
-_PERSISTENT = "TDMStoreInst supports persistent kernels only as non-atomic StreamK=3"
+_ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _ACROSS_TILES = \
-  "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or StreamK spatial clusters"
+  "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
 _PROBLEM = "TDMStoreInst does not support E, Gradient, gate residual, ScaleCD, AmaxD or GroupedGemm"
 _ALONG_M = "TDMStoreInst supports bias and ScaleAlphaVec only along M"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
@@ -132,9 +132,8 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "SingleBuffer"}, _GSU_DYNAMIC),
   ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"}, _GSU_DYNAMIC),
   ({"GlobalSplitU": -1, "AdaptiveGemmGSUA": 1}, _GSU_DYNAMIC),
-  ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0}, _PERSISTENT),
-  (dict(_STREAMK, WorkAssignment="DynamicWorkQueue"), _PERSISTENT),
-  (dict(_STREAMK, StreamKAtomic=1), _PERSISTENT),
+  (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
+  ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ClusterDim": [2, 1]}, _ACROSS_TILES),
   (dict(_STREAMK, PrefetchAcrossPersistent=1), _ACROSS_TILES),
   (dict(_STREAMK, ReuseAcrossPersistent=1), _ACROSS_TILES),
   (dict(_STREAMK, ClusterDim=[2, 1]), _ACROSS_TILES),
@@ -156,6 +155,17 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
+
+
+@pytest.mark.parametrize("overrides", [
+  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0},
+  dict(_STREAMK, WorkAssignment="DynamicWorkQueue"),
+  dict(_STREAMK, WorkAssignment="Hybrid"),
+], ids=["dp", "sk4", "sk5"])
+def test_accepts_persistent_policies(overrides):
+  """Every non-atomic persistent policy stores the tiles it completes directly to D: DataParallel, and
+  StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid."""
+  assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
 def test_levels_match_the_valid_values_and_add_one_path_each():
@@ -621,6 +631,23 @@ def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys
     end = _nextLine(lines, store, ("s_barrier", "s_endpgm"))
     assert end is not None
     assert any(_code(line).startswith("s_wait_tensorcnt") for line in lines[store + 1:end]), lines[store]
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+@pytest.mark.parametrize("policy", [{"StreamK": 3, "StreamKForceDPOnly": 1}, {"StreamK": 4}], ids=["dp", "sk4"])
+def test_persistent_kernels_stage_and_fence(gp_gfx1250, gfx1250_iim, assembler, capsys, level, policy):
+  """DataParallel and StreamK 4 kernels store the tiles they complete through the TDM block, and after each
+  TDM store's wait a barrier comes before the next tile's first tensor_load_to_lds."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, TDMInst=3, **policy)
+  assert sol.get("Valid"), capsys.readouterr().out
+  lines = asm.splitlines()
+  stores = [i for i, line in enumerate(lines) if _code(line).startswith("tensor_store_from_lds")]
+  assert stores
+  for store in stores:
+    wait = _nextLine(lines, store, ("s_wait_tensorcnt",))
+    barrier = _nextLine(lines, wait, ("s_barrier",))
+    load = _nextLine(lines, wait, ("tensor_load_to_lds",))
+    assert barrier is not None and (load is None or barrier < load), lines[store]
 
 
 @pytest.mark.parametrize("streamk", [0, 3])

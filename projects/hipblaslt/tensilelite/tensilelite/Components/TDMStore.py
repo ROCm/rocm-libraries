@@ -49,8 +49,8 @@ from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, 
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
 from ..Common.ScaleAlphaVec import scaleAlphaVectorMode
-from ..ExecutionPolicy import hasStaticAssignment, isPersistent, isStreamKSpatialCluster, \
-  requiresPartialReduction
+from ..Common.Utilities import persistentSpatialCluster
+from ..ExecutionPolicy import isPersistent, isStreamK
 from .NonTemporal import tdmCacheModifiers
 
 # PackData and TensorDataMover are imported where they are used: they load every component
@@ -74,8 +74,9 @@ def tdmStoreRejectReason(state):
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
   tensor_store_from_lds per wave. That needs bf16 or fp16 D converted from fp32 accumulators, written
-  directly to D, by a GlobalSplitU=1 kernel or as the final store of a non-atomic StreamK=3 tile, no
-  LDS data kept from one persistent tile to the next, and MacroTile1 split evenly across the waves.
+  directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than atomic StreamK, which
+  stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
+  split evenly across the waves.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the bias and ScaleAlphaVec vectors along M, the latter
   with or without the device-scalar bit of UseScaleAlphaVec, and the ScaleAB vectors, which the staged
@@ -92,10 +93,10 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
-  if isPersistent(state) and not (requiresPartialReduction(state) and hasStaticAssignment(state)):
-    return "TDMStoreInst supports persistent kernels only as non-atomic StreamK=3"
-  if state["PrefetchAcrossPersistent"] or state["ReuseAcrossPersistent"] or isStreamKSpatialCluster(state):
-    return "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or StreamK spatial clusters"
+  if isStreamK(state) and state.get("StreamKAtomic", 0):
+    return "TDMStoreInst does not support atomic StreamK"
+  if state["PrefetchAcrossPersistent"] or state["ReuseAcrossPersistent"] or persistentSpatialCluster(state):
+    return "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
     return "TDMStoreInst requires GlobalSplitU=1 or -1"
   if state["GlobalSplitU"] == -1 and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer" or state["AdaptiveGemmGSUA"]):
