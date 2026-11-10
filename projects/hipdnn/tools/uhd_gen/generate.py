@@ -673,6 +673,9 @@ def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
 # Seconds the output pipes may stay open once the bench has finished or been killed. A process
 # that left the bench's process tree can still hold them, and a run must return anyway.
 _PIPE_DRAIN_SECONDS = 5.0
+# Longest single wait for the bench's output or exit: an interruption is handled between
+# waits, and a blocked wait on Windows does not see Ctrl+C until it returns.
+_WAIT_SLICE_SECONDS = 0.5
 
 
 def _kill_tree(process: subprocess.Popen) -> None:
@@ -722,36 +725,41 @@ def _communicate(
         pump.start()
     output: list[str] = []
     deadline = None if timeout is None else time.monotonic() + timeout
+
+    def wait_slice() -> float | None:
+        """Seconds to block next (at most `_WAIT_SLICE_SECONDS`), or None once the deadline
+        has passed."""
+        if deadline is None:
+            return _WAIT_SLICE_SECONDS
+        remaining = deadline - time.monotonic()
+        return None if remaining <= 0 else min(remaining, _WAIT_SLICE_SECONDS)
+
     killed = False
     try:
         while True:
-            try:
-                line = lines.get(
-                    timeout=(
-                        None
-                        if deadline is None
-                        else max(0.0, deadline - time.monotonic())
-                    )
-                )
-            except queue.Empty:
+            wait = wait_slice()
+            if wait is None:
                 killed = True
                 break
+            try:
+                line = lines.get(timeout=wait)
+            except queue.Empty:
+                continue
             if line is None:
                 break
             output.append(line)
             if per_line and timeout is not None:
                 deadline = time.monotonic() + timeout
-        if not killed:
-            try:
-                process.wait(
-                    timeout=(
-                        None
-                        if deadline is None
-                        else max(0.0, deadline - time.monotonic())
-                    )
-                )
-            except subprocess.TimeoutExpired:
+        while not killed:
+            wait = wait_slice()
+            if wait is None:
                 killed = True
+                break
+            try:
+                process.wait(timeout=wait)
+                break
+            except subprocess.TimeoutExpired:
+                continue
     except BaseException:
         _kill_tree(process)
         raise
