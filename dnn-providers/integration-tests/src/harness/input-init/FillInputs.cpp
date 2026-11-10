@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
@@ -430,6 +431,270 @@ std::optional<std::string> assignPagedCacheStoreSlots(
     return std::nullopt;
 }
 
+// ── Varlen index operands: cu_seqlens and state_indices ──────────────────────
+// Neither can be drawn element by element: cu_seqlens is a partition of the tokens and
+// state_indices names distinct pool rows. Both are written after the generic fill
+// (deriveVarlenIndexOperands()), whatever recipe the tensor had, as SDPA backward's O and
+// stats are. Each draws from its own generator seeded by the tensor's seed override, or
+// the global seed, and its uid, so a bundle's values never depend on its other inputs.
+
+std::mt19937 varlenGenerator(const InputFillRecipes& recipes, int64_t uid)
+{
+    std::seed_seq seed{recipes.resolveSeed(uid).value_or(recipes.globalSeed()),
+                       static_cast<unsigned int>(uid)};
+    return std::mt19937(seed);
+}
+
+// Writes `values` into a rank-1 INT32 or INT64 tensor of the same length.
+std::optional<std::string> writeIndexTensor(hipdnn_data_sdk::utilities::ITensor& tensor,
+                                            hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                            const std::vector<int64_t>& values)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    if(dataType != DataType::INT32 && dataType != DataType::INT64)
+    {
+        return "an index tensor must be INT32 or INT64, not "
+               + std::string(EnumNameDataType(dataType));
+    }
+    if(tensor.dims().size() != 1 || tensor.dims()[0] != static_cast<int64_t>(values.size()))
+    {
+        return "an index tensor must be rank 1 with " + std::to_string(values.size()) + " elements";
+    }
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        void* element = tensor.hostDataOffsetFromIndex(tensor.getIndex(i));
+        if(dataType == DataType::INT32)
+        {
+            *static_cast<int32_t*>(element) = static_cast<int32_t>(values[i]);
+        }
+        else
+        {
+            *static_cast<int64_t*>(element) = values[i];
+        }
+    }
+    tensor.markHostModified();
+    return std::nullopt;
+}
+
+// Offsets of `sequences` sequences over `tokens` tokens: 0 first, `tokens` last,
+// non-decreasing. With at least one token per sequence, one sequence chosen at random
+// gets exactly one token, shorter than any conv window, so a kernel that mishandles a
+// sequence shorter than its state is caught; the rest split the remaining tokens at
+// random cut points. With fewer tokens than sequences, a random subset gets one token
+// each and the others are empty.
+std::vector<int64_t> cuSeqlensValues(int64_t sequences, int64_t tokens, std::mt19937& rng)
+{
+    std::vector<int64_t> lengths(static_cast<size_t>(sequences), 0);
+    if(tokens < sequences)
+    {
+        std::fill_n(lengths.begin(), tokens, 1);
+        for(size_t i = lengths.size() - 1; i > 0; --i)
+        {
+            std::swap(lengths[i], lengths[rng() % (i + 1)]);
+        }
+    }
+    else if(sequences == 1)
+    {
+        lengths[0] = tokens;
+    }
+    else
+    {
+        const auto shortest = static_cast<size_t>(rng() % static_cast<uint64_t>(sequences));
+        const int64_t extra = tokens - sequences;
+        std::vector<int64_t> cuts;
+        cuts.reserve(static_cast<size_t>(std::max<int64_t>(sequences - 2, 0)) + 1);
+        for(int64_t i = 0; i < sequences - 2; ++i)
+        {
+            cuts.push_back(static_cast<int64_t>(rng() % static_cast<uint64_t>(extra + 1)));
+        }
+        std::sort(cuts.begin(), cuts.end());
+        cuts.push_back(extra);
+        int64_t previous = 0;
+        size_t cut = 0;
+        for(size_t n = 0; n < lengths.size(); ++n)
+        {
+            lengths[n] = 1;
+            if(n != shortest)
+            {
+                lengths[n] += cuts[cut] - previous;
+                previous = cuts[cut++];
+            }
+        }
+    }
+    std::vector<int64_t> offsets(lengths.size() + 1, 0);
+    for(size_t n = 0; n < lengths.size(); ++n)
+    {
+        offsets[n + 1] = offsets[n] + lengths[n];
+    }
+    return offsets;
+}
+
+// Pool rows of `sequences` sequences in a pool of `poolRows`: distinct and in range,
+// in random order, so a kernel that ignores the indirection reads and writes the wrong
+// rows. A pool smaller than the batch repeats rows, which only a graph that never writes
+// the pool may use.
+std::vector<int64_t> stateIndexValues(int64_t sequences, int64_t poolRows, std::mt19937& rng)
+{
+    std::vector<int64_t> rows(static_cast<size_t>(std::max(poolRows, int64_t{1})));
+    for(size_t i = 0; i < rows.size(); ++i)
+    {
+        rows[i] = static_cast<int64_t>(i);
+    }
+    std::vector<int64_t> picked(static_cast<size_t>(sequences));
+    for(size_t n = 0; n < picked.size(); ++n)
+    {
+        if(n < rows.size())
+        {
+            std::swap(rows[n], rows[n + rng() % (rows.size() - n)]);
+            picked[n] = rows[n];
+        }
+        else
+        {
+            picked[n] = picked[n % rows.size()];
+        }
+    }
+    return picked;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    findGraphTensor(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph, int64_t uid)
+{
+    if(graph.tensors() == nullptr)
+    {
+        return nullptr;
+    }
+    for(const auto* tensor : *graph.tensors())
+    {
+        if(tensor->uid() == uid)
+        {
+            return tensor;
+        }
+    }
+    return nullptr;
+}
+
+// Extent of `axis` of tensor `uid` in the graph, or nullopt when it has no such axis.
+std::optional<int64_t> graphTensorExtent(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                                         int64_t uid,
+                                         flatbuffers::uoffset_t axis)
+{
+    const auto* tensor = findGraphTensor(graph, uid);
+    if(tensor == nullptr || tensor->dims() == nullptr || axis >= tensor->dims()->size())
+    {
+        return std::nullopt;
+    }
+    return tensor->dims()->Get(axis);
+}
+
+// Fills cu_seqlens `uid` ([N + 1]) with the offsets of N sequences over `tokens` tokens,
+// if the bundle owns it. A cu_seqlens the graph computes is left alone.
+std::optional<std::string> fillCuSeqlens(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                                         InputTensorMap& inputs,
+                                         const std::vector<int64_t>& ownedUids,
+                                         const InputFillRecipes& recipes,
+                                         int64_t uid,
+                                         int64_t tokens)
+{
+    if(std::find(ownedUids.begin(), ownedUids.end(), uid) == ownedUids.end())
+    {
+        return std::nullopt;
+    }
+    const auto* attributes = findGraphTensor(graph, uid);
+    auto& tensor = *inputs.at(uid);
+    if(attributes == nullptr || tensor.dims().size() != 1 || tensor.dims()[0] < 2)
+    {
+        return "cu_seqlens must be [N + 1] with N >= 1";
+    }
+    auto rng = varlenGenerator(recipes, uid);
+    const auto why = writeIndexTensor(
+        tensor, attributes->data_type(), cuSeqlensValues(tensor.dims()[0] - 1, tokens, rng));
+    return why ? std::optional<std::string>("cu_seqlens: " + *why) : std::nullopt;
+}
+
+// Fills state_indices `uid` ([N]) with distinct rows of a pool of `poolRows`, if the
+// bundle owns it.
+std::optional<std::string>
+    fillStateIndices(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                     InputTensorMap& inputs,
+                     const std::vector<int64_t>& ownedUids,
+                     const InputFillRecipes& recipes,
+                     int64_t uid,
+                     int64_t poolRows)
+{
+    if(std::find(ownedUids.begin(), ownedUids.end(), uid) == ownedUids.end())
+    {
+        return std::nullopt;
+    }
+    const auto* attributes = findGraphTensor(graph, uid);
+    auto& tensor = *inputs.at(uid);
+    if(attributes == nullptr || tensor.dims().size() != 1)
+    {
+        return "state_indices must be [N]";
+    }
+    auto rng = varlenGenerator(recipes, uid);
+    const auto why = writeIndexTensor(
+        tensor, attributes->data_type(), stateIndexValues(tensor.dims()[0], poolRows, rng));
+    return why ? std::optional<std::string>("state_indices: " + *why) : std::nullopt;
+}
+
+// cu_seqlens over x's T tokens; state_indices over initial_state's P pool rows.
+std::optional<std::string>
+    deriveCausalConv1dIndices(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                              const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes& a,
+                              InputTensorMap& inputs,
+                              const std::vector<int64_t>& ownedUids,
+                              const InputFillRecipes& recipes)
+{
+    const auto tokens = graphTensorExtent(graph, a.x_tensor_uid(), 0);
+    if(!tokens)
+    {
+        return "x has no token axis";
+    }
+    if(auto why
+       = fillCuSeqlens(graph, inputs, ownedUids, recipes, a.cu_seqlens_tensor_uid(), *tokens))
+    {
+        return why;
+    }
+    if(!a.state_indices_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    const auto poolRows = a.initial_state_tensor_uid().has_value()
+                              ? graphTensorExtent(graph, *a.initial_state_tensor_uid(), 0)
+                              : std::nullopt;
+    if(!poolRows)
+    {
+        return "state_indices needs an initial_state pool [P, C, W - 1]";
+    }
+    return fillStateIndices(
+        graph, inputs, ownedUids, recipes, *a.state_indices_tensor_uid(), *poolRows);
+}
+
+// Writes every varlen index operand of the graph. Returns why one cannot be written.
+std::optional<std::string>
+    deriveVarlenIndexOperands(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                              InputTensorMap& inputs,
+                              const std::vector<int64_t>& ownedUids,
+                              const InputFillRecipes& recipes)
+{
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        std::optional<std::string> why;
+        if(const auto* a = node.attributes_as_CausalConv1dAttributes())
+        {
+            why = deriveCausalConv1dIndices(graph, *a, inputs, ownedUids, recipes);
+        }
+        if(why)
+        {
+            const auto* name = node.name();
+            return "node " + std::string(name != nullptr ? name->c_str() : "(unnamed)") + ": "
+                   + *why;
+        }
+    }
+    return std::nullopt;
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
@@ -485,6 +750,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     case NA::PagedCacheStoreAttributes:
         setPagedCacheStoreInitDefaults(node, recipes);
         return true;
+    // x, weight, bias and the states take the [-1, 1] default; cu_seqlens and
+    // state_indices are written after the fill (deriveVarlenIndexOperands()).
+    case NA::CausalConv1dAttributes:
     // x takes the [-1, 1] default. Ties (frequent in bf16 / f16 rows of thousands) need no
     // avoiding: the FlyDSL kernel and the CPU reference both rank equal values by position.
     case NA::TopkAttributes:
@@ -818,6 +1086,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                 + std::string(name != nullptr ? name->c_str() : "(unnamed)") + ": " + *why);
         }
     }
+
+    // cu_seqlens and state_indices are structured, not drawn element by element.
+    if(auto why = deriveVarlenIndexOperands(graph, inputs, ownedUids, recipes))
+    {
+        return FillResult::unsupported("cannot fill the varlen index operands of " + *why);
+    }
     return FillResult::ok(deviceFilled);
 }
 
@@ -837,6 +1111,17 @@ std::vector<int64_t> inPlaceOutputUids(const hipdnn_flatbuffers_sdk::data_object
         case NA::PagedCacheStoreAttributes:
             uids.push_back(node->attributes_as_PagedCacheStoreAttributes()->container_tensor_uid());
             break;
+        // A final_state pool addressed through state_indices keeps the rows no sequence
+        // names.
+        case NA::CausalConv1dAttributes:
+        {
+            const auto* a = node->attributes_as_CausalConv1dAttributes();
+            if(a->state_indices_tensor_uid().has_value() && a->final_state_tensor_uid().has_value())
+            {
+                uids.push_back(*a->final_state_tensor_uid());
+            }
+            break;
+        }
         default:
             break;
         }

@@ -586,4 +586,37 @@ constexpr float getTolerance()
 
 } // namespace paged_cache_store
 
+namespace causal_conv1d
+{
+
+// Tolerance for y and final_state. final_state is a copy of input elements, exact on both
+// sides. Each y element is act(bias + sum of W products), accumulated in f32 by both the
+// engine and the reference: with operands in [-1, 1] the terms sum to at most W + 1 in
+// magnitude, so the summation order and the device's exp() in SiLU move the f32 value by
+// about 1e-6, under the f32 bound. A half or bfloat16 y is that f32 value rounded once on
+// each side, so the two may land one output ulp apart: at most 2^-10 * |y| for half and
+// 2^-7 * |y| for bfloat16, which the comparison's rtol term covers under the bounds below.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 8e-3f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace causal_conv1d
+
 } // namespace hipdnn_test_sdk::utilities

@@ -1,0 +1,96 @@
+{
+  "compute_data_type": "${case.compute_data_type}",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "CausalConv1dVarlenPrefill",
+  "nodes": [
+    {
+      "attributes": {
+        "activation": "silu"
+      },
+      "compute_data_type": "float",
+      "inputs": {
+        "x_tensor_uid": 5,
+        "weight_tensor_uid": 4,
+        "cu_seqlens_tensor_uid": 3,
+        "bias_tensor_uid": 2,
+        "initial_state_tensor_uid": null,
+        "state_indices_tensor_uid": null
+      },
+      "name": "CausalConv1d_0",
+      "outputs": {
+        "y_tensor_uid": 1,
+        "final_state_tensor_uid": 0
+      },
+      "type": "CausalConv1dAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "CausalConv1d_0::FINAL_STATE",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "CausalConv1d_0::Y",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "cu_seqlens",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "weight",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    }
+  ]
+}

@@ -85,6 +85,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::topk::getTolerance<T>();
     case NA::GatherAttributes:
         return tol::gather::getTolerance<T>();
+    case NA::CausalConv1dAttributes:
+        return tol::causal_conv1d::getTolerance<T>();
     default:
         return 1e-3f;
     }

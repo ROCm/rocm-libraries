@@ -1,0 +1,25 @@
+{
+  "claims": {
+    "hipkernel:flydsl_causal_conv1d": [
+      {
+        "cases": [
+          "2_256_3_ncl",
+          "3_2048_3_bfp16_ncl",
+          "3_96_2_ncl"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

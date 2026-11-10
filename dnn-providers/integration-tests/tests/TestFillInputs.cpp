@@ -1464,6 +1464,78 @@ TEST(TestFillInputs, SoftmaxLogitsSpanSeveralDecadesOfProbability)
 namespace
 {
 
+// ── Causal conv1d ───────────────────────────────────────────────────────────
+// x, y [T, C]; weight [C, 4]; cu_seqlens [N + 1] INT32; with a pool, initial and final
+// state [P, C, 3] and state_indices [N] INT64. uids: x=1, weight=2, cu_seqlens=3, y=4,
+// initial_state=5, state_indices=6, final_state=7.
+struct CausalConv1dGraph
+{
+    GraphResult graph;
+    std::vector<int64_t> leafUids;
+    InputTensorMap inputs;
+};
+
+std::unique_ptr<CausalConv1dGraph>
+    buildCausalConv1dGraph(int64_t tokens, int64_t sequences, std::optional<int64_t> poolRows)
+{
+    auto result = std::make_unique<CausalConv1dGraph>();
+    auto& b = result->graph.builder;
+    const int64_t channels = 4;
+    const std::vector<int64_t> xDims = {tokens, channels};
+    const std::vector<int64_t> xStrides = {channels, 1};
+    const std::vector<int64_t> wDims = {channels, 4};
+    const std::vector<int64_t> wStrides = {4, 1};
+    const std::vector<int64_t> cuDims = {sequences + 1};
+    const std::vector<int64_t> indexDims = {sequences};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> stateDims = {poolRows.value_or(sequences), channels, 3};
+    const std::vector<int64_t> stateStrides = {channels * 3, 3, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "weight", DataType::FLOAT, &wStrides, &wDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 3, "cu_seqlens", DataType::INT32, &unitStrides, &cuDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 4, "y", DataType::FLOAT, &xStrides, &xDims));
+    flatbuffers::Optional<int64_t> initial = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> indices = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> finalState = flatbuffers::nullopt;
+    if(poolRows.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 5, "initial_state", DataType::FLOAT, &stateStrides, &stateDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 6, "state_indices", DataType::INT64, &unitStrides, &indexDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 7, "final_state", DataType::FLOAT, &stateStrides, &stateDims));
+        initial = 5;
+        indices = 6;
+        finalState = 7;
+    }
+
+    auto conv = CreateCausalConv1dAttributes(b,
+                                             1,
+                                             2,
+                                             3,
+                                             4,
+                                             flatbuffers::nullopt,
+                                             initial,
+                                             indices,
+                                             finalState,
+                                             CausalConv1dActivation::SILU);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "causal_conv1d", DataType::FLOAT, NodeAttributes::CausalConv1dAttributes, conv.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    result->graph.graph = GetGraph(b.GetBufferPointer());
+    result->leafUids = result->graph.leafInputUids({4, 7});
+    result->inputs = makeTensorsFromGraph(result->graph, result->leafUids);
+    return result;
+}
+
 template <class T>
 std::vector<int64_t> indexValues(const InputTensorMap& inputs, int64_t uid)
 {
@@ -1472,7 +1544,85 @@ std::vector<int64_t> indexValues(const InputTensorMap& inputs, int64_t uid)
     return {values, values + tensor.elementCount()};
 }
 
+std::vector<int64_t> fillCausalConv1d(CausalConv1dGraph& g, unsigned int seed)
+{
+    InputFillRecipes recipes;
+    recipes.setGlobalSeed(seed);
+    const auto result = fillInputs(*g.graph.graph, g.inputs, g.leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return indexValues<int32_t>(g.inputs, 3);
+}
+
 } // namespace
+
+// cu_seqlens partitions the T tokens, every sequence gets a token, and one gets exactly
+// one: shorter than the conv's three state columns.
+TEST(TestFillInputs, CausalConv1dCuSeqlensPartitionTokensWithOneShortSequence)
+{
+    for(unsigned int seed = 1; seed <= 16; ++seed)
+    {
+        auto g = buildCausalConv1dGraph(/*tokens=*/40, /*sequences=*/3, std::nullopt);
+        const auto offsets = fillCausalConv1d(*g, seed);
+        ASSERT_EQ(offsets.size(), 4u);
+        EXPECT_EQ(offsets.front(), 0);
+        EXPECT_EQ(offsets.back(), 40);
+        int64_t shortSequences = 0;
+        for(size_t n = 1; n < offsets.size(); ++n)
+        {
+            EXPECT_GE(offsets[n] - offsets[n - 1], 1) << "seed " << seed;
+            shortSequences += offsets[n] - offsets[n - 1] == 1 ? 1 : 0;
+        }
+        EXPECT_GE(shortSequences, 1) << "seed " << seed;
+    }
+}
+
+// Decode: one token per sequence.
+TEST(TestFillInputs, CausalConv1dCuSeqlensDecodeIsOneTokenEach)
+{
+    auto g = buildCausalConv1dGraph(/*tokens=*/4, /*sequences=*/4, std::nullopt);
+    EXPECT_EQ(fillCausalConv1d(*g, 1), (std::vector<int64_t>{0, 1, 2, 3, 4}));
+}
+
+// Fewer tokens than sequences: some sequences are empty, the offsets still end at T.
+TEST(TestFillInputs, CausalConv1dCuSeqlensWithFewerTokensThanSequences)
+{
+    auto g = buildCausalConv1dGraph(/*tokens=*/2, /*sequences=*/5, std::nullopt);
+    const auto offsets = fillCausalConv1d(*g, 1);
+    EXPECT_EQ(offsets.front(), 0);
+    EXPECT_EQ(offsets.back(), 2);
+    EXPECT_TRUE(std::is_sorted(offsets.begin(), offsets.end()));
+}
+
+TEST(TestFillInputs, CausalConv1dCuSeqlensAreReproducible)
+{
+    auto first = buildCausalConv1dGraph(/*tokens=*/40, /*sequences=*/3, std::nullopt);
+    auto second = buildCausalConv1dGraph(/*tokens=*/40, /*sequences=*/3, std::nullopt);
+    EXPECT_EQ(fillCausalConv1d(*first, 7), fillCausalConv1d(*second, 7));
+}
+
+// state_indices name distinct rows of the pool, and the pooled final_state starts from
+// filled contents, so the rows no sequence names compare equal.
+TEST(TestFillInputs, CausalConv1dStateIndicesAreDistinctPoolRows)
+{
+    for(unsigned int seed = 1; seed <= 16; ++seed)
+    {
+        auto g = buildCausalConv1dGraph(/*tokens=*/9, /*sequences=*/3, /*poolRows=*/5);
+        fillCausalConv1d(*g, seed);
+        const auto rows = indexValues<int64_t>(g->inputs, 6);
+        const std::set<int64_t> distinct(rows.begin(), rows.end());
+        EXPECT_EQ(distinct.size(), 3u) << "seed " << seed;
+        EXPECT_GE(*distinct.begin(), 0);
+        EXPECT_LT(*distinct.rbegin(), 5);
+    }
+}
+
+TEST(TestFillInputs, CausalConv1dPooledFinalStateIsUpdatedInPlace)
+{
+    auto pooled = buildCausalConv1dGraph(/*tokens=*/9, /*sequences=*/3, /*poolRows=*/5);
+    EXPECT_EQ(inPlaceOutputUids(*pooled->graph.graph), (std::vector<int64_t>{7}));
+    auto unpooled = buildCausalConv1dGraph(/*tokens=*/9, /*sequences=*/3, std::nullopt);
+    EXPECT_TRUE(inPlaceOutputUids(*unpooled->graph.graph).empty());
+}
 
 namespace
 {

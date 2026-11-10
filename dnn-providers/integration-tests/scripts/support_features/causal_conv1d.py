@@ -8,10 +8,11 @@ channel, ``y = act(bias + sum_j weight[c, j] * xs[t + j])`` over the W - 1
 state columns followed by the tokens, and the final state is the last W - 1
 entries. The features come from ``causal_conv1d_attributes.fbs``. The
 serializer (``utilities/json/CausalConv1dAttributes.hpp``) writes the ports
-under ``inputs`` and ``outputs`` and ``activation`` under ``attributes``. No
-provider implements the op, so the dtypes are those the CPU reference executor
-registers (``CausalConv1dSignatureKey``): one float dtype for x, weight, y,
-bias and the states; int32 or int64 offsets and state indices. By group:
+under ``inputs`` and ``outputs`` and ``activation`` under ``attributes``. The
+dtypes are those the CPU reference executor registers
+(``CausalConv1dSignatureKey``), which bounds what any provider can be verified
+on: one float dtype for x, weight, y, bias and the states; int32 or int64
+offsets and state indices. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x`` (and of weight, y, bias, states).
 - ``cu_seqlens_dtype`` (exclusive): ``int32`` or ``int64``.
