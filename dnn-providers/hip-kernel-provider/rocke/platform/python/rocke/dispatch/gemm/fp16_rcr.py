@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from functools import partial
 from typing import Callable, Sequence, Tuple
 
 from ...core.arch import ArchTarget
@@ -26,6 +27,7 @@ from ..core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    ShapeRange,
     stable_json_hash,
     selector_matches,
 )
@@ -164,6 +166,35 @@ def _spec_rdna_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+def _spec_gfx1201_compv4(
+    req: GemmRequest,
+    name: str,
+    *,
+    tile: TileSpec,
+    allow_1wg: bool = False,
+    store_after_mma: bool = True,
+    group_m: int = 4,
+    k_stagger: int = 8,
+    k_stagger_step: int = 4,
+) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=tile,
+        trait=TraitSpec(
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="default",
+            lds_swizzle=True,
+            lds_db_allow_1wg=allow_1wg,
+            lds_store_after_mma=store_after_mma,
+            group_m=group_m,
+            k_stagger=k_stagger,
+            k_stagger_step=k_stagger_step,
+        ),
+    )
+
+
 def _make_candidate(
     *,
     name: str,
@@ -171,6 +202,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arches: Tuple[str, ...],
+    shapes: Tuple[ShapeRange, ...] = (),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -205,7 +237,9 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=GEMM_FP16_RCR_ABI_VERSION,
         priority=priority,
-        capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
+        capability=Capability(
+            arches=arches, dtypes=("fp16",), layouts=("RCR",), shapes=shapes
+        ),
         _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
@@ -234,6 +268,72 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 # against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 
+# The measured gfx1201 palette is deliberately not a gfx12-family claim.
+# Bounds are output elements and reduction elements; tile divisibility remains
+# the common request-shape predicate. No host probe or timing enters selection.
+_GFX1201_ARCHES = ("gfx1201",)
+_GFX1201_SMALL_MAX_OUTPUT = 3 << 18
+_GFX1201_MEDIUM_MAX_OUTPUT = 1 << 20
+_GFX1201_LARGE_MIN_OUTPUT = 1 << 22
+_GFX1201_LARGE_MAX_OUTPUT = (1 << 24) - 1
+_GFX1201_MEDIUM_SHAPES = (
+    ShapeRange(
+        "output_elements",
+        min=_GFX1201_SMALL_MAX_OUTPUT + 1,
+        max=_GFX1201_MEDIUM_MAX_OUTPUT,
+    ),
+    ShapeRange("K", min=64),
+)
+_GFX1201_LARGE_SHAPES = (
+    ShapeRange(
+        "output_elements",
+        min=_GFX1201_LARGE_MIN_OUTPUT + 1,
+        max=_GFX1201_LARGE_MAX_OUTPUT,
+    ),
+)
+_GFX1201_SMALL = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(64, 64, 64, 2, 2, 1, 16, 16, 16)
+)
+_GFX1201_DEFAULT = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 16)
+)
+_GFX1201_MEDIUM = partial(
+    _spec_gfx1201_compv4,
+    tile=TileSpec(128, 128, 64, 2, 4, 1, 16, 16, 16),
+    allow_1wg=True,
+)
+_GFX1201_MEDIUM_LOW_K = partial(
+    _GFX1201_MEDIUM, group_m=8, k_stagger=0, k_stagger_step=1
+)
+_GFX1201_WIDE = partial(
+    _spec_gfx1201_compv4,
+    tile=TileSpec(128, 256, 32, 2, 4, 1, 16, 16, 16),
+    allow_1wg=True,
+    group_m=8,
+    k_stagger=0,
+    k_stagger_step=1,
+)
+_GFX1201_LONG_K = partial(
+    _spec_gfx1201_compv4,
+    tile=TileSpec(256, 128, 32, 4, 2, 1, 16, 16, 16),
+    allow_1wg=True,
+)
+_GFX1201_K16 = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(128, 128, 16, 2, 2, 1, 16, 16, 16)
+)
+_GFX1201_FRINGE_M = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(32, 64, 64, 1, 2, 1, 16, 16, 16)
+)
+_GFX1201_FRINGE_N = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(64, 32, 64, 2, 1, 1, 16, 16, 16)
+)
+_GFX1201_FRINGE = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(32, 32, 64, 1, 1, 1, 16, 16, 16)
+)
+_GFX1201_SHORT = partial(
+    _spec_gfx1201_compv4, tile=TileSpec(32, 32, 16, 1, 1, 1, 16, 16, 16)
+)
+
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
     dim_vocabulary=GEMM_DIM_VOCABULARY,
@@ -250,9 +350,128 @@ GEMM_FP16_REGISTRY.extend(
             arches=_CDNA_MFMA_FP16,
         ),
         _make_candidate(
+            name="universal_gemm_fp16_gfx1201_short_k32",
+            spec_id="gfx1201_compv4_short_k32",
+            priority=1,
+            spec_fn=partial(
+                _spec_gfx1201_compv4,
+                tile=TileSpec(128, 128, 32, 2, 4, 1, 16, 16, 16),
+                store_after_mma=False,
+            ),
+            arches=_GFX1201_ARCHES,
+            shapes=(ShapeRange("K", max=32),),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_long_stride",
+            spec_id="gfx1201_compv4_long_stride",
+            priority=2,
+            spec_fn=_GFX1201_SMALL,
+            arches=_GFX1201_ARCHES,
+            shapes=(
+                ShapeRange("output_elements", max=_GFX1201_LARGE_MIN_OUTPUT),
+                ShapeRange("K", multiple_of=8192),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_small",
+            spec_id="gfx1201_compv4_small",
+            priority=3,
+            spec_fn=_GFX1201_SMALL,
+            arches=_GFX1201_ARCHES,
+            shapes=(ShapeRange("output_elements", max=_GFX1201_SMALL_MAX_OUTPUT),),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_medium_low_k",
+            spec_id="gfx1201_compv4_medium_low_k",
+            priority=3,
+            spec_fn=_GFX1201_MEDIUM_LOW_K,
+            arches=_GFX1201_ARCHES,
+            shapes=_GFX1201_MEDIUM_SHAPES + (ShapeRange("K", min=1024, max=2047),),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_medium",
+            spec_id="gfx1201_compv4_medium",
+            priority=4,
+            spec_fn=_GFX1201_MEDIUM,
+            arches=_GFX1201_ARCHES,
+            shapes=_GFX1201_MEDIUM_SHAPES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_large_long_k",
+            spec_id="gfx1201_compv4_large_long_k",
+            priority=5,
+            spec_fn=_GFX1201_LONG_K,
+            arches=_GFX1201_ARCHES,
+            shapes=_GFX1201_LARGE_SHAPES + (ShapeRange("K", min=4096, max=8191),),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_large_wide",
+            spec_id="gfx1201_compv4_large_wide",
+            priority=6,
+            spec_fn=_GFX1201_WIDE,
+            arches=_GFX1201_ARCHES,
+            shapes=_GFX1201_LARGE_SHAPES
+            + (
+                ShapeRange("M", max=2048),
+                ShapeRange("N", min=4096),
+                ShapeRange("K", min=2048, max=4095),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_default",
+            spec_id="gfx1201_compv4_default",
+            priority=7,
+            spec_fn=_GFX1201_DEFAULT,
+            arches=_GFX1201_ARCHES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_aligned64",
+            spec_id="gfx1201_compv4_aligned64",
+            priority=8,
+            spec_fn=_GFX1201_SMALL,
+            arches=_GFX1201_ARCHES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_k16",
+            spec_id="gfx1201_compv4_k16",
+            priority=9,
+            spec_fn=_GFX1201_K16,
+            arches=_GFX1201_ARCHES,
+            shapes=(ShapeRange("K", min=32),),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_fringe_m",
+            spec_id="gfx1201_compv4_fringe_m",
+            priority=10,
+            spec_fn=_GFX1201_FRINGE_M,
+            arches=_GFX1201_ARCHES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_fringe_n",
+            spec_id="gfx1201_compv4_fringe_n",
+            priority=11,
+            spec_fn=_GFX1201_FRINGE_N,
+            arches=_GFX1201_ARCHES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_fringe",
+            spec_id="gfx1201_compv4_fringe",
+            priority=12,
+            spec_fn=_GFX1201_FRINGE,
+            arches=_GFX1201_ARCHES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_unaligned_k16",
+            spec_id="gfx1201_compv4_unaligned_k16",
+            priority=13,
+            spec_fn=_GFX1201_SHORT,
+            arches=_GFX1201_ARCHES,
+            shapes=(ShapeRange("K", min=32),),
+        ),
+        _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
             spec_id="rdna_wmma_default",
-            priority=10,
+            priority=30,
             spec_fn=_spec_rdna_wmma,
             arches=RDNA_WMMA_GEMM_ARCHES,
         ),
@@ -266,7 +485,7 @@ GEMM_FP16_REGISTRY.extend(
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma_small",
             spec_id="rdna_wmma_32x32",
-            priority=20,
+            priority=40,
             spec_fn=_spec_rdna_wmma_small,
             arches=RDNA_WMMA_GEMM_ARCHES,
         ),

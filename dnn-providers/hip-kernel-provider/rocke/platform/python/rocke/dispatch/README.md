@@ -74,6 +74,39 @@ unified tuning candidates are the first **tuned** candidates: each is one
 geometry variant whose configuration is a point in a knob space
 (see [Tuned candidates](#tuned-candidates)).
 
+### gfx1201 FP16 RCR selection
+
+Automatic FP16 selection on **gfx1201 only** uses the declared `compv4` palette
+in `gemm/fp16_rcr.py`. `GemmRequest.dims()` exposes `output_elements = M * N`
+alongside `M`, `N`, and `K`, so coverage manifests carry the output-area bounds.
+Selection is a pure function of the request; it never probes a GPU or timings.
+
+The ordered bands are:
+
+| Band | Tile M×N×K / wave grid | Additional constraints |
+|---|---|---|
+| Short K=32 | 128×128×32 / 2×4 | `K <= 32`; stores before WMMA |
+| Long contiguous-row stride | 64×64×64 / 2×2 | output area ≤ 2²²; K a multiple of 8192 |
+| Small output | 64×64×64 / 2×2 | output area ≤ 3·2¹⁸ |
+| Medium output | 128×128×64 / 2×4 | 3·2¹⁸ < area ≤ 2²⁰ |
+| Large output, long K | 256×128×32 / 4×2 | 2²² < area < 2²⁴; 4096 ≤ K < 8192 |
+| Large wide output | 128×256×32 / 2×4 | same area band; M ≤ 2048, N ≥ 4096; 2048 ≤ K < 4096 |
+| General aligned output | 128×128×32 / 2×2 | exact tile divisibility |
+| Alignment alternatives | 64×64×64, 128×128×16, then 32-wide tiles | first exactly dividing tile |
+
+The compv4 palette starts at K ≥ 32; K=16 retains the legacy `mem` selection.
+All bands require exact M/N/K tile divisibility and keep padding disabled.
+The larger double-buffer tiles explicitly enable `lds_db_allow_1wg`; both
+buffers, including every padded row, must fit the 64 KiB device budget.
+The common traits are LDS swizzle, stores after WMMA, grouped-M 4 and stagger
+8×4. Medium reductions with 1024 ≤ K < 2048 and the large-wide band instead
+use grouped-M 8 without stagger. The longer-K medium band retains stagger.
+
+The existing explicit `rdna_wmma_default` and `rdna_wmma_32x32` pins keep their
+original `mem` specs. Other architectures and BF16 automatic selection are
+unchanged. Candidates outside a declared band are rejected even when pinned;
+the registry's normal priority and divisibility checks choose the next candidate.
+
 ### Declared coverage and the arch gate
 
 Every candidate declares a `Capability`: the exact `gfx` targets it was built

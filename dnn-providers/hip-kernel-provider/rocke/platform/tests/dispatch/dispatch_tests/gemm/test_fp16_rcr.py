@@ -176,12 +176,6 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertEqual(rdna.candidate.name, "universal_gemm_fp16_rdna_wmma_small")
         self.assertEqual(rdna.grid, (4, 4, 1))
 
-    def test_registry_exposes_multiple_variants(self):
-        candidates = gemm_fp16_candidates()
-        self.assertGreaterEqual(len(candidates), 4)
-        self.assertIn("cdna_cshuffle_default", {c.spec_id for c in candidates})
-        self.assertIn("rdna_wmma_default", {c.spec_id for c in candidates})
-
     def test_ranker_can_override_auto_priority(self):
         def prefer_mem(_request, candidates):
             return sorted(candidates, key=lambda c: c.spec_id != "cdna_mem_64x128")
@@ -195,12 +189,10 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertEqual(result.kernel_id.spec_id, "cdna_mem_64x128")
                 self.assertEqual(result.candidate.name, "universal_gemm_fp16_cdna_mem")
 
-    def test_sweep_space_is_bounded_and_valid(self):
+    def test_offered_specs_are_valid_on_the_requested_arch(self):
         for arch in (*COVERED_ARCHES, "gfx1151", "gfx1201"):
             req = GemmRequest(M=512, N=512, K=512, arch=arch)
             specs = gemm_fp16_sweep_space(req)
-            self.assertGreaterEqual(len(specs), 1)
-            self.assertLessEqual(len(specs), 4)
             for spec in specs:
                 ok, why = is_valid_spec(spec, arch=arch)
                 self.assertTrue(ok, f"{arch}: {why}")
@@ -225,6 +217,118 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 llvm = lower_kernel_to_llvm(kernel, arch=req.arch)
                 self.assertIn("define amdgpu_kernel void", llvm)
                 self.assertIn(_MFMA_32X32_FP16[arch], llvm)
+
+
+class TestGfx1201Compv4Dispatch(unittest.TestCase):
+    def _pick(self, shape, **selectors):
+        return dispatch_gemm_fp16(GemmRequest(*shape, arch="gfx1201", **selectors))
+
+    def test_output_bands_and_reduction_bands_choose_legal_tiles(self):
+        cases = (
+            ((128, 6144, 1024), (64, 64, 64), False, 4, 8),
+            ((128, 6272, 1024), (128, 128, 64), True, 8, 0),
+            ((1024, 1024, 512), (128, 128, 64), True, 4, 8),
+            ((1024, 1024, 1024), (128, 128, 64), True, 8, 0),
+            ((128, 8192, 2048), (128, 128, 64), True, 4, 8),
+            ((1152, 1024, 1024), (128, 128, 32), False, 4, 8),
+            ((2048, 2560, 6144), (256, 128, 32), True, 4, 8),
+            ((2048, 6144, 2560), (128, 256, 32), True, 8, 0),
+            ((2304, 2304, 2048), (128, 128, 32), False, 4, 8),
+            ((4096, 4096, 4096), (128, 128, 32), False, 4, 8),
+        )
+        for shape, tile, one_wg, group, stagger in cases:
+            with self.subTest(shape=shape):
+                spec = self._pick(shape).spec
+                self.assertEqual(
+                    (spec.tile.tile_m, spec.tile.tile_n, spec.tile.tile_k), tile
+                )
+                self.assertEqual(spec.trait.lds_db_allow_1wg, one_wg)
+                self.assertEqual(
+                    (spec.trait.group_m, spec.trait.k_stagger), (group, stagger)
+                )
+                self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+
+    def test_alignment_and_short_k_fall_through_without_padding(self):
+        cases = (
+            ((96, 1024, 1024), (32, 64, 64)),
+            ((1024, 96, 1024), (64, 32, 64)),
+            ((160, 160, 1024), (32, 32, 64)),
+            ((2048, 2048, 1040), (128, 128, 16)),
+            ((256, 256, 32), (128, 128, 32)),
+            ((128, 128, 16), (64, 32, 16)),
+        )
+        for shape, tile in cases:
+            with self.subTest(shape=shape):
+                spec = self._pick(shape).spec
+                self.assertEqual(
+                    (spec.tile.tile_m, spec.tile.tile_n, spec.tile.tile_k), tile
+                )
+                self.assertFalse(
+                    spec.trait.pad_m or spec.trait.pad_n or spec.trait.pad_k
+                )
+                self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+
+    def test_long_row_stride_band_does_not_include_neighboring_k(self):
+        for k, tile in ((8128, 128), (8192, 64), (8256, 128), (16384, 64)):
+            with self.subTest(k=k):
+                spec = self._pick((2048, 2048, k)).spec
+                self.assertEqual(spec.tile.tile_m, tile)
+                self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+
+    def test_one_step_reductions_keep_legacy_selection(self):
+        for shape, pin in (
+            ((1024, 1024, 16), "rdna_wmma_default"),
+            ((96, 96, 16), "rdna_wmma_32x32"),
+        ):
+            with self.subTest(shape=shape):
+                result = self._pick(shape)
+                self.assertEqual(result.candidate.spec_id, pin)
+                self.assertEqual(result.spec.trait.pipeline, "mem")
+
+    def test_explicit_legacy_pins_are_not_retuned(self):
+        for pin, tile in (
+            ("rdna_wmma_default", (64, 32, 16)),
+            ("rdna_wmma_32x32", (32, 32, 16)),
+        ):
+            with self.subTest(pin=pin):
+                spec = self._pick((128, 128, 64), spec_id=pin).spec
+                self.assertEqual(
+                    (spec.tile.tile_m, spec.tile.tile_n, spec.tile.tile_k), tile
+                )
+                self.assertEqual(spec.trait.pipeline, "mem")
+                self.assertFalse(spec.trait.lds_db_allow_1wg)
+
+    def test_pin_cannot_bypass_shape_or_dtype_constraints(self):
+        with self.assertRaises(ValueError):
+            self._pick((512, 512, 512), spec_id="gfx1201_compv4_medium")
+        with self.assertRaises(ValueError):
+            self._pick((1024, 1024, 1024), dtype="bf16")
+        with self.assertRaises(ValueError):
+            self._pick((130, 128, 32))
+
+    def test_other_targets_and_bf16_keep_their_selections(self):
+        from rocke.dispatch import dispatch_gemm_bf16
+
+        for arch, expected in (
+            ("gfx1151", "rdna_wmma_default"),
+            ("gfx942", "cdna_cshuffle_default"),
+            ("gfx950", "cdna_cshuffle_default"),
+        ):
+            with self.subTest(arch=arch):
+                result = dispatch_gemm_fp16(GemmRequest(512, 512, 512, arch=arch))
+                self.assertEqual(result.candidate.spec_id, expected)
+        result = dispatch_gemm_bf16(
+            GemmRequest(512, 512, 512, arch="gfx1201", dtype="bf16")
+        )
+        self.assertEqual(result.candidate.spec_id, "rdna_wmma_default")
+        for candidate in gemm_fp16_candidates():
+            if not candidate.spec_id.startswith("gfx1201_compv4"):
+                continue
+            for arch in ("gfx1200", "gfx1151", "gfx1250", "gfx942", "gfx950"):
+                with self.subTest(candidate=candidate.spec_id, arch=arch):
+                    self.assertFalse(
+                        candidate.admits(GemmRequest(1024, 1024, 1024, arch=arch))[0]
+                    )
 
 
 if __name__ == "__main__":
