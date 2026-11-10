@@ -159,6 +159,7 @@
           "prba01_b1h2k2v2_64x64_d128_bfp16_brcausal_v0to1_tolp",
           "prbg01_b1h2k2v2_1x1_d128_bfp16_none_tolk1",
           "prbg01_b1h2k2v2_1x1_d128_fp16_none_tolk1",
+          "prbr01_b1h1k1v1_64x96_d128_bfp16_none_p0_told",
           "reg01_b1h1k1v1_128x128_d128_bfp16_cm_tlw33rinf_tolp",
           "reg02a_b1h1k1v1_64x128_d128_bfp16_cm_brnone_told",
           "reg02b_b1h1k1v1_64x128_d128_bfp16_cmbr_none_told",
@@ -181,16 +182,6 @@
           "gfx1100": [
             "linux"
           ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "prbr01_b1h1k1v1_64x96_d128_bfp16_none_p0_told"
-        ],
-        "support": {
           "gfx950": [
             "linux"
           ]
