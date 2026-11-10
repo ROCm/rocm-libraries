@@ -2266,14 +2266,19 @@ def test_observations_never_change_the_enclosures() -> None:
 
 
 def test_calibration_scope_is_all_quick_cases_or_none() -> None:
-    """No partial ratification: the calibrated case set is empty (Phase 4
-    capture, failing closed) or exactly the quick matrix, with the same
+    """No partial ratification: the calibrated case set is exactly the quick
+    matrix, one entry per dtype holding that dtype's cases, with the same
     dispatch fingerprint as the uniform (P3) entries."""
     quick = {case.case_id for case in P4_QUICK_CASES}
     calibrated = {
         case_id for entry in P4_CALIBRATION.values() for case_id in entry.case_ids
     }
-    assert calibrated in (set(), quick)
+    assert calibrated == quick
+    assert set(P4_CALIBRATION) == set(UNIFORM_CALIBRATION)
+    for (_, _, dtype), entry in P4_CALIBRATION.items():
+        assert set(entry.case_ids) == {
+            case.case_id for case in P4_QUICK_CASES if case.dtype == dtype
+        }
     for key, entry in P4_CALIBRATION.items():
         assert entry.spec == UNIFORM_CALIBRATION[key].spec
         assert entry.policy == P4_POLICY and entry.assumptions == P4_ASSUMPTIONS

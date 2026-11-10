@@ -280,6 +280,9 @@ EPILOGUE_ASSUMPTION = (
 _SINGLE_ROUNDING_DTYPES = frozenset({"fp16"})
 
 
+# Cached: a row's dimensions share a few accumulator intervals, and Tier B
+# evaluates this once per coordinate.
+@cache
 def cast_single_or_double_hull(
     accumulator: F32Interval, reciprocal: F32Interval, dtype: str
 ) -> tuple[int, int]:
@@ -2168,8 +2171,35 @@ class P4CalibrationEntry:
         return tuple(problems)
 
 
-# Empty until gfx942 ratification (Phase 5): the GPU lane fails closed.
-P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType({})
+# Ratified on gfx942. Case ids are literal, so changing a fixture, its head
+# scales or the quick shapes fails closed instead of following silently. The
+# dispatch fingerprint is the ratified uniform (P3) one; a contract checks it.
+P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType(
+    {
+        ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
+            policy=P4_POLICY,
+            assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
+            case_ids=(
+                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
+                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
+                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
+                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+            ),
+            spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].spec,
+        ),
+        ("gfx942", "attention_gfx942_dense", "bf16"): P4CalibrationEntry(
+            policy=P4_POLICY,
+            assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
+            case_ids=(
+                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
+                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
+                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
+                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+            ),
+            spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].spec,
+        ),
+    }
+)
 
 _P4_RECALIBRATION_REMEDY = (
     "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
