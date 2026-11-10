@@ -544,7 +544,7 @@ std::vector<ConfigRefusal> configRefusals()
         {"FlatNegative", [](ConfigFields& f) { f.flat = -1; }},
         {"HaloNotWholeVectors", [](ConfigFields& f) { f.halo = 12; }},
         {"HaloBelowTheVector", [](ConfigFields& f) { f.halo = 0; }},
-        {"FmaHaloPastTheVector", [](ConfigFields& f) { f.halo = 8; }, true},
+        {"FmaWideHaloPastStride1", [](ConfigFields& f) { f.halo = 8; }, true},
         {"FmaVecNotDividingBmq",
          [](ConfigFields& f) {
              f.bmq = 66;
@@ -830,7 +830,8 @@ TEST(TestConvIgemmNchwKernelMatch, StrideOneTapsShiftByTheDilation)
     unit.dilation = {1, 1};
     unit.prePadding = unit.postPadding = {0, 3};
     EXPECT_TRUE(admits(shortHalo, "gfx1100", unit));
-    // The FMA kernel takes unit dilation only.
+    // The FMA kernel's one-vector halo is a register window: unit dilation, taps within the
+    // vector. A wider halo serves dilation and long filters at stride 1.
     auto fma = fmaFields();
     fma.stride = 1;
     fma.taps = 3;
@@ -843,6 +844,15 @@ TEST(TestConvIgemmNchwKernelMatch, StrideOneTapsShiftByTheDilation)
     three.dilation = {1, 2};
     three.prePadding = three.postPadding = {0, 2};
     EXPECT_FALSE(admits(fma, "gfx1100", three, "FLOAT"));
+    auto wide = fma;
+    wide.halo = 8;
+    EXPECT_TRUE(admits(wide, "gfx1100", three, "FLOAT"));
+    auto seven = fmaFields();
+    seven.stride = 1;
+    seven.taps = 7;
+    seven.bmq = 128;
+    seven.halo = 32;
+    EXPECT_TRUE(admits(seven, "gfx1100", dilatedShape(), "FLOAT"));
 }
 
 TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)

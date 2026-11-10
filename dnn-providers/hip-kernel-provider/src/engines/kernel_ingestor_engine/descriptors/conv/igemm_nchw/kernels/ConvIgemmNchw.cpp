@@ -13,7 +13,8 @@
 //   CONV_K7_STRIDE   the convolution's stride along the width
 //   CONV_K7_TAPS     the most filter taps a stride phase holds (ceil(S / stride) at most this)
 //   CONV_K7_FLAT     0, or the phases computed over the flattened dy plane (K7BlockFlat)
-//   CONV_K7_HALO     matrix core: the dy window's elements past the tile (FMA: VEC)
+//   CONV_K7_HALO     the dy window's elements past the tile (FMA: VEC keeps the register
+//                    window, wider reads each tap's window from LDS, stride 1)
 
 #include "ConvIgemmNchwCore.h"
 
@@ -36,7 +37,8 @@ extern "C" __global__ void __launch_bounds__(CONV_K7_BLOCK) ConvIgemmNchw(K7Args
                CONV_K7_STRIDE,
                CONV_K7_TAPS,
                CONV_K7_STAGES,
-               CONV_K7_FLAT>(a);
+               CONV_K7_FLAT,
+               CONV_K7_HALO>(a);
 #else
     k7DgradMma<CONV_K7_T,
                CONV_K7_ATOM,

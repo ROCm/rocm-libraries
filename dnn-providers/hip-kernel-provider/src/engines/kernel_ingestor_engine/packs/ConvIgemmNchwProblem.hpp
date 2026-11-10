@@ -74,7 +74,8 @@ struct NchwConfig
     /// problem must be flat (NchwProblem::flat) with at most this many filter taps.
     int64_t flat = 0;
     /// The dy window's elements past the tile, whole vectors: at least the farthest tap's reach
-    /// ((taps - 1) dilation, plus one at strides past 1). FMA: the vector.
+    /// ((taps - 1) dilation, plus one at strides past 1). FMA: the vector (a register window,
+    /// unit dilation), or wider at stride 1.
     int64_t halo = 0;
 };
 
@@ -134,7 +135,7 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes);
  * and the other kind's 0; the tile against the atom's step (matrix core) or the thread tile
  * (FMA); the vector against the element size, the tile and the filter run; the stride equal to
  * the problem's and the taps per phase exactly ceil(S / stride); the halo covering the farthest
- * tap's reach (FMA: one vector, unit dilation); flat against the problem; the LDS within 64 KiB;
+ * tap's reach (FMA: one vector at unit dilation, wider at stride 1); flat against the problem; the LDS within 64 KiB;
  * the grid within the launch limits. The device and dtype checks are the kernel
  * match's (atomRunsOn, the dtype string).
  */

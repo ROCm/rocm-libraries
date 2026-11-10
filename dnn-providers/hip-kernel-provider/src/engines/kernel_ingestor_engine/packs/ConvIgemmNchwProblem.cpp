@@ -224,7 +224,7 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
     const int64_t smax = config.stride * config.taps;
     if(config.atom == "fma")
     {
-        const int64_t wq = config.bmq + config.vec;
+        const int64_t wq = config.bmq + config.halo;
         const int64_t lda = wq + pad;
         // k7FmaPitch: an odd number of 16-byte chunks.
         const int64_t chunks = divUp(smax, pad);
@@ -271,11 +271,13 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
         return std::nullopt;
     }
     // The window's halo: whole vectors past the tile that reach the farthest tap, (taps - 1)
-    // dilation back, and one further for the phases below pad mod stride. The FMA kernel's
-    // window is one vector, its taps unrolled in registers (unit dilation).
+    // dilation back, and one further for the phases below pad mod stride. The FMA kernel with a
+    // one-vector halo unrolls its taps over a register window (unit dilation); a wider halo reads
+    // each tap's window from LDS (stride 1).
     const int64_t reach = (config.taps - 1) * a.dil + (config.stride > 1 ? 1 : 0);
     if(config.halo < config.vec || config.halo % config.vec != 0 || reach > config.halo
-       || (fma && (config.halo != config.vec || config.taps > config.vec || a.dil != 1)))
+       || (fma && config.halo == config.vec && (config.taps > config.vec || a.dil != 1))
+       || (fma && config.halo > config.vec && config.stride != 1))
     {
         return std::nullopt;
     }
