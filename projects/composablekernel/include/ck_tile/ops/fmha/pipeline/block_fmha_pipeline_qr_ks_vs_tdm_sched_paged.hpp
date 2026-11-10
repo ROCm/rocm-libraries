@@ -53,7 +53,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = BlockFmhaShape::kM0 > 64;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -94,11 +93,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
-    static constexpr index_t kAlignmentQ    = Policy::template GetAlignmentQ<Problem>();
-    static constexpr index_t kAlignmentK    = Policy::template GetAlignmentK<Problem>();
-    static constexpr index_t kAlignmentV    = Policy::template GetAlignmentV<Problem>();
-    static constexpr index_t kAlignmentO    = Policy::template GetAlignmentO<Problem>();
-    static constexpr index_t kAlignmentOacc = Policy::template GetAlignmentO<Problem>();
+    static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
+    static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
+    static constexpr index_t kAlignmentV = Policy::template GetAlignmentV<Problem>();
+    static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
     static constexpr index_t kAlignmentBias =
         kPadSeqLenK ? 1 : Policy::template GetAlignmentBias<Problem>();
     static constexpr index_t kAlignmentRandVal =
@@ -144,10 +142,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                   Problem::kPageBlockSize == 1024);
     static_assert(Problem::kPageBlockSize % kN0 == 0 || kN0 % Problem::kPageBlockSize == 0);
 
-    static constexpr bool kUsesUntransposedVKernelPath = true;
-    static constexpr bool kUsesTdmAffineDramPath       = true;
-    static constexpr bool kUsesFixedSegmentedLdsArena  = true;
-    static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    static constexpr index_t kBlockPerCu = Policy::kBlockPerCu;
 
     // Lean TDM issue: see Policy::UseLeanTdmIssue.
     static constexpr bool kLeanIssue = Policy::template UseLeanTdmIssue<Problem>();
