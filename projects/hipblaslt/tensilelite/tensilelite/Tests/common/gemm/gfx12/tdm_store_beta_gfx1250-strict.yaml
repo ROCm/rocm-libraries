@@ -316,3 +316,41 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
           - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+  ########################################
+  # GlobalSplitU=-1 with SingleBuffer, MultipleBufferSingleKernel and AtomicDest, and
+  # MultipleBufferSingleKernel with AdaptiveGemmGSUA 1: the GSU == 1 branch stores through the TDM
+  # block, and the GSU > 1 branch keeps its buffer_store or atomics. K=128 runs GSU 1 and the
+  # single-tile K=512 sizes GSU > 1. AtomicDest to bf16 D needs an even AssertFree0ElementMultiple
+  # (packed atomics write element pairs), so it runs the sizes with M even.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [-1]
+        - Groups:
+          - - GlobalSplitUAlgorithm: [SingleBuffer, MultipleBufferSingleKernel]
+              AdaptiveGemmGSUA: [0]
+            - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
+              AdaptiveGemmGSUA: [1]
+            - GlobalSplitUAlgorithm: [AtomicDest]
+              AdaptiveGemmGSUA: [0]
+              AssertFree0ElementMultiple: [2]
+        - TDMStoreInst: [0, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [510, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
+          - Exact: [254, 253, 1, 512]
