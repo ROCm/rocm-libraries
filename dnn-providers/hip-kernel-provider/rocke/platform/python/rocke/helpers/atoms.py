@@ -557,7 +557,7 @@ class MfmaAtom:
         strings), so this routes straight through the target-neutral
         :meth:`IRBuilder.mma`. The prior per-shape ``b.mfma_f32_*`` dispatch
         table was a 1:1 wrapper layer over exactly this call — emission is
-        byte-identical (same ``op_id`` attribute, same ``c_frag_len``-sized
+        byte-identical (same ``op_id`` attribute, same ``dst.frag_len``-sized
         result, same SSA name hint) — and routing through ``mma`` lets the
         same atom drive WMMA on RDNA once a WMMA-named atom is added.
         """
@@ -778,8 +778,8 @@ class WmmaAtom:
         return self.mma_op(arch).b_layout()
 
     def c_layout(self, arch: str = "gfx1151") -> LayoutMap:
-        """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
-        return self.mma_op(arch).c_layout()
+        """The accumulator input ``(row, col)`` lane/slot -> coordinate map."""
+        return self.mma_op(arch).src_layout(2)
 
     # Convenience alias mirroring ``MmaOp.acc_layout``.
     def acc_layout(self, arch: str = "gfx1151") -> LayoutMap:

@@ -345,7 +345,7 @@ Removing a wait is **legal** only when some pass regenerates it; otherwise the h
 | Classification | Opcodes | Rebuilt by |
 |----------------|---------|------------|
 | `WaitCntInsertion` | `s_wait_dscnt`, `s_wait_loadcnt`, `s_wait_kmcnt`, `s_wait_tensorcnt`, `s_wait_asynccnt`, `s_wait_loadcnt_dscnt` | `emitOneSpec`, one field of `WaitCountSpec` each (the packed form splits into two) |
-| `HazardPass` | `s_wait_xcnt` | `Gfx1250HazardPass`, from its own XNACK replay-group rules |
+| `HazardPass` | `s_wait_xcnt` | `Gfx1250XnackHazardPass`, from its own XNACK replay-group rules |
 | `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
 
 `RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.

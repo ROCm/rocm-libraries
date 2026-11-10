@@ -34,6 +34,20 @@
 #  rejected by both engines:
 #  13  fwd_smallc_wmma on gfx950 (wave64, no TDM)
 #  14  fwd_smallk_wmma with C=36 (not a multiple of 8)
+#  small K, K not a power of two and per-axis padding:
+#  15  bf16, 3x3 s1 PAD 1, K=3 (one 96-bit Z read per tap, per-channel
+#      stores), 1x3 waves, 2x3 tiles, 6x16 tile, ck 32, prefetch
+#  16  fp16, 3x3 s1 PAD 1, K=3, 1x4 waves, 2x4 tiles, 6x30 tile, ck 64,
+#      prefetch
+#  17  bf16, 1x7 s1 PAD 0 / column PAD 3, K=1, 1x300 row, 1x2 waves, 1x2
+#      tiles, 1x58 tile, ck 32, prefetch
+#  18  fp16, 1x7 s1 PAD 0 / column PAD 3, K=1, 1x2 waves, 1x4 tiles, 1x122
+#      tile, ck 32
+#  19  bf16, 3x3 s1 PAD 1, K=5 (channel-by-channel Z reads and stores),
+#      1x3 waves, 3x3 tiles, 6x16 tile, ck 32
+#  20  fp16, 3x3 s1 PAD 1, K=6, 1x3 waves, 4x3 tiles, 6x16 tile, ck 32
+#  rejected by both engines:
+#  21  fwd_smallk_wmma 1x7 with column PAD 7 (outside 0..KW-1)
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_wmma import (
@@ -44,7 +58,7 @@ from kernels.common.conv_fwd_small_wmma import (
 )
 
 
-def _p(*, K=3, PAD=1, S=1, C=3, Kout=64, dtype="bf16", H=32, W=40):
+def _p(*, K=3, PAD=1, S=1, C=3, Kout=64, dtype="bf16", H=32, W=40, KW=None, pad_w=-1):
     return DirectConvProblem(
         N=2,
         H=H,
@@ -53,8 +67,9 @@ def _p(*, K=3, PAD=1, S=1, C=3, Kout=64, dtype="bf16", H=32, W=40):
         cpg=C,
         kpg=Kout,
         KH=K,
-        KW=K,
+        KW=K if KW is None else KW,
         PAD=PAD,
+        pad_w=pad_w,
         stride=S,
         dtype=dtype,
     )
@@ -176,6 +191,72 @@ def _spec(idx: int):
         ),
         13: C(problem=_p()),
         14: K(problem=_p(C=36, Kout=4)),
+        15: K(
+            problem=_p(C=64, Kout=3),
+            waves_c=1,
+            waves_p=3,
+            tiles_c=2,
+            tiles_p=3,
+            out_h=6,
+            out_w=16,
+            ck=32,
+            prefetch=True,
+        ),
+        16: K(
+            problem=_p(C=64, Kout=3, dtype="fp16"),
+            waves_c=1,
+            waves_p=4,
+            tiles_c=2,
+            tiles_p=4,
+            out_h=6,
+            out_w=30,
+            ck=64,
+            prefetch=True,
+        ),
+        17: K(
+            problem=_p(K=1, KW=7, PAD=0, pad_w=3, C=32, Kout=1, H=1, W=300),
+            waves_c=1,
+            waves_p=2,
+            tiles_c=1,
+            tiles_p=2,
+            out_h=1,
+            out_w=58,
+            ck=32,
+            prefetch=True,
+        ),
+        18: K(
+            problem=_p(
+                K=1, KW=7, PAD=0, pad_w=3, C=32, Kout=1, H=1, W=300, dtype="fp16"
+            ),
+            waves_c=1,
+            waves_p=2,
+            tiles_c=1,
+            tiles_p=4,
+            out_h=1,
+            out_w=122,
+            ck=32,
+        ),
+        19: K(
+            problem=_p(C=64, Kout=5),
+            waves_c=1,
+            waves_p=3,
+            tiles_c=3,
+            tiles_p=3,
+            out_h=6,
+            out_w=16,
+            ck=32,
+        ),
+        20: K(
+            problem=_p(C=64, Kout=6, dtype="fp16"),
+            waves_c=1,
+            waves_p=3,
+            tiles_c=4,
+            tiles_p=3,
+            out_h=6,
+            out_w=16,
+            ck=32,
+        ),
+        21: K(problem=_p(K=1, KW=7, PAD=0, pad_w=7, C=32, Kout=1, H=1, W=300)),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

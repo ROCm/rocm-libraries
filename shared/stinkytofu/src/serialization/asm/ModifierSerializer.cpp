@@ -581,7 +581,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), isStore,
-                           false, false, false, scope, th, nv));
+                           false, false, scope, th, nv));
     } else if (attrKey == "mod.cache_scope") {
         inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {

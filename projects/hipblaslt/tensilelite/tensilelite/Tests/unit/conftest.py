@@ -14,12 +14,93 @@ if _CODEGEN_DIR not in sys.path:
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import (
+    cxx_compiler as _cxx_compiler,
+    shared_assembler,
+    shared_full_isa_info_map,
+    shared_isa_info_map_or_skip,
+)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_rocisa_state():
     with preserve_rocisa_kernel_state():
         yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _single_threaded_parallel_map():
+    """Run the unit tests' ``ParallelMap``/``ParallelMap2`` calls in-process.
+
+    Why here: ``CPUThreadCount()`` sizes its pool from ``globalParameters["CpuThreads"]``
+    (default -1, meaning every CPU the process can see). That is the machine's CPU count,
+    not the CI job's CPU allocation, so each pytest/xdist process launches a pool of
+    roughly that many workers (96 on a 96-CPU host) for tests that map over one or a few
+    items. The pool never speeds those tests up, and it multiplies CPU use by the number
+    of xdist workers. A session-scoped autouse fixture in this conftest runs once in every
+    process that runs unit tests, each xdist worker included, so no test or CLI flag has to
+    opt in.
+
+    Why a fixture and not a ``pytest_configure`` hook: pytest runs a nested conftest's
+    ``pytest_configure`` as soon as it imports that conftest during collection, so a run
+    that collects all of ``Tests`` (``tox -e py3 -- tensilelite/Tests -m common``) would
+    also have set ``CpuThreads`` for the non-unit tests that call ``Tensile`` in-process.
+    Autouse fixtures only reach tests under ``unit/``, and the patches are undone when the
+    session ends.
+
+    Why both values: ``restoreDefaultGlobalParameters()``, called by the ``Tensile``,
+    ``TensileUpdateLibrary`` and ``TensileRetuneLibrary`` entry points the tests exercise,
+    clears ``globalParameters`` and refills it from ``defaultGlobalParameters``. Setting
+    only the live value is undone by the first such call and the pools come back.
+    A test that needs a different value sets it for itself, as several already do. The
+    real worker-pool path stays covered by the device-library builds, by the
+    subprocess-based ``Tests/common/test_config.py`` runs, and by one small test in
+    ``characterization/Parallel``.
+    """
+    from tensilelite.Common import GlobalParameters
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(GlobalParameters.globalParameters, "CpuThreads", 1)
+        patch.setitem(GlobalParameters.defaultGlobalParameters, "CpuThreads", 1)
+        yield
+
+
+# Shared toolchain fixtures. Each is one object for the whole run, and the capability
+# maps are read-only (see toolchain_test_helpers): a test that needs to change one takes
+# a copy with copy_isa_info_map.
+@pytest.fixture(scope="session")
+def cxx_compiler():
+    return _cxx_compiler()
+
+
+@pytest.fixture(scope="session")
+def isa_info_map():
+    return shared_full_isa_info_map()
+
+
+@pytest.fixture(scope="session")
+def assembler():
+    return shared_assembler()
+
+
+@pytest.fixture(scope="session")
+def gfx90a_iim():
+    return shared_isa_info_map_or_skip("gfx90a")
+
+
+@pytest.fixture(scope="session")
+def gfx942_iim():
+    return shared_isa_info_map_or_skip("gfx942")
+
+
+@pytest.fixture(scope="session")
+def gfx950_iim():
+    return shared_isa_info_map_or_skip("gfx950")
+
+
+@pytest.fixture(scope="session")
+def gfx1250_iim():
+    return shared_isa_info_map_or_skip("gfx1250")
 
 
 @pytest.fixture(autouse=True)
