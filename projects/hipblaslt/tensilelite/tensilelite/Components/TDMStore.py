@@ -81,8 +81,8 @@ def tdmStoreRejectReason(state):
   besides C and D the epilogue may only read the bias and ScaleAlphaVec vectors along M, the latter
   with or without the device-scalar bit of UseScaleAlphaVec, and the ScaleAB vectors, which the staged
   tile follows in LDS.
-  A GlobalSplitU=-1 kernel uses the block only when the runtime GSU is 1, and its GSU>1
-  partials keep buffer_store; it is supported with MultipleBuffer and AdaptiveGemmGSUA=0.
+  A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block only
+  when the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store.
   """
   if not state["TDMStoreInst"]:
     return None
@@ -99,8 +99,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
     return "TDMStoreInst requires GlobalSplitU=1 or -1"
-  if state["GlobalSplitU"] == -1 and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer" or state["AdaptiveGemmGSUA"]):
-    return "TDMStoreInst supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
   # -1 (auto) is resolved later, where Solution rejects TDMStoreInst if it resolves to a remap width.
