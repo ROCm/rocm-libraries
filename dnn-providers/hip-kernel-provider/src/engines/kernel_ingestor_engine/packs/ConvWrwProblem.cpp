@@ -255,6 +255,19 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
     const int64_t vec = config.vec;
+    if(config.loop == LOOP_ROWS_FMA)
+    {
+        // K3FmaRowTiles: as the FMA ring's, over fr windows of the strided window rows.
+        const int64_t threads = (config.bk / config.tk) * (config.bc / config.tc);
+        const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
+        const int64_t nbv = divUp(win, vec) + (vec > 1 ? 1 : 0);
+        const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
+        const int64_t aUnits
+            = cf ? (config.bk / 4) * (config.bq / vec) : config.bq * (config.bk / vec);
+        const int64_t bUnits
+            = cf ? config.fr * (config.bc / 4) * nbv : config.fr * nbv * vec * (config.bc / vec);
+        return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+    }
     if(config.loop == LOOP_RING_FMA)
     {
         // K3FmaTiles: channels-first units are 4 channels by a vector of positions; channels-last
@@ -337,7 +350,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    const bool fma = config.loop == LOOP_RING_FMA;
+    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
+    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -357,7 +371,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_RING_FMA)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_FMA)
     {
         return std::nullopt;
     }
@@ -373,8 +387,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    // The vector and the tile.
-    if(config.vec * eb != 16 || config.bk < 1 || config.bc < 1 || config.bq < 1)
+    // The vector and the tile: 16 bytes, or (FMA output rows) one element.
+    if((config.vec * eb != 16 && !(config.loop == LOOP_ROWS_FMA && config.vec == 1))
+       || config.bk < 1 || config.bc < 1 || config.bq < 1)
     {
         return std::nullopt;
     }
@@ -410,7 +425,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     if(cf)
     {
-        if(config.bq % config.vec != 0 || config.vec % config.sw != 0)
+        if(config.bq % config.vec != 0 || (!fma && config.vec % config.sw != 0))
         {
             return std::nullopt;
         }
@@ -420,7 +435,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // The row rings: height stride 1, the whole filter height per block.
-    if(config.loop != LOOP_ROWS && (a.stride[1] != 1 || config.fr != a.filter[1]))
+    if(!rows && (a.stride[1] != 1 || config.fr != a.filter[1]))
     {
         return std::nullopt;
     }
@@ -436,10 +451,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    // The FMA ring: unit width stride, rows of whole vectors (units wholly in or out of a row).
-    if(fma
-       && (config.sw != 1 || a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0
-           || config.bq % config.vec != 0))
+    // The FMA ring: unit width stride. Both FMA loops: channels-first rows of whole vectors
+    // (units wholly in or out of a row).
+    if(config.loop == LOOP_RING_FMA && config.sw != 1)
+    {
+        return std::nullopt;
+    }
+    if(fma && config.bq % config.vec != 0)
+    {
+        return std::nullopt;
+    }
+    if(fma && cf && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
     {
         return std::nullopt;
     }
@@ -481,15 +503,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // Grid and reduction steps.
     const int64_t gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
     const int64_t frows = a.filter[0] * a.filter[1];
-    const int64_t gridY
-        = a.groups * (config.loop == LOOP_ROWS ? divUp(frows, config.fr) : a.filter[0]);
+    const int64_t gridY = a.groups * (rows ? divUp(frows, config.fr) : a.filter[0]);
     const int64_t chunks = divUp(a.outSpatial[2], config.bq);
     const int64_t trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
     const auto steps
-        = config.loop == LOOP_ROWS
-              ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
-              : pack_features::checkedProduct(
-                    {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
+        = rows ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
+               : pack_features::checkedProduct(
+                     {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
     const auto partialElems = pack_features::checkedProduct({a.groups, problem.taps, kg, cg});
     if(gridX < 1 || gridX > INT_LIMIT || gridY < 1 || gridY > MAX_GRID_YZ || !steps.has_value()
        || *steps < 1 || !partialElems.has_value() || trackLen > INT_LIMIT || chunks > INT_LIMIT)
@@ -544,7 +564,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.splits = static_cast<int>(splits);
     k3.steps = *steps;
     k3.stepsPerSplit = stepsPerSplit;
-    k3.trackLen = config.loop == LOOP_ROWS ? 0 : static_cast<int>(trackLen);
+    k3.trackLen = rows ? 0 : static_cast<int>(trackLen);
     const bool channelsLast = !cf;
     packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
     packedStrides(
