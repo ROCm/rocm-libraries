@@ -39,7 +39,6 @@ Documentation for rocSPARSE is available at
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.
 
 ### Removed
-
 * Removed the GoogleTest superbuild in `deps/CMakeLists.txt`, together with `deps/external-gtest.cmake` and `cmake/get-cli-arguments.cmake`.
 
 ## (Unreleased) rocSPARSE 5.2.0
