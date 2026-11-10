@@ -331,6 +331,8 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
         {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
+        {"Deeplab3x3Dilation36",
+         conv(16, 16, {76, 76}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 1)},
         {"Wide1x11Dilation3", conv(16, 16, {3, 40}, {1, 11}, {0, 15}, {0, 15}, {1, 1}, {1, 3})},
         {"Dilation2", conv(16, 24, {11, 13}, {3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2})},
         {"Deeplab3x3Dilation12",
