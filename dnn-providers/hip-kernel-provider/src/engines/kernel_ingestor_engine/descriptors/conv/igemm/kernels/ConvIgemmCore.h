@@ -1662,6 +1662,7 @@ __device__ void k1ConvMma(const K1Args& a)
         {
             typedef typename K1Raw<16>::type Chunk;
             static_assert(FB == 8 || FB == 16 || FB == 32, "fragment size");
+            static_assert(BK % (Atom::KA * PAIR) == 0, "chunked reads span whole k-steps");
 #pragma unroll
             for(int kk = 0; kk < BK; kk += Atom::KA * PAIR)
             {

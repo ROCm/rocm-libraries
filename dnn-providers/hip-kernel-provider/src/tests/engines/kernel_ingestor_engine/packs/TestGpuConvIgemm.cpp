@@ -684,7 +684,8 @@ TEST(TestConvIgemmCatalog, SwizzledTileConfigsAreSixteenBitVectorEightPlainTiles
             ++swizzled;
             const auto info = conv_igemm::atomNamed(kernel.getStringMetadata("atom"));
             ASSERT_TRUE(info.has_value());
-            EXPECT_TRUE(info->swizzles);
+            ASSERT_GT(info->swizzleK, 0);
+            EXPECT_EQ(kernel.getIntMetadata("bk") % info->swizzleK, 0);
             EXPECT_EQ(kernel.getStringMetadata("math"), "native");
             EXPECT_EQ(kernel.getIntMetadata("vec"), 8);
             EXPECT_EQ(kernel.getIntMetadata("halo"), 0);
@@ -720,6 +721,15 @@ TEST(TestConvIgemmCatalog, SwizzledTileKnobDeclinesEveryUnsupportedCombination)
     EXPECT_TRUE(declines("swz", int64_t{2}));
     EXPECT_TRUE(declines("vec", int64_t{4}));
     EXPECT_TRUE(declines("bk", int64_t{128}));
+    // 16x16x16 fragments are read two k-steps (32) per chunk: a 16 k-step cannot hold them.
+    {
+        auto narrow = *base;
+        narrow.metadata["atom"] = std::string("mfma16_f16");
+        narrow.metadata["bk"] = int64_t{16};
+        EXPECT_FALSE(matchesKernel(pack, fixture.context(), narrow, *bound));
+        narrow.metadata["swz"] = int64_t{0};
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), narrow, *bound));
+    }
     EXPECT_TRUE(declines("halo", int64_t{1}));
     EXPECT_TRUE(declines("wdirect", int64_t{1}));
     EXPECT_TRUE(declines("pack", int64_t{1}));

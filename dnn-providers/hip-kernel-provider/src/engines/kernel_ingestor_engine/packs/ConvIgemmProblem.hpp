@@ -93,8 +93,10 @@ struct AtomInfo
     std::string_view kernelType; ///< K1Atom* type name; empty for the FMA kernel
     int wave = 0; ///< 64 MFMA, 32 WMMA, 0 FMA (block from `threads`)
     bool tf32 = false; ///< Rounds fp32 operands (xf32): served only with TF32 permission
-    /// 16-bit fragments of 8, 16 or 32 bytes: the swizzled-tile (swz) configs can read them
-    bool swizzles = false;
+    /// 16-bit fragments of 8, 16 or 32 bytes, which the swizzled-tile (swz) configs read in
+    /// 16-byte chunks: the k-step those reads span (8-byte fragments two atom k-steps), which
+    /// the config's k-step must be a multiple of; 0: no swizzled tiles.
+    int swizzleK = 0;
 };
 
 /// The atom @p name names, or nullopt for an unknown one.

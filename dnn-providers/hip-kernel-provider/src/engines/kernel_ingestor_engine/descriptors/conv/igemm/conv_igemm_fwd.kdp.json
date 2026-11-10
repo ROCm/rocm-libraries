@@ -2336,37 +2336,6 @@
     },
     {
       "version": "1.0",
-      "id": "58b7aa5a-b03f-5e27-9cfd-527d01462889",
-      "name": "conv_igemm.fwd.f16.mfma16_f16.native.256x16x16.w4x1.t0.v8.s1.swz",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvIgemm.cpp",
-        "entry_point": "ConvIgemm"
-      },
-      "metadata": {
-        "direction": "FWD",
-        "dtype": "HALF",
-        "atom": "mfma16_f16",
-        "math": "native",
-        "bm": 256,
-        "bn": 16,
-        "bk": 16,
-        "wm": 4,
-        "wn": 1,
-        "threads": 0,
-        "vec": 8,
-        "stages": 1,
-        "xcd": 0,
-        "halo": 0,
-        "wdirect": 0,
-        "pack": 0,
-        "cf": 0,
-        "swz": 1
-      },
-      "priority": 925
-    },
-    {
-      "version": "1.0",
       "id": "8f8efc64-7f52-5cf5-aebd-a14a0027c452",
       "name": "conv_igemm.fwd.f16.mfma32_f16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz",
       "kernel_source": {
@@ -2394,7 +2363,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 924
+      "priority": 925
     },
     {
       "version": "1.0",
@@ -2425,7 +2394,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 923
+      "priority": 924
     },
     {
       "version": "1.0",
@@ -2456,7 +2425,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 922
+      "priority": 923
     },
     {
       "version": "1.0",
@@ -2487,7 +2456,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 921
+      "priority": 922
     },
     {
       "version": "1.0",
@@ -2518,7 +2487,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 920
+      "priority": 921
     },
     {
       "version": "1.0",
@@ -2549,7 +2518,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 919
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -2580,7 +2549,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 918
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -2611,7 +2580,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 917
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -2642,7 +2611,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 916
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -2673,7 +2642,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 915
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -2704,7 +2673,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 914
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -2735,7 +2704,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 913
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -2766,7 +2735,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 912
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -2797,7 +2766,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 911
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -2828,7 +2797,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 910
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -2859,7 +2828,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 909
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -2890,7 +2859,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 908
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -2921,7 +2890,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 907
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -2952,7 +2921,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 906
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -2983,7 +2952,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 905
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -3014,7 +2983,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 904
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -3045,7 +3014,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 903
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -3076,7 +3045,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 902
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -3107,7 +3076,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 901
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -3138,7 +3107,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 900
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -3169,7 +3138,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 899
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -3200,7 +3169,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 898
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -3231,7 +3200,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 897
+      "priority": 898
     },
     {
       "version": "1.0",
@@ -3262,7 +3231,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 896
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -3293,7 +3262,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 895
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -3324,7 +3293,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 894
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -3355,7 +3324,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 893
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -3386,7 +3355,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 892
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -3417,7 +3386,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 891
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -3448,7 +3417,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 890
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -3479,7 +3448,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 889
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -3510,7 +3479,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 888
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -3541,7 +3510,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 887
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -3572,7 +3541,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 886
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -3603,7 +3572,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 885
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -3634,7 +3603,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 884
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -3665,7 +3634,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 883
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -3696,7 +3665,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 882
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -3727,7 +3696,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 881
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -3758,7 +3727,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 880
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -3789,7 +3758,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 879
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -3820,7 +3789,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 878
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -3851,7 +3820,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 877
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -3882,7 +3851,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 876
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -3913,7 +3882,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 875
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -3944,7 +3913,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 874
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -3975,7 +3944,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 873
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -4006,7 +3975,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 872
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -4037,7 +4006,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 871
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -4068,7 +4037,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 870
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -4099,7 +4068,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 869
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -4130,7 +4099,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 868
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -4161,7 +4130,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 867
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -4192,7 +4161,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 866
+      "priority": 867
     },
     {
       "version": "1.0",
@@ -4223,7 +4192,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 865
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -4254,7 +4223,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 864
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -4285,7 +4254,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 863
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -4316,7 +4285,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 862
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -4347,7 +4316,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 861
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -4378,7 +4347,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 860
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -4409,7 +4378,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 859
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -4440,7 +4409,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 858
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -4471,7 +4440,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 857
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -4502,7 +4471,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 856
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -4533,7 +4502,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 855
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -4564,7 +4533,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 854
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -4595,7 +4564,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 853
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -4626,7 +4595,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 852
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -4657,7 +4626,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 851
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -4688,7 +4657,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 850
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -4719,7 +4688,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 849
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -4750,7 +4719,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 848
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -4781,7 +4750,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 847
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -4812,7 +4781,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 846
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -4843,7 +4812,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 845
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -4874,38 +4843,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 844
-    },
-    {
-      "version": "1.0",
-      "id": "06576b79-607c-5889-8024-b9b2581d7fbc",
-      "name": "conv_igemm.fwd.f16.mfma16_f16.native.256x16x16.w4x1.t0.v8.s1.cf.swz",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvIgemm.cpp",
-        "entry_point": "ConvIgemm"
-      },
-      "metadata": {
-        "direction": "FWD",
-        "dtype": "HALF",
-        "atom": "mfma16_f16",
-        "math": "native",
-        "bm": 256,
-        "bn": 16,
-        "bk": 16,
-        "wm": 4,
-        "wn": 1,
-        "threads": 0,
-        "vec": 8,
-        "stages": 1,
-        "xcd": 0,
-        "halo": 0,
-        "wdirect": 0,
-        "pack": 0,
-        "cf": 1,
-        "swz": 1
-      },
-      "priority": 843
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -4936,7 +4874,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 842
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -4967,7 +4905,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 841
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -4998,7 +4936,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 840
+      "priority": 842
     },
     {
       "version": "1.0",
@@ -5029,7 +4967,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 839
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -5060,7 +4998,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 838
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -5091,7 +5029,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 837
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -5122,7 +5060,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 836
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -5153,7 +5091,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 835
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -5184,7 +5122,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 834
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -5215,7 +5153,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 833
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -5246,7 +5184,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 832
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -5277,7 +5215,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 831
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -5308,7 +5246,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 830
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -5339,7 +5277,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 829
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -5370,7 +5308,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 828
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -5401,7 +5339,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 827
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -5432,7 +5370,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 826
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -5463,7 +5401,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 825
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -5494,7 +5432,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 824
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -5525,7 +5463,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 823
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -5556,7 +5494,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 822
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -8102,37 +8040,6 @@
     },
     {
       "version": "1.0",
-      "id": "b052c6e5-bc6a-5519-8888-095eb52ad155",
-      "name": "conv_igemm.fwd.bf16.mfma16_bf16.native.256x16x16.w4x1.t0.v8.s1.swz",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvIgemm.cpp",
-        "entry_point": "ConvIgemm"
-      },
-      "metadata": {
-        "direction": "FWD",
-        "dtype": "BFLOAT16",
-        "atom": "mfma16_bf16",
-        "math": "native",
-        "bm": 256,
-        "bn": 16,
-        "bk": 16,
-        "wm": 4,
-        "wn": 1,
-        "threads": 0,
-        "vec": 8,
-        "stages": 1,
-        "xcd": 0,
-        "halo": 0,
-        "wdirect": 0,
-        "pack": 0,
-        "cf": 0,
-        "swz": 1
-      },
-      "priority": 918
-    },
-    {
-      "version": "1.0",
       "id": "39c66cdc-67eb-5c97-b8ea-2d4fa68c7d1c",
       "name": "conv_igemm.fwd.bf16.mfma32_bf16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz",
       "kernel_source": {
@@ -8160,7 +8067,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 917
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -8191,7 +8098,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 916
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -8222,7 +8129,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 915
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -8253,7 +8160,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 914
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -8284,7 +8191,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 913
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -8315,7 +8222,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 912
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -8346,7 +8253,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 911
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -8377,7 +8284,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 910
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -8408,7 +8315,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 909
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -8439,7 +8346,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 908
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -8470,7 +8377,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 907
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -8501,7 +8408,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 906
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -8532,7 +8439,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 905
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -8563,7 +8470,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 904
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -8594,7 +8501,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 903
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -8625,7 +8532,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 902
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -8656,7 +8563,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 901
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -8687,7 +8594,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 900
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -8718,7 +8625,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 899
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -8749,7 +8656,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 898
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -8780,7 +8687,7 @@
         "cf": 0,
         "swz": 1
       },
-      "priority": 897
+      "priority": 898
     },
     {
       "version": "1.0",
@@ -8811,7 +8718,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 896
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -8842,7 +8749,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 895
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -8873,7 +8780,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 894
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -8904,7 +8811,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 893
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -8935,7 +8842,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 892
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -8966,7 +8873,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 891
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -8997,7 +8904,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 890
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -9028,7 +8935,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 889
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -9059,7 +8966,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 888
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -9090,7 +8997,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 887
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -9121,7 +9028,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 886
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -9152,7 +9059,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 885
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -9183,7 +9090,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 884
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -9214,7 +9121,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 883
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -9245,7 +9152,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 882
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -9276,7 +9183,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 881
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -9307,7 +9214,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 880
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -9338,7 +9245,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 879
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -9369,7 +9276,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 878
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -9400,7 +9307,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 877
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -9431,7 +9338,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 876
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -9462,7 +9369,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 875
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -9493,7 +9400,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 874
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -9524,7 +9431,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 873
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -9555,7 +9462,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 872
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -9586,7 +9493,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 871
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -9617,7 +9524,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 870
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -9648,7 +9555,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 869
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -9679,7 +9586,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 868
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -9710,7 +9617,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 867
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -9741,7 +9648,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 866
+      "priority": 867
     },
     {
       "version": "1.0",
@@ -9772,7 +9679,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 865
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -9803,7 +9710,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 864
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -9834,7 +9741,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 863
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -9865,7 +9772,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 862
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -9896,7 +9803,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 861
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -9927,7 +9834,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 860
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -9958,7 +9865,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 859
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -9989,7 +9896,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 858
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -10020,7 +9927,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 857
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -10051,7 +9958,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 856
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -10082,7 +9989,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 855
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -10113,7 +10020,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 854
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -10144,7 +10051,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 853
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -10175,7 +10082,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 852
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -10206,7 +10113,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 851
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -10237,7 +10144,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 850
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -10268,7 +10175,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 849
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -10299,7 +10206,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 848
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -10330,7 +10237,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 847
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -10361,7 +10268,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 846
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -10392,7 +10299,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 845
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -10423,7 +10330,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 844
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -10454,7 +10361,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 843
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -10485,7 +10392,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 842
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -10516,7 +10423,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 841
+      "priority": 842
     },
     {
       "version": "1.0",
@@ -10547,7 +10454,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 840
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -10578,7 +10485,7 @@
         "cf": 1,
         "swz": 0
       },
-      "priority": 839
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -10609,7 +10516,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 838
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -10640,7 +10547,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 837
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -10671,7 +10578,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 836
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -10702,7 +10609,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 835
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -10733,7 +10640,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 834
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -10764,7 +10671,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 833
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -10795,7 +10702,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 832
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -10826,38 +10733,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 831
-    },
-    {
-      "version": "1.0",
-      "id": "c7eb8af6-42b8-5dcb-be65-6549f837f4ff",
-      "name": "conv_igemm.fwd.bf16.mfma16_bf16.native.256x16x16.w4x1.t0.v8.s1.cf.swz",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvIgemm.cpp",
-        "entry_point": "ConvIgemm"
-      },
-      "metadata": {
-        "direction": "FWD",
-        "dtype": "BFLOAT16",
-        "atom": "mfma16_bf16",
-        "math": "native",
-        "bm": 256,
-        "bn": 16,
-        "bk": 16,
-        "wm": 4,
-        "wn": 1,
-        "threads": 0,
-        "vec": 8,
-        "stages": 1,
-        "xcd": 0,
-        "halo": 0,
-        "wdirect": 0,
-        "pack": 0,
-        "cf": 1,
-        "swz": 1
-      },
-      "priority": 830
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -10888,7 +10764,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 829
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -10919,7 +10795,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 828
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -10950,7 +10826,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 827
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -10981,7 +10857,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 826
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -11012,7 +10888,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 825
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -11043,7 +10919,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 824
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -11074,7 +10950,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 823
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -11105,7 +10981,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 822
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -11136,7 +11012,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 821
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -11167,7 +11043,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 820
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -11198,7 +11074,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 819
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -11229,7 +11105,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 818
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -11260,7 +11136,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 817
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -11291,7 +11167,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 816
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -11322,7 +11198,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 815
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -11353,7 +11229,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 814
+      "priority": 816
     },
     {
       "version": "1.0",
@@ -11384,7 +11260,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 813
+      "priority": 815
     },
     {
       "version": "1.0",
@@ -11415,7 +11291,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 812
+      "priority": 814
     },
     {
       "version": "1.0",
@@ -11446,7 +11322,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 811
+      "priority": 813
     },
     {
       "version": "1.0",
@@ -11477,7 +11353,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 810
+      "priority": 812
     },
     {
       "version": "1.0",
@@ -11508,7 +11384,7 @@
         "cf": 1,
         "swz": 1
       },
-      "priority": 809
+      "priority": 811
     },
     {
       "version": "1.0",
