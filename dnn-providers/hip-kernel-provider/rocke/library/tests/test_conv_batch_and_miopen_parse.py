@@ -123,6 +123,31 @@ def test_direct_parse_rejects_per_axis_stride_or_padding(geom, what):
         )
 
 
+# A 1x31 depthwise conv with "same" column padding (the Conformer conv module).
+_DW_1X31 = (
+    "MIOpenDriver convbfp16 -n 2 -c 64 -H 6 -W 80 -k 64 -y 1 -x 31 "
+    "-p 0 -q 15 -u {u} -v {u} -g 64 -F {f}"
+)
+
+
+def test_direct_parse_takes_column_padding_for_depthwise_wgrad():
+    """A stride-1 depthwise wgrad keeps its column padding (the Toeplitz WMMA
+    kernel computes it)."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    problem, dtype, forw = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))
+    assert (dtype, forw) == ("bf16", 4)
+    assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (1, 31, 0, 1)
+    assert (problem.pad_w, problem.PAD_W) == (15, 15)
+
+
+def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=2, f=4))
+
+
 # ---------------------------------------------------------------------------
 # _batch_chunks (AOT launches)
 # ---------------------------------------------------------------------------
