@@ -43,7 +43,7 @@ filters = ["*_SdpaBackward_Golden_*.*_fp16_*"]
 atol = 2.5e-3
 rtol = 2.5e-3
 
-# SdpaBackward defects DEF-01, DEF-02, DEF-04, DEF-05 and DEF-06 (test plan
+# SdpaBackward defects DEF-01, DEF-02, DEF-04 and DEF-05 (test plan
 # sdpa-bwd.md §4.2): valid graphs this engine accepts today and computes wrong.
 # The fix for each is a typed decline in SdpaBwdPlanBuilder::isApplicable(); once
 # it lands the engine declines these cases itself, so each entry is temporary:
@@ -65,10 +65,6 @@ reason = "DEF-04: Hk = Hq > Hv is accepted and dV is written past its buffer; tr
 [[test_skips]]
 filters = ["*_SdpaBackward_*.def05_*", "*_SdpaBackward_*.h61_*"]
 reason = "DEF-05: an odd element stride on a sequence or dK/dV head axis is misaddressed; tracked as ALMIOPEN-3038 (fix: asm-sdpa-bwd-decline-strides)"
-
-[[test_skips]]
-filters = ["*_SdpaBackward_*.def06*"]
-reason = "DEF-06: an attention scale of 0 or below gives NaN and Inf; tracked as ALMIOPEN-3043 (fix: asm-sdpa-decline-nonpositive-scale)"
 
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
