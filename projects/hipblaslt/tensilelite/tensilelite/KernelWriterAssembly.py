@@ -1039,6 +1039,23 @@ class KernelWriterAssembly(KernelWriter):
     print("warning: Number of SGPRS (%d with %d temporary for %s) overflowed max SGPRS (%d)."
           % (self.sgprPool.size(), num, tag, self.states.regCaps["MaxSgpr"]))
 
+  def _checkedOutRegs(self):
+    """{(pool, index): tag} of every sgpr/vgpr currently checked out."""
+    from rocisa.register import RegisterPool
+    regs = {}
+    for name, pool in (("s", self.sgprPool), ("v", self.vgprPool)):
+      for idx, reg in enumerate(pool.getPool()):
+        if reg.status == RegisterPool.Status.InUse:
+          regs[(name, idx)] = reg.tag
+    return regs
+
+  def _assertStillCheckedOut(self, regs, where):
+    """Assert every register of a _checkedOutRegs() snapshot is still
+    checked out under the same tag at ``where``."""
+    now = self._checkedOutRegs()
+    freed = sorted("%s%u(%s)" % (p, i, t) for (p, i), t in regs.items() if now.get((p, i)) != t)
+    assert not freed, "registers live across %s were checked in before it: %s" % (where, ", ".join(freed))
+
   def allocTmpSgpr(self, num: int, alignment=None, tag=None):
     def overflowListener(e):
       self._reportTmpSgprOverflow(num, tag)
@@ -19451,6 +19468,11 @@ class KernelWriterAssembly(KernelWriter):
       # (their deferred Fixup/Partials blocks are emitted only by the post-loop store,
       # so referencing them from the NLL would leave undefined symbols).
       fusedFullTileStore = self.states.subtileFusedFullTileStore
+      # Under the arrival fixup these registers are live across writePartials
+      # (see usesArrivalFixup); snapshot them to assert that.
+      arrivalFixup = processingComponent is not None and not fusedFullTileStore \
+        and processingComponent.usesArrivalFixup(self, kernel)
+      liveAcrossPartials = self._checkedOutRegs() if arrivalFixup else None
       if processingComponent is not None and not fusedFullTileStore:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
@@ -19660,11 +19682,19 @@ class KernelWriterAssembly(KernelWriter):
             self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
+        # Under the arrival fixup these are live across writePartials.
+        if not arrivalFixup:
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       if processingComponent is not None and not fusedFullTileStore:
+        if liveAcrossPartials is not None:
+          self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+
+      if activationLabelList and arrivalFixup:
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       # End label
       module.add(endLabel)
@@ -25149,10 +25179,22 @@ class KernelWriterAssembly(KernelWriter):
     for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
       comp.init(self, kernel, tp)
   
+  def gl2PrefetchTpList(self, kernel, tPA, tPB):
+    """The tensors the GL2 prefetch warms L2 for.
+
+    The RAP reuse copy loads neither A nor its scales -- they stay resident -- so
+    prefetching them only spends L2 requests, and HBM bandwidth when the lines
+    have been evicted, on data the tile never reads.
+    """
+    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
+    if self.states.rapDropAResidentLoads:
+      tpList = [tp for tp in tpList if tp["tensorChar"] not in ("A", "MXSA")]
+    return tpList
+
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
     comp = GL2PrefetchLoad.find(self)
-    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
+    tpList = self.gl2PrefetchTpList(kernel, tPA, tPB)
 
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:
@@ -25175,7 +25217,7 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
     comp = GL2PrefetchLoad.find(self)
-    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.issueLoad(self, kernel, tp))
     return mod
   
@@ -25183,7 +25225,7 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
     comp = GL2PrefetchLoad.find(self)
-    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.incrementAddr(self, kernel, tp))
     return mod
   
@@ -25191,9 +25233,11 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Skip PGR")
     mod.addComment("GL2 Prefetch Skip PGR")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.skipPGR(self, kernel, tPA))
+    prefetchA = not self.states.rapDropAResidentLoads
+    if prefetchA:
+      mod.add(comp.skipPGR(self, kernel, tPA))
     mod.add(comp.skipPGR(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
+    if kernel["ProblemType"]["MXBlockA"] and prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
     if kernel["ProblemType"]["MXBlockB"]:
       mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
