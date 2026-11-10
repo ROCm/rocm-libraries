@@ -75,8 +75,9 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value. With non-coherent XCD L2s it is read after the spin loop.
-            T local_val = has_noncoherent_xcd_l2 ? static_cast<T>(0)
-                                                 : rocsparse::load_done_row_data(&csr_val[j]);
+            T local_val = ROCSPARSE_HAS_NONCOHERENT_XCD_L2
+                              ? static_cast<T>(0)
+                              : rocsparse::load_done_row_data(&csr_val[j]);
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -98,7 +99,7 @@ namespace rocsparse
 
             // Earlier columns may have updated entry j with device scope stores, which have to
             // complete before it is read back.
-            if(has_noncoherent_xcd_l2)
+            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
             {
                 rocsparse::wait_store_completion();
                 local_val = rocsparse::load_done_row_data(&csr_val[j]);
@@ -161,7 +162,7 @@ namespace rocsparse
 
         // The updates of the diagonal entry are device scope stores, which have to complete
         // before it is read back.
-        if(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::wait_store_completion();
         }
