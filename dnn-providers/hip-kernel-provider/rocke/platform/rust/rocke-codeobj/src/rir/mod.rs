@@ -357,6 +357,99 @@ mod attr_tests {
 }
 
 #[cfg(test)]
+mod preload_tests {
+    use super::*;
+    use crate::rir::mir::{Opc, Opnd, Phys};
+
+    /// `pointers` pointer parameters and an i32 `%n`: each lane stores,
+    /// through the last pointer at its global index, `%n`'s bits plus what
+    /// the others hold there.
+    fn kernel(pointers: usize, attrs: &str) -> String {
+        let mut t = format!("ckdsl.ir v1\nkernel @pre {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n");
+        for p in 0..pointers {
+            t += &format!("    %P{p} : ptr<f32,global>\n");
+        }
+        t += "    %n : i32\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n";
+        t += "    %bid : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n";
+        t += "    %row : i32 = arith.mul ( %bid, %c64 )\n    %i : i32 = arith.add ( %row, %tid )\n";
+        t += "    %nf : f32 = arith.bitcast ( %n ) { target = s:\"f32\" }\n";
+        let mut sum = "%nf".to_string();
+        for p in 0..pointers - 1 {
+            t += &format!("    %x{p} : f32 = memref.global_load_typed ( %P{p}, %i ) {{ align = i:4, elem_type = s:\"f32\" }}\n");
+            t += &format!("    %s{p} : f32 = arith.fadd ( {sum}, %x{p} )\n");
+            sum = format!("%s{p}");
+        }
+        t + &format!(
+            "    memref.global_store_typed ( %P{}, %i, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n",
+            pointers - 1
+        )
+    }
+
+    fn compiled(text: &str) -> CompiledKernel {
+        compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}"))
+    }
+
+    /// The kernel descriptor in a code object: the 64 bytes with the
+    /// kernel's kernarg size, reserved bytes 12-15 zero and gfx950's kernel
+    /// code properties.
+    fn descriptor(hsaco: &[u8], kernarg_size: u32) -> [u8; 64] {
+        let at = (0..hsaco.len() - 64)
+            .step_by(4)
+            .find(|&i| hsaco[i + 8..i + 12] == kernarg_size.to_le_bytes() && hsaco[i + 12..i + 16] == [0; 4] && hsaco[i + 56..i + 58] == [8, 0])
+            .expect("a kernel descriptor");
+        hsaco[at..at + 64].try_into().unwrap()
+    }
+
+    fn smem_loads(f: &mir::MFunc) -> Vec<i64> {
+        let loads = |op: Opc| matches!(op, Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512);
+        f.blocks.iter().flat_map(|b| &b.insts).filter(|i| loads(i.op)).map(|i| i.imm).collect()
+    }
+
+    /// `text` with every parameter `inreg`.
+    fn inreg(text: &str) -> String {
+        let param = |l: &str| l.starts_with("    %") && l.contains(" : ") && !l.contains(" = ");
+        text.lines().map(|l| if param(l) { format!("{l} {{ inreg = b:true }}\n") } else { format!("{l}\n") }).collect()
+    }
+
+    #[test]
+    fn the_attribute_preloads_as_every_parameter_inreg_would() {
+        // Five pointers and an i32: 44 bytes, 11 dwords preloaded into s2..s12.
+        let (on, off) = (compiled(&kernel(5, ", kernarg_preload = b:true")), compiled(&kernel(5, "")));
+        assert_eq!(on.hsaco, compiled(&inreg(&kernel(5, ""))).hsaco);
+        // The kernel proper loads no argument, and reads the workgroup id
+        // after the preloaded SGPRs (s13, against s2 without them).
+        assert!(smem_loads(&on.func).is_empty(), "{}", on.listing());
+        assert!(!smem_loads(&off.func).is_empty());
+        let reads = |f: &mir::MFunc, s: u16| f.blocks.iter().flat_map(|b| &b.insts).any(|i| i.uses.contains(&Opnd::P(Phys::S(s), 1)));
+        assert!(reads(&on.func, 13) && reads(&off.func, 2), "{}", on.listing());
+        // USER_SGPR_COUNT 13 against 2, the rest of RSRC2 alike; the preload
+        // length 11 from offset 0 against none; the 256-byte entry first.
+        let (d_on, d_off) = (descriptor(&on.hsaco, 44), descriptor(&off.hsaco, 44));
+        let rsrc2 = |d: &[u8; 64]| u32::from_le_bytes(d[52..56].try_into().unwrap());
+        assert_eq!((rsrc2(&d_on) >> 1 & 0x1f, rsrc2(&d_off) >> 1 & 0x1f), (13, 2));
+        assert_eq!(rsrc2(&d_on) & !(0x1f << 1), rsrc2(&d_off) & !(0x1f << 1));
+        assert_eq!((u16::from_le_bytes([d_on[58], d_on[59]]), u16::from_le_bytes([d_off[58], d_off[59]])), (11, 0));
+        let body = crate::target::gfx9::asm::assemble(&on.func).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(on.stats.code_bytes, 256 + body.len());
+    }
+
+    #[test]
+    fn arguments_past_the_user_sgprs_still_load_and_off_is_unchanged() {
+        // Eight pointers and an i32: 68 bytes; the first seven pointers fill
+        // the 14 dwords, the last pointer and %n still load.
+        let on = compiled(&kernel(8, ", kernarg_preload = b:true"));
+        let body = smem_loads(&on.func);
+        assert!(!body.is_empty() && body.iter().all(|&at| at >= 56), "{body:?}");
+        assert_eq!(u16::from_le_bytes(descriptor(&on.hsaco, 68)[58..60].try_into().unwrap()), 14);
+        // The attribute off is the code without it, byte for byte.
+        assert_eq!(compiled(&kernel(8, ", kernarg_preload = b:false")).hsaco, compiled(&kernel(8, "")).hsaco);
+        // gfx1151 has no kernarg preload.
+        let err = compile_any_target(&kernel(2, ", kernarg_preload = b:true"), Target::Gfx1151).err().expect("refused");
+        assert!(err.to_string().contains("kernarg preload"), "{err}");
+    }
+}
+
+#[cfg(test)]
 mod thread_tests {
     use super::*;
 

@@ -1756,8 +1756,27 @@ impl<'a> Isel<'a> {
                     },
                     Some(other) => return Err(unsupported(format!("tile.mma scale_sel {other:?}: two byte indices"))),
                 };
+                use crate::target::gfx9::mfma;
                 let op_id = op.str_attr("op_id").unwrap_or("");
-                let d = crate::target::gfx9::mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
+                // The MX op names its A and B formats in attributes.
+                let atom = match op_id {
+                    mfma::MX_16X16X128 => {
+                        let format = |key: &str| match op.attr(key) {
+                            None => Some(None),
+                            Some(super::ast::Attr::Str(f)) => Some(Some(&**f)),
+                            Some(_) => None,
+                        };
+                        let atom = match (format("a_format"), format("b_format")) {
+                            (Some(fa), Some(fb)) => mfma::mx_atom(fa, fb),
+                            _ => None,
+                        };
+                        let (fa, fb) = (op.attr("a_format"), op.attr("b_format"));
+                        Some(atom.ok_or_else(|| unsupported(format!("tile.mma {op_id}: formats {fa:?} and {fb:?}")))?)
+                    }
+                    _ => None,
+                };
+                let op_id = atom.as_deref().unwrap_or(op_id);
+                let d = mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
                 self.set(op.results[0], Val::T(d));
             }
             Mma if op.str_attr("op_id") == Some("wmma_f32_16x16x16_bf16") => {
@@ -6349,7 +6368,7 @@ pub fn select_for(
     isel.kernarg_ptr = kernarg;
     // Kernarg preload (gfx950): the hardware writes the preloaded arguments
     // into the user SGPRs after the kernarg pointer.
-    if target == Target::Gfx1151 && kernel.params.iter().any(|p| p.inreg) {
+    if target == Target::Gfx1151 && (kernel.passes.kernarg_preload || kernel.params.iter().any(|p| p.inreg)) {
         return Err(unsupported("kernarg preload (inreg) on gfx1151"));
     }
     let (preloaded, preload) = super::opt::kernarg_preload(kernel);

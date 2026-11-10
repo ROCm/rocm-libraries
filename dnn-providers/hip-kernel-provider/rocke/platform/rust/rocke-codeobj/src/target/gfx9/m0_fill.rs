@@ -126,6 +126,20 @@ mod tests {
     }
 
     #[test]
+    fn the_write_swaps_with_the_16x16x128_scaled_mfma_too() {
+        let mfma16 = |acc: u16| {
+            MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), [v(256 + acc, 4)], [v(20, 6), v(30, 6), v(256 + acc, 4), v(40, 1), v(41, 1)])
+                .with_imm(2 | 2 << 7)
+        };
+        let mut on = func(vec![dma(1), mfma16(0), m0(15), dma(2), mfma16(4)], true);
+        assert_eq!(run(&mut on), 1);
+        let ops: Vec<Opc> = on.blocks[0].insts.iter().map(|i| i.op).collect();
+        assert_eq!(ops[1..4], [Opc::SMovB32, Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::BufLoadLdsB128)]);
+        insert_nops(&mut on);
+        assert_eq!(nops(&on), 0);
+    }
+
+    #[test]
     fn it_crosses_one_instruction_and_no_wait_barrier_or_writer_of_its_source() {
         let mov = m0(10);
         assert!(may_cross(&MInst::new(Opc::SAddI32, [s(11)], [s(12), Opnd::Imm(1)]), &mov));

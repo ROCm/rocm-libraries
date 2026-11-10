@@ -1101,11 +1101,16 @@ pub struct Passes {
     /// `u16_zext`: the zero extension of a `ds_read_u16` result is the
     /// register itself, whose high half the load already zeroed (`rir::isel`).
     pub u16_zext: bool,
+    /// `kernarg_preload`: every parameter is `inreg`, so the dispatch writes
+    /// the leading arguments that fit into the user SGPRs after the kernarg
+    /// pointer, where the kernel reads them instead of loading them
+    /// (`opt::kernarg_preload`).
+    pub kernarg_preload: bool,
 }
 
 impl Passes {
     /// The attribute names, as `set` takes them.
-    pub const NAMES: [&'static str; 10] = [
+    pub const NAMES: [&'static str; 11] = [
         "dead_lanes",
         "m0_fill",
         "peep_waits",
@@ -1116,6 +1121,7 @@ impl Passes {
         "acc_init_keep",
         "lds_waw",
         "u16_zext",
+        "kernarg_preload",
     ];
 
     /// Turns pass `name` on or off; false when no pass has that name.
@@ -1131,6 +1137,7 @@ impl Passes {
             "acc_init_keep" => &mut self.acc_init_keep,
             "lds_waw" => &mut self.lds_waw,
             "u16_zext" => &mut self.u16_zext,
+            "kernarg_preload" => &mut self.kernarg_preload,
             _ => return false,
         };
         *flag = on;

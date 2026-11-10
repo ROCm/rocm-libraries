@@ -395,7 +395,7 @@ pub fn fact(inst: &MInst) -> Fact {
         forwards_dst: matches!(op, Opc::VFmaMixloF16 | Opc::VFmaMixhiF16)
             || (fmt == Fmt::Vop3 && inst.mods & M_OPSEL_DST != 0)
             || (fmt == Fmt::Vop3p && form == Form::Pk32 && super::asm::pk32_encoded(inst).map_or(true, |(_, hi, _)| hi & 1 != 0))
-            || (fmt == Fmt::Vop3p && !matches!(form, Form::Mix | Form::Pk32 | Form::AccRead | Form::AccWrite | Form::Mai))
+            || (fmt == Fmt::Vop3p && !matches!(form, Form::Mix | Form::Pk32 | Form::AccRead | Form::AccWrite | Form::Mai | Form::MaiScale))
             || (form == Form::Mix && inst.mods & M_MIX_F16_0 != 0),
         div_fmas: matches!(op, Opc::VDivFmasF32 | Opc::VDivFmasF64),
         lane_read: matches!(op, Opc::VReadlaneB32 | Opc::VReadfirstlaneB32),
@@ -848,6 +848,11 @@ mod tests {
         let packed = MInst::new(Opc::VPkAddF16, [v(1, 1)], [v(2, 1), v(3, 1)]);
         assert_eq!(nops(vec![packed.clone(), valu(v(5, 1), v(1, 1), v(6, 1))]), [(1, 0)]);
         assert!(nops(vec![packed, valu(v(5, 1), v(7, 1), v(6, 1))]).is_empty());
+        // MFMAs forward none, the block-scaled ones included (their op_sel bits are scale bytes).
+        for op in [t::Gfx9Op::VMfma16x16x32F16, t::Gfx9Op::VMfmaScale32x32x64F8f6f4, t::Gfx9Op::VMfmaScale16x16x128F8f6f4] {
+            let mfma = MInst::new(Opc::Gfx9(op), [v(0, 4)], [v(8, 8), v(16, 8), v(0, 4), v(24, 1), v(25, 1)]).with_imm(0xf << 10);
+            assert!(!fact(&mfma).forwards_dst, "{op:?}");
+        }
     }
 
     #[test]
@@ -1056,6 +1061,53 @@ mod tests {
         // M9: a DGEMM, then v_fma_f64.
         let fma64 = MInst::new(Opc::VFmaF64, [v(20, 2)], [v(22, 2), v(24, 2), v(26, 2)]);
         assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), fma64]), 2);
+    }
+
+    /// Under lever `fp6pass` the block-scaled 16x16x128 MFMA runs 8 passes
+    /// with an 8-bit A or B format and 4 with fp6, bf6 or fp4 alone, and
+    /// waits as an XDL MFMA of that many passes; without it, 8 for all.
+    #[test]
+    fn scaled_16x16x128_waits_follow_its_passes() {
+        use super::super::asm::AGPR0;
+        use t::Gfx9Op::*;
+        let a = |r: u16, n: u8| v(AGPR0 + r, n);
+        let scaled = |d: Opnd, c: Opnd, ab: u8, ctl: i64| {
+            MInst::new(Opc::Gfx9(VMfmaScale16x16x128F8f6f4), [d], [v(40, ab), v(48, ab), c, v(56, 1), v(57, 1)]).with_imm(ctl)
+        };
+        // Narrow formats (E2M3, E3M2, fp4, mixed), the scale bytes aside; an 8-bit A or B.
+        let passes = |ctl: i64| mfma_kind_of(&scaled(a(0, 4), a(0, 4), 6, ctl)).map(|(c, p)| (c == MfmaClass::Xdl, p));
+        let ctls = [2 | 2 << 7, 3 | 3 << 7, 4 | 4 << 7, 3 | 4 << 7, 2 | 2 << 7 | 0xf << 10, 2, 1 << 7, 0];
+        assert_eq!(ctls.map(passes), [Some((true, 8)); 8]);
+        crate::rir::with_levers(&["fp6pass"], || {
+            let fp6 = |d: Opnd, c: Opnd| scaled(d, c, 6, 2 | 2 << 7);
+            let fp8 = |d: Opnd, c: Opnd| scaled(d, c, 8, 0);
+            let w = waits_before_last;
+            assert_eq!(ctls.map(passes), [4, 4, 4, 4, 4, 8, 8, 8].map(|p| Some((true, p))));
+            // M3: on one accumulator (C the previous D) back to back; a partial overlap, passes + 2.
+            assert_eq!(w(vec![fp6(a(0, 4), a(0, 4)), fp6(a(0, 4), a(0, 4))]), 0);
+            assert_eq!(w(vec![fp8(a(0, 4), a(0, 4)), fp8(a(0, 4), a(0, 4))]), 0);
+            assert_eq!(w(vec![fp6(a(0, 4), a(0, 4)), fp6(a(8, 4), a(2, 4))]), 6);
+            assert_eq!(w(vec![fp8(a(0, 4), a(0, 4)), fp6(a(8, 4), a(2, 4))]), 10);
+            // M4: the result read as A or B: passes + 4.
+            let as_a = |r: Opnd| MInst::new(Opc::Gfx9(VMfmaScale16x16x128F8f6f4), [a(20, 4)], [r, v(48, 6), a(20, 4), v(56, 1), v(57, 1)]).with_imm(2 | 2 << 7);
+            assert_eq!(w(vec![fp6(v(0, 4), v(0, 4)), as_a(v(0, 6))]), 8);
+            assert_eq!(w(vec![fp8(v(0, 4), v(0, 4)), as_a(v(0, 6))]), 12);
+            // M5: VALU (v_accvgpr_read included) and memory readers: passes + 4.
+            let acc_read = MInst::new(Opc::Gfx9(VAccvgprReadB32), [v(6, 1)], [a(2, 1)]);
+            assert_eq!(w(vec![fp6(a(0, 4), a(0, 4)), acc_read.clone()]), 8);
+            assert_eq!(w(vec![fp8(a(0, 4), a(0, 4)), acc_read]), 12);
+            assert_eq!(w(vec![fp6(v(0, 4), v(0, 4)), MInst::new(Opc::GStoreB128, [], [v(20, 2), v(0, 4)])]), 8);
+            // M6: a VALU overwrites the result; M7: what it reads as C, passes - 1.
+            assert_eq!(w(vec![fp6(v(0, 4), v(0, 4)), valu(v(1, 1), v(30, 1), v(31, 1))]), 8);
+            assert_eq!(w(vec![fp6(v(20, 4), v(8, 4)), valu(v(9, 1), v(30, 1), v(31, 1))]), 3);
+            assert_eq!(w(vec![fp8(v(20, 4), v(8, 4)), valu(v(9, 1), v(30, 1), v(31, 1))]), 7);
+            // M2: a VALU write of either scale VGPR.
+            assert_eq!(w(vec![valu(v(56, 1), v(1, 1), v(2, 1)), fp6(a(0, 4), a(0, 4))]), 2);
+            assert_eq!(w(vec![valu(v(57, 1), v(1, 1), v(2, 1)), fp6(a(0, 4), a(0, 4))]), 2);
+            // Independent work fills the wait states: two VALUs of M5's eight.
+            let other = valu(v(50, 1), v(51, 1), v(52, 1));
+            assert_eq!(w(vec![fp6(v(0, 4), v(0, 4)), other.clone(), other, valu(v(60, 1), v(1, 1), v(61, 1))]), 6);
+        });
     }
 
     /// AGPR moves forward no destination (H9) and take H1 for an SGPR

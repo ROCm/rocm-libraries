@@ -3195,7 +3195,8 @@ pub const DEVFN_PRELOAD_SGPRS: u32 = 64;
 /// `inreg` parameters, in order, each preloaded into the user SGPRs after
 /// the kernarg segment pointer at its kernarg dword (s[2 + offset / 4]), up
 /// to the first parameter that is not `inreg` or that would end past
-/// `PRELOAD_SGPRS` dwords. Returns `(param index, first dword)` of each and
+/// `PRELOAD_SGPRS` dwords; the kernel attribute `kernarg_preload` makes
+/// every parameter `inreg`. Returns `(param index, first dword)` of each and
 /// the dwords preloaded (the descriptor's `KERNARG_PRELOAD_SPEC_LENGTH`,
 /// alignment padding between arguments included).
 pub fn kernarg_preload(kernel: &Kernel) -> (Vec<(usize, u32)>, u32) {
@@ -3208,7 +3209,7 @@ pub fn kernarg_preload(kernel: &Kernel) -> (Vec<(usize, u32)>, u32) {
     for (index, param) in kernel.params.iter().enumerate() {
         let first = offsets[index] / 4;
         let last = first + param.ty.dwords();
-        if !param.inreg || last > limit {
+        if !(param.inreg || kernel.passes.kernarg_preload) || last > limit {
             break;
         }
         out.push((index, first));

@@ -306,6 +306,17 @@ mod tests {
         let pair = || (pipe_slots(&dense(0)), pipe_slots(&dense(4 | 4 << 7)));
         assert_eq!(pair(), (8, 8));
         assert_eq!(crate::rir::with_levers(&["fp6pass"], pair), (8, 4));
+        // The block-scaled 16x16x128 alike; its fp6 result reaches a VALU 4-pass M5's 8 states on.
+        let scaled16 = |ctl: i64| {
+            MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), [r(10, 4)], [r(2, 8), r(3, 8), r(10, 4), r(4, 1), r(5, 1)])
+                .with_imm(ctl)
+        };
+        let slots16 = || -> Vec<u8> { ctls.iter().map(|&ctl| pipe_slots(&scaled16(ctl))).collect() };
+        assert_eq!(slots16(), [8; 5]);
+        assert_eq!(crate::rir::with_levers(&["fp6pass"], slots16), [8, 8, 4, 4, 4]);
+        let fp6_16 = || hazards::mfma_result_latency(&scaled16(3 | 3 << 7));
+        assert_eq!((fp6_16(), crate::rir::with_levers(&["fp6pass"], fp6_16)), (Some(12), Some(8)));
+        assert_eq!(hazards::mfma_result_latency(&scaled16(0)), Some(12));
         // A VALU reader of an fp6 result waits the 8-pass M5 (12 wait states), not the 16-pass one.
         let fp6 = || hazards::mfma_result_latency(&scaled(2 | 2 << 7));
         assert_eq!((fp6(), crate::rir::with_levers(&["fp6pass"], fp6)), (Some(20), Some(12)));

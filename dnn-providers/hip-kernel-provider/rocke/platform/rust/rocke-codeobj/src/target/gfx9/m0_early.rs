@@ -132,6 +132,19 @@ mod tests {
     }
 
     #[test]
+    fn the_write_moves_above_the_16x16x128_scaled_mfma_too() {
+        let mfma16 = |acc: u16| {
+            MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), [v(256 + acc, 4)], [v(20, 8), v(30, 8), v(256 + acc, 4), v(40, 1), v(41, 1)])
+        };
+        let mut on = func(vec![dma(1), mfma16(0), m0(15), dma(2), mfma16(4)], true);
+        assert_eq!(run(&mut on), 1);
+        let ops: Vec<Opc> = on.blocks[0].insts.iter().map(|i| i.op).collect();
+        assert_eq!(ops[..3], [Opc::Gfx9(Gfx9Op::BufLoadLdsB128), Opc::SMovB32, Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4)]);
+        insert_nops(&mut on);
+        assert_eq!(nops(&on), 0);
+    }
+
+    #[test]
     fn a_covered_write_stays() {
         let insts = vec![m0(15), mfma(0), dma(2)];
         let mut f = func(insts.clone(), true);
