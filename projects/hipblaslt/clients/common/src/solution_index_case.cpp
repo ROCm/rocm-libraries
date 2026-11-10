@@ -330,18 +330,6 @@ namespace
 
 }
 
-bool requiresCUCount(TensileLite::ContractionSolution const& solution,
-                     TensileLite::Hardware const&            hardware)
-{
-    auto const* gpu = dynamic_cast<TensileLite::AMDGPU const*>(&hardware);
-    if(!gpu)
-        return false;
-    TensileLite::AMDGPU other = *gpu;
-    other.computeUnitCount += 1;
-    auto const& predicate = *solution.hardwarePredicate;
-    return predicate(hardware) && !predicate(other);
-}
-
 std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
     int index, TensileLite::ContractionSolution const& solution, SolutionCaseOptions const& options)
 {

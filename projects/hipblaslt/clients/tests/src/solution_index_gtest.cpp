@@ -6,8 +6,7 @@
 // Opt-in: set HIPBLASLT_SOLUTION_INDEX_RANGE=BEGIN:END (half-open) or
 // HIPBLASLT_SOLUTION_INDEX_LIST=FILE (one index per line). The library comes
 // from HIPBLASLT_TENSILE_LIBPATH, as for the runtime, and must match the device.
-// HIPBLASLT_SOLUTION_INDEX_SECONDARY_DEVICE keeps only solutions that need this
-// device's CU count; HIPBLASLT_SOLUTION_INDEX_{REDUCTION_BLOCKS,ALPHA,BETA}
+// HIPBLASLT_SOLUTION_INDEX_{REDUCTION_BLOCKS,ALPHA,BETA}
 // override SolutionCaseOptions.
 
 #include "hipblaslt_arguments.hpp"
@@ -148,7 +147,6 @@ namespace
         options.gfx1250         = hipGetDevice(&device) == hipSuccess
                           && hipGetDeviceProperties(&props, device) == hipSuccess
                           && std::string(props.gcnArchName).rfind("gfx1250", 0) == 0;
-        bool const secondaryDevice = std::getenv("HIPBLASLT_SOLUTION_INDEX_SECONDARY_DEVICE");
         for(int index : indices)
         {
             // Metadata only: this reads the solution's shard, not its code object.
@@ -157,10 +155,6 @@ namespace
                 continue;
             // The solution's own hardware predicate decides whether this device,
             // emulated or physical, can run it.
-            // A solution without a CU-count requirement runs only on the
-            // primary device; secondary devices exist for the CU-specific ones.
-            if(secondaryDevice && !requiresCUCount(*solution, *hardware))
-                continue;
             SolutionCase c;
             c.index  = index;
             c.kernel = solution->kernelName;

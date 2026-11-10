@@ -8,7 +8,6 @@
 
 #include "hipblaslt_arguments.hpp"
 
-#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
 #include <cstdint>
@@ -42,8 +41,3 @@ std::variant<Arguments, UnsupportedSolution>
     solutionIndexCase(int                                     index,
                       TensileLite::ContractionSolution const& solution,
                       SolutionCaseOptions const&              options);
-
-// Whether `solution` runs on `hardware` only because of its compute-unit count:
-// the same device with another count is rejected.
-bool requiresCUCount(TensileLite::ContractionSolution const& solution,
-                     TensileLite::Hardware const&            hardware);

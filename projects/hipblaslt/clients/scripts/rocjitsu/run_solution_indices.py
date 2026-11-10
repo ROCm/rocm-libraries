@@ -8,11 +8,17 @@ the outcomes. When a case crashes or hangs, gtest writes no report, so this
 records the cases that finished, marks the running one, and resumes with
 the indices that never started.
 
+Some solutions run only on a particular CU count or PCI chip ID. Give one
+--config per emulated device, most general first: each later device runs
+only the indices that every earlier one skipped because the solution's
+hardware predicate rejected it.
+
 Example::
 
-    run_solution_indices.py --rocjitsu rocjitsu --config gfx942.json \\
-        --client hipblaslt-test --library lib/hipblaslt/library/gfx942 \\
-        --range 0:4096 --out results/gfx942-304cu
+    run_solution_indices.py --rocjitsu rocjitsu --client hipblaslt-test \\
+        --library lib/hipblaslt/library/gfx950 --range 0:4096 \\
+        --config gfx950-75a3.json --config gfx950-75a8.json \\
+        --out results/gfx950
 """
 
 import argparse
@@ -34,24 +40,23 @@ def indices_from(args):
     return [int(line) for line in Path(args.indices).read_text().split()]
 
 
-def run_once(args, indices, attempt):
+def run_once(args, config_path, out, indices):
     """Run the given indices; return {index: outcome} for every case that ended."""
-    out = Path(args.out) / f"attempt-{attempt}"
     out.mkdir(parents=True, exist_ok=True)
     (out / "indices.txt").write_text("".join(f"{i}\n" for i in indices))
-    config = json.loads(Path(args.config).read_text())
-    config["plugins"] = {"race": {}}
-    config["sinks"] = {"types": ["file"], "dir": str(out)}
-    (out / "config.json").write_text(json.dumps(config))
+    config = json.loads(Path(config_path).read_text())
     env = dict(
         os.environ,
         HIPBLASLT_SOLUTION_INDEX_LIST=str(out / "indices.txt"),
         HIPBLASLT_TENSILE_LIBPATH=args.library,
-        RJ_SINK_DIR=str(out),
         OMP_NUM_THREADS="1",
     )
-    if args.secondary:
-        env["HIPBLASLT_SOLUTION_INDEX_SECONDARY_DEVICE"] = "1"
+    if args.race:
+        # The cases read the race plugin's log to check races and dispatches.
+        config["plugins"] = {"race": {}}
+        config["sinks"] = {"types": ["file"], "dir": str(out)}
+        env["RJ_SINK_DIR"] = str(out)
+    (out / "config.json").write_text(json.dumps(config))
     command = [
         args.rocjitsu,
         "--config",
@@ -101,20 +106,11 @@ def run_once(args, indices, attempt):
     return outcomes, code
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("rocjitsu", "config", "client", "library", "out"):
-        parser.add_argument(f"--{name}", required=True)
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--range", help="Half-open BEGIN:END")
-    group.add_argument("--indices", help="File with one index per line")
-    parser.add_argument("--secondary", action="store_true", help="Run only CU-specific solutions")
-    parser.add_argument("--timeout", type=float, default=120, help="Seconds allowed per index")
-    args = parser.parse_args()
-
-    remaining, results, attempt = indices_from(args), {}, 0
+def run_device(args, config_path, out, indices):
+    """Run indices on one emulated device, resuming after crashes and hangs."""
+    remaining, results, attempt = list(indices), {}, 0
     while remaining:
-        outcomes, failure = run_once(args, remaining, attempt)
+        outcomes, failure = run_once(args, config_path, out / f"attempt-{attempt}", remaining)
         results.update(outcomes)
         before = len(remaining)
         remaining = [i for i in remaining if i not in results]
@@ -124,10 +120,48 @@ def main():
                 results[index] = {"outcome": "NOT_RUN", "detail": f"process ended ({failure})"}
             break
         if failure is None:
-            # Indices the test did not generate (absent from the library, or a
-            # secondary device's CU-agnostic solutions) are not cases here.
+            # Indices absent from the library generate no case.
             break
         attempt += 1
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ("rocjitsu", "client", "library", "out"):
+        parser.add_argument(f"--{name}", required=True)
+    parser.add_argument(
+        "--config",
+        action="append",
+        required=True,
+        help="rocjitsu config of one emulated device; repeat, most general first",
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--range", help="Half-open BEGIN:END")
+    group.add_argument("--indices", help="File with one index per line")
+    parser.add_argument("--timeout", type=float, default=120, help="Seconds allowed per index")
+    parser.add_argument(
+        "--no-race",
+        dest="race",
+        action="store_false",
+        help="Run without the race plugin, for targets it does not support",
+    )
+    args = parser.parse_args()
+
+    results, pending = {}, indices_from(args)
+    for number, config_path in enumerate(args.config):
+        if not pending:
+            break
+        outcomes = run_device(args, config_path, Path(args.out) / f"device-{number}", pending)
+        for index, result in outcomes.items():
+            result["device"] = number
+        rejected = {
+            i
+            for i, r in outcomes.items()
+            if r["outcome"] == "SKIPPED" and "hardware predicate" in r["detail"]
+        }
+        results.update(outcomes)
+        pending = [i for i in pending if i in rejected]
     Path(args.out, "results.json").write_text(json.dumps(results, indent=1, sort_keys=True))
     counts = {}
     for result in results.values():

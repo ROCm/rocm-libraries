@@ -8,7 +8,6 @@
 
 #include <gtest/gtest.h>
 
-#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 
 #include <memory>
@@ -194,26 +193,4 @@ TEST(HostUnitSolutionIndexCase, smoke_RequiredEpilogue)
     allowed->value = {TensileLite::ActivationType::Gelu};
     requireSizes(solution, {allowed});
     EXPECT_EQ(unsupported(solution), "required ReLU activation not allowed");
-}
-
-// A CU-count predicate is what makes a solution need a secondary device.
-TEST(HostUnitSolutionIndexCase, smoke_RequiresCUCount)
-{
-    using AMDGPU = TensileLite::AMDGPU;
-    using GPU    = std::shared_ptr<Predicates::Predicate<AMDGPU>>;
-    AMDGPU const                     device(AMDGPU::Processor::gfx942, 304, "MI300X");
-    TensileLite::ContractionSolution solution;
-    makeHalfSolution(solution);
-    auto pin = [&](std::vector<GPU> checks) {
-        solution.hardwarePredicate
-            = std::make_shared<Predicates::IsSubclass<TensileLite::Hardware, AMDGPU>>(
-                std::make_shared<Predicates::And<AMDGPU>>(checks));
-    };
-    GPU const processor = std::make_shared<Predicates::GPU::ProcessorEqual>(device.processor);
-    pin({processor});
-    EXPECT_FALSE(requiresCUCount(solution, device));
-    pin({processor, std::make_shared<Predicates::GPU::CUCountEqual>(304)});
-    EXPECT_TRUE(requiresCUCount(solution, device));
-    pin({processor, std::make_shared<Predicates::GPU::CUCountEqual>(228)});
-    EXPECT_FALSE(requiresCUCount(solution, device));
 }
