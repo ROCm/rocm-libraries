@@ -33,6 +33,7 @@
 #include "rocsolver/rocsolver.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -69,11 +70,11 @@ private:
     bool has_scalars_r, has_scalars_c, optim_mem;
     size_t num_excl, size_excl, size_shared;
     std::unordered_map<std::string, size_t> indices, n_indices;
-    std::vector<uint8_t*> pointers;
+    std::vector<std::byte*> pointers;
     std::vector<size_t> sizes;
     std::vector<std::unique_ptr<rocsolver_workspace_helper>> nested;
 
-    void assign_buffer(uint8_t* scalars_r, uint8_t* scalars_c, uint8_t* curr_ptr)
+    void assign_buffer(std::byte* scalars_r, std::byte* scalars_c, std::byte* curr_ptr)
     {
         pointers.reserve(sizes.size() + has_scalars_r + has_scalars_c);
 
@@ -82,7 +83,7 @@ private:
         if(has_scalars_c)
             pointers.push_back(scalars_c);
 
-        uint8_t* nested_ptr = curr_ptr;
+        std::byte* nested_ptr = curr_ptr;
         for(size_t i = 0; i < sizes.size(); i++)
         {
             pointers.push_back(sizes[i] ? curr_ptr : nullptr);
@@ -292,9 +293,9 @@ public:
         HIP_CHECK(hipMemsetAsync(buffer, 0, size_scalars_r + size_scalars_c + size_mem, stream));
 
         // assign pointers
-        uint8_t* scalars_r = (uint8_t*)buffer;
-        uint8_t* scalars_c = scalars_r + size_scalars_r;
-        uint8_t* curr_ptr = scalars_c + size_scalars_c;
+        std::byte* scalars_r = (std::byte*)buffer;
+        std::byte* scalars_c = scalars_r + size_scalars_r;
+        std::byte* curr_ptr = scalars_c + size_scalars_c;
         assign_buffer(scalars_r, scalars_c, curr_ptr);
 
         // initialize scalars
@@ -399,27 +400,30 @@ public:
 
     void print_debug()
     {
-        bool has_scalars_r = 0;
-        bool has_scalars_c = 0;
+        std::string s;
 
-        std::cerr << "Num Sizes: " << sizes.size() << std::endl;
+        s += fmt::format("Num Sizes: {}\n", sizes.size());
         for(size_t i = 0; i < sizes.size(); i++)
         {
-            std::cerr << sizes[i] << " bytes";
+            s += fmt::format("  {} bytes", sizes[i]);
             if(i < pointers.size())
-                std::cerr << " (" << (void*)pointers[i] << ")";
+                s += fmt::format(" ({})", (void*)pointers[i + has_scalars_r + has_scalars_c]);
             if(i >= num_excl)
-                std::cerr << " shared";
-            std::cerr << std::endl;
+                s += " shared";
+            s += "\n";
         }
-        std::cerr << "Total Size (Self): " << size_excl + size_shared << std::endl;
+        s += fmt::format("Total Size (Self): {}\n", size_excl + size_shared);
         if(nested.size() > 0)
-            std::cerr << "Total Size (Self+Nested): "
-                      << get_internal_size(&has_scalars_r, &has_scalars_c) << std::endl;
+        {
+            bool unused = 0;
+            s += fmt::format("Total Size (Self+Nested): {}\n", get_internal_size(&unused, &unused));
+        }
         if(has_scalars_r)
-            std::cerr << "Scalar array requested" << std::endl;
+            s += "Scalar array requested\n";
         if(has_scalars_c)
-            std::cerr << "Complex scalar array requested" << std::endl;
+            s += "Complex scalar array requested\n";
+
+        fmt::print(std::cerr, s);
     }
 };
 

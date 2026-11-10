@@ -67,14 +67,14 @@ try
     rocblas_stride strideB = 0;
 
     // split batch
-    I nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
-    I batch_count = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const batch_count_split = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     rocsolver_workspace_helper work_helper;
     rocsolver_gesv_getMemorySize<true, false, T>(handle, n, nrhs, A, shiftA, lda, strideA, ipiv,
                                                  strideP, B, shiftB, ldb, strideB, info,
-                                                 batch_count, &work_helper);
+                                                 batch_count_split, &work_helper);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
@@ -89,8 +89,8 @@ try
 
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
-        I const bid = isweep * batch_count;
-        batch_count = std::min(batch_count_arg - bid, batch_count);
+        I const bid = isweep * batch_count_split;
+        I const batch_count = std::min(batch_count_arg - bid, batch_count_split);
 
         auto const A_sweep = (A == nullptr) ? nullptr : A + bid;
         auto const B_sweep = (B == nullptr) ? nullptr : B + bid;
