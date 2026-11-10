@@ -645,7 +645,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(config.bpu != 1 && config.bpu != 2 && config.bpu != 4)
+    if(config.bpu != 1 && config.bpu != 2 && config.bpu != 4 && config.bpu != 8)
     {
         return std::nullopt;
     }

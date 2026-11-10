@@ -125,8 +125,8 @@ struct WrwConfig
     int64_t ns = 0;
     /// Loop 5: items a workgroup runs side by side (waves_q: 1, 2 or 4; wk wc wq = 8); else 0.
     int64_t wq = 0;
-    /// The split planner's target blocks per dispatch unit (1, 2 or 4; 1 for loop 5, whose
-    /// persistent grid has one workgroup per unit): host-side only.
+    /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
+    /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
 };
 
@@ -263,7 +263,7 @@ DirectPlan directPlanFor(int64_t tiles,
  * configs require);
  * ns 2 to 4 for loop 2, else 0; the block within 1024 threads and its load passes within 32;
  * the LDS within the device's; images of at least one vector (channels-first); the grids within
- * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2 or 4. The splits follow
+ * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2, 4 or 8. The splits follow
  * splitsWanted at bpu blocks per unit, so a device that reports no dispatch units is declined.
  *
  * Loop 5 (direct): gfx950, layout 2, a 16 x 16 x 32 atom, bq 32, wq 1, 2 or 4 with wk wc wq =
