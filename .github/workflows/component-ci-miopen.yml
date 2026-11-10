@@ -184,9 +184,9 @@ jobs:
       - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'
         run: |
-          apt-get update && apt-get install -y libdrm-dev
+          apt-get update && apt-get install -y libdrm-dev ninja-build
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
-            -DCMAKE_BUILD_TYPE=Release
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'
