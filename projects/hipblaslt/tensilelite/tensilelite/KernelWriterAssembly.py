@@ -100,6 +100,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
+from .Components.TDMStore import tdmStoreBlocks
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -19292,6 +19293,8 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
+      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, self.states.bpeCexternal, vectorWidths)
+      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, self.states.bpeCexternal, vectorWidths))
 
       for fdIdx in reversed(range(len(factorDims))):
         factorDim = factorDims[fdIdx]
@@ -19350,16 +19353,23 @@ class KernelWriterAssembly(KernelWriter):
                 posLabel = self.labels.getNameInc("ThenDeferredReturnDir")
                 edgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
           else:
+            tdmStoreBlock = vectorWidth in tdmVectorWidths
+            tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
+            # The TDM block stores the whole tile like the NonEdge path: the widest block, which comes first.
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
-                                          applyAlpha, beta, edge, atomic,
-                                          vectorWidth, element, activationLabelList,
+                                          applyAlpha, beta, edge and not tdmStoreBlock, atomic,
+                                          vectorWidths[0] if tdmStoreBlock else vectorWidth,
+                                          elements[0] if tdmStoreBlock else element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                           edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
                                           currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims,
                                           emitGateResidual=emitGateResidual,
-                                          hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes)
+                                          hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes,
+                                          tdmStoreLdsBase=tdmStoreLdsBase)
+            if tdmStoreBlock:
+              self.vgprPool.checkIn(tdmStoreLdsBase)
           # Edge conditions and branches
           if edge == True:
             # Else label
@@ -19420,16 +19430,21 @@ class KernelWriterAssembly(KernelWriter):
                     nonEdgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
               else:
                 nonEdgeModule = Module("Non_Edge_B%u_FD%u_VW%u" % (beta, factorDim, vectorWidth))
+                tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmNonEdge else None
                 currentInstLength, activationTypeStr = \
                 self.globalWriteElementBatch(kernel, tPA, tPB, activation,
                                               applyAlpha, beta, False, atomic,
-                                              vectorWidth, element, activationLabelList,
+                                              vectorWidths[0] if tdmNonEdge else vectorWidth,
+                                              elements[0] if tdmNonEdge else element, activationLabelList,
                                               tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                               actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                               nonEdgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"], endLabel,
                                               currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims,
                                               emitGateResidual=emitGateResidual,
-                                              hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes)
+                                              hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes,
+                                              tdmStoreLdsBase=tdmStoreLdsBase)
+                if tdmNonEdge:
+                  self.vgprPool.checkIn(tdmStoreLdsBase)
               edgeModule.add(nonEdgeModule, pos=0)
               # NOTE: isEdgeTarget of normal and adaptive kernels are different
               #   Normal kernel: to Then/Else label, followed by edge store
@@ -21741,7 +21756,7 @@ class KernelWriterAssembly(KernelWriter):
                               edgeModule, writeLabel, endLabel, \
                               currentInstLength, \
                               betaIdx, fdIdx, vectorDataTypes, factorDims, emitGateResidual,
-                              hasMultipleGlobalWriteModes=False):
+                              hasMultipleGlobalWriteModes=False, tdmStoreLdsBase=None):
     factorDim = factorDims[fdIdx]
     gateAppliesToFinalD = bool(
         self.states.useGateResidual
@@ -21966,7 +21981,7 @@ class KernelWriterAssembly(KernelWriter):
                 self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
                 biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
                 activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
-                _next_firing_rowInc, _direct_next_rowInc))
+                _next_firing_rowInc, _direct_next_rowInc, tdmStoreLdsBase))
             biasLocalBarrierInit = True
           return m
 
@@ -22706,7 +22721,7 @@ class KernelWriterAssembly(KernelWriter):
       addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit: bool, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
       batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-      inter_iter_rowInc=0, direct_next_rowInc=0) -> Module:
+      inter_iter_rowInc=0, direct_next_rowInc=0, tdmStoreLdsBase=None) -> Module:
       packdata = Component.PackData.find(self)
       gwriter  = Component.GlobalWriteComponents.find(self)
       return gwriter(kernel, tPA, tPB, activation, ss, \
@@ -22715,7 +22730,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc)
+        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase)
 
   ##############################################################################
   def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):

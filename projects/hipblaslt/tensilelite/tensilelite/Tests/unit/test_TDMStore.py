@@ -1,0 +1,705 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Unit tests for TDMStoreInst: the store paths of each level, the NonEdge paths of level 3 included, solution
+validation, the kernel-name token, the LDS layout, the store modifiers and the emitted TDM block: its C load and the cache
+hints of C, its fp16 and narrow store vectors, and the waits around it after StinkyTofu."""
+
+import re
+from collections import Counter, defaultdict
+from copy import deepcopy
+
+import pytest
+from rocisa.enum import CacheScope, NonVolatile, TemporalHint
+
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components.TDMStore import STINKY_KEEP, TDM_STORE_PATHS, tdmStoreBlocks, tdmStoreLdsBytes, \
+  tdmStoreModifiers, tdmStoreRejectReason
+from tensilelite.SolutionStructs.Naming import getKernelNameMin
+
+from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
+from toolchain_test_helpers import copy_isa_info_map
+
+pytestmark = pytest.mark.unit
+
+_LEVELS = [1, 2, 3]
+
+# The ProblemType keys an override of _state may name; every other override goes to the solution.
+_PROBLEM_TYPE_KEYS = {
+  "DestDataType", "ComputeDataType", "HighPrecisionAccumulate", "FusedGemmA2A", "UseE", "Gradient",
+  "UseGateResidual", "GroupedGemm", "UseBias", "UseScaleAlphaVec", "UseScaleAB", "UseScaleCD",
+  "ActivationType", "OutputAmaxD",
+}
+
+
+def _state(**overrides):
+  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=2
+  solution inside the supported configurations, with `overrides` applied."""
+  problemType = {
+    "DestDataType": DataType("b"),
+    "ComputeDataType": DataType("s"),
+    "HighPrecisionAccumulate": True,
+    "FusedGemmA2A": False,
+    "UseE": False,
+    "Gradient": False,
+    "UseGateResidual": False,
+    "UseScaleCD": False,
+    "OutputAmaxD": False,
+    "GroupedGemm": False,
+    "UseBias": 0,
+    "UseScaleAlphaVec": 0,
+  }
+  state = {
+    "TDMStoreInst": 2,
+    "ISA": (12, 5, 0),
+    "BufferStore": True,
+    "TileProcessingStrategy": "None",
+    "WorkAssignment": "StaticGrid",
+    "StreamKAtomic": 0,
+    "ClusterDim": [1, 1],
+    "PrefetchAcrossPersistent": 0,
+    "ReuseAcrossPersistent": 0,
+    "GlobalSplitU": 1,
+    "GlobalSplitUAlgorithm": "MultipleBuffer",
+    "AdaptiveGemmGSUA": 0,
+    "UseSubtileImpl": False,
+    "StoreRemapVectorWidth": 0,
+    "CompactLoopStore": False,
+    "MacroTile1": 256,
+    "NumThreads": 128,
+    "WavefrontSize": 32,
+    "ProblemType": problemType,
+  }
+  for key, value in overrides.items():
+    (problemType if key in _PROBLEM_TYPE_KEYS else state)[key] = value
+  return state
+
+
+@pytest.mark.parametrize("dest", ["b", "h"])
+def test_accepts_bf16_and_fp16(dest):
+  assert tdmStoreRejectReason(_state(DestDataType=DataType(dest))) is None
+
+
+def test_accepts_non_atomic_streamk3():
+  assert tdmStoreRejectReason(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0)) is None
+
+
+def test_accepts_multiple_buffer_dynamic_gsu():
+  assert tdmStoreRejectReason(_state(GlobalSplitU=-1, UseBias=1, UseScaleAlphaVec=1)) is None
+
+
+@pytest.mark.parametrize("overrides", [
+  {"AdaptiveGemm": 1},
+  {"StoreRemapVectorWidth": -1},
+  {"UseBias": 1},
+  {"UseScaleAlphaVec": 1},
+  {"UseScaleAB": "Scalar"},
+  {"UseScaleAB": "Vector"},
+  {"ActivationType": "relu"},
+  {"ActivationType": "hipblaslt_all"},
+  {"UseBias": 1, "UseScaleAlphaVec": 1, "ActivationType": "hipblaslt_all",
+   "TileProcessingStrategy": "StreamK", "GlobalSplitU": 0},
+])
+def test_accepts_supported_options(overrides):
+  """AdaptiveGemm, the automatic StoreRemapVectorWidth (-1, which Solution resolves and checks), the
+  epilogue vectors along M, ScaleAB and the activations."""
+  assert tdmStoreRejectReason(_state(**overrides)) is None
+
+
+def test_disabled_is_not_validated():
+  assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
+
+
+_HPA = "TDMStoreInst requires HighPrecisionAccumulate with a single-precision ComputeDataType"
+_GSU_DYNAMIC = "TDMStoreInst supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
+_PERSISTENT = "TDMStoreInst supports persistent kernels only as non-atomic StreamK=3"
+_ACROSS_TILES = \
+  "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or StreamK spatial clusters"
+_PROBLEM = "TDMStoreInst does not support E, Gradient, gate residual, ScaleCD, AmaxD or GroupedGemm"
+_ALONG_M = "TDMStoreInst supports bias and ScaleAlphaVec only along M"
+_STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
+
+
+@pytest.mark.parametrize("overrides, reason", [
+  ({"ISA": (9, 5, 0)}, "TDMStoreInst requires gfx1250"),
+  ({"DestDataType": DataType("s")}, "TDMStoreInst supports only bf16 and fp16 DestDataType"),
+  ({"HighPrecisionAccumulate": False}, _HPA),
+  ({"ComputeDataType": DataType("h")}, _HPA),
+  ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
+  ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
+  ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "SingleBuffer"}, _GSU_DYNAMIC),
+  ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"}, _GSU_DYNAMIC),
+  ({"GlobalSplitU": -1, "AdaptiveGemmGSUA": 1}, _GSU_DYNAMIC),
+  ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0}, _PERSISTENT),
+  (dict(_STREAMK, WorkAssignment="DynamicWorkQueue"), _PERSISTENT),
+  (dict(_STREAMK, StreamKAtomic=1), _PERSISTENT),
+  (dict(_STREAMK, PrefetchAcrossPersistent=1), _ACROSS_TILES),
+  (dict(_STREAMK, ReuseAcrossPersistent=1), _ACROSS_TILES),
+  (dict(_STREAMK, ClusterDim=[2, 1]), _ACROSS_TILES),
+  ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
+  ({"StoreRemapVectorWidth": 4}, "TDMStoreInst does not support StoreRemapVectorWidth"),
+  ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
+  ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
+  ({"UseE": True}, _PROBLEM),
+  ({"Gradient": True}, _PROBLEM),
+  ({"UseGateResidual": True}, _PROBLEM),
+  ({"UseScaleCD": True}, _PROBLEM),
+  ({"OutputAmaxD": True}, _PROBLEM),
+  ({"GroupedGemm": True}, _PROBLEM),
+  ({"UseBias": 2}, _ALONG_M),
+  ({"UseBias": 3}, _ALONG_M),
+  ({"UseScaleAlphaVec": 2}, _ALONG_M),
+  ({"NumThreads": 96}, "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"),
+])
+def test_rejects_unsupported(overrides, reason):
+  assert tdmStoreRejectReason(_state(**overrides)) == reason
+
+
+def test_levels_match_the_valid_values_and_add_one_path_each():
+  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"]
+  for level in _LEVELS:
+    assert TDM_STORE_PATHS[level][:-1] == TDM_STORE_PATHS[level - 1]
+
+
+def _blocks(level, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2):
+  return tdmStoreBlocks({"TDMStoreInst": level, "_GlobalAccumulation": accumulation}, edge, atomic, bpe,
+                        list(vectorWidths))
+
+
+# The store blocks generateBetaModules gets with StoreVectorWidth 8: AdaptiveGemm=0 keeps the
+# widest and the narrowest, AdaptiveGemm=1 every width.
+_VECTOR_WIDTHS = {0: (8, 1), 1: (8, 4, 2, 1)}
+
+
+@pytest.mark.parametrize("adaptive", [0, 1])
+@pytest.mark.parametrize("svw", [1, 2, 4, 8])
+def test_each_level_picks_blocks_of_the_store_width_cascade(svw, adaptive):
+  """A level picks the blocks of the store-width cascade that store through the TDM block: level 1 the
+  masked blocks narrower than the store vector width and the narrowest one, level 2 every masked block,
+  and of a store without edge blocks only level 3 the unmasked one. Level 2 adds the masked block of the
+  store vector width, which at store vector width 1 is the narrowest one, already picked by level 1."""
+  cascade = [svw, 1] if adaptive == 0 else [w for w in (8, 4, 2, 1) if w <= svw]
+  edgeM = {w for w in cascade if w < svw} | {min(cascade)}
+  expected = {0: set(), 1: edgeM, 2: edgeM | {svw}, 3: edgeM | {svw}}
+  for level in [0] + _LEVELS:
+    assert _blocks(level, vectorWidths=cascade) == expected[level], (level, cascade)
+    assert _blocks(level, edge=False, vectorWidths=cascade[:1]) == ({svw} if level == 3 else set()), level
+  assert (_blocks(1, vectorWidths=cascade) == _blocks(2, vectorWidths=cascade)) == (svw == 1)
+
+
+@pytest.mark.parametrize("accumulation, atomic", [
+  ("MultipleBuffer", False),
+  ("MultipleBufferSingleKernel", False),
+  ("SingleBuffer", True),
+  (None, True),
+])
+def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
+  assert _blocks(3, atomic=atomic, accumulation=accumulation) == set()
+  assert _blocks(3, edge=False, vectorWidths=(8,), atomic=atomic, accumulation=accumulation) == set()
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_four_byte_elements_keep_buffer_store(level):
+  """fp32 elements, such as GSU>1 partials at the compute type, never go through the TDM block."""
+  assert _blocks(level, bpe=4) == set()
+  assert _blocks(level, edge=False, vectorWidths=(8,), bpe=4) == set()
+
+
+def test_streamk_final_store_uses_the_tdm_block():
+  assert _blocks(2, accumulation="PartialsBuffer") == {8, 1}
+
+
+@pytest.mark.parametrize("level", [0] + _LEVELS)
+def test_lds_bytes_of_the_staged_tile(level):
+  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "ProblemType": {"DestDataType": DataType("h")}}
+  assert tdmStoreLdsBytes(state) == (256 * 128 * 2 if level else 0)
+
+
+def test_store_modifiers_follow_the_hints_of_d():
+  """tensor_store_from_lds takes NonTemporalD, TemporalHintD and NonVolatileD as addStore decodes them.
+
+  TH_WB and TH_LU share one value, so th is compared by value: whether the bound enum makes them
+  one Python object depends on the rocisa backend.
+  """
+  caps = {"HasTHModifier": True}
+  kernel = {"NonTemporalD": 2, "TemporalHintD": TemporalHint.TH_WB.value, "NonVolatileD": NonVolatile.NV.value}
+  mods = tdmStoreModifiers(caps, kernel)
+  assert (mods.scope, mods.th.value, mods.nv, mods.isStore) == \
+    (CacheScope.SCOPE_DEV, TemporalHint.TH_WB.value, NonVolatile.NV, True)
+  assert tdmStoreModifiers(caps, {"NonTemporalD": 0, "TemporalHintD": 0, "NonVolatileD": 0}) is None
+  assert tdmStoreModifiers({"HasTHModifier": False}, kernel) is None
+
+
+def _kernel(tdmStore):
+  """The smallest kernel dict that exercises Naming._getName."""
+  kernel = deepcopy(defaultSolution)
+  kernel["ProblemType"] = {
+    "OperationIdentifier": "Cijk_Alik_Bljk",
+    "DataType": 0,
+    "DestDataType": 0,
+    "ComputeDataType": 0,
+    "GroupedGemm": False,
+    "UseBeta": False,
+    "UseBias": 0,
+  }
+  kernel["MacroTile0"] = 256
+  kernel["MacroTile1"] = 256
+  kernel["DepthU"] = 64
+  kernel["MatrixInstM"] = 16
+  kernel["MatrixInstN"] = 16
+  kernel["MatrixInstB"] = 1
+  kernel["MatrixInstruction"] = [16, 16, 32, 1]
+  kernel["MIWaveTile"] = [8, 8]
+  kernel["WorkGroup"] = [32, 4, 1]
+  kernel["ISA"] = (12, 5, 0)
+  kernel["TDMStoreInst"] = tdmStore
+  return kernel
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_kernel_name_token_only_when_enabled(level):
+  """TDMStoreInst=0 keeps every existing kernel name; levels 1-3 add the TDMSI1, TDMSI2 or TDMSI3 token, which
+  stays apart from the TDMS0 or TDMS1 of TDMSplit."""
+  off = getKernelNameMin(_kernel(0), False)
+  on = getKernelNameMin(_kernel(level), False)
+  assert "TDMSI" not in off
+  assert on.replace("_TDMSI%u" % level, "", 1) == off
+  split, both = _kernel(0), _kernel(level)
+  split["TDMSplit"] = both["TDMSplit"] = True
+  split, both = getKernelNameMin(split, False), getKernelNameMin(both, False)
+  assert "_TDMS1_" in split and "TDMSI" not in split
+  assert "_TDMS1_" in both and "_TDMSI%u_" % level in both
+
+
+def _params(gfx1250_iim, mi=None, **overrides):
+  """A bf16 TN gfx1250 kernel with beta: by default MT256x256 over 4 waves, StoreVectorWidth 8."""
+  from tensilelite.Common.Architectures import gfxToIsa
+  from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
+
+  isa = gfxToIsa("gfx1250")
+  mi = mi or [16, 16, 32, 1, 1, 8, 8, 2, 2]
+  problemType = {
+    "OperationType": "GEMM", "DataType": "B", "MacDataTypeA": "B", "MacDataTypeB": "B",
+    "DestDataType": "B", "ComputeDataType": "s", "HighPrecisionAccumulate": True,
+    "TransposeA": True, "TransposeB": False, "UseBeta": True, "Batched": True,
+    "MXBlockA": 0, "MXBlockB": 0,
+  }
+  problemType.update(overrides.pop("ProblemType", {}))
+  params = {
+    "ProblemType": problemType, "ISA": isa, "MatrixInstruction": mi,
+    "WorkGroup": [16, 16, 1], "WavefrontSize": 32, "DepthU": 64,
+    "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+    "ScheduleIterAlg": 4, "StaggerU": 0, "GlobalSplitU": 1, "InnerUnroll": 1,
+    "TransposeLDS": -1, "LdsPadA": -1, "LdsPadB": -1,
+    "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1, "1LDSBuffer": 0,
+    "VectorWidthA": -1, "VectorWidthB": -1, "StoreVectorWidth": -1,
+    "GlobalReadVectorWidthA": -1, "GlobalReadVectorWidthB": -1,
+    "LocalReadVectorWidth": -1, "SourceSwap": False, "ExpandPointerSwap": False,
+    "GlobalSplitUAlgorithm": "MultipleBuffer", "TDMInst": 3, "LDSTrInst": False,
+    "StreamK": 0, "StreamKForceDPOnly": 0, "PrefetchAcrossPersistent": 0,
+    "UseSubtileImpl": False, "StoreRemapVectorWidth": 0,
+    "DirectToVgprA": False, "DirectToVgprB": False,
+    "DirectToVgprSparseMetadata": False, "WorkGroupMapping": 1,
+    "TDMFuse": 0, "TDMSplit": False, "InitCIterWmma": 0,
+  }
+  params.update(overrides)
+  params.update(matrixInstructionToMIParameters(
+    mi, isa, params["WavefrontSize"], problemType, params["WorkGroup"], gfx1250_iim))
+  return params
+
+
+def _emit_asm(gfx1250_iim, assembler, mi=None, **overrides):
+  """(solution, assembly text or None) of the kernel of _params. CPU-only; no GPU is touched."""
+  return emit_asm(gfx1250_iim, assembler, _params(gfx1250_iim, mi, **overrides))
+
+
+# The store blocks of a GlobalSplitU=1 kernel are labelled by write path: GSU1 stores D directly,
+# MB copies the GSU>1 partials to the workspace and OptNLL_MB is the store of the optimized NLL.
+_LABEL = re.compile(r"^label_GW_B(\d)_FD0_VW(\d+)_(\w+?)_(Then|NonEdge):")
+_STORE = re.compile(r"^\s*buffer_store\S* ")
+_STORE_D = re.compile(r"^\s*buffer_store\S* [^\n]*s\[sgprSrdD:")
+
+
+def _stores(asm):
+  """{(path, beta): Then vector widths, slots of the TDM stores of the Then blocks, NonEdge label, TDM stores
+  and D buffer_stores of the NonEdge block, D buffer_store count, buffer_store count}."""
+  paths = defaultdict(lambda: {"then": [], "tdm": [], "nonEdge": False, "nonEdgeTdm": 0, "nonEdgeBuffer": 0,
+                               "buffer": 0, "stores": 0})
+  block = part = None
+  for line in asm.splitlines():
+    m = _LABEL.match(line)
+    if m:
+      block, slot, part = paths[(m.group(3), m.group(1))], int(m.group(2)), m.group(4)
+      if part == "Then":
+        block["then"].append(slot)
+      else:
+        block["nonEdge"] = True
+    elif block is not None and "tensor_store_from_lds " in line:
+      if part == "Then":
+        block["tdm"].append(slot)
+      else:
+        block["nonEdgeTdm"] += 1
+    elif block is not None and _STORE.match(line):
+      storeD = bool(_STORE_D.match(line))
+      block["stores"] += 1
+      block["buffer"] += storeD
+      block["nonEdgeBuffer"] += storeD and part == "NonEdge"
+  return paths
+
+
+def _tdmBlock(asm, beta, slot):
+  """The GSU1 TDM block of `beta`, the Then block of vector width `slot`, up to its tensor_store_from_lds."""
+  then = re.search(r"^label_GW_B%s_FD0_VW%u_GSU1_Then:" % (beta, slot), asm, re.M)
+  assert then, "no GSU1 Then block of vector width %u for beta %s" % (slot, beta)
+  return asm[then.end():asm.index("tensor_store_from_lds ", then.end())]
+
+
+def _code(line):
+  """The instruction of an assembly line, without its comment."""
+  return line.partition("//")[0].strip()
+
+
+def _outside(asm):
+  """The instructions and labels of the kernel code outside the NonEdge blocks of the direct store and the
+  Then block of the OptNLL store, each from its label to the next global-write label: labels renamed in
+  order of appearance, without the instruction-prefetch hints StinkyTofu places by code offset."""
+  lines, inside = [], False
+  for line in map(_code, re.sub(r"\.amdgpu_metadata.*?\.end_amdgpu_metadata", "", asm, flags=re.S).splitlines()):
+    if line.startswith("label_GW_"):
+      inside = line.endswith(("_GSU1_NonEdge:", "_OptNLL_MB_Then:"))
+    elif inside or line.startswith("s_prefetch_inst_pc_rel"):
+      continue
+    lines.append(line)
+  names, code = {}, []
+  for line in lines:
+    if line and not line.startswith((".", "/*")) and (not line.endswith(":") or line.startswith("label_")):
+      code.append(re.sub(r"\blabel_\w+", lambda m: names.setdefault(m.group(0), "L%u" % len(names)), line))
+  return code
+
+
+# Level 0 has no TDM block, so it is emitted with the default TDMInst only.
+_LEVEL_TDM_INST = [(0, 3)] + [(level, tdmInst) for level in _LEVELS for tdmInst in (0, 3)]
+
+
+@pytest.mark.parametrize("sourceSwap", [False, True])
+@pytest.mark.parametrize("adaptive", [0, 1])
+@pytest.mark.parametrize("level, tdmInst", _LEVEL_TDM_INST)
+def test_emitted_paths_of_each_level(gp_gfx1250, gfx1250_iim, assembler, capsys, level, tdmInst, adaptive,
+                                     sourceSwap):
+  """Each beta of the direct store keeps the store blocks of level 0 and stores the blocks its level picks
+  through the TDM block, which reads C from the staged tile; the GSU>1 copy of the partials keeps buffer_store.
+  Level 3 also stores the NonEdge path of each beta through the TDM block, so no block of the direct store
+  keeps a buffer_store of D there.
+  The block drains tensor_load_to_lds before it reuses the main-loop LDS only when A or B is a TDM load."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, TDMInst=tdmInst, AdaptiveGemm=adaptive,
+                       SourceSwap=sourceSwap)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 8
+  cascade = list(_VECTOR_WIDTHS[adaptive])
+  stores = _stores(asm)
+  for beta in "01":
+    direct = stores[("GSU1", beta)]
+    assert sorted(direct["then"], reverse=True) == cascade
+    assert sorted(direct["tdm"], reverse=True) == sorted(_blocks(level, vectorWidths=cascade), reverse=True)
+    assert direct["nonEdge"] and direct["nonEdgeTdm"] == (level == 3), (beta, direct)
+    assert bool(direct["nonEdgeBuffer"]) == bool(direct["buffer"]) == (level < 3), (beta, direct)
+  partials = stores[("MB", "0")]
+  assert sorted(partials["then"], reverse=True) == cascade and partials["nonEdge"] and not partials["tdm"]
+  assert not partials["nonEdgeTdm"]
+  if level:
+    block = _tdmBlock(asm, "1", {1: 1, 2: 8, 3: 8}[level])
+    assert not re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:", block, re.M)
+    loads = list(re.finditer(r"^\s*tensor_load_to_lds ", block, re.M))
+    assert len(loads) == 1 and re.search(r"^\s*ds_load\S* ", block[loads[0].end():], re.M)
+    drain = re.search(r"^\s*s_wait_tensorcnt[^\n]*drain tensor_load_to_lds", asm, re.M)
+    assert bool(drain) == (tdmInst == 3)
+
+
+@pytest.mark.parametrize("level", [0] + _LEVELS)
+def test_optnll_store_goes_through_the_tdm_block_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """The OptNLL store is an unmasked full-tile store of D, a NonEdge path without edge blocks, so level 3
+  stores it through the TDM block whatever the alignment of the columns, and levels 0-2 keep buffer_store."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level)
+  assert sol.get("Valid"), capsys.readouterr().out
+  optNLL = _stores(asm)[("OptNLL_MB", "0")]
+  assert optNLL["then"] == [8] and not optNLL["nonEdge"]
+  assert optNLL["tdm"] == ([8] if level == 3 else [])
+  assert bool(optNLL["buffer"]) == (level < 3), optNLL
+
+
+@pytest.mark.parametrize("adaptive", [0, 1])
+def test_level_3_is_level_2_plus_the_nonedge_paths(gp_gfx1250, gfx1250_iim, assembler, capsys, adaptive):
+  """No level adds, drops or moves a global-write label or a branch to one, so none checks the alignment of
+  the columns, and a level-3 kernel equals its level-2 twin outside the NonEdge blocks of the direct store
+  and the OptNLL store, which it stores through the TDM block."""
+  asms = {}
+  for level in [0] + _LEVELS:
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, AdaptiveGemm=adaptive)
+    assert sol.get("Valid"), capsys.readouterr().out
+    asms[level] = asm
+  for level, asm in asms.items():
+    assert _skeleton(asm) == _skeleton(asms[0]), level
+  assert _outside(asms[3]) == _outside(asms[2])
+
+
+@pytest.mark.parametrize("adaptive", [0, 1])
+@pytest.mark.parametrize("level", [0] + _LEVELS)
+def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, capsys, level, adaptive):
+  """With SourceSwap the store vector width is VectorWidthA: MIWaveTile0=2 gives 2, whose only
+  narrower path is VW1, so level 1 sends the VW1 path through the TDM block."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 8, 4, 1], TDMStoreInst=level,
+                       AdaptiveGemm=adaptive, SourceSwap=True)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 2
+  stores = _stores(asm)
+  for beta in "01":
+    direct = stores[("GSU1", beta)]
+    assert sorted(direct["then"], reverse=True) == [2, 1]
+    assert sorted(direct["tdm"], reverse=True) == {0: [], 1: [1], 2: [2, 1], 3: [2, 1]}[level]
+
+
+_FP16 = {"DataType": "H", "MacDataTypeA": "H", "MacDataTypeB": "H", "DestDataType": "H"}
+
+
+def test_fp16_c_is_read_back_from_the_staged_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """fp16 C comes back from the staged tile in 16-byte vectors at StoreVectorWidth 8."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_FP16)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 8
+  block = _tdmBlock(asm, "1", 8)
+  load = re.search(r"^\s*tensor_load_to_lds ", block, re.M)
+  assert load and re.search(r"^\s*ds_load_b128 ", block[load.end():], re.M)
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_fp16_with_beta_at_store_vector_width_1(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """At StoreVectorWidth 1 every level stores the one masked block through the TDM block, which reads each
+  C element back into its own VGPR: an even one with ds_load_u16, an odd one with ds_load_u16_d16_hi
+  into the high half, where readInput puts it."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=1, ProblemType=_FP16)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 1
+  loads = re.findall(r"^\s*(ds_load_\w+) v\S+, .*// load C element \((\d+), (\d+)\)", _tdmBlock(asm, "1", 1), re.M)
+  assert {mnemonic for mnemonic, _, _ in loads} == {"ds_load_u16", "ds_load_u16_d16_hi"}
+  for mnemonic, coord0, coord1 in loads:
+    assert (mnemonic == "ds_load_u16_d16_hi") == (int(coord0) % 2 == 1), (mnemonic, coord0, coord1)
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_store_vector_width_4(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """At StoreVectorWidth 4 the TDM block stages 8-byte vectors in every block the level picks."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=4)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 4
+  stores = _stores(asm)
+  for beta in "01":
+    direct = stores[("GSU1", beta)]
+    assert sorted(direct["tdm"]) == sorted(_blocks(level, vectorWidths=direct["then"]))
+    for slot in direct["tdm"]:
+      assert re.search(r"^\s*ds_store_b64 ", _tdmBlock(asm, beta, slot), re.M)
+
+
+def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """GlobalSplitU=-1 with bias and ScaleAlphaVec: the direct and the OptNLL store go through the TDM
+  block, and the copy of the GSU>1 partials keeps buffer_store."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=-1,
+                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1})
+  assert sol.get("Valid"), capsys.readouterr().out
+  stores = _stores(asm)
+  for beta in "01":
+    direct = stores[("GSU1", beta)]
+    assert sorted(direct["tdm"]) == sorted(direct["then"]) and direct["nonEdgeTdm"] == 1 and not direct["buffer"]
+  assert stores[("OptNLL_MB", "0")]["tdm"] == [8] and not stores[("OptNLL_MB", "0")]["buffer"]
+  partials = stores[("MB", "0")]
+  assert not partials["tdm"] and partials["stores"] > 0
+
+
+def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """StoreRemapVectorWidth=-1 resolves to 0 with SourceSwap, which TDMStoreInst takes; Solution rejects a
+  nonzero resolved width."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, SourceSwap=True, StoreRemapVectorWidth=-1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreRemapVectorWidth"] == 0
+  assert "tensor_store_from_lds " in asm
+  capsys.readouterr()
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, SourceSwap=False, StoreRemapVectorWidth=-1,
+                       VectorWidthA=1)
+  assert not sol.get("Valid") and asm is None
+  assert "TDMStoreInst does not support StoreRemapVectorWidth" in capsys.readouterr().out
+
+
+def _cacheTokens(line):
+  """The th: and scope: tokens of an instruction line, as {name: value}."""
+  return dict(re.findall(r"\b(th|scope):(\S+)", _code(line)))
+
+
+def test_c_load_takes_the_hints_of_c(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """The tensor_load_to_lds of C carries the th: and scope: of the buffer_load of C on the other paths."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, TemporalHintC=3, NonTemporalC=2)
+  assert sol.get("Valid"), capsys.readouterr().out
+  load = re.search(r"^\s*tensor_load_to_lds [^\n]*", _tdmBlock(asm, "1", 8), re.M)
+  bufferLoad = re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:[^\n]*", asm, re.M)
+  assert load and bufferLoad
+  expected = _cacheTokens(bufferLoad.group(0))
+  assert "th" in expected
+  assert _cacheTokens(load.group(0)) == expected
+
+
+def test_requires_tdm_in_the_assembler(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  from tensilelite.Common.Architectures import gfxToIsa
+
+  noTdm = copy_isa_info_map(gfx1250_iim)
+  noTdm[gfxToIsa("gfx1250")].asmCaps["HasTDM"] = False
+  sol, asm = _emit_asm(noTdm, assembler, TDMStoreInst=2, TDMInst=0)
+  assert not sol.get("Valid") and asm is None
+  assert "TDMStoreInst requires asmCaps HasTDM" in capsys.readouterr().out
+
+
+def _nextLine(lines, start, prefixes):
+  """The index of the first line after `start` whose instruction starts with one of `prefixes`, or None."""
+  return next((i for i in range(start + 1, len(lines)) if _code(lines[i]).startswith(prefixes)), None)
+
+
+@pytest.mark.parametrize("streamk", [0, 3])
+@pytest.mark.parametrize("level", [2, 3])
+def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys, level, streamk):
+  """In the emitted assembly the drain of tensor_load_to_lds still comes before the next barrier, and
+  every tensor_store_from_lds is waited for before the next barrier or the end of the kernel."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, TDMInst=3, StreamK=streamk)
+  assert sol.get("Valid"), capsys.readouterr().out
+  lines = asm.splitlines()
+  # Only the StinkyTofu pipeline writes STINKY_TOTAL_INST_BYTES; the kept staging wait shows its marker.
+  assert "STINKY_TOTAL_INST_BYTES" in asm
+  assert any(_code(line).startswith("s_wait_dscnt") and STINKY_KEEP in line for line in lines)
+  drains = [i for i, line in enumerate(lines)
+            if _code(line).startswith("s_wait_tensorcnt") and "drain tensor_load_to_lds" in line]
+  assert drains
+  for drain in drains:
+    barrier = _nextLine(lines, drain, ("s_barrier",))
+    assert barrier is not None and any("main-loop LDS" in line for line in lines[barrier:barrier + 3]), lines[drain]
+  stores = [i for i, line in enumerate(lines) if _code(line).startswith("tensor_store_from_lds")]
+  assert stores
+  for store in stores:
+    end = _nextLine(lines, store, ("s_barrier", "s_endpgm"))
+    assert end is not None
+    assert any(_code(line).startswith("s_wait_tensorcnt") for line in lines[store + 1:end]), lines[store]
+
+
+@pytest.mark.parametrize("streamk", [0, 3])
+def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
+  """The bias and ScaleAlphaVec vectors keep LDS offset 0, as without TDMStoreInst, and the TDM block stages
+  the D tile from a 256-byte boundary after them: its setup and the descriptors of the C load and the D
+  store add that offset."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, StreamK=streamk,
+                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1})
+  assert sol.get("Valid"), capsys.readouterr().out
+  staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
+  assert tdmStoreLdsBytes(sol) == staged
+  assert sol["LdsOffsetBias"] == sol["LdsOffsetBiasNonGSU"] == sol["LdsOffsetBiasGSU"] == 0
+  offset = sol["_TDMStoreLdsOffset"]
+  assert offset % 256 == 0 and offset >= 256 * 4 * 2
+  assert sol["LdsNumBytes"] >= offset + staged
+  assert "add lds offset" not in asm
+  # The vectors overlap the main-loop LDS, so every preload barriers before its stores.
+  assert_every_vector_preload_barriers(asm)
+  for beta, descriptors in (("0", 1), ("1", 2)):
+    adds = [_code(line) for line in _tdmBlock(asm, beta, 8).splitlines() if "LDS offset of the staged tile" in line]
+    assert sum(add.startswith("v_add") for add in adds) == 1, adds
+    assert sum(add.startswith("s_add_u32") for add in adds) == descriptors, adds
+    assert all(str(offset) in add or hex(offset) in add for add in adds), adds
+
+
+@pytest.mark.parametrize("storeVectorWidth", [-1, 1])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_epilogue_vectors_keep_lds_offset_0(gp_gfx1250, gfx1250_iim, assembler, capsys, level, storeVectorWidth):
+  """No level adds an LDS offset to the addresses of the bias and ScaleAlphaVec vectors."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=storeVectorWidth,
+                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["LdsOffsetBias"] == 0 and sol["_TDMStoreLdsOffset"] > 0 and sol["_TDMStoreLdsOffset"] % 256 == 0
+  assert not re.search(r"add (bias )?lds offset", asm)
+
+
+def _skeleton(asm):
+  """The global-write labels of a kernel in order, and how many of its instructions name each of them."""
+  lines = [_code(line) for line in asm.splitlines()]
+  names = [name for line in lines if line and not line.endswith(":") for name in re.findall(r"\blabel_GW_\w+", line)]
+  return [line for line in lines if re.match(r"label_GW_\w+:$", line)], Counter(names)
+
+
+@pytest.mark.parametrize("vectors", [False, True])
+@pytest.mark.parametrize("adaptive", [0, 1])
+def test_store_vector_width_1_levels_1_and_2_store_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                                                        adaptive, vectors):
+  """At store vector width 1 the store-width cascade has one masked block, the narrowest and the one of the
+  store vector width at once, so levels 1 and 2 store it through the TDM block and emit the same kernel
+  apart from its name. Every level keeps the labels and branches of level 0, which send the M-edge,
+  N-edge-only and corner tiles all to that block, and its NonEdge path keeps buffer_store until level 3
+  stores it through the TDM block too. With bias and ScaleAlphaVec the vectors keep LDS offset 0."""
+  kernels = {}
+  for level in [0] + _LEVELS:
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=1, AdaptiveGemm=adaptive,
+                         **({"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert sol["StoreVectorWidth"] == 1
+    kernels[level] = asm
+  unnamed = lambda asm: [re.sub(r"_TDMSI[12](?=_)", "_TDMSI", _code(line)) for line in asm.splitlines()]
+  assert unnamed(kernels[1]) == unnamed(kernels[2])
+  for level, asm in kernels.items():
+    assert _skeleton(asm) == _skeleton(kernels[0]), level
+    stores = _stores(asm)
+    lines = [code for code in map(_code, asm.splitlines())
+             if code and not code.startswith(("s_prefetch_inst_pc_rel", "s_set_vgpr_msb"))]
+    for beta in "01":
+      direct = stores[("GSU1", beta)]
+      assert direct["then"] == [1] and direct["nonEdge"], (level, beta, direct)
+      assert direct["tdm"] == ([1] if level else []), (level, beta, direct)
+      assert direct["nonEdgeTdm"] == (level == 3) and bool(direct["nonEdgeBuffer"]) == (level < 3), (level, beta, direct)
+      end = lines.index("label_GW_B%s_FD0_VW1_GSU1_NonEdgeEnd:" % beta)
+      assert lines[end + 1:end + 3] == ["label_GW_B%s_FD0_VW1_GSU1_%s:" % (beta, part) for part in ("Else", "Then")]
+    assert "add lds offset" not in asm
+
+
+def test_solution_rejects_with_the_reason(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=2)
+  assert not sol.get("Valid") and asm is None
+  assert "TDMStoreInst requires GlobalSplitU=1 or -1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("sourceSwap", [False, True])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_local_split_u_stages_each_element_after_the_lsu_offset(gp_gfx1250, gfx1250_iim, assembler, capsys, level,
+                                                                sourceSwap):
+  """With LocalSplitU=2, shaped like the LSU=2 kernels of the gfx1250 bf16 TN logic, each thread stages
+  the elements it owns after the LDS reduction where the LSU global write would store them: the LSU
+  offset goes into coord0 (coord1 with SourceSwap) after the reduction, the TDM setup reads that VGPR
+  with nothing in the block writing it first, and the staging stores address the tile from the setup."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, [16, 16, 32, 1, 1, 4, 4, 1, 2], TDMStoreInst=level,
+                       SourceSwap=sourceSwap, WorkGroup=[16, 4, 2], DepthU=128)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["LocalSplitU"] == 2 and sol["NumThreads"] == 128 and sol["StoreVectorWidth"] == 4
+  operands = lambda line: [op.strip() for op in _code(line).partition(" ")[2].split(",")]
+  lines = asm.splitlines()
+  dim = 1 if sourceSwap else 0
+  offsets = [i for i, line in enumerate(lines) if "coord%u += LSU offset%u" % (dim, dim) in line]
+  assert len(offsets) == 1 and "valid offset coord%u is zero." % (1 - dim) in asm
+  lsuCoord = operands(lines[offsets[0]])[0]
+  assert max(i for i, line in enumerate(lines) if "post-lsu local write" in line) < offsets[0]
+  slot = 1 if level == 1 else 4
+  stores = _stores(asm)
+  for beta in "01":
+    direct = stores[("GSU1", beta)]
+    assert slot in direct["tdm"] and sorted(direct["tdm"]) == sorted(_blocks(level, vectorWidths=direct["then"]))
+    then = re.search(r"^label_GW_B%s_FD0_VW%u_GSU1_Then:" % (beta, slot), asm, re.M)
+    assert asm.count("\n", 0, then.start()) > offsets[0]
+    block = _tdmBlock(asm, beta, slot).splitlines()
+    setup = next(i for i, line in enumerate(block) if "tile column = coord1 - wg1*MT1" in line)
+    plus0 = next(i for i in range(setup, len(block)) if block[i].rstrip().endswith("+ coord0"))
+    coords = {1: operands(block[setup])[1], 0: operands(block[plus0])[2]}
+    assert coords[dim] == lsuCoord, (block[setup], block[plus0])
+    assert not [line for line in block[:setup] if operands(line)[0] == lsuCoord
+                and not _code(line).startswith(("s_", "v_cmp", "buffer_store", "ds_store", "tensor_"))]
+    staging = [line for line in block if "stage D element" in line]
+    assert staging and all(operands(line)[0] == operands(block[setup])[0] for line in staging)
