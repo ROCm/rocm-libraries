@@ -54,7 +54,8 @@ verify file's directory.
 A verifier returns `CONFIRMED`, `PARTIAL` (a narrower claim holds; restate it), `DOWNGRADED`
 or `UPGRADED` (tier changed, with the reason), `REFUTED` or `UNVERIFIED` (what blocked it).
 `CONFIRMED` and `REFUTED` are equal outcomes: never look for a reason to confirm, and
-correct tier inflation as readily as errors.
+correct tier inflation as readily as errors. The verdict follows the proof alone: a PR thread's
+state or an author's reply never sets it ([report.md](report.md) *Threads*).
 
 A second verifier, who is neither the reporter nor the first verifier, rechecks a `REFUTED`
 verdict on a `BLOCKING` or `IMPORTANT` finding and any verdict whose final tier is on the
@@ -112,6 +113,7 @@ Reason:    <one line>
 Proof:     <command, exit code, log as $EVIDENCE/<relative path>>
 Class:     rerun | text-read | not-exercised   (at a new head)
 Not established: <what the proof does not cover>
+Needs human decision: <question, options, recommendation>   (optional; see lanes/verify.md *Threads*)
 ```
 
 Keep mutation diffs and logs in

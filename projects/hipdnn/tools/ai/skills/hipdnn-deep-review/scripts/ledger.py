@@ -7,6 +7,7 @@ Usage: ledger.py <seed|ids|coverage|verdicts|mlines|counts> <evidence dir> <roun
        ledger.py seed <evidence dir> <round> [--lane NAME=<status text>]...
        ledger.py cluster <evidence dir> <round> <kept ID> <duplicate ID>...
        ledger.py set <evidence dir> <round> <ID> <FIXED@sha|ACCEPTED-RISK|OPEN> [--class C] [--note TEXT]
+       ledger.py link <evidence dir> <round> (--from posted.tsv | <comment URL> <ID>[,<ID>...])
 
 Each subcommand reads `<evidence>/r<round>/` and `<evidence>/LEDGER.md` and exits 1 with a
 one-line reason on failure. Rows are only ever updated or appended, never deleted.
@@ -39,6 +40,16 @@ LANE_COLS = ["Lane", "Status", "Report", "STOP"]
 DECISION_COLS = ["Round", "Question", "Decision", "Findings affected"]
 QUESTION_COLS = ["ID", "Question", "Options", "Recommendation"]
 IDMAP_COLS = ["Lane / provisional", "Final ID", "SUPERSEDED-BY"]
+THREAD_COLS = [
+    "Thread URL",
+    "Finding",
+    "Opened by",
+    "State",
+    "Last reply",
+    "Round seen",
+]
+# The web URL of a review comment (REST `html_url`), the key of a thread: never the API URL.
+COMMENT_URL = re.compile(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/\d+#discussion_r\d+")
 M_OWNERS = {1: "TESTQ", 2: "TESTB", 3: "TESTQ", 4: "AUTH", 5: "AUTH"}
 BLOCKING_TIERS = ("BLOCKING", "IMPORTANT")
 
@@ -163,6 +174,7 @@ def cmd_seed(a):
             rl.Table("Decisions", DECISION_COLS),
             rl.Table("Open questions", QUESTION_COLS),
         ]
+    threads_table(tables)
     save_ledger(a.evidence, tables)
     print(
         f"seeded round {a.round}: {len(cov.rows)} files, {len(lane_table.rows)} lanes"
@@ -445,6 +457,8 @@ def cmd_verdicts(a):
         row["Tier"] = f"{reported} -> {final['Tier']}"
         if final["Verdict"] == "PARTIAL":
             row["Claim"] = collapse(final["Claim"])
+        if final.get("Needs human decision"):
+            print(f"needs-decision: {fid}: {collapse(final['Needs human decision'])}")
         updated += 1
     save_ledger(a.evidence, tables)
     print(f"verdicts: {updated} rows updated")
@@ -593,6 +607,75 @@ def cmd_set(a):
     print(f"{a.id}: {status}")
 
 
+def threads_table(tables):
+    """The Threads table of a ledger, appended when an older ledger lacks it."""
+    for t in tables:
+        if t.title == "Threads":
+            return t
+    t = rl.Table("Threads", THREAD_COLS)
+    tables.append(t)
+    return t
+
+
+def read_posted(path):
+    """(URL, [ID, ...]) per line of a posted.tsv: `<comment URL><TAB><ID>[,<ID>...]`."""
+    out = []
+    for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        url, sep, ids = line.partition("\t")
+        found = [i.strip() for i in ids.split(",") if i.strip()]
+        if not sep or not found:
+            raise rl.Fail(f"{path} line {n}: expected <comment URL><TAB><ID>[,<ID>...]")
+        out.append((url.strip(), found))
+    return out
+
+
+def cmd_link(a):
+    """Link posted comments to findings: one Threads row (Opened by `review`, State and
+    Last reply empty, Round seen <round>) per (comment URL, final ID). Takes a posted.tsv
+    (`--from`) or one `<URL> <ID>[,<ID>...]`. Re-linking adds no row. Fails, writing
+    nothing, on a URL that is not a web comment URL (`.../pull/<N>#discussion_r<id>`, never
+    the API URL) or an ID that is not a Findings row, naming each."""
+    if a.source:
+        if a.url or a.ids:
+            raise rl.Fail("give --from <posted.tsv> or <URL> <ID>, not both")
+        pairs = read_posted(a.source)
+    elif a.url and a.ids:
+        pairs = [(a.url, [i for i in a.ids.split(",") if i])]
+    else:
+        raise rl.Fail("give --from <posted.tsv> or <URL> <ID>")
+    tables = load_ledger(a.evidence)
+    known = {r["ID"] for r in rl.find_table(tables, "Findings").rows}
+    bad_urls = sorted({u for u, _ in pairs if not COMMENT_URL.fullmatch(u)})
+    if bad_urls:
+        raise rl.Fail(
+            "not a web comment URL (.../pull/<N>#discussion_r<id>): "
+            + ", ".join(bad_urls)
+        )
+    unknown = sorted({i for _, ids in pairs for i in ids if i not in known})
+    if unknown:
+        raise rl.Fail("not in the ledger: " + ", ".join(unknown))
+    threads = threads_table(tables)
+    have = {(r["Thread URL"], r["Finding"]) for r in threads.rows}
+    added = 0
+    for url, ids in pairs:
+        for fid in ids:
+            if (url, fid) not in have:
+                have.add((url, fid))
+                threads.add(
+                    **{
+                        "Thread URL": url,
+                        "Finding": fid,
+                        "Opened by": "review",
+                        "Round seen": a.round,
+                    }
+                )
+                added += 1
+    save_ledger(a.evidence, tables)
+    print(f"link: {added} rows added, {len(pairs)} comments")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -605,6 +688,7 @@ def main(argv=None):
         ("mlines", cmd_mlines),
         ("counts", cmd_counts),
         ("set", cmd_set),
+        ("link", cmd_link),
     ):
         s = sub.add_parser(name, help=fn.__doc__.split("\n\n")[0].split(". ")[0])
         s.add_argument("evidence")
@@ -616,6 +700,10 @@ def main(argv=None):
             s.add_argument("status")
             s.add_argument("--class", dest="evidence_class")
             s.add_argument("--note", default="")
+        if name == "link":
+            s.add_argument("--from", dest="source", metavar="POSTED_TSV")
+            s.add_argument("url", nargs="?")
+            s.add_argument("ids", nargs="?", metavar="ID")
         if name == "cluster":
             s.add_argument("keep")
             s.add_argument("dups", nargs="+", metavar="dup")

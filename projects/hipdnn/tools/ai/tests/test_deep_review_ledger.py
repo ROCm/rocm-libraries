@@ -330,6 +330,21 @@ def test_verdicts_status_tier_and_narrowed_claim(ledger, rl, ev, capsys):
     assert "second verifier needed: CORR-3 (tier BLOCKING -> SUGGESTION)" in out
 
 
+def test_verdicts_prints_the_verifiers_needs_decision_text(ledger, ev, capsys):
+    make_candidates(ledger, ev, "IMPORTANT", "IMPORTANT")
+    write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT")
+    path = ev / "r1" / "verify" / "CORR-2.md"
+    path.write_text(
+        verify_file("CORR-2", "CONFIRMED", "IMPORTANT")
+        + "Needs human decision: keep the\n  old default?\n"
+    )
+    capsys.readouterr()
+    assert run(ledger, "verdicts", ev) == 0
+    out = capsys.readouterr().out
+    assert "needs-decision: CORR-2: keep the old default?" in out
+    assert "needs-decision: CORR-1" not in out
+
+
 def test_verdicts_exit_1_only_while_a_finding_is_pending(ledger, ev, capsys):
     make_candidates(ledger, ev, "IMPORTANT", "IMPORTANT")
     write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT")
