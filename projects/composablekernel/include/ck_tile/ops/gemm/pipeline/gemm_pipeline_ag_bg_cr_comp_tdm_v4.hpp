@@ -265,16 +265,10 @@ CK_TILE_HOST_DEVICE constexpr void tdm_address(uint32_t (&g0)[4], uint32_t lds, 
     g0[3] = (static_cast<uint32_t>(global >> 32) & 0x1FFFFFFu) | (2u << 30);
 }
 
-/// `d` with its LDS address moved by lds_offset and its global address advanced by byte_offset,
-/// carried into the 25 high address bits.
-CK_TILE_HOST_DEVICE constexpr void
-tdm_patch_address(TdmDesc& d, uint32_t lds_offset, uint32_t byte_offset)
+/// The 57-bit global address of a group 0.
+CK_TILE_HOST_DEVICE constexpr uint64_t tdm_global(const uint32_t (&g0)[4])
 {
-    d.g0[1] += lds_offset;
-    uint64_t address = (static_cast<uint64_t>(d.g0[3] & 0x1FFFFFFu) << 32) | d.g0[2];
-    address += byte_offset;
-    d.g0[2] = static_cast<uint32_t>(address);
-    d.g0[3] = (static_cast<uint32_t>(address >> 32) & 0x1FFFFFFu) | (d.g0[3] & 0xFE000000u);
+    return (static_cast<uint64_t>(g0[3] & 0x1FFFFFFu) << 32) | g0[2];
 }
 
 /// A data descriptor of the tile at K byte k_byte: dim 0 holds the K bytes left.
@@ -477,7 +471,13 @@ struct GemmPipelineAgBgCrCompTDMV4
         uint32_t b_mask = 0;
         mx_tdm_v4::TdmDesc data{};
         mx_tdm_v4::TdmDesc scale{};
-        index_t scale_stride = 0;
+        // Group 0 of each load is rebuilt from these: patching the hoisted descriptor's own
+        // words keeps it live, and every load then copies it into a fresh register quad.
+        uint32_t data_lds     = 0;
+        uint32_t scale_lds    = 0;
+        uint64_t data_global  = 0;
+        uint64_t scale_global = 0;
+        index_t scale_stride  = 0;
         // Scale row bytes for the GL2 prefetch: as M * 4 / N * 4, LLVM factors the 4 out of
         // row * stride + offset and the address takes an extra VALU op.
         index_t a_scale_stride;
@@ -628,8 +628,12 @@ struct GemmPipelineAgBgCrCompTDMV4
                     d.g2[i] = mx_tdm_v4::uniform(even ? b.g2[i] : a.g2[i]);
                 return d;
             };
-            data  = select(DataDescriptor<false>(component), DataDescriptor<true>(component));
-            scale = select(ScaleDescriptor<false>(component), ScaleDescriptor<true>(component));
+            data      = select(DataDescriptor<false>(component), DataDescriptor<true>(component));
+            scale     = select(ScaleDescriptor<false>(component), ScaleDescriptor<true>(component));
+            data_lds  = data.g0[1];
+            scale_lds = scale.g0[1];
+            data_global  = mx_tdm_v4::tdm_global(data.g0);
+            scale_global = mx_tdm_v4::tdm_global(scale.g0);
             scale_stride = even ? p.N * 4 : p.M * 4;
         }
 
@@ -639,16 +643,17 @@ struct GemmPipelineAgBgCrCompTDMV4
             const index_t k_byte      = mx_tdm_v4::div_c<kKPerByte>(k0);
             const index_t remaining_k = packed_k - k_byte;
             mx_tdm_v4::TdmDesc d      = data;
-            mx_tdm_v4::tdm_patch_address(
-                d, static_cast<uint32_t>(BufferBase(parity)), static_cast<uint32_t>(k_byte));
+            mx_tdm_v4::tdm_address(d.g0,
+                                   data_lds + static_cast<uint32_t>(BufferBase(parity)),
+                                   data_global + static_cast<uint32_t>(k_byte));
             mx_tdm_v4::tdm_patch_remaining_k(d, static_cast<uint32_t>(remaining_k));
             mx_tdm_v4::tensor_load(d);
             const index_t k_step     = mx_tdm_v4::div_c<mx_tdm_v4::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
             mx_tdm_v4::TdmDesc s     = scale;
-            mx_tdm_v4::tdm_patch_address(s,
-                                         static_cast<uint32_t>(BufferBase(parity)),
-                                         static_cast<uint32_t>(k_step * scale_stride));
+            mx_tdm_v4::tdm_address(s.g0,
+                                   scale_lds + static_cast<uint32_t>(BufferBase(parity)),
+                                   scale_global + static_cast<uint32_t>(k_step * scale_stride));
             mx_tdm_v4::tdm_patch_steps_left(s, static_cast<uint32_t>(steps_left));
             mx_tdm_v4::tensor_load(s);
         }
