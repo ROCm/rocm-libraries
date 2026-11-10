@@ -104,7 +104,7 @@ template <>
 std::vector<SdpaFwdToleranceTestCase>
     getSdpaFwdToleranceTestCases<TypeTriple<float, float, float>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
 
     // headDim=0 => throws
     // seqKv=0 => throws
@@ -172,7 +172,7 @@ std::vector<SdpaFwdToleranceTestCase>
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     const double absScaleDefault = 1.0; // no scale given: no scaling
 
-    auto expectedWithCast = [&](int64_t headDimVal, int64_t seqKvVal, double absScale) {
+    const auto expectedWithCast = [&](int64_t headDimVal, int64_t seqKvVal, double absScale) {
         const double base = expectedSdpaTolerance(1.0, 1.0, 1.0, headDimVal, seqKvVal, absScale, u);
         const double sumAbsProductBoundQk = static_cast<double>(headDimVal) * 1.0 * 1.0;
         const double castQkt = 2.0 * sumAbsProductBoundQk * absScale * u; // * maxAbsV=1
@@ -213,8 +213,8 @@ std::vector<SdpaFwdToleranceTestCase>
 template <>
 std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<half, float, float>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
     const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
@@ -239,7 +239,7 @@ std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<ha
 template <>
 std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
     const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
@@ -264,8 +264,8 @@ template <>
 std::vector<SdpaFwdToleranceTestCase>
     getSdpaFwdToleranceTestCases<TypeTriple<bfloat16, float, float>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
     const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
@@ -291,7 +291,7 @@ template <>
 std::vector<SdpaFwdToleranceTestCase>
     getSdpaFwdToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
     const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
@@ -334,17 +334,17 @@ protected:
         }
         else
         {
-            auto tol = calculateSdpaFwdTolerance<Out, In, Comp>(params.qMin,
-                                                                params.qMax,
-                                                                params.kMin,
-                                                                params.kMax,
-                                                                params.vMin,
-                                                                params.vMax,
-                                                                params.headDim,
-                                                                params.seqKv,
-                                                                params.scale);
+            const auto tol = calculateSdpaFwdTolerance<Out, In, Comp>(params.qMin,
+                                                                      params.qMax,
+                                                                      params.kMin,
+                                                                      params.kMax,
+                                                                      params.vMin,
+                                                                      params.vMax,
+                                                                      params.headDim,
+                                                                      params.seqKv,
+                                                                      params.scale);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(
                 tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
@@ -431,7 +431,7 @@ TEST(TestCalculateSdpaFwdTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(0.500001f); // Small error
     actualFailing->fillTensorWithValue(1.5f); // Large error
 
-    auto tol
+    const auto tol
         = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 8, 4);
 
     // Tolerance should be small but nonzero for FP32
@@ -488,16 +488,17 @@ TEST(TestCalculateSdpaFwdTolerance, ThrowsOnOutputOverflow)
 TEST(TestCalculateSdpaFwdTolerance, ZeroVInput)
 {
     // When V=0, maxAbsV=0. All output terms are proportional to maxAbsV => tolerance = 0.
-    auto tol = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4);
+    const auto tol
+        = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4);
     EXPECT_EQ(tol, 0.0f);
 
     // With bfloat16 output: output cast of maxAbsV=0 also vanishes
-    auto tolBf16
+    const auto tolBf16
         = calculateSdpaFwdTolerance<bfloat16, float, float>(-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4);
     EXPECT_EQ(tolBf16, 0.0f);
 
     // With input casting (double -> float): cast errors also scale by maxAbsV => 0
-    auto tolCast
+    const auto tolCast
         = calculateSdpaFwdTolerance<float, double, float>(-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4);
     EXPECT_EQ(tolCast, 0.0f);
 }
@@ -507,38 +508,38 @@ TEST(TestCalculateSdpaFwdTolerance, ZeroVInput)
 TEST(TestCalculateSdpaFwdTolerance, ToleranceScalesWithDimensions)
 {
     // FP32: varying headDim (D) with fixed Skv=4, scale=1.0 to isolate Stage 1
-    auto tolD1 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolD1 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 4, 1.0);
-    auto tolD10 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolD10 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 4, 1.0);
-    auto tolD100 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolD100 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 100, 4, 1.0);
 
     EXPECT_LT(tolD1, tolD10) << "FP32: D=10 should have higher tolerance than D=1";
     EXPECT_LT(tolD10, tolD100) << "FP32: D=100 should have higher tolerance than D=10";
 
     // Verify D dominates Stage 1: ratio D100/D1 should reflect D growth
-    auto ratioD = static_cast<double>(tolD100) / static_cast<double>(tolD1);
+    const auto ratioD = static_cast<double>(tolD100) / static_cast<double>(tolD1);
     EXPECT_GT(ratioD, 5.0) << "FP32: ratio D100/D1 should reflect D growth in Stage 1";
 
     // FP32: varying seqKv (Skv) with fixed D=8, scale=1.0 to isolate Stages 2+3
-    auto tolSkv1 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolSkv1 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 8, 1, 1.0);
-    auto tolSkv10 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolSkv10 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 8, 10, 1.0);
-    auto tolSkv100 = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolSkv100 = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 8, 100, 1.0);
 
     EXPECT_LT(tolSkv1, tolSkv10) << "FP32: Skv=10 should have higher tolerance than Skv=1";
     EXPECT_LT(tolSkv10, tolSkv100) << "FP32: Skv=100 should have higher tolerance than Skv=10";
 
     // BF16: verify tolerance grows with D (statistical bound -> sqrt(D) growth)
-    auto tolBf16D1 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto tolBf16D1 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 4, 1.0);
-    auto tolBf16D10 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto tolBf16D10 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 4, 1.0);
     // D=50 stays under gamma_D < 0.5 for bf16 (gamma = 6*sqrt(100)*2^-7 ~ 0.469)
-    auto tolBf16D50 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto tolBf16D50 = calculateSdpaFwdTolerance<bfloat16, bfloat16, bfloat16>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 50, 4, 1.0);
 
     EXPECT_LT(tolBf16D1, tolBf16D10) << "BF16: D=10 should have higher tolerance than D=1";
@@ -549,14 +550,14 @@ TEST(TestCalculateSdpaFwdTolerance, ToleranceScalesWithDimensions)
 TEST(TestCalculateSdpaFwdTolerance, CustomScaleVsDefault)
 {
     // No scale given: 1.0 (no scaling), as in cuDNN.
-    auto tolDefault
+    const auto tolDefault
         = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128);
-    auto tolScaleOne = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolScaleOne = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128, 1.0);
     EXPECT_EQ(tolDefault, tolScaleOne);
 
     // Custom scale = 8.0 (8x larger than the default)
-    auto tolLargeScale = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolLargeScale = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128, 8.0);
 
     // Larger scale amplifies Stage 1 score error, so tolerance should be larger
@@ -564,7 +565,7 @@ TEST(TestCalculateSdpaFwdTolerance, CustomScaleVsDefault)
         << "Larger scale should produce larger tolerance (Stage 1 amplified)";
 
     // Custom scale = 0.0 should produce a valid (small) tolerance, not trigger default
-    auto tolZeroScale = calculateSdpaFwdTolerance<float, float, float>(
+    const auto tolZeroScale = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128, 0.0);
 
     EXPECT_LT(tolZeroScale, tolDefault)
@@ -574,7 +575,7 @@ TEST(TestCalculateSdpaFwdTolerance, CustomScaleVsDefault)
 // D=1 and Skv=1: minimal accumulation, tolerance should be very small for FP32
 TEST(TestCalculateSdpaFwdTolerance, MinimalDimensions)
 {
-    auto tol
+    const auto tol
         = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 1);
 
     // Should be nonzero but small

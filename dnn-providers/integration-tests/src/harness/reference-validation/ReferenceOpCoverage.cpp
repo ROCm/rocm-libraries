@@ -70,8 +70,9 @@ std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, 
     std::set<NodeAttributes> types;
     try
     {
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-            graphBuffer, size);
+        const auto graph
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
         for(uint32_t i = 0; i < graph.nodeCount(); ++i)
         {
             types.insert(graph.getNode(i).attributes_type());
@@ -151,8 +152,9 @@ bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
 {
     try
     {
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-            graphBuffer, size);
+        const auto graph
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
         const auto& tensorMap = graph.getTensorMap();
 
         const auto lookup = [&tensorMap](int64_t uid) {
@@ -279,7 +281,7 @@ std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
         formatted += op;
         separator = ", ";
     }
-    formatted += ")";
+    formatted += ')';
     return formatted;
 }
 

@@ -67,9 +67,9 @@ public:
                               "ConvolutionFpropNode missing dilation for pre-validation");
 
         // Get tensor references
-        auto x = attributes.get_x();
-        auto w = attributes.get_w();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto w = attributes.get_w();
+        const auto y = attributes.get_y();
 
         // Validate input tensor dimensions and strides
         auto& xDims = x->get_dim();
@@ -102,7 +102,7 @@ public:
 
         // For grouped convolution: x_dims[1] / w_dims[1] is group count.
         // Output channels must be divisible by group count.
-        auto groupCount = xDims[1] / wDims[1];
+        const auto groupCount = xDims[1] / wDims[1];
         HIPDNN_RETURN_IF_NE(
             wDims[0] % groupCount,
             0,
@@ -138,7 +138,7 @@ public:
         }
 
         // Validate spatial parameter counts match spatial dimensions
-        auto spatialDims = xDims.size() - 2; // Skip N and C dimensions
+        const auto spatialDims = xDims.size() - 2; // Skip N and C dimensions
         auto& prePadding = attributes.get_pre_padding();
         auto& postPadding = attributes.get_post_padding();
         auto& stride = attributes.get_stride();
@@ -171,10 +171,10 @@ public:
         // Check spatial parameters for each dimension
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            auto prePad = prePadding[i];
-            auto postPad = postPadding[i];
-            auto strideVal = stride[i];
-            auto dilationVal = dilation[i];
+            const auto prePad = prePadding[i];
+            const auto postPad = postPadding[i];
+            const auto strideVal = stride[i];
+            const auto dilationVal = dilation[i];
 
             // Validate parameters
             HIPDNN_RETURN_IF_LT(
@@ -197,12 +197,12 @@ public:
 
             if(!yDims.empty())
             {
-                auto inputSize = xDims[i + 2];
-                auto kernelSize = wDims[i + 2];
-                auto outputSize = yDims[i + 2];
+                const auto inputSize = xDims[i + 2];
+                const auto kernelSize = wDims[i + 2];
+                const auto outputSize = yDims[i + 2];
 
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+                const auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                const auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
 
                 HIPDNN_RETURN_IF_LT(numerator,
                                     0,
@@ -232,9 +232,9 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto w = attributes.get_w();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto w = attributes.get_w();
+        const auto y = attributes.get_y();
 
         HIPDNN_RETURN_IF_FALSE(x,
                                ErrorCode::ATTRIBUTE_NOT_SET,
@@ -272,7 +272,7 @@ public:
             // Starting from dim 2 (skip N and C)
             for(size_t i = 2; i < xDims.size(); ++i)
             {
-                auto spatialIdx = i - 2; // Index into spatial dimension arrays
+                const auto spatialIdx = i - 2; // Index into spatial dimension arrays
 
                 HIPDNN_RETURN_IF_TRUE(
                     spatialIdx >= prePadding.size() || spatialIdx >= postPadding.size()
@@ -286,12 +286,12 @@ public:
                 // output_size = floor((input_size + pre_padding + post_padding - dilated_kernel_size) / stride) + 1
                 // where dilated_kernel_size = dilation * (kernel_size - 1) + 1
 
-                auto inputSize = xDims[i];
-                auto kernelSize = wDims[i];
-                auto prePad = prePadding[spatialIdx];
-                auto postPad = postPadding[spatialIdx];
-                auto strideVal = stride[spatialIdx];
-                auto dilationVal = dilation[spatialIdx];
+                const auto inputSize = xDims[i];
+                const auto kernelSize = wDims[i];
+                const auto prePad = prePadding[spatialIdx];
+                const auto postPad = postPadding[spatialIdx];
+                const auto strideVal = stride[spatialIdx];
+                const auto dilationVal = dilation[spatialIdx];
 
                 // Validate parameters
                 HIPDNN_RETURN_IF_LT(strideVal,
@@ -315,10 +315,10 @@ public:
                                     "ConvolutionFpropNode: Post-padding must be non-negative");
 
                 // Calculate dilated kernel size
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                const auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
 
                 // Calculate output dimension
-                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+                const auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
                 HIPDNN_RETURN_IF_LT(
                     numerator,
                     0,
@@ -356,10 +356,11 @@ public:
                 "ConvolutionFpropNode: Stride dimension mismatch between input and output tensors");
 
             // Extract stride order from input tensor and apply to output tensor
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
+            const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate Y strides using the extracted stride order and Y dimensions
-            auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDimsFinal, strideOrder);
+            const auto yStrides
+                = hipdnn_data_sdk::utilities::generateStrides(yDimsFinal, strideOrder);
 
             y->set_stride(yStrides);
         }

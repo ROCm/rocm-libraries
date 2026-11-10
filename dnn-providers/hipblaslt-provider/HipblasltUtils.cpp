@@ -110,7 +110,7 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
         tensorMap,
     int64_t uid)
 {
-    if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
+    if(auto const tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
     {
         return hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(
             tensorAttr->second);

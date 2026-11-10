@@ -232,7 +232,7 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc,
     };
 
     detail::ScopedHipdnnBackendDescriptor engineDesc;
-    auto createErr
+    const auto createErr
         = hipdnn_frontend::detail::createEngineDescriptorForGraph(engineDesc, graphDesc, engineId);
     if(createErr.is_bad())
     {
@@ -241,7 +241,7 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc,
 
     auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
         HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-    auto setStatus
+    const auto setStatus
         = detail::hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
                                                        HIPDNN_ATTR_ENGINECFG_ENGINE,
                                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -257,14 +257,14 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc,
         return failed();
     }
 
-    auto finStatus = detail::hipdnnBackend()->backendFinalize(engineConfigDesc->get());
+    const auto finStatus = detail::hipdnnBackend()->backendFinalize(engineConfigDesc->get());
     if(finStatus != HIPDNN_STATUS_SUCCESS)
     {
         return failed();
     }
 
     int64_t wsSize = 0;
-    auto wsStatus
+    const auto wsStatus
         = detail::hipdnnBackend()->backendGetAttribute(engineConfigDesc->get(),
                                                        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
                                                        HIPDNN_TYPE_INT64,

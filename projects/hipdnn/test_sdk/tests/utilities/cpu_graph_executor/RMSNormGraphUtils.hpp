@@ -27,19 +27,20 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_intermediate_data_type(
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
     // Scale/bias shape matches input except batch is broadcast. Non-1 non-batch
     // dims form a trailing suffix matching input — required by validateScaleNormalizedShape.
     auto derivedDims = dims;
     derivedDims[0] = 1;
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale",
@@ -47,10 +48,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         derivedDims,
         derivedStrides);
     scaleAttr.set_uid(uid++);
-    auto scaleTensorAttr
+    const auto scaleTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
-    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
     if(runtimeEpsilon)
     {
@@ -72,7 +73,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     auto outputTensorsAttr = graph->rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 
-    auto& yTensorAttr = outputTensorsAttr[0];
+    const auto& yTensorAttr = outputTensorsAttr[0];
     if(!yTensorAttr->has_uid())
     {
         yTensorAttr->set_uid(uid++);
@@ -87,9 +88,9 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     // With scale matching input except batch, inv_rms is [N, 1, 1, 1, ...].
     auto invRmsDims = std::vector<int64_t>(dims.size(), 1);
     invRmsDims[0] = dims[0];
-    auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+    const auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
-    auto& invRmsTensorAttr = outputTensorsAttr[1];
+    const auto& invRmsTensorAttr = outputTensorsAttr[1];
     if(!invRmsTensorAttr->has_uid())
     {
         invRmsTensorAttr->set_uid(uid++);
@@ -117,19 +118,20 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_intermediate_data_type(
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
     // Scale/bias shape matches input except batch is broadcast. Non-1 non-batch
     // dims form a trailing suffix matching input — required by validateScaleNormalizedShape.
     auto derivedDims = dims;
     derivedDims[0] = 1;
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale",
@@ -137,7 +139,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         derivedDims,
         derivedStrides);
     scaleAttr.set_uid(uid++);
-    auto scaleTensorAttr
+    const auto scaleTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -146,10 +148,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         derivedDims,
         derivedStrides);
     biasAttr.set_uid(uid++);
-    auto biasTensorAttr
+    const auto biasTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
-    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -167,7 +169,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     auto outputTensorsAttr = graph->rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 
-    auto& yTensorAttr = outputTensorsAttr[0];
+    const auto& yTensorAttr = outputTensorsAttr[0];
     if(!yTensorAttr->has_uid())
     {
         yTensorAttr->set_uid(uid++);
@@ -182,9 +184,9 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     // With scale matching input except batch, inv_rms is [N, 1, 1, 1, ...].
     auto invRmsDims = std::vector<int64_t>(dims.size(), 1);
     invRmsDims[0] = dims[0];
-    auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+    const auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
-    auto& invRmsTensorAttr = outputTensorsAttr[1];
+    const auto& invRmsTensorAttr = outputTensorsAttr[1];
     if(!invRmsTensorAttr->has_uid())
     {
         invRmsTensorAttr->set_uid(uid++);
@@ -212,29 +214,31 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_intermediate_data_type(
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
     // Scale/bias shape matches input except batch is broadcast
     auto scaleDims = dims;
     scaleDims[0] = 1;
-    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+    const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
     // invRms shape matches input except non-batch dims are 1
     auto invRmsDims = std::vector<int64_t>(dims.size(), 1);
     invRmsDims[0] = dims[0];
-    auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+    const auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
     int64_t uid = 1;
 
     auto dyAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "dy", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
     dyAttr.set_uid(uid++);
-    auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
+    const auto dyTensor
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensor
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale",
@@ -242,7 +246,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         scaleDims,
         scaleStrides);
     scaleAttr.set_uid(uid++);
-    auto scaleTensor
+    const auto scaleTensor
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto invRmsAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -251,7 +255,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         invRmsDims,
         invRmsStrides);
     invRmsAttr.set_uid(uid++);
-    auto invRmsTensor
+    const auto invRmsTensor
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(invRmsAttr));
 
     hipdnn_frontend::graph::RMSNormBackwardAttributes rmsnormBwdAttrs;
@@ -263,7 +267,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     auto outputTensorsAttr
         = graph->rmsnorm_backward(dyTensor, xTensor, scaleTensor, invRmsTensor, rmsnormBwdAttrs);
 
-    auto& dxTensorAttr = outputTensorsAttr[0];
+    const auto& dxTensorAttr = outputTensorsAttr[0];
     if(!dxTensorAttr->has_uid())
     {
         dxTensorAttr->set_uid(uid++);
@@ -273,7 +277,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     dxTensorAttr->set_stride(strides);
     dxTensorAttr->set_is_virtual(false);
 
-    auto& dscaleTensorAttr = outputTensorsAttr[1];
+    const auto& dscaleTensorAttr = outputTensorsAttr[1];
     if(!dscaleTensorAttr->has_uid())
     {
         dscaleTensorAttr->set_uid(uid++);
@@ -284,7 +288,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     dscaleTensorAttr->set_stride(scaleStrides);
     dscaleTensorAttr->set_is_virtual(false);
 
-    auto& dbiasTensorAttr = outputTensorsAttr[2];
+    const auto& dbiasTensorAttr = outputTensorsAttr[2];
     if(!dbiasTensorAttr->has_uid())
     {
         dbiasTensorAttr->set_uid(uid++);

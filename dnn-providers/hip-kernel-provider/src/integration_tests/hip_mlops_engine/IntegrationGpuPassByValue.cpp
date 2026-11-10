@@ -59,7 +59,7 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        auto const pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -143,7 +143,7 @@ protected:
 
         GraphTensorBundle bundle;
         graphObj.visit([&](const INode& node) {
-            auto addTensor = [&](const std::shared_ptr<TensorAttributes>& tensorAttr) {
+            auto const addTensor = [&](const std::shared_ptr<TensorAttributes>& tensorAttr) {
                 if(tensorAttr->get_is_virtual()
                    || bundle.tensors.find(tensorAttr->get_uid()) != bundle.tensors.end()
                    || runtimeHostScalarsByUid.find(tensorAttr->get_uid())
@@ -213,7 +213,7 @@ protected:
         std::vector<float> out;
         for(const auto& outputAttr : outputs)
         {
-            auto& tensor = bundle.tensors.at(outputAttr->get_uid());
+            auto const& tensor = bundle.tensors.at(outputAttr->get_uid());
             tensor->markDeviceModified();
             const auto* hostData = static_cast<const float*>(tensor->rawHostData());
             out.insert(out.end(), hostData, hostData + tensor->elementCount());
@@ -236,26 +236,26 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        auto const xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", dims, generateStrides(dims, TensorLayout::NCHW.strideOrder)));
-        auto meanTensorAttr = std::make_shared<TensorAttributes>(
+        auto const meanTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("mean", derivedDims, generateStrides(derivedDims)));
-        auto varianceTensorAttr = std::make_shared<TensorAttributes>(
+        auto const varianceTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("variance", derivedDims, generateStrides(derivedDims)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(
+        auto const scaleTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("scale", derivedDims, generateStrides(derivedDims)));
-        auto biasTensorAttr = std::make_shared<TensorAttributes>(
+        auto const biasTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("bias", derivedDims, generateStrides(derivedDims)));
         auto epsilonTensorAttr = makeScalarTensor("epsilon", mode, epsilonValue);
 
         const BatchnormInferenceAttributesVarianceExt bnAttrs;
-        auto yTensorAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
-                                                                     meanTensorAttr,
-                                                                     varianceTensorAttr,
-                                                                     scaleTensorAttr,
-                                                                     biasTensorAttr,
-                                                                     epsilonTensorAttr,
-                                                                     bnAttrs);
+        auto const yTensorAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
+                                                                           meanTensorAttr,
+                                                                           varianceTensorAttr,
+                                                                           scaleTensorAttr,
+                                                                           biasTensorAttr,
+                                                                           epsilonTensorAttr,
+                                                                           bnAttrs);
         yTensorAttr->set_output(true);
         yTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
 
@@ -281,11 +281,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        auto const xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", dims, generateStrides(dims, TensorLayout::NCHW.strideOrder)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(
+        auto const scaleTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("scale", derivedDims, generateStrides(derivedDims)));
-        auto biasTensorAttr = std::make_shared<TensorAttributes>(
+        auto const biasTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("bias", derivedDims, generateStrides(derivedDims)));
         auto epsilonTensorAttr = makeScalarTensor("epsilon", mode, epsilonValue);
 
@@ -319,20 +319,20 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        auto const xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", dims, generateStrides(dims, TensorLayout::NCHW.strideOrder)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(
+        auto const scaleTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("scale", derivedDims, generateStrides(derivedDims)));
-        auto biasTensorAttr = std::make_shared<TensorAttributes>(
+        auto const biasTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("bias", derivedDims, generateStrides(derivedDims)));
-        auto prevRunningMeanTensorAttr = std::make_shared<TensorAttributes>(
+        auto const prevRunningMeanTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("prev_running_mean", derivedDims, generateStrides(derivedDims)));
-        auto prevRunningVarianceTensorAttr
+        auto const prevRunningVarianceTensorAttr
             = std::make_shared<TensorAttributes>(makeTensorAttributes(
                 "prev_running_variance", derivedDims, generateStrides(derivedDims)));
 
         // Epsilon fixed as a baked compile-time constant so only momentum varies.
-        auto epsilonTensorAttr = makeScalarTensor("epsilon", PbvMode::COMPILE_TIME, 1e-5f);
+        auto const epsilonTensorAttr = makeScalarTensor("epsilon", PbvMode::COMPILE_TIME, 1e-5f);
         auto momentumTensorAttr = makeScalarTensor("momentum", mode, momentumValue);
 
         BatchnormAttributes bnAttrs;
@@ -375,11 +375,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        auto const xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", dims, generateStrides(dims, TensorLayout::NCHW.strideOrder)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        auto const scaleTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "scale", affineDims, generateStrides(affineDims, TensorLayout::NCHW.strideOrder)));
-        auto biasTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        auto const biasTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "bias", affineDims, generateStrides(affineDims, TensorLayout::NCHW.strideOrder)));
         auto epsilonTensorAttr = makeScalarTensor("epsilon", mode, epsilonValue);
 
@@ -415,9 +415,9 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        auto const xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", dims, generateStrides(dims, TensorLayout::NCHW.strideOrder)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        auto const scaleTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "scale", affineDims, generateStrides(affineDims, TensorLayout::NCHW.strideOrder)));
         auto epsilonTensorAttr = makeScalarTensor("epsilon", mode, epsilonValue);
 

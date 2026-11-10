@@ -25,12 +25,12 @@ public:
     {
         addBatchnormDefaults();
 
-        auto inputDataType = inputTensorAttrs->data_type();
-        auto outputDataType = outputTensorAttrs->data_type();
-        auto meanDataType = meanTensorAttrs != nullptr
-                                ? meanTensorAttrs->data_type()
-                                : hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
-        auto scaleDataType = scaleTensorAttrs->data_type();
+        auto const inputDataType = inputTensorAttrs->data_type();
+        auto const outputDataType = outputTensorAttrs->data_type();
+        auto const meanDataType = meanTensorAttrs != nullptr
+                                      ? meanTensorAttrs->data_type()
+                                      : hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+        auto const scaleDataType = scaleTensorAttrs->data_type();
 
         add("HIP_PLUGIN_BN_INPUT_TYPE", std::string(getKernelParamTypeString(inputDataType)));
         add("HIP_PLUGIN_BN_OUTPUT_TYPE", std::string(getKernelParamTypeString(outputDataType)));

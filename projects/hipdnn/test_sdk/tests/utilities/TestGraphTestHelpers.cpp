@@ -19,25 +19,25 @@ namespace
 
 TEST(TestBuildConvFpropGraph, ReturnsNonNullGraph)
 {
-    auto graph = buildConvFpropGraph();
+    const auto graph = buildConvFpropGraph();
     ASSERT_NE(graph, nullptr);
 }
 
 TEST(TestBuildConvFpropGraph, DefaultGraphName)
 {
-    auto graph = buildConvFpropGraph();
+    const auto graph = buildConvFpropGraph();
     EXPECT_EQ(graph->get_name(), "ConvFpropTestGraph");
 }
 
 TEST(TestBuildConvFpropGraph, CustomGraphName)
 {
-    auto graph = buildConvFpropGraph("MyCustomGraph");
+    const auto graph = buildConvFpropGraph("MyCustomGraph");
     EXPECT_EQ(graph->get_name(), "MyCustomGraph");
 }
 
 TEST(TestBuildConvFpropGraph, DefaultDataTypes)
 {
-    auto graph = buildConvFpropGraph();
+    const auto graph = buildConvFpropGraph();
     EXPECT_EQ(graph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(graph->get_intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(graph->get_io_data_type(), DataType::FLOAT);
@@ -45,7 +45,8 @@ TEST(TestBuildConvFpropGraph, DefaultDataTypes)
 
 TEST(TestBuildConvFpropGraph, CustomDataTypes)
 {
-    auto graph = buildConvFpropGraph("Test", DataType::HALF, DataType::BFLOAT16, DataType::FLOAT);
+    const auto graph
+        = buildConvFpropGraph("Test", DataType::HALF, DataType::BFLOAT16, DataType::FLOAT);
     EXPECT_EQ(graph->get_compute_data_type(), DataType::HALF);
     EXPECT_EQ(graph->get_intermediate_data_type(), DataType::BFLOAT16);
     EXPECT_EQ(graph->get_io_data_type(), DataType::FLOAT);
@@ -53,15 +54,15 @@ TEST(TestBuildConvFpropGraph, CustomDataTypes)
 
 TEST(TestBuildConvFpropGraph, GraphValidates)
 {
-    auto graph = buildConvFpropGraph();
-    auto result = graph->validate();
+    const auto graph = buildConvFpropGraph();
+    const auto result = graph->validate();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
 TEST(TestBuildConvFpropGraph, GraphHasOneNode)
 {
-    auto graph = buildConvFpropGraph();
-    auto result = graph->validate();
+    const auto graph = buildConvFpropGraph();
+    const auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK);
 
     const auto& nodes = graph->getSubNodes();
@@ -75,7 +76,7 @@ TEST(TestBuildConvFpropGraph, GraphHasOneNode)
 TEST(TestBuildTensorMap, EmptyGraph)
 {
     const hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
-    auto tensorMap = hipdnn_tests::buildTensorMap(graphT);
+    const auto tensorMap = hipdnn_tests::buildTensorMap(graphT);
     EXPECT_TRUE(tensorMap.empty());
 }
 

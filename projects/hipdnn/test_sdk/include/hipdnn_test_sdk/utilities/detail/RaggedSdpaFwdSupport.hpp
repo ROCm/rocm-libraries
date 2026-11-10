@@ -293,9 +293,7 @@ struct RaggedSdpaFwdParams
         , scaleTensor(foldSdpaScale(attributes.scale_tensor_uid().has_value()
                                         ? tensorMap.at(attributes.scale_tensor_uid().value())
                                         : nullptr,
-                                    attributes.attn_scale_value().has_value()
-                                        ? std::make_optional(attributes.attn_scale_value().value())
-                                        : std::nullopt))
+                                    attributes.attn_scale_value()))
         , leftBound(leftBound)
         , rightBound(rightBound)
         , topLeftAlignment(topLeftAlignment)

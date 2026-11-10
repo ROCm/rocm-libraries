@@ -31,7 +31,7 @@ protected:
 TEST_F(TestFrontendLogging, VerifyCodeEmitsLogs)
 {
     // Use withOverrideLevel() to capture ALL logs
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Test info message from frontend");
     HIPDNN_FE_LOG_WARN("Test warning message from frontend");
@@ -54,7 +54,7 @@ TEST_F(TestFrontendLogging, VerifyLogEmittedWhenLevelAllows)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
     // Use withCurrentLevel() to preserve the WARN level
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
 
     HIPDNN_FE_LOG_INFO("Info should be filtered");
     HIPDNN_FE_LOG_WARN("Warning should pass");
@@ -77,7 +77,7 @@ TEST_F(TestFrontendLogging, VerifyLogNotEmittedWhenLevelPrevents)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
 
     // Use withCurrentLevel() to preserve the ERROR level
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
 
     HIPDNN_FE_LOG_INFO("Info should be filtered");
     HIPDNN_FE_LOG_WARN("Warn should be filtered");
@@ -93,7 +93,7 @@ TEST_F(TestFrontendLogging, VerifyLogNotEmittedWhenLevelPrevents)
 // Verify no logs emitted from UUT
 TEST_F(TestFrontendLogging, VerifyNoLogsEmitted)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
 
     HIPDNN_FE_LOG_INFO("Info should be filtered");
     HIPDNN_FE_LOG_WARN("Warn should be filtered");
@@ -152,10 +152,10 @@ TEST_F(TestFrontendLogging, SetAndGetLogLevel)
 TEST_F(TestFrontendLogging, SetLogLevelAffectsFrontendLogs)
 {
     // Set to ERROR level
-    auto error = setGlobalLogLevel(HIPDNN_SEV_ERROR);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_ERROR);
     EXPECT_EQ(error.code, ErrorCode::OK);
 
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
 
     HIPDNN_FE_LOG_INFO("Info should be filtered");
     HIPDNN_FE_LOG_WARN("Warn should be filtered");

@@ -68,7 +68,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -205,7 +205,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                          const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -274,7 +274,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -299,68 +299,68 @@ protected:
 
 TEST_F(TestGraphDescriptorSdpaFwd, BuildFromSingleOperation)
 {
-    auto qDesc = createFinalizedTensor(
+    const auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(
+    const auto kDesc = createFinalizedTensor(
         K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(
+    const auto vDesc = createFinalizedTensor(
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(
+    const auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
-    auto attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
-    auto scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
-    auto seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
-    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
-    auto seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
-    auto offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
-    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
-    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
-    auto pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
-    auto pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
-    auto blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
-    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
-    auto descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
-    auto descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
-    auto descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
-    auto descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
-    auto scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
-    auto scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
-    auto statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
-    auto maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
-    auto sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
-    auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
-    auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
-    auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
-    auto opDesc = createFinalizedSdpaFwdOp(qDesc.get(),
-                                           kDesc.get(),
-                                           vDesc.get(),
-                                           oDesc.get(),
-                                           attnMaskDesc.get(),
-                                           scaleDesc.get(),
-                                           seqLenQDesc.get(),
-                                           seqLenKvDesc.get(),
-                                           seedDesc.get(),
-                                           offsetDesc.get(),
-                                           dropoutMaskDesc.get(),
-                                           dropoutScaleDesc.get(),
-                                           pageTableKDesc.get(),
-                                           pageTableVDesc.get(),
-                                           blockMaskDesc.get(),
-                                           sinkTokenDesc.get(),
-                                           descaleQDesc.get(),
-                                           descaleKDesc.get(),
-                                           descaleVDesc.get(),
-                                           descaleSDesc.get(),
-                                           scaleSDesc.get(),
-                                           scaleODesc.get(),
-                                           statsDesc.get(),
-                                           maxDesc.get(),
-                                           sumExpDesc.get(),
-                                           rngDumpDesc.get(),
-                                           amaxSDesc.get(),
-                                           amaxODesc.get());
+    const auto attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
+    const auto scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
+    const auto seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    const auto seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    const auto seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
+    const auto offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
+    const auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    const auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    const auto pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    const auto pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    const auto blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
+    const auto sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
+    const auto descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
+    const auto descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
+    const auto descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
+    const auto descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
+    const auto scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
+    const auto scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
+    const auto statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
+    const auto maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
+    const auto sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
+    const auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
+    const auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
+    const auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
+    const auto opDesc = createFinalizedSdpaFwdOp(qDesc.get(),
+                                                 kDesc.get(),
+                                                 vDesc.get(),
+                                                 oDesc.get(),
+                                                 attnMaskDesc.get(),
+                                                 scaleDesc.get(),
+                                                 seqLenQDesc.get(),
+                                                 seqLenKvDesc.get(),
+                                                 seedDesc.get(),
+                                                 offsetDesc.get(),
+                                                 dropoutMaskDesc.get(),
+                                                 dropoutScaleDesc.get(),
+                                                 pageTableKDesc.get(),
+                                                 pageTableVDesc.get(),
+                                                 blockMaskDesc.get(),
+                                                 sinkTokenDesc.get(),
+                                                 descaleQDesc.get(),
+                                                 descaleKDesc.get(),
+                                                 descaleVDesc.get(),
+                                                 descaleSDesc.get(),
+                                                 scaleSDesc.get(),
+                                                 scaleODesc.get(),
+                                                 statsDesc.get(),
+                                                 maxDesc.get(),
+                                                 sumExpDesc.get(),
+                                                 rngDumpDesc.get(),
+                                                 amaxSDesc.get(),
+                                                 amaxODesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -371,7 +371,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -453,18 +453,18 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorSdpaFwd, ComputeDataTypePreserved)
 {
-    auto qDesc = createFinalizedTensor(
+    const auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(
+    const auto kDesc = createFinalizedTensor(
         K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(
+    const auto vDesc = createFinalizedTensor(
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(
+    const auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
-    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
+    const auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -474,7 +474,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -483,19 +483,19 @@ TEST_F(TestGraphDescriptorSdpaFwd, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorSdpaFwd, BuildFromRequiredTensorsOnly)
 {
-    auto qDesc = createFinalizedTensor(
+    const auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(
+    const auto kDesc = createFinalizedTensor(
         K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(
+    const auto vDesc = createFinalizedTensor(
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(
+    const auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc
+    const auto opDesc
         = createFinalizedSdpaFwdOpRequiredOnly(qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -505,7 +505,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromRequiredTensorsOnly)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -574,19 +574,19 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromRequiredTensorsOnly)
 
 TEST_F(TestGraphDescriptorSdpaFwd, OperationNamePreservedInSerialization)
 {
-    auto qDesc = createFinalizedTensor(
+    const auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(
+    const auto kDesc = createFinalizedTensor(
         K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(
+    const auto vDesc = createFinalizedTensor(
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(
+    const auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
+    const auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "my_sdpa_op");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -596,7 +596,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNamePreservedInSerialization)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -605,19 +605,19 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNamePreservedInSerialization)
 
 TEST_F(TestGraphDescriptorSdpaFwd, OperationNameRoundTripThroughLifting)
 {
-    auto qDesc = createFinalizedTensor(
+    const auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(
+    const auto kDesc = createFinalizedTensor(
         K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(
+    const auto vDesc = createFinalizedTensor(
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(
+    const auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
+    const auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "round_trip_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -628,14 +628,14 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize and deserialize via FlatBuffer
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
-    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
-    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    const auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
     ASSERT_NE(rebuilt, nullptr);
 
     auto* graphOp = rebuilt->asGraphOperation();

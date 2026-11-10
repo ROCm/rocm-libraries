@@ -42,7 +42,7 @@ protected:
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_SingleNodeReluFwd_ReturnsTrue)
 {
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
@@ -51,7 +51,7 @@ TEST_F(ReluPlanBuilderTest, IsApplicable_SingleNodeReluFwd_ReturnsTrue)
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 {
-    auto fbb = createNonReluPointwiseGraph();
+    const auto fbb = createNonReluPointwiseGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
@@ -60,7 +60,7 @@ TEST_F(ReluPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
 {
-    auto fbb = createMultiNodeReluGraph();
+    const auto fbb = createMultiNodeReluGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
@@ -69,7 +69,7 @@ TEST_F(ReluPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_ConvFwdGraph_ReturnsFalse)
 {
-    auto fbb = createConvFwdGraph();
+    const auto fbb = createConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
@@ -78,7 +78,7 @@ TEST_F(ReluPlanBuilderTest, IsApplicable_ConvFwdGraph_ReturnsFalse)
 
 TEST_F(ReluPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 {
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     const ExampleProviderSettings settings;
@@ -87,7 +87,7 @@ TEST_F(ReluPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 
 TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
 {
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     const auto knobs = _planBuilder->getCustomKnobs(_handle, graph);
@@ -97,11 +97,11 @@ TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
 
 TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_StoresInSettings)
 {
-    auto graphFbb = createReluFwdGraph();
+    const auto graphFbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         graphFbb.GetBufferPointer(), graphFbb.GetSize());
 
-    auto configFbb = createEngineConfigWithFloatKnob(0, "example.relu.negative_slope", 0.5);
+    const auto configFbb = createEngineConfigWithFloatKnob(0, "example.relu.negative_slope", 0.5);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
         configFbb.GetBufferPointer(), configFbb.GetSize());
 
@@ -113,11 +113,11 @@ TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_Stores
 
 TEST_F(ReluPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 {
-    auto graphFbb = createReluFwdGraph({1, 1, 4});
+    const auto graphFbb = createReluFwdGraph({1, 1, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         graphFbb.GetBufferPointer(), graphFbb.GetSize());
 
-    auto configFbb = createEngineConfig(0);
+    const auto configFbb = createEngineConfig(0);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
         configFbb.GetBufferPointer(), configFbb.GetSize());
 

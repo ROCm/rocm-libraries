@@ -60,17 +60,17 @@ class IntegrationConvolutionWgradDescriptorLowering : public IntegrationTestFixt
 // in the frontend.
 TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestConvWgradGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_WGRAD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_WGRAD_TENSOR_X_DIMS)).set_stride(toVec(K_WGRAD_TENSOR_X_STRIDES));
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_uid(K_WGRAD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_WGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_WGRAD_TENSOR_DY_STRIDES));
 
@@ -82,7 +82,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
     convAttrs.set_dilation(toVec(K_WGRAD_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-    auto dw = graph->conv_wgrad(dy, x, convAttrs);
+    const auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_dim(toVec(K_WGRAD_TENSOR_DW_DIMS));
     dw->set_uid(K_WGRAD_TENSOR_DW_UID).set_output(true).set_name("DW");
 
@@ -149,17 +149,17 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidWgradGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_AUTO_X_DIMS)).set_stride(toVec(K_AUTO_X_STRIDES));
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_AUTO_DY_DIMS)).set_stride(toVec(K_AUTO_DY_STRIDES));
 
@@ -168,7 +168,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedI
     convAttrs.set_stride(toVec(K_AUTO_STRIDE));
     convAttrs.set_dilation(toVec(K_AUTO_DILATION));
 
-    auto dw = graph->conv_wgrad(dy, x, convAttrs);
+    const auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_dim(toVec(K_AUTO_DW_DIMS));
     dw->set_output(true);
 

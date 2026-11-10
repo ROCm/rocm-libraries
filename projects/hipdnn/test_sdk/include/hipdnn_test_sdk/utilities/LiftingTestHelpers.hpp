@@ -124,11 +124,11 @@ inline std::shared_ptr<TestableGraphLifting>
         .set_intermediate_data_type(intermediateType)
         .set_io_data_type(ioType);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
     w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
@@ -140,7 +140,7 @@ inline std::shared_ptr<TestableGraphLifting>
     convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     return graph;
@@ -157,7 +157,7 @@ inline void verifyTensorInGraph(
     const std::vector<int64_t>& expectedStrides,
     hipdnn_frontend::DataType expectedDataType)
 {
-    auto it = tensorMap.find(expectedUid);
+    const auto it = tensorMap.find(expectedUid);
     ASSERT_NE(it, tensorMap.end()) << "Tensor with UID " << expectedUid << " not found";
     const auto& tensor = it->second;
     EXPECT_EQ(tensor->get_name(), expectedName) << "Name mismatch for UID " << expectedUid;

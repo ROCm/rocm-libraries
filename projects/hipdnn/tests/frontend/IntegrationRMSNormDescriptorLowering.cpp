@@ -47,22 +47,22 @@ class IntegrationRMSNormDescriptorLowering : public IntegrationTestFixture
 // the values set in the frontend.
 TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestRMSNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RMSNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_RMSNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     RMSNormAttributes rmsnormAttrs;
@@ -147,22 +147,22 @@ TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidRMSNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("Epsilon");
 
     RMSNormAttributes rmsnormAttrs;
@@ -231,25 +231,25 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
 // Roundtrip with optional bias tensor set, verifying it appears in the serialized graph.
 TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormWithBiasRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("BiasRMSNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RMSNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_RMSNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_RMSNORM_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_RMSNORM_TENSOR_BIAS_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
@@ -294,22 +294,22 @@ TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormWithBiasRoundTrip)
 // Inference mode: inv_rms should not appear in the serialized graph.
 TEST_F(IntegrationRMSNormDescriptorLowering, InferenceModeOmitsInvRms)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("InferenceRMSNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RMSNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_RMSNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     RMSNormAttributes rmsnormAttrs;

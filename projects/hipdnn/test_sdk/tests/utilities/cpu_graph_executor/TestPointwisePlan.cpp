@@ -287,7 +287,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -296,7 +296,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -323,7 +323,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -332,7 +332,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -356,7 +356,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -365,7 +365,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -389,7 +389,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -398,7 +398,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -422,7 +422,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -431,7 +431,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -455,7 +455,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -496,7 +496,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableBinary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -530,7 +530,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGelu)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -567,7 +567,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGeluApproxTanh)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -604,7 +604,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnarySwish)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -641,7 +641,7 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -675,7 +675,7 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfEluAlphaValueSet)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -711,7 +711,7 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,

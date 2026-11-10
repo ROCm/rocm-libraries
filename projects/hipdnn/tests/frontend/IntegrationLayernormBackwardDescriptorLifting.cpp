@@ -46,19 +46,19 @@ protected:
         LayernormBackwardAttributes attrs;
         attrs.set_name("test_op");
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_LAYERNORMBACKWARD_TENSOR_DY_UID)
             .set_name("dy")
             .set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS))
             .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_LAYERNORMBACKWARD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS))
             .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID)
             .set_name("scale")
             .set_data_type(DataType::FLOAT);
@@ -111,9 +111,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationLayernormBackwardDescriptorLifting, BasicLayernormBackwardRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -227,9 +227,9 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, BasicLayernormBackwardRoun
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -279,9 +279,9 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardTensorSha
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -357,23 +357,23 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, AutoAssignedUidsPreservedI
     LayernormBackwardAttributes attrs;
     attrs.set_name("test_auto_uid");
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("LayernormBackwardAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS))
         .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
@@ -401,11 +401,11 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, AutoAssignedUidsPreservedI
     results[1]->set_output(true).set_name("dscale");
     results[2]->set_output(true).set_name("dbias");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 9u);
 
     // Verify all UIDs are distinct

@@ -19,19 +19,19 @@ TEST(TestGraphMoeGroupedMatmul, BuildGraph)
         .set_intermediate_data_type(DataType::FLOAT);
 
     // Create input tensors
-    auto token = std::make_shared<TensorAttributes>();
+    const auto token = std::make_shared<TensorAttributes>();
     token->set_dim({1, 8, 16}).set_stride({128, 16, 1}).set_data_type(DataType::FLOAT);
 
-    auto weight = std::make_shared<TensorAttributes>();
+    const auto weight = std::make_shared<TensorAttributes>();
     weight->set_dim({2, 16, 32}).set_stride({512, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto firstTokenOffset = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>();
     firstTokenOffset->set_dim({2, 1, 1}).set_stride({1, 1, 1}).set_data_type(DataType::INT32);
 
-    auto tokenIndex = std::make_shared<TensorAttributes>();
+    const auto tokenIndex = std::make_shared<TensorAttributes>();
     tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
 
-    auto tokenKs = std::make_shared<TensorAttributes>();
+    const auto tokenKs = std::make_shared<TensorAttributes>();
     tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
 
     // Create attributes
@@ -41,7 +41,7 @@ TEST(TestGraphMoeGroupedMatmul, BuildGraph)
     attributes.set_top_k(2);
 
     // Call graph method
-    auto output = graph.moe_grouped_matmul(
+    const auto output = graph.moe_grouped_matmul(
         token, weight, firstTokenOffset, tokenIndex, tokenKs, attributes);
 
     // Verify returned tensor is non-null
@@ -50,6 +50,6 @@ TEST(TestGraphMoeGroupedMatmul, BuildGraph)
     EXPECT_TRUE(output->get_is_virtual());
 
     // Verify graph validates successfully
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }

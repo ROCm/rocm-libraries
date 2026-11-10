@@ -112,12 +112,12 @@ TEST(TestRMSNormBwdSignatureKey, CreateFromNodeAndTensorMap)
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, dims, TensorLayout::NHWC);
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const RMSNormBwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());

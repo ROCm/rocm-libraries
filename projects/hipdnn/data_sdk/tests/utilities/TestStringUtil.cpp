@@ -14,9 +14,9 @@ TEST_F(TestStringUtil, Fnv1aHashDeterministicBehavior)
 {
     // Same input should always produce the same output
     const char* testString = "MIOPEN_PLUGIN";
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
-    auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
+    const auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash(testString);
 
     EXPECT_EQ(hash1, hash2);
     EXPECT_EQ(hash2, hash3);
@@ -36,7 +36,7 @@ TEST_F(TestStringUtil, Fnv1aHashDifferentStringsDifferentHashes)
     std::unordered_set<uint64_t> hashes;
     for(const auto& str : testStrings)
     {
-        auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
+        const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
         // Check for uniqueness
         EXPECT_TRUE(hashes.insert(hash).second) << "Collision detected for string: " << str;
     }
@@ -46,14 +46,14 @@ TEST_F(TestStringUtil, Fnv1aHashHandlesNullPointer)
 {
     // Null pointer should return 0
     const char* nullStr = nullptr;
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(nullStr);
+    const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(nullStr);
     EXPECT_EQ(hash, 0u);
 }
 
 TEST_F(TestStringUtil, Fnv1aHashHandlesEmptyString)
 {
     // Empty string should return 0
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash("");
+    const auto hash = hipdnn_data_sdk::utilities::fnv1aHash("");
     EXPECT_EQ(hash, 0u);
 }
 
@@ -63,9 +63,9 @@ TEST_F(TestStringUtil, Fnv1aHashStringOverloadsConsistent)
     const std::string stdStr = "TEST_STRING";
     const std::string_view strView = "TEST_STRING";
 
-    auto hashCStr = hipdnn_data_sdk::utilities::fnv1aHash(cStr);
-    auto hashStdStr = hipdnn_data_sdk::utilities::fnv1aHash(stdStr);
-    auto hashStrView = hipdnn_data_sdk::utilities::fnv1aHash(strView);
+    const auto hashCStr = hipdnn_data_sdk::utilities::fnv1aHash(cStr);
+    const auto hashStdStr = hipdnn_data_sdk::utilities::fnv1aHash(stdStr);
+    const auto hashStrView = hipdnn_data_sdk::utilities::fnv1aHash(strView);
 
     EXPECT_EQ(hashCStr, hashStdStr);
     EXPECT_EQ(hashStdStr, hashStrView);
@@ -77,13 +77,13 @@ TEST_F(TestStringUtil, Fnv1aHashLongStringHandling)
     std::string longStr(1000, 'A');
     longStr += "_SUFFIX";
 
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(longStr);
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(longStr);
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(longStr);
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(longStr);
 
     EXPECT_EQ(hash1, hash2); // Still deterministic
 
     // Should be different from a shorter string
-    auto hashShort = hipdnn_data_sdk::utilities::fnv1aHash("A_SUFFIX");
+    const auto hashShort = hipdnn_data_sdk::utilities::fnv1aHash("A_SUFFIX");
     EXPECT_NE(hash1, hashShort);
 }
 
@@ -110,7 +110,7 @@ TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
     std::unordered_set<uint64_t> hashes;
     for(const auto& str : specialStrings)
     {
-        auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
+        const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
         // Each should produce a unique hash
         EXPECT_TRUE(hashes.insert(hash).second) << "Collision detected for: " << str;
     }
@@ -119,9 +119,9 @@ TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
 TEST_F(TestStringUtil, Fnv1aHashCaseSensitivity)
 {
     // Hash should be case-sensitive
-    auto hashLower = hipdnn_data_sdk::utilities::fnv1aHash("test_string");
-    auto hashUpper = hipdnn_data_sdk::utilities::fnv1aHash("TEST_STRING");
-    auto hashMixed = hipdnn_data_sdk::utilities::fnv1aHash("Test_String");
+    const auto hashLower = hipdnn_data_sdk::utilities::fnv1aHash("test_string");
+    const auto hashUpper = hipdnn_data_sdk::utilities::fnv1aHash("TEST_STRING");
+    const auto hashMixed = hipdnn_data_sdk::utilities::fnv1aHash("Test_String");
 
     EXPECT_NE(hashLower, hashUpper);
     EXPECT_NE(hashUpper, hashMixed);
@@ -131,10 +131,10 @@ TEST_F(TestStringUtil, Fnv1aHashCaseSensitivity)
 TEST_F(TestStringUtil, Fnv1aHashSimilarStringsProduceDifferentHashes)
 {
     // Test that similar strings still produce different hashes
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V1");
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V2");
-    auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V11");
-    auto hash4 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V21");
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V1");
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V2");
+    const auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V11");
+    const auto hash4 = hipdnn_data_sdk::utilities::fnv1aHash("STRING_V21");
 
     EXPECT_NE(hash1, hash2);
     EXPECT_NE(hash1, hash3);
@@ -147,8 +147,8 @@ TEST_F(TestStringUtil, Fnv1aHashSimilarStringsProduceDifferentHashes)
 TEST_F(TestStringUtil, Fnv1aHashKnownValues)
 {
     // Test that known strings produce consistent values
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash("MIOPEN_PLUGIN");
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash("VENDOR_FAST_CONV");
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash("MIOPEN_PLUGIN");
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash("VENDOR_FAST_CONV");
 
     // Just verify they're non-zero and different from each other
     EXPECT_NE(hash1, 0u);
@@ -159,8 +159,8 @@ TEST_F(TestStringUtil, Fnv1aHashKnownValues)
 TEST_F(TestStringUtil, Fnv1aHashBinaryDeterministicBehavior)
 {
     std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04, 0x05};
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
 
     EXPECT_EQ(hash1, hash2);
     EXPECT_NE(hash1, 0u);
@@ -168,14 +168,15 @@ TEST_F(TestStringUtil, Fnv1aHashBinaryDeterministicBehavior)
 
 TEST_F(TestStringUtil, Fnv1aHashBinaryHandlesNullPointer)
 {
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(static_cast<const uint8_t*>(nullptr), 10);
+    const auto hash
+        = hipdnn_data_sdk::utilities::fnv1aHash(static_cast<const uint8_t*>(nullptr), 10);
     EXPECT_EQ(hash, 0u);
 }
 
 TEST_F(TestStringUtil, Fnv1aHashBinaryHandlesZeroSize)
 {
     std::vector<uint8_t> data = {0x01};
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), 0);
+    const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), 0);
     EXPECT_EQ(hash, 0u);
 }
 
@@ -185,9 +186,9 @@ TEST_F(TestStringUtil, Fnv1aHashBinaryDifferentDataDifferentHashes)
     std::vector<uint8_t> data2 = {0x01, 0x02, 0x04};
     std::vector<uint8_t> data3 = {0x01, 0x02};
 
-    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data1.data(), data1.size());
-    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data2.data(), data2.size());
-    auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash(data3.data(), data3.size());
+    const auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data1.data(), data1.size());
+    const auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data2.data(), data2.size());
+    const auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash(data3.data(), data3.size());
 
     EXPECT_NE(hash1, hash2);
     EXPECT_NE(hash1, hash3);
@@ -199,9 +200,9 @@ TEST_F(TestStringUtil, Fnv1aHashBinaryConsistentWithStringForAscii)
     // For ASCII data, the binary overload should produce the same hash as the string overload
     // since both iterate byte-by-byte with the same algorithm
     const char* testStr = "hello";
-    auto hashStr = hipdnn_data_sdk::utilities::fnv1aHash(testStr);
-    auto hashBin = hipdnn_data_sdk::utilities::fnv1aHash(reinterpret_cast<const uint8_t*>(testStr),
-                                                         std::strlen(testStr));
+    const auto hashStr = hipdnn_data_sdk::utilities::fnv1aHash(testStr);
+    const auto hashBin = hipdnn_data_sdk::utilities::fnv1aHash(
+        reinterpret_cast<const uint8_t*>(testStr), std::strlen(testStr));
 
     EXPECT_EQ(hashStr, hashBin);
 }

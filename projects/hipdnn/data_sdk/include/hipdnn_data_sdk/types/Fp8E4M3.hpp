@@ -149,7 +149,7 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
     if(exp <= 0)
     {
         mant |= 0x00800000; // Add implicit 1
-        auto shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
+        const auto shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
         if(shift > 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero

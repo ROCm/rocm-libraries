@@ -57,7 +57,7 @@ flatbuffers::FlatBufferBuilder makeRaggedGraph(DataType dataType)
 // The ragged bf16 graph with Q's ragged_offset removed: K, V and O stay ragged.
 flatbuffers::FlatBufferBuilder makeGraphWithDenseQ()
 {
-    auto ragged = makeRaggedGraph(DataType::BFLOAT16);
+    const auto ragged = makeRaggedGraph(DataType::BFLOAT16);
     auto graph = UnPackGraph(ragged.GetBufferPointer());
     for(auto& tensor : graph->tensors)
     {
@@ -105,8 +105,8 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, HashFunction)
 
 TEST(TestGpuSdpaRaggedFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    auto graphBuilder = makeRaggedGraph(DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeRaggedGraph(DataType::BFLOAT16);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaRaggedFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -122,12 +122,12 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, ExecutorRoutesRaggedBf16NodeToRaggedPlan)
 {
     using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
 
-    auto raggedBuilder = makeRaggedGraph(DataType::BFLOAT16);
+    const auto raggedBuilder = makeRaggedGraph(DataType::BFLOAT16);
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize()));
 
     // Same shape/dtype but no ragged_offset: a dense node, handled by the dense plan.
-    auto denseBuilder = createSdpaFwdGraph(
+    const auto denseBuilder = createSdpaFwdGraph(
         Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::BFLOAT16);
     EXPECT_TRUE(executor.isApplicable(denseBuilder.GetBufferPointer(), denseBuilder.GetSize()));
 }
@@ -135,8 +135,8 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, ExecutorRoutesRaggedBf16NodeToRaggedPlan)
 // The dense plan must not take a ragged node, or it would read packed data as dense.
 TEST(TestGpuSdpaRaggedFwdSignatureKey, DensePlanRejectsRaggedNode)
 {
-    auto graphBuilder = makeRaggedGraph(DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeRaggedGraph(DataType::BFLOAT16);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
                                 DataType::BFLOAT16,
@@ -151,7 +151,7 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, ExecutorRejectsPartlyRaggedNode)
 {
     using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
 
-    auto graphBuilder = makeGraphWithDenseQ();
+    const auto graphBuilder = makeGraphWithDenseQ();
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
 }
@@ -170,20 +170,20 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, Fp8NodeKeyAndRouting)
     options.descaleK = FloatOperandSpec{DESCALE_K_UID};
     options.descaleV = FloatOperandSpec{DESCALE_V_UID};
     options.oDataType = DataType::BFLOAT16;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 /*batch=*/1,
-                                                 DIMS,
-                                                 DIMS,
-                                                 DIMS,
-                                                 DIMS,
-                                                 DataType::FP8_E4M3,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       /*batch=*/1,
+                                                       DIMS,
+                                                       DIMS,
+                                                       DIMS,
+                                                       DIMS,
+                                                       DataType::FP8_E4M3,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaRaggedFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());

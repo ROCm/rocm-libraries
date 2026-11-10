@@ -125,8 +125,8 @@ protected:
 
 TEST_F(TestLayernormOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -136,16 +136,16 @@ TEST_F(TestLayernormOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestLayernormOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::LayernormAttributes);
-    auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     EXPECT_EQ(desc->getData().x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
@@ -164,8 +164,8 @@ TEST_F(TestLayernormOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestLayernormOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -176,7 +176,7 @@ TEST_F(TestLayernormOperationFromNode, PreservesForwardPhase)
     auto attrs = createStandardLayernormAttrs();
     attrs.forward_phase = NormFwdPhase::INFERENCE;
     node.attributes.Set(attrs);
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().forward_phase, NormFwdPhase::INFERENCE);
 }
@@ -187,15 +187,15 @@ TEST_F(TestLayernormOperationFromNode, PreservesNormalizedDimCount)
     auto attrs = createStandardLayernormAttrs();
     attrs.normalized_dim_count = 2;
     node.attributes.Set(attrs);
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().normalized_dim_count, 2);
 }
 
 TEST_F(TestLayernormOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_LAYERNORM_TENSOR_X_UID);
@@ -215,8 +215,8 @@ TEST_F(TestLayernormOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestLayernormOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_LAYERNORM_TENSOR_X_UID]);
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_LAYERNORM_TENSOR_SCALE_UID]);
@@ -230,7 +230,7 @@ TEST_F(TestLayernormOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestLayernormOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -239,7 +239,7 @@ TEST_F(TestLayernormOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestLayernormOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -248,7 +248,7 @@ TEST_F(TestLayernormOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestLayernormOperationFromNode, FailsWithMissingBiasTensor)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_BIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -257,7 +257,7 @@ TEST_F(TestLayernormOperationFromNode, FailsWithMissingBiasTensor)
 TEST_F(TestLayernormOperationFromNode, FailsWithMissingEpsilonTensor)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_EPSILON_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -266,7 +266,7 @@ TEST_F(TestLayernormOperationFromNode, FailsWithMissingEpsilonTensor)
 TEST_F(TestLayernormOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -282,7 +282,7 @@ TEST_F(TestLayernormOperationFromNode, SucceedsWithoutOptionalTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -293,7 +293,7 @@ TEST_F(TestLayernormOperationFromNode, SucceedsWithoutOptionalTensors)
 TEST_F(TestLayernormOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -302,7 +302,7 @@ TEST_F(TestLayernormOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissi
 TEST_F(TestLayernormOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -310,8 +310,8 @@ TEST_F(TestLayernormOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTens
 
 TEST_F(TestLayernormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     // 5 required + 2 optional = 7
@@ -327,8 +327,8 @@ TEST_F(TestLayernormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestLayernormOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -352,8 +352,8 @@ TEST_F(TestLayernormOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestLayernormOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -428,7 +428,7 @@ TEST_F(TestLayernormOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_layernorm_1";
 
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -443,8 +443,8 @@ TEST_F(TestLayernormOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestLayernormOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -456,7 +456,7 @@ TEST_F(TestLayernormOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

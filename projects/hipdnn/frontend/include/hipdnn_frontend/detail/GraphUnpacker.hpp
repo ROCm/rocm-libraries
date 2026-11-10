@@ -113,7 +113,7 @@ namespace hipdnn_frontend::detail
     // Query preferred engine ID (optional, may not be set)
     int64_t preferredEngineId = 0;
     int64_t actualCount = 0;
-    auto status
+    const auto status
         = hipdnnBackend()->backendGetAttribute(graphDesc,
                                                HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT,
                                                HIPDNN_TYPE_INT64,
@@ -127,7 +127,7 @@ namespace hipdnn_frontend::detail
 
     bool isOverrideShapeEnabled = false;
     int64_t overrideFlagCount = 0;
-    auto overrideStatus = hipdnnBackend()->backendGetAttribute(
+    const auto overrideStatus = hipdnnBackend()->backendGetAttribute(
         graphDesc,
         HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
         HIPDNN_TYPE_BOOLEAN,
@@ -187,7 +187,7 @@ namespace hipdnn_frontend::detail
         }
     }
 
-    auto unpackErr = unpackGraphDescriptor(
+    const auto unpackErr = unpackGraphDescriptor(
         graphDesc.get(), outNodes, outGraphAttrs, outPreferredEngineId, outIsOverrideShapeEnabled);
     if(unpackErr.is_bad())
     {

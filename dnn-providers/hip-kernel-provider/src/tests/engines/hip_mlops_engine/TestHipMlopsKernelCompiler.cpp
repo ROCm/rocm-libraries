@@ -25,10 +25,10 @@ TEST(TestHipMlopsKernelCompiler, ValidParams)
     SKIP_IF_NO_DEVICES();
 
     const HipMlopsKernelCompiler compiler;
-    auto& cache = HipMlopsKernelCompiler::moduleCache();
+    auto const& cache = HipMlopsKernelCompiler::moduleCache();
     EXPECT_EQ(cache.size(), 0);
 
-    auto result = compiler.compile("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    auto const result = compiler.compile("vector_add.cpp", {"-O3", "-DFLOAT=float"});
     EXPECT_NE(result, nullptr);
 
     EXPECT_EQ(cache.size(), 1);

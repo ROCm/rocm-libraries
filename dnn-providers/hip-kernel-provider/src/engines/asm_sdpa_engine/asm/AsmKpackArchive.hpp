@@ -112,14 +112,14 @@ private:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        auto it = _archives.find(arch);
+        auto const it = _archives.find(arch);
         if(it != _archives.end())
         {
             return it->second;
         }
 
-        auto kpackPath = currentPluginDirectory() / "arch_content" / "asm_sdpa" / arch
-                         / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
+        auto const kpackPath = currentPluginDirectory() / "arch_content" / "asm_sdpa" / arch
+                               / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
 
         kpack_archive_t archive = nullptr;
         const kpack_error_t err = kpack_open(kpackPath.string().c_str(), &archive);

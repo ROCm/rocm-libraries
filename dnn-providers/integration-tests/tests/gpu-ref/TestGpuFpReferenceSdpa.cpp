@@ -1785,8 +1785,8 @@ TEST_P(TestGpuSdpaFwdPagedFp32, MatchesCpuReference)
     seqLenKv.memory().hostData();
     pageTable.memory().hostData();
 
-    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
-    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
+    const auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
+    const auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
     Tensor<float> oCpu({BATCH, H, SQ, D});
     Tensor<float> oGpu({BATCH, H, SQ, D});
     Tensor<float> lseCpu({BATCH, H, SQ, 1});

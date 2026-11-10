@@ -40,25 +40,25 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_BN_BWD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
         scale->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto mean = std::make_shared<TensorAttributes>();
+        const auto mean = std::make_shared<TensorAttributes>();
         mean->set_uid(K_BN_BWD_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
         mean->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto invVar = std::make_shared<TensorAttributes>();
+        const auto invVar = std::make_shared<TensorAttributes>();
         invVar->set_uid(K_BN_BWD_TENSOR_INV_VARIANCE_UID)
             .set_name("InvVariance")
             .set_data_type(DataType::FLOAT);
@@ -86,39 +86,39 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_BN_BWD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
         scale->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto mean = std::make_shared<TensorAttributes>();
+        const auto mean = std::make_shared<TensorAttributes>();
         mean->set_uid(K_BN_BWD_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
         mean->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto invVar = std::make_shared<TensorAttributes>();
+        const auto invVar = std::make_shared<TensorAttributes>();
         invVar->set_uid(K_BN_BWD_TENSOR_INV_VARIANCE_UID)
             .set_name("InvVariance")
             .set_data_type(DataType::FLOAT);
         invVar->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto peerStat0 = std::make_shared<TensorAttributes>();
+        const auto peerStat0 = std::make_shared<TensorAttributes>();
         peerStat0->set_uid(K_BN_BWD_TENSOR_PEER_STAT_0_UID)
             .set_name("PeerStat0")
             .set_data_type(DataType::FLOAT);
         peerStat0->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
-        auto peerStat1 = std::make_shared<TensorAttributes>();
+        const auto peerStat1 = std::make_shared<TensorAttributes>();
         peerStat1->set_uid(K_BN_BWD_TENSOR_PEER_STAT_1_UID)
             .set_name("PeerStat1")
             .set_data_type(DataType::FLOAT);
@@ -147,15 +147,15 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_BN_BWD_MINIMAL_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_MINIMAL_TENSOR_SCALE_UID)
             .set_name("Scale")
             .set_data_type(DataType::FLOAT);
@@ -179,9 +179,9 @@ protected:
 // and validates all tensors and operation attributes.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoundTrip)
 {
-    auto originalGraph = buildBatchnormBackwardGraph();
+    const auto originalGraph = buildBatchnormBackwardGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -197,7 +197,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // DY tensor
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DY_UID), 0u);
-    auto liftedDy = tensorMap[K_BN_BWD_TENSOR_DY_UID];
+    const auto liftedDy = tensorMap[K_BN_BWD_TENSOR_DY_UID];
     EXPECT_EQ(liftedDy->get_uid(), K_BN_BWD_TENSOR_DY_UID);
     EXPECT_EQ(liftedDy->get_name(), "DY");
     EXPECT_EQ(liftedDy->get_dim(), toVec(K_BN_BWD_TENSOR_DY_DIMS));
@@ -206,7 +206,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // X tensor
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_BN_BWD_TENSOR_X_UID];
+    const auto liftedX = tensorMap[K_BN_BWD_TENSOR_X_UID];
     EXPECT_EQ(liftedX->get_uid(), K_BN_BWD_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
     EXPECT_EQ(liftedX->get_dim(), toVec(K_BN_BWD_TENSOR_X_DIMS));
@@ -215,7 +215,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // Scale tensor
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_SCALE_UID), 0u);
-    auto liftedScale = tensorMap[K_BN_BWD_TENSOR_SCALE_UID];
+    const auto liftedScale = tensorMap[K_BN_BWD_TENSOR_SCALE_UID];
     EXPECT_EQ(liftedScale->get_uid(), K_BN_BWD_TENSOR_SCALE_UID);
     EXPECT_EQ(liftedScale->get_name(), "Scale");
     EXPECT_EQ(liftedScale->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
@@ -224,7 +224,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // Mean tensor (optional, set in this graph)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_MEAN_UID), 0u);
-    auto liftedMean = tensorMap[K_BN_BWD_TENSOR_MEAN_UID];
+    const auto liftedMean = tensorMap[K_BN_BWD_TENSOR_MEAN_UID];
     EXPECT_EQ(liftedMean->get_uid(), K_BN_BWD_TENSOR_MEAN_UID);
     EXPECT_EQ(liftedMean->get_name(), "Mean");
     EXPECT_EQ(liftedMean->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
@@ -233,7 +233,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // InvVariance tensor (optional, set in this graph)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_INV_VARIANCE_UID), 0u);
-    auto liftedInvVar = tensorMap[K_BN_BWD_TENSOR_INV_VARIANCE_UID];
+    const auto liftedInvVar = tensorMap[K_BN_BWD_TENSOR_INV_VARIANCE_UID];
     EXPECT_EQ(liftedInvVar->get_uid(), K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(liftedInvVar->get_name(), "InvVariance");
     EXPECT_EQ(liftedInvVar->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
@@ -242,7 +242,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // DX tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DX_UID), 0u);
-    auto liftedDx = tensorMap[K_BN_BWD_TENSOR_DX_UID];
+    const auto liftedDx = tensorMap[K_BN_BWD_TENSOR_DX_UID];
     EXPECT_EQ(liftedDx->get_uid(), K_BN_BWD_TENSOR_DX_UID);
     EXPECT_EQ(liftedDx->get_name(), "DX");
     EXPECT_EQ(liftedDx->get_dim(), toVec(K_BN_BWD_TENSOR_DX_DIMS));
@@ -251,7 +251,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // DScale tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DSCALE_UID), 0u);
-    auto liftedDscale = tensorMap[K_BN_BWD_TENSOR_DSCALE_UID];
+    const auto liftedDscale = tensorMap[K_BN_BWD_TENSOR_DSCALE_UID];
     EXPECT_EQ(liftedDscale->get_uid(), K_BN_BWD_TENSOR_DSCALE_UID);
     EXPECT_EQ(liftedDscale->get_name(), "DScale");
     EXPECT_EQ(liftedDscale->get_dim(), toVec(K_BN_BWD_TENSOR_DSCALE_DIMS));
@@ -260,7 +260,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // DBias tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DBIAS_UID), 0u);
-    auto liftedDbias = tensorMap[K_BN_BWD_TENSOR_DBIAS_UID];
+    const auto liftedDbias = tensorMap[K_BN_BWD_TENSOR_DBIAS_UID];
     EXPECT_EQ(liftedDbias->get_uid(), K_BN_BWD_TENSOR_DBIAS_UID);
     EXPECT_EQ(liftedDbias->get_name(), "DBias");
     EXPECT_EQ(liftedDbias->get_dim(), toVec(K_BN_BWD_TENSOR_DBIAS_DIMS));
@@ -284,9 +284,9 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 // Verifies tensor pointer sharing is preserved after lifting.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardTensorSharingPreserved)
 {
-    auto originalGraph = buildBatchnormBackwardGraph();
+    const auto originalGraph = buildBatchnormBackwardGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -312,9 +312,9 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardTensorSha
 // Serializes to binary (FlatBuffer path), lifts without finalization, and verifies all fields.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWithoutFinalization)
 {
-    auto originalGraph = buildBatchnormBackwardGraph();
+    const auto originalGraph = buildBatchnormBackwardGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -372,12 +372,12 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWitho
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting,
        BatchnormBackwardMinimalRequiredTensorsRoundTrip)
 {
-    auto originalGraph = buildMinimalBatchnormBackwardGraph();
+    const auto originalGraph = buildMinimalBatchnormBackwardGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     // dy, x, scale, dx, dscale, dbias = 6 (no mean/invVariance)
     ASSERT_EQ(tensorMap.size(), 6u)
         << "Expected 6 tensors in minimal lifted graph (no "
@@ -404,9 +404,9 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting,
 // and verifies peer_stats appear in the lifted tensor map and node attributes.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStatsPreserved)
 {
-    auto originalGraph = buildBatchnormBackwardGraphWithPeerStats();
+    const auto originalGraph = buildBatchnormBackwardGraphWithPeerStats();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensor map includes the 2 peer_stats tensors (8 base + 2 peer = 10)
@@ -416,7 +416,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
 
     // Verify peer_stats tensors appear in the tensor map with correct UIDs, names, dims, strides
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_PEER_STAT_0_UID), 0u);
-    auto liftedPeerStat0 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_0_UID];
+    const auto liftedPeerStat0 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_0_UID];
     EXPECT_EQ(liftedPeerStat0->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStat0->get_name(), "PeerStat0");
     EXPECT_EQ(liftedPeerStat0->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
@@ -424,7 +424,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
     EXPECT_EQ(liftedPeerStat0->get_data_type(), DataType::FLOAT);
 
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_PEER_STAT_1_UID), 0u);
-    auto liftedPeerStat1 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_1_UID];
+    const auto liftedPeerStat1 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_1_UID];
     EXPECT_EQ(liftedPeerStat1->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_1_UID);
     EXPECT_EQ(liftedPeerStat1->get_name(), "PeerStat1");
     EXPECT_EQ(liftedPeerStat1->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
@@ -456,22 +456,22 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
 // and verifies all auto-assigned UIDs are distinct and tensor dims survive.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssignedUidsPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidBnBwdLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Build tensors with distinct dims but NO set_uid() calls
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_BN_BWD_AUTO_DATA_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_DATA_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BN_BWD_AUTO_DATA_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_DATA_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BN_BWD_AUTO_PARAM_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_PARAM_STRIDES));
 
@@ -483,7 +483,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     dscaleOut->set_output(true).set_name("DScale");
     dbiasOut->set_output(true).set_name("DBias");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -510,9 +510,9 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     ASSERT_NE(bnBwdNode, nullptr);
 
     // Verify tensor dims survived the round trip by identifying tensors via dims
-    auto dyUid = bnBwdNode->attributes.get_dy()->get_uid();
-    auto scaleUid = bnBwdNode->attributes.get_scale()->get_uid();
-    auto dxUid = bnBwdNode->attributes.get_dx()->get_uid();
+    const auto dyUid = bnBwdNode->attributes.get_dy()->get_uid();
+    const auto scaleUid = bnBwdNode->attributes.get_scale()->get_uid();
+    const auto dxUid = bnBwdNode->attributes.get_dx()->get_uid();
 
     EXPECT_NE(dyUid, scaleUid);
     EXPECT_NE(dyUid, dxUid);
@@ -529,7 +529,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
 // for a batchnorm backward graph with optional mean/invVariance.
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
 {
-    auto originalGraph = buildBatchnormBackwardGraph();
+    const auto originalGraph = buildBatchnormBackwardGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -541,7 +541,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_FALSE(jsonData.empty());
 
     // Deserialize from JSON with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -552,7 +552,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     // Verify tensor count (dy, x, scale, mean, invVar, dx, dscale, dbias = 8)
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted batchnorm backward graph";
 
     // Verify tensors

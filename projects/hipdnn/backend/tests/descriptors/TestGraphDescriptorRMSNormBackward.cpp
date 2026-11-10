@@ -47,7 +47,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                      const std::string& name = "")
 {
     auto wrapper = createDescriptor<RMSNormBackwardOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<RMSNormBackwardOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<RMSNormBackwardOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -102,7 +102,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -155,36 +155,36 @@ protected:
 
 TEST_F(TestGraphDescriptorRMSNormBackward, BuildFromSingleOperation)
 {
-    auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
-                                                   xDesc.get(),
-                                                   scaleDesc.get(),
-                                                   invRmsDesc.get(),
-                                                   dxDesc.get(),
-                                                   dscaleDesc.get(),
-                                                   dbiasDesc.get());
+    const auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
+                                                         xDesc.get(),
+                                                         scaleDesc.get(),
+                                                         invRmsDesc.get(),
+                                                         dxDesc.get(),
+                                                         dscaleDesc.get(),
+                                                         dbiasDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -195,7 +195,7 @@ TEST_F(TestGraphDescriptorRMSNormBackward, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -266,37 +266,37 @@ TEST_F(TestGraphDescriptorRMSNormBackward, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorRMSNormBackward, ComputeDataTypePreserved)
 {
-    auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
-                                                   xDesc.get(),
-                                                   scaleDesc.get(),
-                                                   invRmsDesc.get(),
-                                                   dxDesc.get(),
-                                                   dscaleDesc.get(),
-                                                   dbiasDesc.get(),
-                                                   HIPDNN_DATA_HALF);
+    const auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
+                                                         xDesc.get(),
+                                                         scaleDesc.get(),
+                                                         invRmsDesc.get(),
+                                                         dxDesc.get(),
+                                                         dscaleDesc.get(),
+                                                         dbiasDesc.get(),
+                                                         HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -306,7 +306,7 @@ TEST_F(TestGraphDescriptorRMSNormBackward, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -315,38 +315,38 @@ TEST_F(TestGraphDescriptorRMSNormBackward, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorRMSNormBackward, OperationNamePreservedInSerialization)
 {
-    auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
-                                                   xDesc.get(),
-                                                   scaleDesc.get(),
-                                                   invRmsDesc.get(),
-                                                   dxDesc.get(),
-                                                   dscaleDesc.get(),
-                                                   dbiasDesc.get(),
-                                                   HIPDNN_DATA_FLOAT,
-                                                   "test_rmsnormbackward_name");
+    const auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
+                                                         xDesc.get(),
+                                                         scaleDesc.get(),
+                                                         invRmsDesc.get(),
+                                                         dxDesc.get(),
+                                                         dscaleDesc.get(),
+                                                         dbiasDesc.get(),
+                                                         HIPDNN_DATA_FLOAT,
+                                                         "test_rmsnormbackward_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -356,7 +356,7 @@ TEST_F(TestGraphDescriptorRMSNormBackward, OperationNamePreservedInSerialization
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -365,38 +365,38 @@ TEST_F(TestGraphDescriptorRMSNormBackward, OperationNamePreservedInSerialization
 
 TEST_F(TestGraphDescriptorRMSNormBackward, OperationNameRoundTripThroughLifting)
 {
-    auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
-                                                   xDesc.get(),
-                                                   scaleDesc.get(),
-                                                   invRmsDesc.get(),
-                                                   dxDesc.get(),
-                                                   dscaleDesc.get(),
-                                                   dbiasDesc.get(),
-                                                   HIPDNN_DATA_FLOAT,
-                                                   "test_rmsnormbackward_lifting");
+    const auto dyDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_RMSNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedRMSNormBackwardOp(dyDesc.get(),
+                                                         xDesc.get(),
+                                                         scaleDesc.get(),
+                                                         invRmsDesc.get(),
+                                                         dxDesc.get(),
+                                                         dscaleDesc.get(),
+                                                         dbiasDesc.get(),
+                                                         HIPDNN_DATA_FLOAT,
+                                                         "test_rmsnormbackward_lifting");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -407,13 +407,13 @@ TEST_F(TestGraphDescriptorRMSNormBackward, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -424,7 +424,7 @@ TEST_F(TestGraphDescriptorRMSNormBackward, OperationNameRoundTripThroughLifting)
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

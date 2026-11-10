@@ -30,7 +30,7 @@ GraphSession
     const std::vector<uint8_t> graphBytes(bundle.graphBuffer.data(),
                                           bundle.graphBuffer.data() + bundle.graphBuffer.size());
 
-    if(auto err = session.graph->from_binary(handle, graphBytes); !err.is_good())
+    if(const auto err = session.graph->from_binary(handle, graphBytes); !err.is_good())
     {
         session.buildFailed = true;
         session.buildError = err.get_message();
@@ -130,7 +130,7 @@ EngineOpResult
                 return EngineOpResult::failed(error);
             }
 
-            if(auto status = graph.execute(handle, variantPack, workspace->get());
+            if(const auto status = graph.execute(handle, variantPack, workspace->get());
                !status.is_good())
             {
                 return EngineOpResult::failed(status.get_message());

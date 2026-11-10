@@ -36,7 +36,7 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
 {
     // Get the kernel source by name — convert to std::string for null-terminated c_str(),
     // since hiprtcCreateProgram requires null-terminated C strings.
-    auto kernelSrc = std::string(hipdnn_gpu_ref::getGpuRefKernelSrc(sourceName.c_str()));
+    const auto kernelSrc = std::string(hipdnn_gpu_ref::getGpuRefKernelSrc(sourceName.c_str()));
 
     // Get include headers — likewise convert string_views to strings for null termination.
     std::vector<std::string_view> includeTexts;
@@ -70,7 +70,8 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
         optPtrs.push_back(def.c_str());
     }
 
-    auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
+    const auto result
+        = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)
     {
         size_t logSize = 0;
@@ -106,7 +107,7 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
 
     // Manual error check (instead of GPU_REF_HIP_CHECK) because module must be
     // unloaded before throwing to avoid memory leak.
-    auto funcResult = hipModuleGetFunction(&_function, _module, functionName.c_str());
+    const auto funcResult = hipModuleGetFunction(&_function, _module, functionName.c_str());
     if(funcResult != hipSuccess)
     {
         static_cast<void>(hipModuleUnload(_module));
@@ -140,21 +141,21 @@ const CompiledKernel&
     {
         if(i > 0)
         {
-            key += ",";
+            key += ',';
         }
         key += compileDefines[i];
     }
     key += "::" + functionName;
 
     const std::lock_guard<std::mutex> lock(_mutex);
-    auto it = _cache.find(key);
+    const auto it = _cache.find(key);
     if(it != _cache.end())
     {
         return *it->second;
     }
 
     auto kernel = std::make_unique<CompiledKernel>(sourceName, compileDefines, functionName);
-    auto& ref = *kernel;
+    const auto& ref = *kernel;
     _cache.emplace(std::move(key), std::move(kernel));
     return ref;
 }

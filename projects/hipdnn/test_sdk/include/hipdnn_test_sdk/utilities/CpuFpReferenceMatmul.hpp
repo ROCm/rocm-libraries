@@ -37,7 +37,7 @@ public:
         const auto rank = static_cast<int64_t>(cDims.size());
         const auto batchDims = rank - static_cast<int64_t>(K_BATCH_IDX);
 
-        auto matmulFunc = [&](const std::vector<int64_t>& indices) {
+        const auto matmulFunc = [&](const std::vector<int64_t>& indices) {
             // C dims: [...batch..., M, N]
             const int64_t m = *(indices.rbegin() + K_M_IDX);
             const int64_t n = *(indices.rbegin() + K_N_IDX);
@@ -80,7 +80,7 @@ public:
             c.setHostValue(hipdnn_test_sdk::detail::safeConvert<CDataType>(acc), indices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(matmulFunc, c.dims());
         parallelFunc(std::thread::hardware_concurrency());
 

@@ -62,7 +62,7 @@ void BundleReferenceValidationHarness::SetUp()
 
 OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
-    auto wrapper = _bundle->graphWrapper();
+    const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
         wrapper.getTensorMap(),
         _bundle->outputTensorUids,
@@ -82,7 +82,7 @@ bool BundleReferenceValidationHarness::useDevice() const
 std::unordered_map<int64_t, void*>
     BundleReferenceValidationHarness::buildVariantPack(OutputTensors& outputs)
 {
-    auto wrapper = _bundle->graphWrapper();
+    const auto wrapper = _bundle->graphWrapper();
     return detail::buildVariantPack(
         _tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice());
 }

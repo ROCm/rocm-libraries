@@ -18,13 +18,13 @@ TEST(TestResampleBwdAttributes, CreateResampleBwdAttributes)
     ResampleBwdAttributes attrs;
 
     // Set all tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(50);
     attrs.set_dy(dyTensor);
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_uid(52);
     attrs.set_index(indexTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(51);
     attrs.set_dx(dxTensor);
 
@@ -87,7 +87,7 @@ TEST(TestResampleBwdAttributes, SetDyMove)
     EXPECT_EQ(dyTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_dy();
+    const auto retrievedTensor = attrs.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -109,7 +109,7 @@ TEST(TestResampleBwdAttributes, SetIndexMove)
     EXPECT_EQ(indexTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_index();
+    const auto retrievedTensor = attrs.get_index();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -129,7 +129,7 @@ TEST(TestResampleBwdAttributes, SetDxMove)
     EXPECT_EQ(dxTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_dx();
+    const auto retrievedTensor = attrs.get_dx();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -178,11 +178,11 @@ TEST(TestResampleBwdAttributes, SetTensorsConstRef)
     ResampleBwdAttributes attrs;
 
     // Create tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(50).set_name("DyConstRef");
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_uid(52).set_name("IndexConstRef");
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(51).set_name("DxConstRef");
 
     // Set using const reference (copy)
@@ -207,11 +207,11 @@ TEST(TestResampleBwdAttributes, LogicalAndStrictEquality)
     attr1.set_resample_mode(ResampleMode::MAXPOOL);
     attr1.set_padding_mode(PaddingMode::ZERO_PAD);
 
-    auto dy1 = std::make_shared<TensorAttributes>();
+    const auto dy1 = std::make_shared<TensorAttributes>();
     dy1->set_uid(1).set_name("Dy").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dy(dy1);
 
-    auto dx1 = std::make_shared<TensorAttributes>();
+    const auto dx1 = std::make_shared<TensorAttributes>();
     dx1->set_uid(2).set_name("Dx").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dx(dx1);
 
@@ -224,11 +224,11 @@ TEST(TestResampleBwdAttributes, LogicalAndStrictEquality)
     attr2.set_resample_mode(ResampleMode::MAXPOOL);
     attr2.set_padding_mode(PaddingMode::ZERO_PAD);
 
-    auto dy2 = std::make_shared<TensorAttributes>();
+    const auto dy2 = std::make_shared<TensorAttributes>();
     dy2->set_uid(1).set_name("Dy").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dy(dy2);
 
-    auto dx2 = std::make_shared<TensorAttributes>();
+    const auto dx2 = std::make_shared<TensorAttributes>();
     dx2->set_uid(2).set_name("Dx").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dx(dx2);
 
@@ -238,7 +238,7 @@ TEST(TestResampleBwdAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchDy = std::make_shared<TensorAttributes>();
+    const auto structuralMismatchDy = std::make_shared<TensorAttributes>();
     structuralMismatchDy->set_uid(99).set_name("MismatchedDy");
     attr2.set_dy(structuralMismatchDy);
 
@@ -298,7 +298,7 @@ TEST(TestResampleBwdAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchDy = std::make_shared<TensorAttributes>();
+    const auto logicalMatchDy = std::make_shared<TensorAttributes>();
     logicalMatchDy
         ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("Dy")

@@ -41,7 +41,7 @@ public:
     {
         auto desc = getDescriptor();
 
-        auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
+        const auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
             if(std::find(skip.begin(), skip.end(), attr) == skip.end())
             {
                 desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
@@ -65,7 +65,7 @@ public:
 
     void setAllTensors() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
@@ -98,7 +98,7 @@ public:
 
     void setRMSNormBackwardParams() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
     }
 
     void setAllAttributes() const
@@ -174,7 +174,7 @@ protected:
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT);
@@ -214,7 +214,7 @@ INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDy)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -227,7 +227,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDy)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorX)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
 
@@ -237,7 +237,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorX)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorScale)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -249,7 +249,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorScale)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorInvRms)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -261,7 +261,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorInvRms)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDx)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -273,7 +273,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDx)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDscale)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -285,7 +285,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDscale)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDbias)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -297,7 +297,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorDescriptorDbias)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -307,7 +307,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT, HIPDNN_TYPE_INT64, 1, &_dyDesc),
@@ -316,7 +316,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
@@ -326,7 +326,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -340,7 +340,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -351,7 +351,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -367,7 +367,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataTypeWrongElementCou
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -378,7 +378,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -393,7 +393,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     HipdnnBackendDescriptor* retrievedDy = nullptr;
     int64_t elementCount = 0;
@@ -414,7 +414,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
@@ -439,7 +439,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -454,7 +454,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -467,7 +467,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -482,7 +482,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDyQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
@@ -496,7 +496,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDyQueryReturnsO
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT,
@@ -510,7 +510,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorXQueryReturnsOn
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT,
@@ -524,7 +524,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorScaleQueryRetur
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorInvRmsQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
@@ -538,7 +538,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorInvRmsQueryRetu
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDxQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT,
@@ -552,7 +552,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDxQueryReturnsO
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDscaleQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT,
@@ -566,7 +566,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDscaleQueryRetu
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDbiasQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT,
@@ -580,7 +580,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorDbiasQueryRetur
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT,
@@ -594,7 +594,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeTypeQueryRetur
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -611,7 +611,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeTensorQueryFailsNullE
 TEST_F(TestRMSNormBackwardOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify the tensor descriptors are preserved
     ASSERT_NE(desc->getDyDesc(), nullptr);
@@ -639,7 +639,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, FinalizePreservesTensorReferences
 TEST_F(TestRMSNormBackwardOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setAllAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("RMSNormBackwardOperationDescriptor"), std::string::npos);
@@ -667,7 +667,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7);
@@ -684,7 +684,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     setAllAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
         HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -710,7 +710,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setAllAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
         HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -725,7 +725,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor,
        GetTensorDescriptorsOrderIsDyXScaleInvRmsDxDscaleDbias)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7);
@@ -743,7 +743,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraphOp
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -755,7 +755,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraphOp
 TEST_F(TestRMSNormBackwardOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _dyDesc->tryAsGraphOperation();
+    const auto graphOp = _dyDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -765,7 +765,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, TryAsInterfaceReturnsNullForWrong
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeNameSuccess)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "test_rmsnormbackward_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -790,7 +790,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetAttributeNameSuccess)
 
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeNameQueryReturnsSizeInclNull)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
@@ -811,7 +811,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeNameQueryReturnsSizeI
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeOperationTypeReturnsCorrectType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
@@ -825,7 +825,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeOperationTypeReturnsC
 TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -836,7 +836,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeOperationTypeQueryRet
 TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodePreservesName)
 {
     setAllAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string opName = "test_rmsnormbackward";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,

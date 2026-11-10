@@ -24,7 +24,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestBlockScaleQuantizePlan, ExecutePlan)
 {
-    auto builder = createValidBlockScaleQuantizeGraph();
+    const auto builder = createValidBlockScaleQuantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graphWrapper.getNode(0);
@@ -50,7 +50,7 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlan)
                                     nodeAttributes->axis());
 
     // Direct execution for reference
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(2).rawHostData());
@@ -61,7 +61,7 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlan)
         *directXTensor, *directYTensor, *directScaleTensor, params.blockSize, params.axis);
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleQuantizePlan<float, float, float, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -75,16 +75,16 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlan)
 
 TEST(TestBlockScaleQuantizePlan, ExecutePlanWithoutAxis)
 {
-    auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                      {65536, 1024, 32, 1},
-                                                      {2, 64, 32, 1},
-                                                      {2048, 32, 1, 1},
-                                                      32,
-                                                      DataType::FLOAT,
-                                                      DataType::FLOAT,
-                                                      DataType::FLOAT,
-                                                      DataType::FLOAT,
-                                                      std::nullopt);
+    const auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                            {65536, 1024, 32, 1},
+                                                            {2, 64, 32, 1},
+                                                            {2048, 32, 1, 1},
+                                                            32,
+                                                            DataType::FLOAT,
+                                                            DataType::FLOAT,
+                                                            DataType::FLOAT,
+                                                            DataType::FLOAT,
+                                                            std::nullopt);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graphWrapper.getNode(0);
@@ -110,7 +110,7 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlanWithoutAxis)
                                     nodeAttributes->axis());
 
     // Direct execution for reference
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(2).rawHostData());
@@ -121,7 +121,7 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlanWithoutAxis)
         *directXTensor, *directYTensor, *directScaleTensor, params.blockSize, params.axis);
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleQuantizePlan<float, float, float, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -135,7 +135,7 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlanWithoutAxis)
 
 TEST(TestBlockScaleQuantizePlanBuilder, PlanConstruction)
 {
-    auto builder = createValidBlockScaleQuantizeGraph();
+    const auto builder = createValidBlockScaleQuantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const BlockScaleQuantizePlanBuilder<DataType::FLOAT,
@@ -144,7 +144,7 @@ TEST(TestBlockScaleQuantizePlanBuilder, PlanConstruction)
                                         DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<BlockScaleQuantizePlan<float, float, float, float>*>(builtPlan.get())
@@ -154,7 +154,7 @@ TEST(TestBlockScaleQuantizePlanBuilder, PlanConstruction)
 
 TEST(TestBlockScaleQuantizePlanBuilder, IsApplicable)
 {
-    auto builder = createValidBlockScaleQuantizeGraph();
+    const auto builder = createValidBlockScaleQuantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const BlockScaleQuantizePlanBuilder<DataType::FLOAT,
@@ -175,15 +175,15 @@ TEST(TestBlockScaleQuantizePlanBuilder, IsApplicable)
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     // MX combinations: FLOAT input with E8M0 scale and FP8_E4M3 output
-    auto mxBuilder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                        {65536, 1024, 32, 1},
-                                                        {2, 2, 32, 32},
-                                                        {2048, 1024, 32, 1},
-                                                        32,
-                                                        DataType::HALF,
-                                                        DataType::FP8_E4M3,
-                                                        DataType::FP8_E8M0,
-                                                        DataType::FLOAT);
+    const auto mxBuilder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                              {65536, 1024, 32, 1},
+                                                              {2, 2, 32, 32},
+                                                              {2048, 1024, 32, 1},
+                                                              32,
+                                                              DataType::HALF,
+                                                              DataType::FP8_E4M3,
+                                                              DataType::FP8_E8M0,
+                                                              DataType::FLOAT);
     const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
 
     const BlockScaleQuantizePlanBuilder<DataType::HALF,
@@ -245,14 +245,14 @@ TYPED_TEST(BlockScaleQuantizeMxPlan, ExecutePlan)
     using OutputType = typename Config::OutputType;
     using ScaleType = typename Config::ScaleType;
 
-    auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                      {65536, 1024, 32, 1},
-                                                      {2, 2, 32, 32},
-                                                      {2048, 1024, 32, 1},
-                                                      32,
-                                                      Config::INPUT_DATA_TYPE,
-                                                      Config::OUTPUT_DATA_TYPE,
-                                                      Config::SCALE_DATA_TYPE);
+    const auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                            {65536, 1024, 32, 1},
+                                                            {2, 2, 32, 32},
+                                                            {2048, 1024, 32, 1},
+                                                            32,
+                                                            Config::INPUT_DATA_TYPE,
+                                                            Config::OUTPUT_DATA_TYPE,
+                                                            Config::SCALE_DATA_TYPE);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graphWrapper.getNode(0);
@@ -274,7 +274,7 @@ TYPED_TEST(BlockScaleQuantizeMxPlan, ExecutePlan)
                                     nodeAttributes->axis());
 
     // Direct reference execution
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<InputType>(params.xTensor, directBundle.getTensor(1).rawHostData());
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(2).rawHostData());
@@ -285,7 +285,7 @@ TYPED_TEST(BlockScaleQuantizeMxPlan, ExecutePlan)
         *directXTensor, *directYTensor, *directScaleTensor, params.blockSize, params.axis);
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleQuantizePlan<InputType, OutputType, ScaleType, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -323,14 +323,14 @@ TYPED_TEST(BlockScaleQuantizeNonFloatIOPlan, ExecutePlan)
     using OutputType = typename Config::OutputType;
     using ScaleType = typename Config::ScaleType;
 
-    auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                      {65536, 1024, 32, 1},
-                                                      {2, 2, 32, 32},
-                                                      {2048, 1024, 32, 1},
-                                                      32,
-                                                      Config::INPUT_DATA_TYPE,
-                                                      Config::OUTPUT_DATA_TYPE,
-                                                      Config::SCALE_DATA_TYPE);
+    const auto builder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                            {65536, 1024, 32, 1},
+                                                            {2, 2, 32, 32},
+                                                            {2048, 1024, 32, 1},
+                                                            32,
+                                                            Config::INPUT_DATA_TYPE,
+                                                            Config::OUTPUT_DATA_TYPE,
+                                                            Config::SCALE_DATA_TYPE);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graphWrapper.getNode(0);
@@ -352,7 +352,7 @@ TYPED_TEST(BlockScaleQuantizeNonFloatIOPlan, ExecutePlan)
                                     nodeAttributes->axis());
 
     // Direct reference execution
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<InputType>(params.xTensor, directBundle.getTensor(1).rawHostData());
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(2).rawHostData());
@@ -363,7 +363,7 @@ TYPED_TEST(BlockScaleQuantizeNonFloatIOPlan, ExecutePlan)
         *directXTensor, *directYTensor, *directScaleTensor, params.blockSize, params.axis);
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleQuantizePlan<InputType, OutputType, ScaleType, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -402,15 +402,15 @@ TYPED_TEST_SUITE(BlockScaleQuantizeMxIsApplicable, MxIsApplicableTypes, );
 TYPED_TEST(BlockScaleQuantizeMxIsApplicable, MatchingTypeIsApplicable)
 {
     using Config = TypeParam;
-    auto mxBuilder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                        {65536, 1024, 32, 1},
-                                                        {2, 2, 32, 32},
-                                                        {2048, 1024, 32, 1},
-                                                        32,
-                                                        DataType::FLOAT,
-                                                        Config::CORRECT_DATA_TYPE,
-                                                        DataType::FP8_E8M0,
-                                                        DataType::FLOAT);
+    const auto mxBuilder = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                              {65536, 1024, 32, 1},
+                                                              {2, 2, 32, 32},
+                                                              {2048, 1024, 32, 1},
+                                                              32,
+                                                              DataType::FLOAT,
+                                                              Config::CORRECT_DATA_TYPE,
+                                                              DataType::FP8_E8M0,
+                                                              DataType::FLOAT);
     const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
 
     const BlockScaleQuantizePlanBuilder<DataType::FLOAT,

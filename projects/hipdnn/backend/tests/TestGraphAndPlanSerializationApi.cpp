@@ -146,17 +146,17 @@ public:
         const std::vector<::flatbuffers::Offset<TensorAttributes>> tensors;
         const std::vector<::flatbuffers::Offset<Node>> nodes;
         const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(idBytes);
-        auto graphOffset = CreateGraphDirect(builder,
-                                             "test",
-                                             DataType::FLOAT,
-                                             DataType::HALF,
-                                             DataType::BFLOAT16,
-                                             &tensors,
-                                             &nodes,
-                                             flatbuffers::nullopt,
-                                             false,
-                                             nullptr,
-                                             &uuid);
+        const auto graphOffset = CreateGraphDirect(builder,
+                                                   "test",
+                                                   DataType::FLOAT,
+                                                   DataType::HALF,
+                                                   DataType::BFLOAT16,
+                                                   &tensors,
+                                                   &nodes,
+                                                   flatbuffers::nullopt,
+                                                   false,
+                                                   nullptr,
+                                                   &uuid);
         builder.Finish(graphOffset);
         return builder.Release();
     }
@@ -167,16 +167,16 @@ public:
                                                  int64_t workspaceSize = 1024) const
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto tensorUids = builder.CreateVector(_tensorUids);
-        auto pluginPayload = builder.CreateVector(std::vector<uint8_t>{4, 5, 6});
+        const auto tensorUids = builder.CreateVector(_tensorUids);
+        const auto pluginPayload = builder.CreateVector(std::vector<uint8_t>{4, 5, 6});
 
-        auto plan = fbs::CreateSerializedExecutionPlan(builder,
-                                                       version,
-                                                       ENGINE_ID,
-                                                       workspaceSize,
-                                                       tensorUids,
-                                                       pluginPayload,
-                                                       /*is_override_shape_enabled=*/false);
+        const auto plan = fbs::CreateSerializedExecutionPlan(builder,
+                                                             version,
+                                                             ENGINE_ID,
+                                                             workspaceSize,
+                                                             tensorUids,
+                                                             pluginPayload,
+                                                             /*is_override_shape_enabled=*/false);
         builder.Finish(plan);
         return builder.Release();
     }
@@ -203,7 +203,7 @@ public:
             planVec = builder.CreateVector(planBytes);
         }
 
-        auto root = fbs::CreateSerializedGraphAndPlan(builder, graphVec, planVec);
+        const auto root = fbs::CreateSerializedGraphAndPlan(builder, graphVec, planVec);
         fbs::FinishSerializedGraphAndPlanBuffer(builder, root);
 
         return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
@@ -236,11 +236,11 @@ public:
         ASSERT_NE(desc, nullptr);
         EXPECT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
 
-        auto graphDesc = desc->asDescriptor<GraphDescriptor>();
+        const auto graphDesc = desc->asDescriptor<GraphDescriptor>();
         // A C-API-deserialized graph is unfinalized; populate its serialized
         // buffer before reading it back.
         graphDesc->buildSerializedGraph();
-        auto roundTripped = graphDesc->getSerializedGraph();
+        const auto roundTripped = graphDesc->getSerializedGraph();
         auto reconstructed = fbs::UnPackGraph(static_cast<const uint8_t*>(roundTripped.ptr));
         ASSERT_NE(reconstructed, nullptr);
 
@@ -289,7 +289,7 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
         fbs::GraphT graph;
-        for(auto uid : _tensorUids)
+        for(const auto uid : _tensorUids)
         {
             auto tensor = std::make_unique<fbs::TensorAttributesT>();
             tensor->uid = uid;
@@ -639,9 +639,9 @@ TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphFromContainerPreservesI
         HIPDNN_STATUS_SUCCESS);
     const ScopedBackendDescriptor desc(rawDesc);
 
-    auto graphDesc = desc->asDescriptor<GraphDescriptor>();
+    const auto graphDesc = desc->asDescriptor<GraphDescriptor>();
     graphDesc->buildSerializedGraph();
-    auto roundTripped = graphDesc->getSerializedGraph();
+    const auto roundTripped = graphDesc->getSerializedGraph();
     const auto* reconstructed = fbs::GetGraph(static_cast<const uint8_t*>(roundTripped.ptr));
     ASSERT_NE(reconstructed->id(), nullptr);
     EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*reconstructed->id()), id);

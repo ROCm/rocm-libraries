@@ -6,7 +6,7 @@ if(NOT EXPECTED_CLANG_FORMAT_VERSION)
     set(EXPECTED_CLANG_FORMAT_VERSION "18")
 endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
-    set(EXPECTED_CLANG_TIDY_VERSION "20")
+    set(EXPECTED_CLANG_TIDY_VERSION "23")
 endif()
 if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
@@ -122,9 +122,10 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
         endforeach()
     endif()
 
+    # ${TOOL_NAME}.py: the clang-tidy PyPI wheel installs run-clang-tidy as run-clang-tidy.py.
     find_program(
-        ${OUTPUT_VAR} NAMES ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} HINTS ${SEARCH_HINTS}
-        PATHS ${LLVM_TOOL_PATHS}
+        ${OUTPUT_VAR} NAMES ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} ${TOOL_NAME}.py
+        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
     )
 
     if(NOT ${OUTPUT_VAR})

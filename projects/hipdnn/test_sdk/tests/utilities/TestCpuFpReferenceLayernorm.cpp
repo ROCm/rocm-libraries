@@ -59,7 +59,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation2D)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Sample 0 statistics
     EXPECT_NEAR(mean.getHostValue(0), 2.5, tolerance);
@@ -114,7 +114,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 3.5, tolerance);
 
@@ -162,9 +162,9 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllZeros)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
     // rstd = 1/sqrt(eps) is large, so float precision causes larger absolute error
-    auto rstdTolerance = 1e-3;
+    const auto rstdTolerance = 1e-3;
 
     for(int b = 0; b < 2; b++)
     {
@@ -203,9 +203,9 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllOnes)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
     // rstd = 1/sqrt(eps) is large, so float precision causes larger absolute error
-    auto rstdTolerance = 1e-3;
+    const auto rstdTolerance = 1e-3;
 
     for(int b = 0; b < 3; b++)
     {
@@ -243,7 +243,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropConstantInput)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(int b = 0; b < 2; b++)
     {
@@ -282,7 +282,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSingleFeature)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Each sample has 1 feature, so mean=x, var=0, xhat=0, y=bias
     EXPECT_NEAR(mean.getHostValue(0), 5.0, tolerance);
@@ -323,7 +323,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropIdentityTransform)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 35.0, tolerance);
 
@@ -376,7 +376,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNegativeAndMixedValues)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 0.0, tolerance);
 
@@ -423,7 +423,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeEpsilon)
     const double largeEpsilon = 100.0;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, largeEpsilon, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 2.5, tolerance);
 
@@ -471,7 +471,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
     CpuFpReferenceLayernorm::fprop<double, double, double, double, double>(
         x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), offset + 2.5, tolerance);
 
@@ -516,7 +516,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutScaleBias)
         &mean,
         &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     const double expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
     EXPECT_NEAR(mean.getHostValue(0), 2.5, tolerance);
@@ -551,7 +551,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
     // With identity scale/bias, verify output properties per normalized group:
     // - output mean ≈ 0
     // - output variance ≈ 1
-    auto tolerance = layernorm::getTolerance<float>();
+    const auto tolerance = layernorm::getTolerance<float>();
 
     for(int b = 0; b < 2; b++)
     {
@@ -754,7 +754,7 @@ TYPED_TEST(CpuFpReferenceLayernormFpropTyped, FpropRunsWithoutError)
         {
             for(int h = 0; h < 32; h++)
             {
-                auto yVal = static_cast<float>(y.getHostValue(b, s, h));
+                const auto yVal = static_cast<float>(y.getHostValue(b, s, h));
                 EXPECT_NEAR(yVal, 0.0f, 0.01f);
             }
         }
@@ -800,7 +800,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNormalizeLastTwoDims)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Batch 0: mean = (1+2+...+12)/12 = 78/12 = 6.5
     EXPECT_NEAR(mean.getHostValue(0), 6.5, tolerance);
@@ -853,7 +853,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropOneHotRows)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // All rows have same mean = 1/3
     const double expectedMean = 1.0 / 3.0;
@@ -910,7 +910,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // mean=2.5, var=1.25, rstd=1/sqrt(1.25+1e-5)
     const double expectedMean = 2.5;
@@ -919,7 +919,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
 
     // y[i] = scale[i] * (x[i] - mean) * rstd + bias[i]
     // Use slightly relaxed tolerance due to float compute precision
-    auto yTolerance = 1e-5;
+    const auto yTolerance = 1e-5;
     for(int i = 0; i < 4; i++)
     {
         const double xVal = x.getHostValue(0, i);
@@ -957,7 +957,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1);
 
     // Verify same results as the golden test (Sample 0)
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
     EXPECT_NEAR(y.getHostValue(0, 0), -2.18327084, tolerance);
     EXPECT_NEAR(y.getHostValue(0, 1), -0.39442361, tolerance);
     EXPECT_NEAR(y.getHostValue(0, 2), 1.39442361, tolerance);
@@ -1028,7 +1028,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop1D)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 6.0, tolerance);
 
@@ -1089,7 +1089,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast1)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each of the 12 groups has zero-mean, unit-variance output
     for(int b = 0; b < 2; b++)
@@ -1156,7 +1156,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast3)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 3, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Batch 0: mean = (1+2+...+24)/24 = 300/24 = 12.5
     EXPECT_NEAR(mean.getHostValue(0), 12.5, tolerance);
@@ -1255,7 +1255,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each of the 12 groups has zero-mean, unit-variance output
     for(int b0 = 0; b0 < 2; b0++)
@@ -1313,7 +1313,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePadded)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each of the 12 groups has zero-mean, unit-variance output
     for(int b0 = 0; b0 < 2; b0++)
@@ -1367,7 +1367,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePaddedBatchDims)
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each of the 12 groups has zero-mean, unit-variance output
     for(int b0 = 0; b0 < 2; b0++)
@@ -1421,7 +1421,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePaddedNormalizedDi
 
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each of the 12 groups has zero-mean, unit-variance output
     for(int b0 = 0; b0 < 2; b0++)

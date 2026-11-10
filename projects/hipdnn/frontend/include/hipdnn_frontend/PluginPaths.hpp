@@ -108,7 +108,7 @@ inline Error setPluginPaths(const Container& pluginPaths,
         cPaths.push_back(path.c_str());
     }
 
-    auto status
+    const auto status
         = backendCall(cPaths.size(), cPaths.empty() ? nullptr : cPaths.data(), *backendMode);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, failureMessage);
     return {};

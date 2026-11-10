@@ -130,7 +130,7 @@ protected:
     static std::pair<std::shared_ptr<Graph>, MatmulTestTensors> createMatmulTestGraphWithUids(
         const std::string& graphName, const SimpleMatmulTensorBundle& bundle, bool useManualUids)
     {
-        auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+        const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
             .set_io_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)

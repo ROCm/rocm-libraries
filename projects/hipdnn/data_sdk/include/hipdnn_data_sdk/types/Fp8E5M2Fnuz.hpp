@@ -137,7 +137,7 @@ inline uint8_t float_to_fp8_e5m2_fnuz_bits(float f) noexcept
         const uint32_t fullMant = mant | 0x00800000u;
         // Shift needed: normal encodes by shifting 23-2=21 bits; each step below exp=1
         // needs one more shift
-        auto shift = static_cast<uint32_t>(1 - exp + 21);
+        const auto shift = static_cast<uint32_t>(1 - exp + 21);
         if(shift > 24)
         {
             // Value is smaller than half the minimum subnormal: underflow to zero.

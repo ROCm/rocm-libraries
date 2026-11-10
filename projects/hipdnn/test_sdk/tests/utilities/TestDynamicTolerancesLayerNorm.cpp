@@ -68,10 +68,10 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<float, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1, x=[-1,1], scale=[-1,1], no bias
@@ -106,10 +106,10 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {
         // normalizedElementCount = 0 => throws
         {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
@@ -127,11 +127,11 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<half, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
@@ -167,10 +167,10 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<half, half, half>>()
 {
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
@@ -187,11 +187,11 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<bfloat16, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
@@ -224,10 +224,10 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gammaVar = [&](int64_t m) {
+    const auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    const auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
@@ -261,7 +261,7 @@ protected:
         }
         else
         {
-            auto tol
+            const auto tol
                 = calculateLayernormFpropTolerance<Out, In, Comp>(params.xMin,
                                                                   params.xMax,
                                                                   params.scaleMin,
@@ -270,7 +270,7 @@ protected:
                                                                   params.biasMin,
                                                                   params.biasMax);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(
                 tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
@@ -360,7 +360,8 @@ TEST(TestCalculateLayernormFpropTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.000001f); // Small error
     actualFailing->fillTensorWithValue(1.2f); // Large error
 
-    auto tol = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
+    const auto tol
+        = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
 
     // For FP32, M=100 (2M=200 accum): tolerance should be small
     EXPECT_LT(tol, 0.01f);
@@ -423,28 +424,28 @@ TEST(TestCalculateLayernormFpropTolerance, ZeroInput)
 {
     // When x=0, range=0, all accumulation and mean path terms vanish.
     // propagatedTolerance = maxAbsBias * epsilon
-    auto tol = calculateLayernormFpropTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10);
+    const auto tol = calculateLayernormFpropTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10);
     EXPECT_EQ(tol, 0.0f);
 
     // With bias (float)
-    auto tolBias
+    const auto tolBias
         = calculateLayernormFpropTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10, -0.5, 0.5);
     EXPECT_GT(tolBias, 0.0f);
 
     // Zero input with bfloat16 output casting: outputEpsilon(bf16) > epsilon(float), but
     // maxOutputMagnitude=0, so output cast term also vanishes
-    auto tolBf16
+    const auto tolBf16
         = calculateLayernormFpropTolerance<bfloat16, float, float>(0.0, 0.0, -1.0, 1.0, 10);
     EXPECT_EQ(tolBf16, 0.0f);
 
     // Zero input with bias and half output: bias term + output cast of bias
-    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto tolHalfBias
+    const auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto tolHalfBias
         = calculateLayernormFpropTolerance<half, float, float>(0.0, 0.0, -1.0, 1.0, 10, -0.5, 0.5);
     // Expected: maxAbsBias * epsilon + maxOutputMagnitude * outputEpsilon
     //         = 0.5 * uFloat + 0.5 * uHalf
-    auto expectedHalfBias = static_cast<float>(0.5 * uFloat + 0.5 * uHalf);
+    const auto expectedHalfBias = static_cast<float>(0.5 * uFloat + 0.5 * uHalf);
     EXPECT_NEAR(tolHalfBias, expectedHalfBias, 1e-10f);
 }
 
@@ -454,31 +455,32 @@ TEST(TestCalculateLayernormFpropTolerance, ZeroInput)
 TEST(TestCalculateLayernormFpropTolerance, ToleranceScalesWithM)
 {
     // FP32: tolerance should grow roughly linearly with M (gamma/2 ~ M*u)
-    auto tolFp32M1 = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 1);
-    auto tolFp32M10
+    const auto tolFp32M1
+        = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 1);
+    const auto tolFp32M10
         = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 10);
-    auto tolFp32M100
+    const auto tolFp32M100
         = calculateLayernormFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
 
     EXPECT_LT(tolFp32M1, tolFp32M10) << "FP32: M=10 should have higher tolerance than M=1";
     EXPECT_LT(tolFp32M10, tolFp32M100) << "FP32: M=100 should have higher tolerance than M=10";
 
     // Ratio check: M=100 vs M=1 (use wide spread so gamma term dominates the constant 5u)
-    auto ratioFp32 = static_cast<double>(tolFp32M100) / static_cast<double>(tolFp32M1);
+    const auto ratioFp32 = static_cast<double>(tolFp32M100) / static_cast<double>(tolFp32M1);
     EXPECT_GT(ratioFp32, 10.0) << "FP32: ratio M100/M1 should reflect ~M growth";
 
     // BF16 (statistical): tolerance should grow ~ sqrt(M)
     // M=50 with 2*50=100 accum: gamma ~ 6*sqrt(200)*2^-7 ~ 0.663 >= 0.5, so use M=25 as upper
-    auto tolBf16M1
+    const auto tolBf16M1
         = calculateLayernormFpropTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 1);
-    auto tolBf16M5
+    const auto tolBf16M5
         = calculateLayernormFpropTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 5);
-    auto tolBf16M25
+    const auto tolBf16M25
         = calculateLayernormFpropTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 25);
 
     EXPECT_LT(tolBf16M1, tolBf16M5) << "BF16: M=5 should have higher tolerance than M=1";
     EXPECT_LT(tolBf16M5, tolBf16M25) << "BF16: M=25 should have higher tolerance than M=5";
 
-    auto ratioBf16 = static_cast<double>(tolBf16M5) / static_cast<double>(tolBf16M1);
+    const auto ratioBf16 = static_cast<double>(tolBf16M5) / static_cast<double>(tolBf16M1);
     EXPECT_GT(ratioBf16, 1.5) << "BF16: ratio M5/M1 should reflect sqrt(M) growth";
 }

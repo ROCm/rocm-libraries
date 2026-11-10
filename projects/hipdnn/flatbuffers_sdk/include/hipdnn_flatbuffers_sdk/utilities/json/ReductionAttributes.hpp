@@ -38,10 +38,10 @@ template <>
 inline auto to<data_objects::ReductionAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                   const nlohmann::json& entry)
 {
-    auto mode = entry.at("mode").get<data_objects::ReductionMode>();
-    auto inUid = entry.at("in_tensor_uid").get<int64_t>();
-    auto outUid = entry.at("out_tensor_uid").get<int64_t>();
-    auto isDeterministic = entry.value("is_deterministic", false);
+    const auto mode = entry.at("mode").get<data_objects::ReductionMode>();
+    const auto inUid = entry.at("in_tensor_uid").get<int64_t>();
+    const auto outUid = entry.at("out_tensor_uid").get<int64_t>();
+    const auto isDeterministic = entry.value("is_deterministic", false);
 
     return data_objects::CreateReductionAttributes(builder, mode, inUid, outUid, isDeterministic);
 }

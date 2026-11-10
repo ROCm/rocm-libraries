@@ -31,7 +31,7 @@ TEST(TestReductionAttributes, SetGetAllModes)
                                               ReductionMode::NORM2,
                                               ReductionMode::MUL_NO_ZEROS};
 
-    for(auto mode : modes)
+    for(const auto mode : modes)
     {
         ReductionAttributes attrs;
         attrs.set_mode(mode);
@@ -44,7 +44,7 @@ TEST(TestReductionAttributes, SetGetXTensor)
     ReductionAttributes attrs;
     EXPECT_EQ(attrs.get_x(), nullptr);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
@@ -53,7 +53,7 @@ TEST(TestReductionAttributes, SetGetXTensor)
 
     attrs.set_x(x);
 
-    auto retrieved = attrs.get_x();
+    const auto retrieved = attrs.get_x();
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "InputTensor");
@@ -64,7 +64,7 @@ TEST(TestReductionAttributes, SetGetYTensor)
     ReductionAttributes attrs;
     EXPECT_EQ(attrs.get_y(), nullptr);
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -73,7 +73,7 @@ TEST(TestReductionAttributes, SetGetYTensor)
 
     attrs.set_y(y);
 
-    auto retrieved = attrs.get_y();
+    const auto retrieved = attrs.get_y();
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved->get_uid(), 2);
     EXPECT_EQ(retrieved->get_name(), "OutputTensor");
@@ -136,11 +136,11 @@ TEST(TestReductionAttributes, LogicalAndStrictEquality)
     attr1.set_mode(hipdnn_frontend::ReductionMode::ADD);
     attr1.set_is_deterministic(true);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y1->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
@@ -149,11 +149,11 @@ TEST(TestReductionAttributes, LogicalAndStrictEquality)
     attr2.set_mode(hipdnn_frontend::ReductionMode::ADD);
     attr2.set_is_deterministic(true);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y2->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
@@ -163,7 +163,7 @@ TEST(TestReductionAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchX->set_uid(99).set_name("MismatchedX");
     attr2.set_x(structuralMismatchX);
 
@@ -199,7 +199,7 @@ TEST(TestReductionAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX
         ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")

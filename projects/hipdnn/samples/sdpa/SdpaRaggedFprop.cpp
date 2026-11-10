@@ -84,7 +84,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // ── Ragged offsets (cumulative sums in token units) ─────────────────
     // Each ragged tensor sets ragged_offset_multiplier = H*D, so the backend scales these
     // token offsets to element offsets. That keeps the offset tables independent of H and D.
-    auto computeOffsets = [](const std::vector<int32_t>& seqLens) -> std::vector<int32_t> {
+    const auto computeOffsets = [](const std::vector<int32_t>& seqLens) -> std::vector<int32_t> {
         std::vector<int32_t> offsets;
         offsets.reserve(seqLens.size() + 1);
         offsets.push_back(0);
@@ -99,7 +99,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     const auto kvOffsetsHost = computeOffsets(kvSeqLens);
 
     // ── Graph construction ──────────────────────────────────────────────
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -111,27 +111,27 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     const std::vector<int64_t> qDims = {B, H, S_MAX, D};
     const std::vector<int64_t> kvDims = {B, H, S_MAX, D};
 
-    auto bshdStrides = utilities::generateStrides(qDims, layout.strideOrder);
+    const auto bshdStrides = utilities::generateStrides(qDims, layout.strideOrder);
 
-    auto qAttr = std::make_shared<graph::TensorAttributes>();
+    const auto qAttr = std::make_shared<graph::TensorAttributes>();
     qAttr->set_dim(qDims).set_data_type(inputType).set_stride(bshdStrides);
 
-    auto kAttr = std::make_shared<graph::TensorAttributes>();
+    const auto kAttr = std::make_shared<graph::TensorAttributes>();
     kAttr->set_dim(kvDims).set_data_type(inputType).set_stride(bshdStrides);
 
-    auto vAttr = std::make_shared<graph::TensorAttributes>();
+    const auto vAttr = std::make_shared<graph::TensorAttributes>();
     vAttr->set_dim(kvDims).set_data_type(inputType).set_stride(bshdStrides);
 
     // ── Ragged offset TensorAttributes ({B+1, 1, 1, 1}, INT32) ────────
     const std::vector<int64_t> raggedOffsetDims = {B + 1, 1, 1, 1};
     const auto raggedOffsetStrides = utilities::generateStrides(raggedOffsetDims);
 
-    auto qRaggedAttr = std::make_shared<graph::TensorAttributes>();
+    const auto qRaggedAttr = std::make_shared<graph::TensorAttributes>();
     qRaggedAttr->set_dim(raggedOffsetDims)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_stride(raggedOffsetStrides);
 
-    auto kvRaggedAttr = std::make_shared<graph::TensorAttributes>();
+    const auto kvRaggedAttr = std::make_shared<graph::TensorAttributes>();
     kvRaggedAttr->set_dim(raggedOffsetDims)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_stride(raggedOffsetStrides);
@@ -146,19 +146,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     const std::vector<int64_t> seqLenDims = {B, 1, 1, 1};
     const auto seqLenStrides = utilities::generateStrides(seqLenDims);
 
-    auto seqLenQAttr = std::make_shared<graph::TensorAttributes>();
+    const auto seqLenQAttr = std::make_shared<graph::TensorAttributes>();
     seqLenQAttr->set_dim(seqLenDims)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_stride(seqLenStrides);
 
-    auto seqLenKvAttr = std::make_shared<graph::TensorAttributes>();
+    const auto seqLenKvAttr = std::make_shared<graph::TensorAttributes>();
     seqLenKvAttr->set_dim(seqLenDims)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_stride(seqLenStrides);
 
     // ── Attention scale (compile-time constant) ────────────────────────
     const float attnScaleVal = 1.0f / std::sqrt(static_cast<float>(D));
-    auto attnScale = std::make_shared<graph::TensorAttributes>();
+    const auto attnScale = std::make_shared<graph::TensorAttributes>();
     attnScale->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<float>());
     attnScale->set_compile_time_constant(attnScaleVal);
 
@@ -182,7 +182,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // ── Runtime tensor allocation ──────────────────────────────────────
 
     // Ragged offset aux tensors (dense Tensor<int32_t>, held as shared_ptr<ITensor>)
-    auto qRaggedOffset
+    const auto qRaggedOffset
         = std::make_shared<utilities::Tensor<int32_t>>(std::vector<int64_t>{B + 1, 1, 1, 1});
     for(size_t i = 0; i < qOffsetsHost.size(); ++i)
     {
@@ -190,7 +190,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             qOffsetsHost[i], static_cast<int64_t>(i), int64_t{0}, int64_t{0}, int64_t{0});
     }
 
-    auto kvRaggedOffset
+    const auto kvRaggedOffset
         = std::make_shared<utilities::Tensor<int32_t>>(std::vector<int64_t>{B + 1, 1, 1, 1});
     for(size_t i = 0; i < kvOffsetsHost.size(); ++i)
     {
@@ -294,7 +294,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
+        const auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

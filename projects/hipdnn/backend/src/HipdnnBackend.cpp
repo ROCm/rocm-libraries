@@ -301,9 +301,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfInvalidDescriptor(descriptor);
         throwIfNull(graphByteSize);
 
-        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        const auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
         graphDesc->buildSerializedGraph();
-        auto data = graphDesc->getSerializedGraph();
+        const auto data = graphDesc->getSerializedGraph();
 
         *graphByteSize = data.size;
 
@@ -341,11 +341,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfInvalidDescriptor(descriptor);
         throwIfNull(graphByteSize);
 
-        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        const auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
         // buildSerializedGraph() populates the cached binary buffer (no-op if already cached).
         // getSerializedJsonGraph() then converts binary -> JSON on each call (not cached).
         graphDesc->buildSerializedGraph();
-        auto jsonStr = graphDesc->getSerializedJsonGraph();
+        const auto jsonStr = graphDesc->getSerializedJsonGraph();
 
         *graphByteSize = jsonStr.size() + 1;
 
@@ -380,7 +380,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
 
-        auto executionPlanDesc
+        const auto executionPlanDesc
             = descriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
         executionPlanDesc->serializeBackendPlan(requestedByteSize, planByteSize, serializedPlan);
 
@@ -407,15 +407,15 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPla
         throwIfInvalidDescriptor(graphDescriptor);
         throwIfNull(blobByteSize);
 
-        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        const auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
         graphDesc->buildSerializedGraph();
-        auto graphData = graphDesc->getSerializedGraph();
+        const auto graphData = graphDesc->getSerializedGraph();
 
         std::vector<uint8_t> planBytes;
         if(executionPlanDescriptor != nullptr)
         {
             throwIfInvalidDescriptor(executionPlanDescriptor);
-            auto executionPlanDesc
+            const auto executionPlanDesc
                 = executionPlanDescriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
 
             size_t planSize = 0;
@@ -519,7 +519,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
             planDataSize = planBlob->size();
         }
 
-        auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
+        const auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
         executionPlanDesc->deserializeBackendPlan(
             handle->getPluginResourceManager(), planData, planDataSize);
         executionPlanDesc->recordDevice(*handle);
@@ -557,7 +557,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
     LOG_API_ENTRY("message_ptr={:p}, maxSize={}", static_cast<void*>(message), maxSize);
     // Ignore status since API doesn't return it.
     // We still want to catch and log if the user provides incorrect parameters.
-    auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
+    const auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(message);
 
         if(maxSize == 0)
@@ -580,7 +580,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
     LOG_API_ENTRY("message_ptr={:p}, maxSize={}", static_cast<void*>(message), maxSize);
     // Ignore status since API doesn't return it.
     // We still want to catch and log if the user provides incorrect parameters.
-    auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
+    const auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(message);
 
         if(maxSize == 0)
@@ -920,7 +920,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHan
         throwIfNull(handle);
         throwIfNull(numPolicies);
 
-        auto policyInfos = handle->getHeuristicPluginResourceManager()->getHeuristicPolicyInfos();
+        const auto policyInfos
+            = handle->getHeuristicPluginResourceManager()->getHeuristicPolicyInfos();
         *numPolicies = policyInfos.size();
 
         LOG_API_SUCCESS(apiName, "retrieved_numPolicies={}", *numPolicies);
@@ -1080,7 +1081,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
             return;
         }
 
-        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        const auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
 
         try
         {

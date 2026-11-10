@@ -40,21 +40,21 @@ TEST(TestGpuConvolutionFwdPlanBuilder, PlanConstruction)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           generateStrides(xDims),
-                                           generateStrides(wDims),
-                                           generateStrides(yDims),
-                                           {0, 0},
-                                           {1, 1},
-                                           {1, 1},
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 generateStrides(xDims),
+                                                 generateStrides(wDims),
+                                                 generateStrides(yDims),
+                                                 {0, 0},
+                                                 {1, 1},
+                                                 {1, 1},
+                                                 DataType::FLOAT);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
@@ -63,7 +63,7 @@ TEST(TestGpuConvolutionFwdPlanBuilder, PlanConstruction)
                                        DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<GpuConvolutionFwdPlan<float, float, float, float>*>(builtPlan.get())
@@ -81,21 +81,21 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsApplicable)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           generateStrides(xDims),
-                                           generateStrides(wDims),
-                                           generateStrides(yDims),
-                                           {0, 0},
-                                           {1, 1},
-                                           {1, 1},
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 generateStrides(xDims),
+                                                 generateStrides(wDims),
+                                                 generateStrides(yDims),
+                                                 {0, 0},
+                                                 {1, 1},
+                                                 {1, 1},
+                                                 DataType::FLOAT);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
@@ -132,19 +132,19 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForRaggedTensors)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           generateStrides(xDims),
-                                           generateStrides(wDims),
-                                           generateStrides(yDims),
-                                           {0, 0},
-                                           {1, 1},
-                                           {1, 1},
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 generateStrides(xDims),
+                                                 generateStrides(wDims),
+                                                 generateStrides(yDims),
+                                                 {0, 0},
+                                                 {1, 1},
+                                                 {1, 1},
+                                                 DataType::FLOAT);
 
     const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
                                        DataType::FLOAT,
@@ -152,12 +152,12 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                        DataType::FLOAT>
         floatPlanBuilder;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
@@ -172,7 +172,7 @@ namespace
 inline size_t elementCount(const std::vector<int64_t>& dims)
 {
     size_t count = 1;
-    for(auto d : dims)
+    for(const auto d : dims)
     {
         count *= static_cast<size_t>(d);
     }
@@ -194,26 +194,26 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
     constexpr int64_t W_UID = 2;
     constexpr int64_t Y_UID = 3;
 
-    auto xStrides = generateStrides(xDims);
-    auto wStrides = generateStrides(wDims);
-    auto yStrides = generateStrides(yDims);
+    const auto xStrides = generateStrides(xDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto yStrides = generateStrides(yDims);
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           xStrides,
-                                           wStrides,
-                                           yStrides,
-                                           padding,
-                                           stride,
-                                           dilation,
-                                           xEnum,
-                                           yEnum);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 xStrides,
+                                                 wStrides,
+                                                 yStrides,
+                                                 padding,
+                                                 stride,
+                                                 dilation,
+                                                 xEnum,
+                                                 yEnum);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const auto* nodeAttributes = graphWrap.getNode(0).attributes_as_ConvolutionFwdAttributes();
@@ -230,9 +230,9 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
 
     GpuConvolutionFwdPlan<XType, WType, YType, ComputeType> patient(std::move(params));
 
-    auto xCount = elementCount(xDims);
-    auto wCount = elementCount(wDims);
-    auto yCount = elementCount(yDims);
+    const auto xCount = elementCount(xDims);
+    const auto wCount = elementCount(wDims);
+    const auto yCount = elementCount(yDims);
 
     // Prepare CPU tensors and fill with random data
     hipdnn_data_sdk::utilities::Tensor<XType> cpuX(xDims, xStrides);
@@ -349,7 +349,7 @@ TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlan)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> wDims = {1, 1, 3, 3};
-    auto tolerance
+    const auto tolerance
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropTolerance<half, half, double>(
             -1.0, 1.0, -1.0, 1.0, wDims);
 
@@ -370,7 +370,7 @@ TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlanMixedOutput)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> wDims = {1, 1, 3, 3};
-    auto tolerance
+    const auto tolerance
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropTolerance<float, half, double>(
             -1.0, 1.0, -1.0, 1.0, wDims);
 
@@ -395,7 +395,7 @@ TEST(TestGpuConvolutionFwdPlanBfp16, ExecutePlan)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> wDims = {1, 1, 3, 3};
-    auto tolerance
+    const auto tolerance
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropTolerance<bfloat16, bfloat16, double>(
             -1.0, 1.0, -1.0, 1.0, wDims);
 
@@ -416,7 +416,7 @@ TEST(TestGpuConvolutionFwdPlanBfp16, ExecutePlanMixedOutput)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> wDims = {1, 1, 3, 3};
-    auto tolerance
+    const auto tolerance
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropTolerance<float, bfloat16, double>(
             -1.0, 1.0, -1.0, 1.0, wDims);
 
@@ -457,21 +457,21 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForConvolutionMode)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           generateStrides(xDims),
-                                           generateStrides(wDims),
-                                           generateStrides(yDims),
-                                           {0, 0},
-                                           {1, 1},
-                                           {1, 1},
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 generateStrides(xDims),
+                                                 generateStrides(wDims),
+                                                 generateStrides(yDims),
+                                                 {0, 0},
+                                                 {1, 1},
+                                                 {1, 1},
+                                                 DataType::FLOAT);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,

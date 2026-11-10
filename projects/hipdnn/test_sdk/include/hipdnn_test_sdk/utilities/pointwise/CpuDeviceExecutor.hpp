@@ -33,19 +33,19 @@ public:
         // Use output dimensions as the broadcast shape
         const auto& broadcastShape = outputDims;
 
-        auto func = [&](const std::vector<int64_t>& indices) {
+        const auto func = [&](const std::vector<int64_t>& indices) {
             // Get broadcasted index for input
-            auto inputIndices = getBroadcastableIndex(indices, inputDims);
+            const auto inputIndices = getBroadcastableIndex(indices, inputDims);
 
             // Get value from input tensor and apply operation
-            auto inputValue = input.getHostValue(inputIndices);
+            const auto inputValue = input.getHostValue(inputIndices);
 
             // Apply operation and set output
-            auto result = op(inputValue);
+            const auto result = op(inputValue);
             output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
@@ -74,21 +74,21 @@ public:
         // Use output dimensions as the broadcast shape
         const auto& broadcastShape = outputDims;
 
-        auto func = [&](const std::vector<int64_t>& indices) {
+        const auto func = [&](const std::vector<int64_t>& indices) {
             // Get broadcasted indices for each input
-            auto input1Indices = getBroadcastableIndex(indices, input1Dims);
-            auto input2Indices = getBroadcastableIndex(indices, input2Dims);
+            const auto input1Indices = getBroadcastableIndex(indices, input1Dims);
+            const auto input2Indices = getBroadcastableIndex(indices, input2Dims);
 
             // Get values from input tensors and apply operation
-            auto input1Value = input1.getHostValue(input1Indices);
-            auto input2Value = input2.getHostValue(input2Indices);
+            const auto input1Value = input1.getHostValue(input1Indices);
+            const auto input2Value = input2.getHostValue(input2Indices);
 
             // Apply operation and set output
-            auto result = op(input1Value, input2Value);
+            const auto result = op(input1Value, input2Value);
             output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
@@ -117,7 +117,7 @@ public:
             throw std::runtime_error("Input2 dimensions are not broadcast compatible with output");
         }
 
-        auto func = [&](const std::vector<int64_t>& indices) {
+        const auto func = [&](const std::vector<int64_t>& indices) {
             const auto input0Indices = getBroadcastableIndex(indices, input0Dims);
             const auto input1Indices = getBroadcastableIndex(indices, input1Dims);
             const auto input2Indices = getBroadcastableIndex(indices, input2Dims);

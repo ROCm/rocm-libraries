@@ -51,7 +51,7 @@ inline Error createLayernormOperation(
                                              "layernorm Y"));
 
     // Optional tensors: only set if present
-    auto mean = attributes.get_mean();
+    const auto mean = attributes.get_mean();
     if(mean)
     {
         HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
@@ -61,7 +61,7 @@ inline Error createLayernormOperation(
                                                  "layernorm MEAN"));
     }
 
-    auto invVariance = attributes.get_inv_variance();
+    const auto invVariance = attributes.get_inv_variance();
     if(invVariance)
     {
         HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),

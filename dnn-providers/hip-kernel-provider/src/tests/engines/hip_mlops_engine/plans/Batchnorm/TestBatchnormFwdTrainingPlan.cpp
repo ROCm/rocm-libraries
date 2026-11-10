@@ -27,7 +27,7 @@ namespace hip_kernel_provider::batchnorm::test
 
 TEST(TestBatchnormFwdTrainingParams, ConstructsFromSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -39,7 +39,7 @@ TEST(TestBatchnormFwdTrainingParams, ConstructsFromSingleNodeGraph)
 
 TEST(TestBatchnormFwdTrainingParams, HasCorrectTensorPointersForSingleNode)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -58,7 +58,7 @@ TEST(TestBatchnormFwdTrainingParams, HasCorrectTensorPointersForSingleNode)
 
 TEST(TestBatchnormFwdTrainingParams, TensorPointersMatchExpectedUids)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -77,7 +77,7 @@ TEST(TestBatchnormFwdTrainingParams, TensorPointersMatchExpectedUids)
 
 TEST(TestBatchnormFwdTrainingParams, IsMoveConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -93,7 +93,7 @@ TEST(TestBatchnormFwdTrainingParams, IsMoveConstructible)
 
 TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -109,7 +109,7 @@ TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {1, 3, 14, 14}, {1, 3, 14, 14}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -127,7 +127,7 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {1, 3, 14, 14}, {1, 3, 14, 14}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -143,7 +143,7 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 
 TEST(TestBatchnormFwdTrainingParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -241,11 +241,11 @@ TEST(TestBatchnormFwdTrainingPlan, CompileCallsCompilerWithCorrectSingleKernel)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -256,9 +256,9 @@ TEST(TestBatchnormFwdTrainingPlan, CompileCallsCompilerWithCorrectSingleKernel)
 TEST(TestBatchnormFwdTrainingPlan, CompileCallsCompilerWithCorrectMultipleKernels)
 {
     const MockKernelCompiler mockCompiler;
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
-    auto createKernel = []() {
+    auto const createKernel = []() {
         auto k = std::make_unique<MockRunnableKernel>();
         EXPECT_CALL(*k, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
         EXPECT_CALL(*k, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
@@ -301,7 +301,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileIncludesOffloadArchOption)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps("gfx942");
+    auto const deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -324,11 +324,11 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -398,11 +398,11 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNchwLayoutSetsCorrectDefine)
 
     // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
     auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -435,11 +435,11 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLayoutSetsCorrectDefine)
 
     // NHWC strides: N=H*W*C, H=W*C, W=C, C=1
     auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -466,11 +466,11 @@ TEST(TestBatchnormFwdTrainingPlan, HasNoSaveStatsSetsCorrectDefines)
 
     // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
     auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -483,7 +483,8 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
     const MockKernelCompiler mockCompiler;
 
     // 2D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({4, 1}, {1, 4});
+    auto const builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({4, 1}, {1, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -493,7 +494,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
     BatchnormFwdTrainingParams params(attr, graph.getTensorMap());
     BatchnormFwdTrainingPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

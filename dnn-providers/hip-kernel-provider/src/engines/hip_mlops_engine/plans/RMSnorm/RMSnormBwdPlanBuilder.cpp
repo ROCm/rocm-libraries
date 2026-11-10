@@ -104,7 +104,7 @@ bool RMSnormBwdPlanBuilder::isApplicable(
         return false;
     }
 
-    auto anyNodeIsNotF32Compute = [&]() {
+    auto const anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType()

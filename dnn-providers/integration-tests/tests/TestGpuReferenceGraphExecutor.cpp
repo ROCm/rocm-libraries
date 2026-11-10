@@ -96,7 +96,7 @@ flatbuffers::FlatBufferBuilder createSimplePointwiseGraph(int64_t inputUid,
                                                        /*is_runtime_pass_by_value=*/true));
     }
 
-    auto pointwiseAttrs
+    const auto pointwiseAttrs
         = CreatePointwiseAttributes(builder,
                                     PointwiseMode::RELU_FWD, // operation (ignored by dummy plan)
                                     flatbuffers::nullopt, // relu_lower_clip
@@ -115,7 +115,7 @@ flatbuffers::FlatBufferBuilder createSimplePointwiseGraph(int64_t inputUid,
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
 
     builder.Finish(graph);
@@ -156,7 +156,7 @@ flatbuffers::FlatBufferBuilder createConvFwdGraphWithPbvInput()
     tensors.push_back(
         CreateTensorAttributesDirect(builder, 3, "y", DataType::FLOAT, &yStrides, &yDims));
 
-    auto convAttrs = CreateConvolutionFwdAttributesDirect(
+    const auto convAttrs = CreateConvolutionFwdAttributesDirect(
         builder, 1, 2, 3, &padding, &padding, &convStride, &dilation, ConvMode::CROSS_CORRELATION);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -166,13 +166,13 @@ flatbuffers::FlatBufferBuilder createConvFwdGraphWithPbvInput()
                                      NodeAttributes::ConvolutionFwdAttributes,
                                      convAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "ConvFwdTestGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "ConvFwdTestGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -203,16 +203,16 @@ flatbuffers::FlatBufferBuilder createPointwiseGraphWithPbvOptionalInput()
     tensors.push_back(
         CreateTensorAttributesDirect(builder, 3, "out_0", DataType::FLOAT, &strides, &dims));
 
-    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
-                                                    PointwiseMode::ADD,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    1, // in_0
-                                                    2, // in_1 (optional, PBV)
-                                                    flatbuffers::nullopt,
-                                                    3); // out_0
+    const auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                          PointwiseMode::ADD,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          1, // in_0
+                                                          2, // in_1 (optional, PBV)
+                                                          flatbuffers::nullopt,
+                                                          3); // out_0
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -221,7 +221,7 @@ flatbuffers::FlatBufferBuilder createPointwiseGraphWithPbvOptionalInput()
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
@@ -245,7 +245,7 @@ flatbuffers::FlatBufferBuilder createCustomOpGraph()
     const std::vector<int64_t> outputUids = {2};
     const std::vector<uint8_t> data;
 
-    auto customOpAttrs
+    const auto customOpAttrs
         = CreateCustomOpAttributesDirect(builder, "test.custom_op", &inputUids, &outputUids, &data);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -255,13 +255,13 @@ flatbuffers::FlatBufferBuilder createCustomOpGraph()
                                      NodeAttributes::CustomOpAttributes,
                                      customOpAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "CustomOpTestGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "CustomOpTestGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
 
     builder.Finish(graph);
     return builder;
@@ -270,7 +270,7 @@ flatbuffers::FlatBufferBuilder createCustomOpGraph()
 inline size_t elementCount(const std::vector<int64_t>& dims)
 {
     size_t count = 1;
-    for(auto d : dims)
+    for(const auto d : dims)
     {
         count *= static_cast<size_t>(d);
     }
@@ -291,27 +291,27 @@ void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
     constexpr int64_t W_UID = 11;
     constexpr int64_t Y_UID = 12;
 
-    auto xStrides = generateStrides(xDims);
-    auto wStrides = generateStrides(wDims);
-    auto yStrides = generateStrides(yDims);
+    const auto xStrides = generateStrides(xDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto yStrides = generateStrides(yDims);
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           xStrides,
-                                           wStrides,
-                                           yStrides,
-                                           padding,
-                                           convStride,
-                                           dilation,
-                                           dataType);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 xStrides,
+                                                 wStrides,
+                                                 yStrides,
+                                                 padding,
+                                                 convStride,
+                                                 dilation,
+                                                 dataType);
 
-    auto xCount = elementCount(xDims);
-    auto wCount = elementCount(wDims);
-    auto yCount = elementCount(yDims);
+    const auto xCount = elementCount(xDims);
+    const auto wCount = elementCount(wDims);
+    const auto yCount = elementCount(yDims);
 
     // Prepare CPU tensors and fill with deterministic data
     hipdnn_data_sdk::utilities::Tensor<T> cpuX(xDims, xStrides);
@@ -383,14 +383,14 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
     constexpr int64_t W_UID = 11;
     constexpr int64_t DX_UID = 12;
 
-    auto dyStrides = generateStrides(dyDims);
-    auto wStrides = generateStrides(wDims);
-    auto dxStrides = generateStrides(dxDims);
+    const auto dyStrides = generateStrides(dyDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto dxStrides = generateStrides(dxDims);
 
     // An empty override means symmetric padding.
     const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
 
-    auto graphBuilder
+    const auto graphBuilder
         = createConvBwdGraphWithPadding(DY_UID,
                                         W_UID,
                                         DX_UID,
@@ -407,9 +407,9 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
-    auto dyCount = elementCount(dyDims);
-    auto wCount = elementCount(wDims);
-    auto dxCount = elementCount(dxDims);
+    const auto dyCount = elementCount(dyDims);
+    const auto wCount = elementCount(wDims);
+    const auto dxCount = elementCount(dxDims);
 
     // Prepare CPU tensors and fill with deterministic data
     hipdnn_data_sdk::utilities::Tensor<T> cpuDy(dyDims, dyStrides);
@@ -485,14 +485,14 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
     constexpr int64_t DY_UID = 11;
     constexpr int64_t DW_UID = 12;
 
-    auto xStrides = generateStrides(xDims);
-    auto dyStrides = generateStrides(dyDims);
-    auto dwStrides = generateStrides(dwDims);
+    const auto xStrides = generateStrides(xDims);
+    const auto dyStrides = generateStrides(dyDims);
+    const auto dwStrides = generateStrides(dwDims);
 
     // An empty override means symmetric padding.
     const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
 
-    auto graphBuilder
+    const auto graphBuilder
         = createConvWrwGraphWithPadding(X_UID,
                                         DY_UID,
                                         DW_UID,
@@ -509,9 +509,9 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
-    auto xCount = elementCount(xDims);
-    auto dyCount = elementCount(dyDims);
-    auto dwCount = elementCount(dwDims);
+    const auto xCount = elementCount(xDims);
+    const auto dyCount = elementCount(dyDims);
+    const auto dwCount = elementCount(dwDims);
 
     // Prepare CPU tensors and fill with deterministic data
     hipdnn_data_sdk::utilities::Tensor<T> cpuX(xDims, xStrides);
@@ -595,7 +595,7 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, OUT_UID, "output", ioDataType, &outStrides, &outDims));
 
-    auto reductionAttr = hipdnn_flatbuffers_sdk::data_objects::CreateReductionAttributes(
+    const auto reductionAttr = hipdnn_flatbuffers_sdk::data_objects::CreateReductionAttributes(
         builder, mode, IN_UID, OUT_UID);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
@@ -607,13 +607,14 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes,
         reductionAttr.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
-                                                                               "ReductionTestGraph",
-                                                                               computeDataType,
-                                                                               computeDataType,
-                                                                               ioDataType,
-                                                                               &tensorAttributes,
-                                                                               &nodes);
+    const auto graphOffset
+        = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "ReductionTestGraph",
+                                                                  computeDataType,
+                                                                  computeDataType,
+                                                                  ioDataType,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
     builder.Finish(graphOffset);
 
     // Prepare tensors and fill input with random values
@@ -662,7 +663,7 @@ TEST(TestGpuReferenceGraphExecutor, CanBeConstructed)
 
 TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRuntimePassByValueGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1},
         {1, 3, 14, 14},
         /*withMeanVariance=*/true,
@@ -677,20 +678,20 @@ TEST(TestGpuReferenceGraphExecutor, IsApplicableForBakedScalarGraph)
     const std::vector<int64_t> xDims{1, 1, 3, 3};
     const std::vector<int64_t> wDims{1, 1, 1, 1};
     const std::vector<int64_t> yDims{1, 1, 3, 3};
-    auto builder = createConvFwdGraph(1,
-                                      2,
-                                      3,
-                                      xDims,
-                                      wDims,
-                                      yDims,
-                                      generateStrides(xDims),
-                                      generateStrides(wDims),
-                                      generateStrides(yDims),
-                                      {0, 0},
-                                      {1, 1},
-                                      {1, 1},
-                                      DataType::FLOAT,
-                                      DataType::FLOAT);
+    const auto builder = createConvFwdGraph(1,
+                                            2,
+                                            3,
+                                            xDims,
+                                            wDims,
+                                            yDims,
+                                            generateStrides(xDims),
+                                            generateStrides(wDims),
+                                            generateStrides(yDims),
+                                            {0, 0},
+                                            {1, 1},
+                                            {1, 1},
+                                            DataType::FLOAT,
+                                            DataType::FLOAT);
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -727,7 +728,7 @@ TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNo
     const std::vector<int64_t> padding{0, 0};
     const std::vector<int64_t> convStride{1, 1};
     const std::vector<int64_t> dilation{1, 1};
-    auto convAttrs = CreateConvolutionFwdAttributesDirect(
+    const auto convAttrs = CreateConvolutionFwdAttributesDirect(
         builder, 1, 2, 3, &padding, &padding, &convStride, &dilation, ConvMode::CROSS_CORRELATION);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -737,13 +738,13 @@ TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNo
                                      NodeAttributes::ConvolutionFwdAttributes,
                                      convAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "ConvFwdWithUnconsumedPbv",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "ConvFwdWithUnconsumedPbv",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
 
     GpuReferenceGraphExecutor executor;
@@ -754,7 +755,8 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenSupportedOpTensorIsRuntim
 {
     // Pointwise is fully supported by the GPU reference (see IsApplicableForBakedScalarGraph),
     // so flagging its input tensor runtime-PBV must be the sole cause of rejection.
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1}, /*inputIsRuntimePassByValue=*/true);
+    const auto builder
+        = createSimplePointwiseGraph(1, 2, {4}, {1}, /*inputIsRuntimePassByValue=*/true);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -763,12 +765,12 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenSupportedOpOutputIsRuntim
 {
     // The per-node PBV scan must cover EVERY operand, not just the input:
     // flagging the output tensor runtime-PBV must also reject the graph.
-    auto builder = createSimplePointwiseGraph(1,
-                                              2,
-                                              {4},
-                                              {1},
-                                              /*inputIsRuntimePassByValue=*/false,
-                                              /*outputIsRuntimePassByValue=*/true);
+    const auto builder = createSimplePointwiseGraph(1,
+                                                    2,
+                                                    {4},
+                                                    {1},
+                                                    /*inputIsRuntimePassByValue=*/false,
+                                                    /*outputIsRuntimePassByValue=*/true);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -777,7 +779,7 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenConvInputIsRuntimePassByV
 {
     // ConvolutionFwd is a supported GPU op; flagging its x operand runtime-PBV
     // must reject the graph, proving the per-op scan is wired for conv too.
-    auto builder = createConvFwdGraphWithPbvInput();
+    const auto builder = createConvFwdGraphWithPbvInput();
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -786,7 +788,7 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenOptionalPointwiseOperandI
 {
     // Only the OPTIONAL in_1 operand is PBV (in_0/out_0 are PBV-free), exercising
     // the optional-operand branch of the scan — the flag must still reject.
-    auto builder = createPointwiseGraphWithPbvOptionalInput();
+    const auto builder = createPointwiseGraphWithPbvOptionalInput();
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -795,7 +797,7 @@ TEST(TestGpuReferenceGraphExecutor, CustomOpThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = createCustomOpGraph();
+    const auto builder = createCustomOpGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
@@ -809,7 +811,7 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
     SKIP_IF_NO_DEVICES();
 
     // BlockScaleDequantize has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
@@ -827,19 +829,19 @@ TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
     const std::vector<int64_t> xDims = {1, 1, 4, 4};
     const std::vector<int64_t> wDims = {1, 1, 3, 3};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
-    auto builder = createConvFwdGraph(10,
-                                      11,
-                                      12,
-                                      xDims,
-                                      wDims,
-                                      yDims,
-                                      generateStrides(xDims),
-                                      generateStrides(wDims),
-                                      generateStrides(yDims),
-                                      {0, 0},
-                                      {1, 1},
-                                      {1, 1},
-                                      DataType::FLOAT);
+    const auto builder = createConvFwdGraph(10,
+                                            11,
+                                            12,
+                                            xDims,
+                                            wDims,
+                                            yDims,
+                                            generateStrides(xDims),
+                                            generateStrides(wDims),
+                                            generateStrides(yDims),
+                                            {0, 0},
+                                            {1, 1},
+                                            {1, 1},
+                                            DataType::FLOAT);
 
     const std::unordered_map<int64_t, void*> emptyPack;
     GpuReferenceGraphExecutor executor;
@@ -851,7 +853,7 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -862,7 +864,7 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedGraph)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
     GpuReferenceGraphExecutor executor;
     ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 
@@ -877,7 +879,7 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedBinaryGraph)
     hipdnn_test_sdk::utilities::PointwiseGraphSpec spec;
     spec.mode = PointwiseMode::ADD;
     spec.secondInputDims = spec.inputDims;
-    auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+    const auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
 
     GpuReferenceGraphExecutor executor;
     ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1061,37 +1063,37 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormFwdIsApplicable)
     const std::vector<int64_t> dims = {2, 3, 5, 7};
     const std::vector<int64_t> batchDims = {2, 1, 1, 1};
     const std::vector<int64_t> normDims = {1, 3, 5, 7};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     auto batchStrides = generateStrides(batchDims);
-    auto normStrides = generateStrides(normDims);
+    const auto normStrides = generateStrides(normDims);
 
-    auto graphBuilder = createLayernormFwdGraph(10,
-                                                11,
-                                                12,
-                                                13,
-                                                14,
-                                                15,
-                                                16,
-                                                dims,
-                                                dims,
-                                                normDims,
-                                                normDims,
-                                                batchDims,
-                                                batchDims,
-                                                strides,
-                                                strides,
-                                                normStrides,
-                                                normStrides,
-                                                batchStrides,
-                                                batchStrides,
-                                                LAYERNORM_DEFAULT_EPSILON,
-                                                3,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormFwdGraph(10,
+                                                      11,
+                                                      12,
+                                                      13,
+                                                      14,
+                                                      15,
+                                                      16,
+                                                      dims,
+                                                      dims,
+                                                      normDims,
+                                                      normDims,
+                                                      batchDims,
+                                                      batchDims,
+                                                      strides,
+                                                      strides,
+                                                      normStrides,
+                                                      normStrides,
+                                                      batchStrides,
+                                                      batchStrides,
+                                                      LAYERNORM_DEFAULT_EPSILON,
+                                                      3,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -1104,37 +1106,37 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormFwdExecutes)
     const std::vector<int64_t> dims = {2, 3, 5, 7};
     const std::vector<int64_t> batchDims = {2, 1, 1, 1};
     const std::vector<int64_t> normDims = {1, 3, 5, 7};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     auto batchStrides = generateStrides(batchDims);
-    auto normStrides = generateStrides(normDims);
+    const auto normStrides = generateStrides(normDims);
 
-    auto graphBuilder = createLayernormFwdGraph(10,
-                                                11,
-                                                12,
-                                                13,
-                                                14,
-                                                15,
-                                                16,
-                                                dims,
-                                                dims,
-                                                normDims,
-                                                normDims,
-                                                batchDims,
-                                                batchDims,
-                                                strides,
-                                                strides,
-                                                normStrides,
-                                                normStrides,
-                                                batchStrides,
-                                                batchStrides,
-                                                LAYERNORM_DEFAULT_EPSILON,
-                                                3,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormFwdGraph(10,
+                                                      11,
+                                                      12,
+                                                      13,
+                                                      14,
+                                                      15,
+                                                      16,
+                                                      dims,
+                                                      dims,
+                                                      normDims,
+                                                      normDims,
+                                                      batchDims,
+                                                      batchDims,
+                                                      strides,
+                                                      strides,
+                                                      normStrides,
+                                                      normStrides,
+                                                      batchStrides,
+                                                      batchStrides,
+                                                      LAYERNORM_DEFAULT_EPSILON,
+                                                      3,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
     hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(normDims, normStrides);
@@ -1222,43 +1224,43 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormBwdIsApplicable)
     const std::vector<int64_t> dims = {2, 3, 5, 7};
     const std::vector<int64_t> batchDims = {2, 1, 1, 1};
     const std::vector<int64_t> normDims = {1, 3, 5, 7};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     auto batchStrides = generateStrides(batchDims);
-    auto normStrides = generateStrides(normDims);
+    const auto normStrides = generateStrides(normDims);
 
-    auto graphBuilder = createLayernormBwdGraph(10,
-                                                11,
-                                                12,
-                                                13,
-                                                14,
-                                                15,
-                                                16,
-                                                17,
-                                                18,
-                                                dims,
-                                                dims,
-                                                normDims,
-                                                dims,
-                                                normDims,
-                                                normDims,
-                                                batchDims,
-                                                batchDims,
-                                                strides,
-                                                strides,
-                                                normStrides,
-                                                strides,
-                                                normStrides,
-                                                normStrides,
-                                                batchStrides,
-                                                batchStrides,
-                                                LAYERNORM_DEFAULT_EPSILON,
-                                                3,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormBwdGraph(10,
+                                                      11,
+                                                      12,
+                                                      13,
+                                                      14,
+                                                      15,
+                                                      16,
+                                                      17,
+                                                      18,
+                                                      dims,
+                                                      dims,
+                                                      normDims,
+                                                      dims,
+                                                      normDims,
+                                                      normDims,
+                                                      batchDims,
+                                                      batchDims,
+                                                      strides,
+                                                      strides,
+                                                      normStrides,
+                                                      strides,
+                                                      normStrides,
+                                                      normStrides,
+                                                      batchStrides,
+                                                      batchStrides,
+                                                      LAYERNORM_DEFAULT_EPSILON,
+                                                      3,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -1271,43 +1273,43 @@ TEST(TestGpuReferenceGraphExecutorFp32, LayernormBwdExecutes)
     const std::vector<int64_t> dims = {2, 3, 5, 7};
     const std::vector<int64_t> batchDims = {2, 1, 1, 1};
     const std::vector<int64_t> normDims = {1, 3, 5, 7};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     auto batchStrides = generateStrides(batchDims);
-    auto normStrides = generateStrides(normDims);
+    const auto normStrides = generateStrides(normDims);
 
-    auto graphBuilder = createLayernormBwdGraph(10,
-                                                11,
-                                                12,
-                                                13,
-                                                14,
-                                                15,
-                                                16,
-                                                17,
-                                                18,
-                                                dims,
-                                                dims,
-                                                normDims,
-                                                dims,
-                                                normDims,
-                                                normDims,
-                                                batchDims,
-                                                batchDims,
-                                                strides,
-                                                strides,
-                                                normStrides,
-                                                strides,
-                                                normStrides,
-                                                normStrides,
-                                                batchStrides,
-                                                batchStrides,
-                                                LAYERNORM_DEFAULT_EPSILON,
-                                                3,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormBwdGraph(10,
+                                                      11,
+                                                      12,
+                                                      13,
+                                                      14,
+                                                      15,
+                                                      16,
+                                                      17,
+                                                      18,
+                                                      dims,
+                                                      dims,
+                                                      normDims,
+                                                      dims,
+                                                      normDims,
+                                                      normDims,
+                                                      batchDims,
+                                                      batchDims,
+                                                      strides,
+                                                      strides,
+                                                      normStrides,
+                                                      strides,
+                                                      normStrides,
+                                                      normStrides,
+                                                      batchStrides,
+                                                      batchStrides,
+                                                      LAYERNORM_DEFAULT_EPSILON,
+                                                      3,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
     hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dims, strides);
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
@@ -1405,23 +1407,23 @@ TEST(TestGpuReferenceGraphExecutorFp32, MatmulIsApplicable)
     const std::vector<int64_t> aDims = {2, 6, 5, 7};
     const std::vector<int64_t> bDims = {4, 3, 7, 11};
     const std::vector<int64_t> cDims = {4, 6, 5, 11};
-    auto aStrides = generateStrides(aDims);
-    auto bStrides = generateStrides(bDims);
-    auto cStrides = generateStrides(cDims);
+    const auto aStrides = generateStrides(aDims);
+    const auto bStrides = generateStrides(bDims);
+    const auto cStrides = generateStrides(cDims);
 
-    auto graphBuilder = createMatmulGraph(10,
-                                          11,
-                                          12,
-                                          aDims,
-                                          aStrides,
-                                          bDims,
-                                          bStrides,
-                                          cDims,
-                                          cStrides,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT);
+    const auto graphBuilder = createMatmulGraph(10,
+                                                11,
+                                                12,
+                                                aDims,
+                                                aStrides,
+                                                bDims,
+                                                bStrides,
+                                                cDims,
+                                                cStrides,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -1434,23 +1436,23 @@ TEST(TestGpuReferenceGraphExecutorFp32, MatmulExecutes)
     const std::vector<int64_t> aDims = {2, 6, 5, 7};
     const std::vector<int64_t> bDims = {4, 3, 7, 11};
     const std::vector<int64_t> cDims = {4, 6, 5, 11};
-    auto aStrides = generateStrides(aDims);
-    auto bStrides = generateStrides(bDims);
-    auto cStrides = generateStrides(cDims);
+    const auto aStrides = generateStrides(aDims);
+    const auto bStrides = generateStrides(bDims);
+    const auto cStrides = generateStrides(cDims);
 
-    auto graphBuilder = createMatmulGraph(10,
-                                          11,
-                                          12,
-                                          aDims,
-                                          aStrides,
-                                          bDims,
-                                          bStrides,
-                                          cDims,
-                                          cStrides,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT);
+    const auto graphBuilder = createMatmulGraph(10,
+                                                11,
+                                                12,
+                                                aDims,
+                                                aStrides,
+                                                bDims,
+                                                bStrides,
+                                                cDims,
+                                                cStrides,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
 
     hipdnn_data_sdk::utilities::Tensor<float> aTensor(aDims, aStrides);
     hipdnn_data_sdk::utilities::Tensor<float> bTensor(bDims, bStrides);
@@ -1494,7 +1496,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseUnaryExecutes)
     constexpr int64_t IN_UID = 10;
     constexpr int64_t OUT_UID = 11;
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -1520,7 +1522,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseUnaryExecutes)
                                                    false));
 
     // Create an ABS unary pointwise operation
-    auto pointwiseAttrs
+    const auto pointwiseAttrs
         = CreatePointwiseAttributes(builder,
                                     PointwiseMode::ABS, // operation
                                     flatbuffers::nullopt, // relu_lower_clip
@@ -1539,7 +1541,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseUnaryExecutes)
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
 
     builder.Finish(graph);
@@ -1576,7 +1578,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
     constexpr int64_t IN_1_UID = 11;
     constexpr int64_t OUT_UID = 12;
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -1612,7 +1614,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
                                                    false));
 
     // Create an Add binary pointwise operation
-    auto pointwiseAttrs
+    const auto pointwiseAttrs
         = CreatePointwiseAttributes(builder,
                                     PointwiseMode::ADD, // operation
                                     flatbuffers::nullopt, // relu_lower_clip
@@ -1631,7 +1633,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
 
     builder.Finish(graph);
@@ -1669,7 +1671,7 @@ TEST(TestGpuReferenceGraphExecutor, RMSNormFwdIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1680,13 +1682,13 @@ TEST(TestGpuReferenceGraphExecutorFp32, RMSNormFwdExecutes)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims);
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims);
 
     std::vector<int64_t> scaleDims(dims);
     scaleDims[0] = 1;
-    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+    const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
         scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
@@ -1729,7 +1731,7 @@ TEST(TestGpuReferenceGraphExecutor, RMSNormBwdIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1740,18 +1742,19 @@ TEST(TestGpuReferenceGraphExecutorFp32, RMSNormBwdExecutes)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(strides, dims, true);
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(strides, dims, true);
 
     std::vector<int64_t> scaleDims(dims);
     scaleDims[0] = 1;
-    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+    const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
         scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     std::vector<int64_t> statDims(dims.size(), 1);
     statDims[0] = dims[0];
-    auto statStrides = hipdnn_data_sdk::utilities::generateStrides(
+    const auto statStrides = hipdnn_data_sdk::utilities::generateStrides(
         statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dims, strides);
@@ -1826,7 +1829,7 @@ TEST(TestGpuReferenceGraphExecutor, ReductionIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1870,7 +1873,7 @@ TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1880,7 +1883,7 @@ TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfWithActivationIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1891,11 +1894,12 @@ TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfExecutes)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     const std::vector<int64_t> perChannelDims = {1, dims[1], 1, 1};
-    auto perChannelStrides = generateStrides(perChannelDims);
+    const auto perChannelStrides = generateStrides(perChannelDims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides, dims);
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides, dims);
 
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
     hipdnn_data_sdk::utilities::Tensor<float> yTensor(dims, strides);
@@ -1949,7 +1953,8 @@ TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfVarianceIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
@@ -1959,7 +1964,7 @@ TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfVarianceWithActivationIsAppli
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
 
     GpuReferenceGraphExecutor executor;
@@ -1971,11 +1976,11 @@ TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfVarianceExecutes)
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     const std::vector<int64_t> perChannelDims = {1, dims[1], 1, 1};
-    auto perChannelStrides = generateStrides(perChannelDims);
+    const auto perChannelStrides = generateStrides(perChannelDims);
 
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(strides, dims);
 
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);

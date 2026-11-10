@@ -94,7 +94,7 @@ void getString(const std::string& source,
                 HIPDNN_STATUS_BAD_PARAM,
                 std::string(errorPrefix) + ": requestedElementCount is negative");
 
-    auto maxSize = static_cast<size_t>(requestedElementCount);
+    const auto maxSize = static_cast<size_t>(requestedElementCount);
     hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
         static_cast<char*>(arrayOfElements), source.c_str(), maxSize);
 
@@ -128,7 +128,7 @@ void getByteArray(const std::vector<uint8_t>& source,
 {
     checkGetArgs(HIPDNN_TYPE_CHAR, attributeType, errorPrefix);
 
-    auto count = static_cast<int64_t>(source.size());
+    const auto count = static_cast<int64_t>(source.size());
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -144,7 +144,7 @@ void getByteArray(const std::vector<uint8_t>& source,
                 HIPDNN_STATUS_BAD_PARAM,
                 std::string(errorPrefix) + ": requestedElementCount is negative");
 
-    auto copyCount = std::min(requestedElementCount, count);
+    const auto copyCount = std::min(requestedElementCount, count);
     if(elementCount != nullptr)
     {
         *elementCount = copyCount;
@@ -419,7 +419,7 @@ std::shared_ptr<TensorDescriptor>
                     int64_t uid,
                     const char* context)
 {
-    auto it = tensorMap.find(uid);
+    const auto it = tensorMap.find(uid);
     THROW_IF_TRUE(it == tensorMap.end(),
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   std::string(context) + ": tensor UID " + std::to_string(uid)
@@ -439,7 +439,7 @@ void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
 
-    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         arrayOfElements,
         HIPDNN_STATUS_BAD_PARAM,
         std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
@@ -537,7 +537,7 @@ void setTensorDescriptorArray(std::vector<std::shared_ptr<TensorDescriptor>>& de
 
     for(int64_t i = 0; i < elementCount; ++i)
     {
-        auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        const auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
             static_cast<const void*>(&descs[i]),
             HIPDNN_STATUS_BAD_PARAM,
             std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
@@ -561,7 +561,7 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
 {
     checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
 
-    auto count = static_cast<int64_t>(descSource.size());
+    const auto count = static_cast<int64_t>(descSource.size());
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -583,7 +583,7 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
     }
 
     auto outDescs = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
-    auto copyCount = std::min(requestedElementCount, count);
+    const auto copyCount = std::min(requestedElementCount, count);
     for(int64_t i = 0; i < copyCount; ++i)
     {
         outDescs[i] = HipdnnBackendDescriptor::packDescriptor(descSource[static_cast<size_t>(i)]);

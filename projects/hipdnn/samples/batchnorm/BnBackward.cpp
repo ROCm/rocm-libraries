@@ -21,30 +21,30 @@ using namespace hipdnn_data_sdk;
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
-    auto inputType = getDataTypeEnumFromType<InputType>();
-    auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
+    const auto inputType = getDataTypeEnumFromType<InputType>();
+    const auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization backwards graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     setPreferredEngine(graph, config);
 
-    auto dy = createTensor({n, c, h, w}, inputType, layout);
-    auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto savedMean = createTensor({1, c, 1, 1}, intermediateType);
-    auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType);
+    const auto dy = createTensor({n, c, h, w}, inputType, layout);
+    const auto x = createTensor({n, c, h, w}, inputType, layout);
+    const auto scale = createTensor({1, c, 1, 1}, intermediateType);
+    const auto savedMean = createTensor({1, c, 1, 1}, intermediateType);
+    const auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType);
 
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
     bnBwdAttributes.set_name("bn_backward_node");
@@ -116,13 +116,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                       &savedMeanTensor,
                                                                       &savedInvVarTensor);
 
-        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
+        const auto tolerance
+            = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
         const auto floatTolerance = static_cast<float>(tolerance);
 
-        auto dxValidator
+        const auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        auto dscaleDbiasValidator
+        const auto dscaleDbiasValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
@@ -179,7 +180,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv);
+        const auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

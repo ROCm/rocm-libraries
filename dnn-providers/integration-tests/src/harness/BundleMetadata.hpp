@@ -127,6 +127,7 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     BundleMetadata meta;
     meta.formatVersion = 1;
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto readString = [&](const char* key) -> std::optional<std::string> {
         if(json.contains(key) && json[key].is_string())
         {
@@ -135,6 +136,7 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         return std::nullopt;
     };
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
         if(json.contains(key) && json[key].is_number_integer())
         {
@@ -160,6 +162,7 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     // The three flags are strict booleans. Absent means false; a string, a number
     // or a null is an authoring error, because "yes" quietly reading as false would
     // leave the bundle verified by the reference it meant to switch off.
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto readFlag = [&](const char* key) -> bool {
         if(!json.contains(key))
         {
@@ -257,6 +260,7 @@ inline std::filesystem::path metaJsonPath(const std::filesystem::path& bundleJso
 /// BundleMetadataError.
 inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::path& bundleJsonPath)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto path = metaJsonPath(bundleJsonPath);
 
     if(!std::filesystem::exists(path))

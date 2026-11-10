@@ -70,15 +70,15 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto q = std::make_shared<TensorAttributes>();
+        const auto q = std::make_shared<TensorAttributes>();
         q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("q").set_data_type(DataType::FLOAT);
         q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-        auto k = std::make_shared<TensorAttributes>();
+        const auto k = std::make_shared<TensorAttributes>();
         k->set_uid(K_SDPA_TENSOR_K_UID).set_name("k").set_data_type(DataType::FLOAT);
         k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-        auto v = std::make_shared<TensorAttributes>();
+        const auto v = std::make_shared<TensorAttributes>();
         v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
         v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -100,7 +100,7 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, BasicSdpaFwdRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -111,7 +111,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, BasicSdpaFwdRoundTrip)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -174,14 +174,14 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, BasicSdpaFwdRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto& originalNodes = originalGraph->getSubNodes();
     ASSERT_EQ(originalNodes.size(), 1u);
     auto* originalNode = dynamic_cast<SdpaFwdNode*>(originalNodes[0].get());
     ASSERT_NE(originalNode, nullptr);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
     scale->set_value(0.125f);
     originalNode->attributes.set_attn_scale(scale);
@@ -195,7 +195,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -233,7 +233,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 // all fields survive the backend binary serialization path.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -248,7 +248,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(graphDesc.get());
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -293,7 +293,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 // every attribute survives.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttributesViaCApi)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -303,56 +303,56 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     // Compatible optional input tensors; attention scale is set as a scalar below. The page
     // tables make K and V paged containers, which max_seq_len_kv requires.
 
-    auto attnMask = std::make_shared<TensorAttributes>();
+    const auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
         .set_name("ATTN_MASK")
         .set_data_type(DataType::FLOAT);
     attnMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    auto seqLenQ = std::make_shared<TensorAttributes>();
+    const auto seqLenQ = std::make_shared<TensorAttributes>();
     seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID)
         .set_name("SEQ_LEN_Q")
         .set_data_type(DataType::INT32);
     seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto seqLenKv = std::make_shared<TensorAttributes>();
+    const auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID)
         .set_name("SEQ_LEN_KV")
         .set_data_type(DataType::INT32);
     seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto pageTableK = std::make_shared<TensorAttributes>();
+    const auto pageTableK = std::make_shared<TensorAttributes>();
     pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID)
         .set_name("PAGE_TABLE_K")
         .set_data_type(DataType::INT32);
     pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    auto pageTableV = std::make_shared<TensorAttributes>();
+    const auto pageTableV = std::make_shared<TensorAttributes>();
     pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID)
         .set_name("PAGE_TABLE_V")
         .set_data_type(DataType::INT32);
     pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    auto seed = std::make_shared<TensorAttributes>();
+    const auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED");
     seed->set_value(int32_t{42});
 
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET");
     offset->set_value(int32_t{0});
 
-    auto dropoutMask = std::make_shared<TensorAttributes>();
+    const auto dropoutMask = std::make_shared<TensorAttributes>();
     dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID)
         .set_name("DROPOUT_MASK")
         .set_data_type(DataType::UINT8);
     dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto dropoutScale = std::make_shared<TensorAttributes>();
+    const auto dropoutScale = std::make_shared<TensorAttributes>();
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
@@ -385,7 +385,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -497,22 +497,22 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
 // auto-assigned UIDs are unique and correctly referenced after a round-trip.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("AutoUidSdpaFwdGraph")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Create tensors WITHOUT explicit UIDs
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_name("Q").set_data_type(DataType::FLOAT);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_name("K").set_data_type(DataType::FLOAT);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_name("V").set_data_type(DataType::FLOAT);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -530,12 +530,12 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // All auto-assigned UIDs should be unique
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u) << "Expected exactly 4 tensors with auto-assigned UIDs";
 
     std::unordered_set<int64_t> uids;
@@ -561,7 +561,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
 // using a handle (full finalization). Verifies the reconstructed graph matches the original.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHandle)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -570,7 +570,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHand
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -607,7 +607,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHand
 // for an SDPA forward graph.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -619,7 +619,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_FALSE(jsonData.empty());
 
     // Deserialize from JSON with handle
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -630,7 +630,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     // Verify tensors by UID
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u);
 
     hipdnn_tests::verifyTensorInGraph(tensorMap,
@@ -677,7 +677,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
 // Earlier behavior threw "Unsupported SDK DataType" on the UNSET sentinel.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeUnsetRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -688,7 +688,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeUnsetRoundTrip)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -705,21 +705,21 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeUnsetRoundTrip)
 // source graph, the lifted graph must round-trip the value.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("SdpaFwdMmaCoreModeSet")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("q").set_data_type(DataType::FLOAT);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_uid(K_SDPA_TENSOR_K_UID).set_name("k").set_data_type(DataType::FLOAT);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -740,7 +740,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

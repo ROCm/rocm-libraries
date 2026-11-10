@@ -41,30 +41,30 @@ class IntegrationRMSNormBackwardDescriptorLowering : public IntegrationTestFixtu
 // the deserialized FlatBuffer attributes match.
 TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestRMSNormBackwardGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_uid(K_RMSNORMBACKWARD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RMSNORMBACKWARD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_RMSNORMBACKWARD_TENSOR_SCALE_UID)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_uid(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID)
         .set_name("inv_rms")
         .set_data_type(DataType::FLOAT);
@@ -174,30 +174,30 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardRoundTrip)
 // Roundtrip with optional dbias tensor set, verifying it appears in the serialized graph.
 TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardWithDBiasRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestRMSNormBackwardGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_uid(K_RMSNORMBACKWARD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RMSNORMBACKWARD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_RMSNORMBACKWARD_TENSOR_SCALE_UID)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_uid(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID)
         .set_name("inv_rms")
         .set_data_type(DataType::FLOAT);
@@ -319,28 +319,28 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardWithDBiasRou
 // through the lowering round-trip.
 TEST_F(IntegrationRMSNormBackwardDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidRMSNormBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_uid(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID)
         .set_name("inv_rms")
         .set_data_type(DataType::FLOAT);

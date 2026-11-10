@@ -70,22 +70,22 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor
+        const auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
 
-        auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
+        const auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
             _params.meanTensor, variantPack.at(_params.meanTensor.uid));
 
-        auto shallowVarianceTensor = createShallowTensor<MeanVarianceDataType>(
+        const auto shallowVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.varianceTensor, variantPack.at(_params.varianceTensor.uid));
 
         const double epsilonVal

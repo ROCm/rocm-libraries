@@ -149,38 +149,38 @@ inline const PointwiseModeBitset& getTernaryModesBitset()
 
 inline bool isUnaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getUnaryModesBitset().test(position);
 }
 
 inline bool isBinaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getBinaryModesBitset().test(position);
 }
 
 inline bool isTernaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
 }
 
 // Check if operations have implemented functors (for ReferencePointwiseBase usage)
 inline bool isImplementedUnaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getImplementedUnaryModesBitset().test(position);
 }
 
 inline bool isImplementedBinaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getImplementedBinaryModesBitset().test(position);
 }
 
 inline bool isImplementedTernaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
+    const auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getImplementedTernaryModesBitset().test(position);
 }
 

@@ -45,12 +45,12 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
-                                                               params.w().tensorDescriptor(),
-                                                               params.x().tensorDescriptor(),
-                                                               params.conv().convDescriptor(),
-                                                               params.y().tensorDescriptor(),
-                                                               &solutionCount);
+        const auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &solutionCount);
         if(status != miopenStatusSuccess)
         {
             return false;
@@ -83,12 +83,13 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
-                                                                    params.dy().tensorDescriptor(),
-                                                                    params.w().tensorDescriptor(),
-                                                                    params.conv().convDescriptor(),
-                                                                    params.dx().tensorDescriptor(),
-                                                                    &solutionCount);
+        const auto status
+            = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                            params.dy().tensorDescriptor(),
+                                                            params.w().tensorDescriptor(),
+                                                            params.conv().convDescriptor(),
+                                                            params.dx().tensorDescriptor(),
+                                                            &solutionCount);
         if(status != miopenStatusSuccess)
         {
             return false;
@@ -121,7 +122,7 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status
+        const auto status
             = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
                                                                params.dy().tensorDescriptor(),
                                                                params.x().tensorDescriptor(),
@@ -494,7 +495,8 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
                         knobSetting.valueType())));
         }
 
-        auto value = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
+        const auto value
+            = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
 
         if(value < 0)
         {

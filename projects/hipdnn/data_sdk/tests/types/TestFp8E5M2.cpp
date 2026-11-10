@@ -310,7 +310,7 @@ TEST(TestFp8E5M2, SignedZeroSupported)
 TEST(TestFp8E5M2, NegateZeroProducesNegativeZero)
 {
     // OCP E5M2 supports -0; negating +0 flips the sign bit -> 0x80 (-0).
-    auto val = -fp8_e5m2(0.0f);
+    const auto val = -fp8_e5m2(0.0f);
     EXPECT_EQ(val.data, static_cast<uint8_t>(0x80));
     EXPECT_EQ(static_cast<float>(val), -0.0f);
     EXPECT_FALSE(isnan(val));
@@ -319,14 +319,14 @@ TEST(TestFp8E5M2, NegateZeroProducesNegativeZero)
 TEST(TestFp8E5M2, NegateNanProducesNan)
 {
     // OCP E5M2: negating any NaN encoding flips the sign bit; the result is still NaN.
-    auto posNan = fp8_e5m2::from_bits(0x7F);
-    auto negNan = -posNan;
+    const auto posNan = fp8_e5m2::from_bits(0x7F);
+    const auto negNan = -posNan;
     EXPECT_EQ(negNan.data, static_cast<uint8_t>(0xFF));
     EXPECT_TRUE(isnan(negNan));
 
     // Non-canonical NaN encodings (0x7D, 0x7E) also negate correctly.
-    auto altPosNan = fp8_e5m2::from_bits(0x7D);
-    auto altNegNan = -altPosNan;
+    const auto altPosNan = fp8_e5m2::from_bits(0x7D);
+    const auto altNegNan = -altPosNan;
     EXPECT_EQ(altNegNan.data, static_cast<uint8_t>(0xFD));
     EXPECT_TRUE(isnan(altNegNan));
 }
@@ -334,14 +334,14 @@ TEST(TestFp8E5M2, NegateNanProducesNan)
 TEST(TestFp8E5M2, NegateInfinityProducesInfinity)
 {
     // OCP E5M2: negating +Inf (0x7C) gives -Inf (0xFC), and vice versa.
-    auto posInf = fp8_e5m2::from_bits(0x7C);
-    auto negInf = -posInf;
+    const auto posInf = fp8_e5m2::from_bits(0x7C);
+    const auto negInf = -posInf;
     EXPECT_EQ(negInf.data, static_cast<uint8_t>(0xFC));
     EXPECT_TRUE(isinf(negInf));
     EXPECT_TRUE(signbit(negInf));
 
-    auto fromNeg = fp8_e5m2::from_bits(0xFC);
-    auto backToPos = -fromNeg;
+    const auto fromNeg = fp8_e5m2::from_bits(0xFC);
+    const auto backToPos = -fromNeg;
     EXPECT_EQ(backToPos.data, static_cast<uint8_t>(0x7C));
     EXPECT_TRUE(isinf(backToPos));
     EXPECT_FALSE(signbit(backToPos));

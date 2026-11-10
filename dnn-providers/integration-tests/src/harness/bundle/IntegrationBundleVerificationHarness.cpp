@@ -377,7 +377,7 @@ std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeS
     const std::string arch = baseArchToken(_deps.policy.arch);
     const auto& rankedIds = session.engines.rankedIds;
 
-    auto observe = [&](const LoadedEngine& engine) {
+    const auto observe = [&](const LoadedEngine& engine) {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
         return ObservedGraphSupport{
@@ -937,7 +937,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
                 *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
         }
 
-        auto packedFill = hipdnn_integration_tests::fillInputs(
+        const auto packedFill = hipdnn_integration_tests::fillInputs(
             wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
         if(!packedFill.filled)
         {
@@ -1043,7 +1043,7 @@ IntegrationBundleVerificationHarness::RefRunResult
         {
             bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
         }
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
+        const auto variantPack = buildVariantPack(refOutputs, useDevice);
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)

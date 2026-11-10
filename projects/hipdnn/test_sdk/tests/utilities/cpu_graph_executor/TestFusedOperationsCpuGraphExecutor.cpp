@@ -29,7 +29,7 @@ class TestFusedOperationsCpuGraphExecutor : public ::testing::Test
 
 TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 {
-    auto tolerance = pointwise::getTolerance<float>();
+    const auto tolerance = pointwise::getTolerance<float>();
     const std::vector<int64_t> xDims = {1, 1, 2, 2};
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
@@ -66,7 +66,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     static_cast<float*>(multiplyConstantTensor.memory().hostData())[0] = multiplyConstant;
 
     // BUILD 3-STEP FUSED GRAPH MANUALLY
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionAddMultiplyFusedTest");
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -78,24 +78,27 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "X", hipdnn_frontend::DataType::FLOAT, xTensor);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "W", hipdnn_frontend::DataType::FLOAT, wTensor);
     wAttr.set_uid(uid++);
-    auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
+    const auto wTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
 
     auto addConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "AddConstant", hipdnn_frontend::DataType::FLOAT, addConstantTensor);
     addConstantAttr.set_uid(uid++);
-    auto addConstantTensorAttr
+    const auto addConstantTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(addConstantAttr));
 
     auto multiplyConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "MultiplyConstant", hipdnn_frontend::DataType::FLOAT, multiplyConstantTensor);
     multiplyConstantAttr.set_uid(uid++);
-    auto multiplyConstantTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
-        std::move(multiplyConstantAttr));
+    const auto multiplyConstantTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+            std::move(multiplyConstantAttr));
 
     // Step 1: CONVOLUTION OPERATION
     hipdnn_frontend::graph::ConvFpropAttributes convAttrs;
@@ -106,7 +109,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     convAttrs.set_post_padding(padding);
     convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto convOutputTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+    const auto convOutputTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
     if(!convOutputTensorAttr->has_uid())
     {
@@ -121,7 +124,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     addAttrs.set_name("PointwiseAdd");
     addAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
-    auto addOutputTensorAttr
+    const auto addOutputTensorAttr
         = graph->pointwise(convOutputTensorAttr, addConstantTensorAttr, addAttrs);
 
     if(!addOutputTensorAttr->has_uid())
@@ -137,7 +140,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     multiplyAttrs.set_name("PointwiseMultiply");
     multiplyAttrs.set_mode(hipdnn_frontend::PointwiseMode::MUL);
 
-    auto finalOutputTensorAttr
+    const auto finalOutputTensorAttr
         = graph->pointwise(addOutputTensorAttr, multiplyConstantTensorAttr, multiplyAttrs);
 
     if(!finalOutputTensorAttr->has_uid())
@@ -156,7 +159,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     variantPack[multiplyConstantTensorAttr->get_uid()] = multiplyConstantTensor.memory().hostData();
     variantPack[finalOutputTensorAttr->get_uid()] = yTensor.memory().hostData();
 
-    auto validationResult = graph->validate();
+    const auto validationResult = graph->validate();
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor
@@ -201,7 +204,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 
 TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
 {
-    auto tolerance = pointwise::getTolerance<float>();
+    const auto tolerance = pointwise::getTolerance<float>();
     const std::vector<int64_t> xDims = {1, 1, 2, 2};
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
@@ -242,7 +245,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     static_cast<float*>(minConstantTensor.memory().hostData())[0] = minConstant;
 
     // BUILD 3-STEP FUSED GRAPH MANUALLY
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionMaxMinFusedTest");
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -254,23 +257,25 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "X", hipdnn_frontend::DataType::FLOAT, xTensor);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "W", hipdnn_frontend::DataType::FLOAT, wTensor);
     wAttr.set_uid(uid++);
-    auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
+    const auto wTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
 
     auto maxConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "MaxConstant", hipdnn_frontend::DataType::FLOAT, maxConstantTensor);
     maxConstantAttr.set_uid(uid++);
-    auto maxConstantTensorAttr
+    const auto maxConstantTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maxConstantAttr));
 
     auto minConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "MinConstant", hipdnn_frontend::DataType::FLOAT, minConstantTensor);
     minConstantAttr.set_uid(uid++);
-    auto minConstantTensorAttr
+    const auto minConstantTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(minConstantAttr));
 
     // Step 1: CONVOLUTION OPERATION
@@ -282,7 +287,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     convAttrs.set_post_padding(padding);
     convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto convOutputTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+    const auto convOutputTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
     if(!convOutputTensorAttr->has_uid())
     {
@@ -297,7 +302,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     maxAttrs.set_name("PointwiseMax");
     maxAttrs.set_mode(hipdnn_frontend::PointwiseMode::MAX);
 
-    auto maxOutputTensorAttr
+    const auto maxOutputTensorAttr
         = graph->pointwise(convOutputTensorAttr, maxConstantTensorAttr, maxAttrs);
 
     if(!maxOutputTensorAttr->has_uid())
@@ -313,7 +318,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     minAttrs.set_name("PointwiseMin");
     minAttrs.set_mode(hipdnn_frontend::PointwiseMode::MIN);
 
-    auto finalOutputTensorAttr
+    const auto finalOutputTensorAttr
         = graph->pointwise(maxOutputTensorAttr, minConstantTensorAttr, minAttrs);
 
     if(!finalOutputTensorAttr->has_uid())
@@ -332,7 +337,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     variantPack[minConstantTensorAttr->get_uid()] = minConstantTensor.memory().hostData();
     variantPack[finalOutputTensorAttr->get_uid()] = yTensor.memory().hostData();
 
-    auto validationResult = graph->validate();
+    const auto validationResult = graph->validate();
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor

@@ -93,17 +93,17 @@ inline flatbuffers::FlatBufferBuilder
                                                        &invVarianceDims.value()));
     }
 
-    auto layernormBackwardAttrs = CreateLayernormBackwardAttributes(builder,
-                                                                    dyUid,
-                                                                    xUid,
-                                                                    scaleUid,
-                                                                    meanUid,
-                                                                    invVarianceUid,
-                                                                    epsilonUid,
-                                                                    dxUid,
-                                                                    dscaleUid,
-                                                                    dbiasUid,
-                                                                    normalizedDimCount);
+    const auto layernormBackwardAttrs = CreateLayernormBackwardAttributes(builder,
+                                                                          dyUid,
+                                                                          xUid,
+                                                                          scaleUid,
+                                                                          meanUid,
+                                                                          invVarianceUid,
+                                                                          epsilonUid,
+                                                                          dxUid,
+                                                                          dscaleUid,
+                                                                          dbiasUid,
+                                                                          normalizedDimCount);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -112,13 +112,13 @@ inline flatbuffers::FlatBufferBuilder
                                      NodeAttributes::LayernormBackwardAttributes,
                                      layernormBackwardAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "LayernormBwdTestGraph",
-                                   computeDataType,
-                                   scaleBiasDataType,
-                                   dxDataType,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "LayernormBwdTestGraph",
+                                         computeDataType,
+                                         scaleBiasDataType,
+                                         dxDataType,
+                                         &tensors,
+                                         &nodes);
 
     builder.Finish(graph);
     return builder;

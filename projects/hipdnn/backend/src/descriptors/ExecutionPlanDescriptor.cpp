@@ -43,7 +43,7 @@ struct TensorIdentities
 
 TensorIdentities collectTensorIdentities(const GraphDescriptor& graph)
 {
-    auto serializedGraph = graph.getSerializedGraph();
+    const auto serializedGraph = graph.getSerializedGraph();
     if(serializedGraph.ptr == nullptr || serializedGraph.size == 0)
     {
         return {};
@@ -87,12 +87,12 @@ void ExecutionPlanDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "ExecutionPlanDescriptor::finalize() failed: Engine was not set.");
 
-    auto engine = _engineConfig->getEngine();
-    auto engineId = engine->getEngineId();
-    auto graph = engine->getGraph();
+    const auto engine = _engineConfig->getEngine();
+    const auto engineId = engine->getEngineId();
+    const auto graph = engine->getGraph();
     auto handle = graph->getHandle();
-    auto pluginResourceManager = handle->getPluginResourceManager();
-    auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
+    const auto pluginResourceManager = handle->getPluginResourceManager();
+    const auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
     _pluginResourceManager = pluginResourceManager;
     _engineId = engineId;
     auto tensorIdentities = collectTensorIdentities(*graph);
@@ -269,10 +269,11 @@ void ExecutionPlanDescriptor::setEngineConfig(hipdnnBackendAttributeType_t attri
                 HIPDNN_STATUS_BAD_PARAM,
                 "ExecutionPlanDescriptor failed to set engine config: Invalid element count.");
 
-    auto engineConfig = HipdnnBackendDescriptor::unpackDescriptor<const EngineConfigDescriptor>(
-        arrayOfElements,
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-        "ExecutionPlanDescriptor failed to set engine config: Null pointer.");
+    const auto engineConfig
+        = HipdnnBackendDescriptor::unpackDescriptor<const EngineConfigDescriptor>(
+            arrayOfElements,
+            HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+            "ExecutionPlanDescriptor failed to set engine config: Null pointer.");
 
     THROW_IF_FALSE(engineConfig->isFinalized(),
                    HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
@@ -326,7 +327,7 @@ void ExecutionPlanDescriptor::getTensorUids(hipdnnBackendAttributeType_t attribu
                 HIPDNN_STATUS_BAD_PARAM,
                 "ExecutionPlanDescriptor failed to get tensor UIDs: Invalid attribute type.");
 
-    auto count = static_cast<int64_t>(_tensorUids.size());
+    const auto count = static_cast<int64_t>(_tensorUids.size());
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
         THROW_IF_NULL(elementCount,
@@ -434,18 +435,19 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
             _engineId, _executionContext->get(), pluginPayload);
 
         flatbuffers::FlatBufferBuilder builder;
-        auto serializedPluginPayload = builder.CreateVector(pluginPayload);
-        auto serializedTensorUids = builder.CreateVector(_tensorUids);
-        auto serializedTensorAlignments = builder.CreateVector(_tensorAlignments);
-        auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-            builder,
-            PLAN_SERIALIZATION_VERSION,
-            _engineId,
-            _workspaceSize,
-            serializedTensorUids,
-            serializedPluginPayload,
-            _isOverrideShapeEnabled,
-            serializedTensorAlignments);
+        const auto serializedPluginPayload = builder.CreateVector(pluginPayload);
+        const auto serializedTensorUids = builder.CreateVector(_tensorUids);
+        const auto serializedTensorAlignments = builder.CreateVector(_tensorAlignments);
+        const auto executionPlan
+            = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
+                builder,
+                PLAN_SERIALIZATION_VERSION,
+                _engineId,
+                _workspaceSize,
+                serializedTensorUids,
+                serializedPluginPayload,
+                _isOverrideShapeEnabled,
+                serializedTensorAlignments);
         builder.Finish(executionPlan);
 
         _serializedPlanCache.assign(builder.GetBufferPointer(),

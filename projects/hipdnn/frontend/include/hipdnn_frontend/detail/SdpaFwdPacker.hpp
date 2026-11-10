@@ -249,7 +249,7 @@ inline Error
     }
     if(attributes.max_seq_len_kv.has_value())
     {
-        auto val = attributes.max_seq_len_kv.value();
+        const auto val = attributes.max_seq_len_kv.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FWD_MAX_SEQ_LEN_KV_EXT,
                                                    HIPDNN_TYPE_INT32,

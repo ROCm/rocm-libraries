@@ -123,20 +123,20 @@ public:
 
         const std::vector<int64_t> xDims = {1, 16, 16, 16};
         const std::vector<int64_t> wDims = {16, 16, 3, 3};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto wAttr = graph::makeTensorAttributes("w", wDims, wStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yAttr->set_output(true);
 
         return graphObj;
@@ -154,20 +154,20 @@ public:
         const std::vector<int64_t> dyDims = {1, 16, 16, 16};
         const std::vector<int64_t> wDims = {16, 16, 3, 3};
         const std::vector<int64_t> dxDims = {1, 16, 16, 16};
-        auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
-        auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
+        const auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
+        const auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
 
         auto dyAttr = graph::makeTensorAttributes("dy", dyDims, dyStrides);
         auto wAttr = graph::makeTensorAttributes("w", wDims, wStrides);
 
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
+        const auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        const auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvDgradAttributes convAttrs;
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto dxAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        const auto dxAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
         dxAttr->set_dim(dxDims);
         dxAttr->set_output(true);
 
@@ -186,20 +186,20 @@ public:
         const std::vector<int64_t> xDims = {1, 16, 16, 16};
         const std::vector<int64_t> dyDims = {1, 16, 16, 16};
         const std::vector<int64_t> wDims = {16, 16, 3, 3};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto dyAttr = graph::makeTensorAttributes("dy", dyDims, dyStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         graph::ConvWgradAttributes convAttrs;
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
+        const auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwAttr->set_dim(wDims);
         dwAttr->set_output(true);
 
@@ -218,31 +218,31 @@ public:
         const std::vector<int64_t> xDims = {1, 16, 16, 16};
         const std::vector<int64_t> wDims = {16, 16, 3, 3};
         const std::vector<int64_t> bDims = {1, 16, 1, 1};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-        auto bStrides = hipdnn_data_sdk::utilities::generateStrides(bDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
+        const auto bStrides = hipdnn_data_sdk::utilities::generateStrides(bDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto wAttr = graph::makeTensorAttributes("w", wDims, wStrides);
         auto bAttr = graph::makeTensorAttributes("bias", bDims, bStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
-        auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
+        const auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         graph::ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto yConvAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yConvAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
         graph::PointwiseAttributes biasAttrs;
         biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
-        auto yBiasAttr = graphObj.pointwise(yConvAttr, bTensorAttr, biasAttrs);
+        const auto yBiasAttr = graphObj.pointwise(yConvAttr, bTensorAttr, biasAttrs);
 
         graph::PointwiseAttributes activAttrs;
         activAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
-        auto yActivAttr = graphObj.pointwise(yBiasAttr, activAttrs);
+        const auto yActivAttr = graphObj.pointwise(yBiasAttr, activAttrs);
 
         yActivAttr->set_output(true);
 
@@ -260,18 +260,19 @@ public:
 
         const std::vector<int64_t> xDims = {2, 16, 8, 8};
         const std::vector<int64_t> scaleDims = hipdnn_data_sdk::utilities::getDerivedShape(xDims);
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
         auto biasAttr = graph::makeTensorAttributes("bias", scaleDims, scaleStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
-        auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
+        const auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::BatchnormAttributes bnAttrs;
@@ -304,8 +305,8 @@ public:
 
         const std::vector<int64_t> xDims = {2, 16, 8, 8};
         const std::vector<int64_t> scaleDims = hipdnn_data_sdk::utilities::getDerivedShape(xDims);
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
@@ -313,20 +314,22 @@ public:
         auto meanAttr = graph::makeTensorAttributes("mean", scaleDims, scaleStrides);
         auto invVarAttr = graph::makeTensorAttributes("invVariance", scaleDims, scaleStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
-        auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-        auto invVarTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        const auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+        const auto invVarTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
 
         const graph::BatchnormInferenceAttributes bnAttrs;
 
-        auto yAttr = graphObj.batchnorm_inference(xTensorAttr,
-                                                  meanTensorAttr,
-                                                  invVarTensorAttr,
-                                                  scaleTensorAttr,
-                                                  biasTensorAttr,
-                                                  bnAttrs);
+        const auto yAttr = graphObj.batchnorm_inference(xTensorAttr,
+                                                        meanTensorAttr,
+                                                        invVarTensorAttr,
+                                                        scaleTensorAttr,
+                                                        biasTensorAttr,
+                                                        bnAttrs);
 
         yAttr->set_output(true);
 
@@ -344,8 +347,8 @@ public:
 
         const std::vector<int64_t> xDims = {2, 16, 8, 8};
         const std::vector<int64_t> scaleDims = hipdnn_data_sdk::utilities::getDerivedShape(xDims);
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto meanAttr = graph::makeTensorAttributes("mean", scaleDims, scaleStrides);
@@ -353,23 +356,24 @@ public:
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
         auto biasAttr = graph::makeTensorAttributes("bias", scaleDims, scaleStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-        auto varianceTensorAttr
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+        const auto varianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
-        auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        const auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         const graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
-        auto yAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
-                                                               meanTensorAttr,
-                                                               varianceTensorAttr,
-                                                               scaleTensorAttr,
-                                                               biasTensorAttr,
-                                                               epsilonTensorAttr,
-                                                               bnAttrs);
+        const auto yAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
+                                                                     meanTensorAttr,
+                                                                     varianceTensorAttr,
+                                                                     scaleTensorAttr,
+                                                                     biasTensorAttr,
+                                                                     epsilonTensorAttr,
+                                                                     bnAttrs);
         yAttr->set_output(true);
 
         return graphObj;
@@ -386,16 +390,17 @@ public:
 
         const std::vector<int64_t> xDims = {2, 16, 8, 8};
         const std::vector<int64_t> scaleDims = hipdnn_data_sdk::utilities::getDerivedShape(xDims);
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto dyAttr = graph::makeTensorAttributes("dy", xDims, xStrides);
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
 
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         const graph::BatchnormBackwardAttributes bnAttrs;
 
@@ -419,18 +424,18 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> aDims = {2, 3};
-        auto aStrides = hipdnn_data_sdk::utilities::generateStrides(aDims);
+        const auto aStrides = hipdnn_data_sdk::utilities::generateStrides(aDims);
         auto aAttr = graph::makeTensorAttributes("A", aDims, aStrides);
-        auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
+        const auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         const std::vector<int64_t> bDims = {3, 4};
-        auto bStrides = hipdnn_data_sdk::utilities::generateStrides(bDims);
+        const auto bStrides = hipdnn_data_sdk::utilities::generateStrides(bDims);
         auto bAttr = graph::makeTensorAttributes("B", bDims, bStrides);
-        auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
+        const auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         const graph::MatmulAttributes matmulAttrs;
 
-        auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
+        const auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
         cAttr->set_output(true);
 
         return graphObj;
@@ -447,18 +452,19 @@ public:
 
         const std::vector<int64_t> xDims = {2, 8, 16};
         const std::vector<int64_t> scaleDims = {1, 8, 16};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
         auto biasAttr = graph::makeTensorAttributes("bias", scaleDims, scaleStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
-        auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
+        const auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::LayernormAttributes lnAttrs;
@@ -492,16 +498,17 @@ public:
 
         const std::vector<int64_t> xDims = {2, 8, 16};
         const std::vector<int64_t> scaleDims = {1, 8, 16};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
+        const auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::RMSNormAttributes rmsAttrs;
@@ -531,19 +538,21 @@ public:
         const std::vector<int64_t> xDims = {2, 8, 16};
         const std::vector<int64_t> scaleDims = {1, 8, 16};
         const std::vector<int64_t> invRmsDims = {2, 1, 1};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
-        auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        const auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
         auto dyAttr = graph::makeTensorAttributes("dy", xDims, xStrides);
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
         auto invRmsAttr = graph::makeTensorAttributes("invRms", invRmsDims, invRmsStrides);
 
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        auto invRmsTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invRmsAttr));
+        const auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto scaleTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        const auto invRmsTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(invRmsAttr));
 
         const graph::RMSNormBackwardAttributes rmsBwdAttrs;
         auto outputs = graphObj.rmsnorm_backward(
@@ -565,19 +574,19 @@ public:
 
         const std::vector<int64_t> xDims = {2, 4, 16, 16};
         const std::vector<int64_t> yDims = {2, 4, 1, 1};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-        auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto yAttr = graph::makeTensorAttributes("y", yDims, yStrides);
-        auto yTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(yAttr));
+        const auto yTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(yAttr));
 
         graph::ReductionAttributes reductionAttrs;
         reductionAttrs.set_mode(hipdnn_frontend::ReductionMode::ADD);
 
-        auto yResult = graphObj.reduction(xTensorAttr, yTensorAttr, reductionAttrs);
+        const auto yResult = graphObj.reduction(xTensorAttr, yTensorAttr, reductionAttrs);
         yResult->set_output(true);
 
         return graphObj;
@@ -593,9 +602,9 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> xDims = {2, 4, 16, 16};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         graph::ResampleFwdAttributes resampleAttrs;
         resampleAttrs.set_pre_padding({0, 0})
@@ -605,7 +614,7 @@ public:
             .set_resample_mode(hipdnn_frontend::ResampleMode::AVGPOOL_EXCLUDE_PADDING)
             .set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
 
-        auto yAttr = graphObj.resample(xTensorAttr, resampleAttrs)[0];
+        const auto yAttr = graphObj.resample(xTensorAttr, resampleAttrs)[0];
         yAttr->set_output(true);
 
         return graphObj;
@@ -622,15 +631,15 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> qkvDims = {2, 8, 32, 64};
-        auto qkvStrides = hipdnn_data_sdk::utilities::generateStrides(qkvDims);
+        const auto qkvStrides = hipdnn_data_sdk::utilities::generateStrides(qkvDims);
 
         auto qAttr = graph::makeTensorAttributes("Q", qkvDims, qkvStrides);
         auto kAttr = graph::makeTensorAttributes("K", qkvDims, qkvStrides);
         auto vAttr = graph::makeTensorAttributes("V", qkvDims, qkvStrides);
 
-        auto qTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(qAttr));
-        auto kTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(kAttr));
-        auto vTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(vAttr));
+        const auto qTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(qAttr));
+        const auto kTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(kAttr));
+        const auto vTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(vAttr));
 
         const graph::SdpaAttributes sdpaAttrs;
 
@@ -651,8 +660,8 @@ public:
 
         const std::vector<int64_t> qkvDims = {2, 8, 32, 64};
         const std::vector<int64_t> statsDims = {2, 8, 32, 1};
-        auto qkvStrides = hipdnn_data_sdk::utilities::generateStrides(qkvDims);
-        auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        const auto qkvStrides = hipdnn_data_sdk::utilities::generateStrides(qkvDims);
+        const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
         auto qAttr = graph::makeTensorAttributes("Q", qkvDims, qkvStrides);
         auto kAttr = graph::makeTensorAttributes("K", qkvDims, qkvStrides);
@@ -661,12 +670,13 @@ public:
         auto dOAttr = graph::makeTensorAttributes("dO", qkvDims, qkvStrides);
         auto statsAttr = graph::makeTensorAttributes("stats", statsDims, statsStrides);
 
-        auto qTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(qAttr));
-        auto kTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(kAttr));
-        auto vTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(vAttr));
-        auto oTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(oAttr));
-        auto dOTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dOAttr));
-        auto statsTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(statsAttr));
+        const auto qTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(qAttr));
+        const auto kTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(kAttr));
+        const auto vTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(vAttr));
+        const auto oTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(oAttr));
+        const auto dOTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dOAttr));
+        const auto statsTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(statsAttr));
 
         const graph::SdpaBackwardAttributes sdpaBwdAttrs;
 
@@ -696,15 +706,15 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> xDims = {2, 4, 16, 16};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         graph::PointwiseAttributes pwAttrs;
         pwAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
 
-        auto yAttr = graphObj.pointwise(xTensorAttr, pwAttrs);
+        const auto yAttr = graphObj.pointwise(xTensorAttr, pwAttrs);
         yAttr->set_output(true);
 
         return graphObj;
@@ -720,18 +730,18 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> xDims = {2, 4, 16, 16};
-        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        const auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
 
         auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
         auto yAttr = graph::makeTensorAttributes("y", xDims, xStrides);
 
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        auto yTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(yAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto yTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(yAttr));
 
         graph::PointwiseAttributes pwAttrs;
         pwAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
-        auto outAttr = graphObj.pointwise(xTensorAttr, yTensorAttr, pwAttrs);
+        const auto outAttr = graphObj.pointwise(xTensorAttr, yTensorAttr, pwAttrs);
         outAttr->set_output(true);
 
         return graphObj;

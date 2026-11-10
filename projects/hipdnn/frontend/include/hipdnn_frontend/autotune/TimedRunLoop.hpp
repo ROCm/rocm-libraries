@@ -156,7 +156,7 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
 {
     for(;;)
     {
-        auto benchErr = timeOnce(timing);
+        const auto benchErr = timeOnce(timing);
         if(benchErr.is_bad())
         {
             errorMessage = "Benchmark failed on iteration " + std::to_string(attempt) + ": "

@@ -139,7 +139,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error fill_from_context(const GraphAttributes& graphAttributes)
     {
-        for(auto& tensor : inputs)
+        for(const auto& tensor : inputs)
         {
             if(tensor)
             {
@@ -147,7 +147,7 @@ public:
             }
         }
 
-        for(auto& tensor : outputs)
+        for(const auto& tensor : outputs)
         {
             if(tensor)
             {

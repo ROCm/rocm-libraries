@@ -44,28 +44,28 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 {
     using Mode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("MoeGroupedMatmulTest");
     graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
         .set_compute_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType))
         .set_intermediate_data_type(
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
-    auto tokenAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto tokenAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "TOKEN",
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
             bundle.tokenTensor));
     tokenAttr->set_uid(1);
 
-    auto weightAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto weightAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "WEIGHT",
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
             bundle.weightTensor));
     weightAttr->set_uid(2);
 
-    auto firstTokenOffsetAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto firstTokenOffsetAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "FIRST_TOKEN_OFFSET", hipdnn_frontend::DataType::INT32, bundle.firstTokenOffsetTensor));
     firstTokenOffsetAttr->set_uid(3);
@@ -94,18 +94,18 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     moeAttrs.set_mode(toFrontendMoeMode(bundle.mode));
     moeAttrs.set_top_k(bundle.topK);
 
-    auto outputAttr = graph->moe_grouped_matmul(
+    const auto outputAttr = graph->moe_grouped_matmul(
         tokenAttr, weightAttr, firstTokenOffsetAttr, tokenIndexAttr, tokenKsAttr, moeAttrs);
     outputAttr->set_uid(6);
     outputAttr->set_output(true);
     outputAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(outputDataType));
 
-    auto variantPack = bundle.createVariantPack(*tokenAttr,
-                                                *weightAttr,
-                                                *firstTokenOffsetAttr,
-                                                tokenIndexAttr.get(),
-                                                tokenKsAttr.get(),
-                                                *outputAttr);
+    const auto variantPack = bundle.createVariantPack(*tokenAttr,
+                                                      *weightAttr,
+                                                      *firstTokenOffsetAttr,
+                                                      tokenIndexAttr.get(),
+                                                      tokenKsAttr.get(),
+                                                      *outputAttr);
 
     return std::make_tuple(graph, variantPack);
 }

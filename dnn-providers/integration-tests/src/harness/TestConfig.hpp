@@ -104,6 +104,7 @@ inline std::optional<VerificationMode>
     {
         return cliValue;
     }
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
     if(!envVal.empty())
     {
@@ -122,6 +123,7 @@ inline std::optional<ValidatorDevice>
     {
         return cliValue;
     }
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
     if(!envVal.empty())
     {
@@ -138,6 +140,7 @@ inline std::optional<std::filesystem::path>
     {
         return cliValue;
     }
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
     if(!envVal.empty())
     {
@@ -238,6 +241,7 @@ public:
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
         if(envVal == "0" || envVal == "false")
         {

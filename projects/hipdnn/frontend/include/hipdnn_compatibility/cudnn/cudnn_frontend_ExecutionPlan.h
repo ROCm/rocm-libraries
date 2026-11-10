@@ -64,12 +64,12 @@ public:
         ss << "CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR : ";
         ss << getTag() << ", ";
         ss << "numeric_notes:" << "[";
-        for(auto note : numeric_notes_vec)
+        for(const auto note : numeric_notes_vec)
         {
             ss << cudnn_frontend::to_string(note) << ",";
         }
         ss << "] behavior_notes:" << "[";
-        for(auto note : behavior_notes_vec)
+        for(const auto note : behavior_notes_vec)
         {
             ss << cudnn_frontend::to_string(note) << ",";
         }
@@ -249,7 +249,7 @@ public:
     ExecutionPlan_v8&& build()
     {
         // Created first so that even a plan failing a precondition has a (null) raw descriptor.
-        auto status = m_execution_plan.initialize_managed_backend_pointer(
+        const auto status = m_execution_plan.initialize_managed_backend_pointer(
             CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
         if(status != CUDNN_STATUS_SUCCESS)
         {
@@ -304,7 +304,7 @@ public:
 
     ExecutionPlan_v8&& loadFromJson(const std::string& json_plan)
     {
-        auto status = m_execution_plan.initialize_managed_backend_pointer(
+        const auto status = m_execution_plan.initialize_managed_backend_pointer(
             CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
         if(status != CUDNN_STATUS_SUCCESS)
         {

@@ -85,7 +85,7 @@ TEST(IntegrationFrontendSetPluginPathsExt, AbsoluteLoadsOnlyCustom)
 
     EXPECT_EQ(loadedPaths.size(), 1);
 
-    auto defaultPluginPath
+    const auto defaultPluginPath
         = (fs::path("hipdnn_plugins/engines")
            / hipdnn_data_sdk::utilities::getLibraryName("test_good_default_plugin"))
               .string();
@@ -116,7 +116,7 @@ TEST(IntegrationFrontendSetPluginPathsExt, AdditiveLoadsBothDefaultAndCustom)
 
     EXPECT_GE(loadedPaths.size(), 2);
 
-    auto defaultPluginPath = testDefaultGoodPluginPath();
+    const auto defaultPluginPath = testDefaultGoodPluginPath();
     const auto& testPluginPath = testGoodPluginPath();
 
     EXPECT_TRUE(containsPluginByFilename(loadedPaths, defaultPluginPath));

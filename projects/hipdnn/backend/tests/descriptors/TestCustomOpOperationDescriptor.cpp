@@ -38,8 +38,8 @@ public:
 
     void setAllAttributesExcept(std::initializer_list<hipdnnBackendAttributeName_t> skip = {}) const
     {
-        auto desc = getDescriptor();
-        auto shouldSkip = [&](hipdnnBackendAttributeName_t attr) {
+        const auto desc = getDescriptor();
+        const auto shouldSkip = [&](hipdnnBackendAttributeName_t attr) {
             return std::find(skip.begin(), skip.end(), attr) != skip.end();
         };
 
@@ -134,7 +134,7 @@ protected:
 
 TEST_F(TestCustomOpOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT);
@@ -168,7 +168,7 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutCustomOpId)
 TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithEmptyCustomOpId)
 {
     setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT});
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string emptyId;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT, HIPDNN_TYPE_CHAR, 0, emptyId.c_str());
@@ -187,7 +187,7 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutComputeType)
 
 TEST_F(TestCustomOpOperationDescriptor, SetInputTensorArray)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::array<HipdnnBackendDescriptor*, 2> inputs = {_input0.get(), _input1.get()};
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -202,7 +202,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetInputTensorArray)
 
 TEST_F(TestCustomOpOperationDescriptor, SetOutputTensorArray)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::array<HipdnnBackendDescriptor*, 1> outputs = {_output0.get()};
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -216,7 +216,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetOutputTensorArray)
 
 TEST_F(TestCustomOpOperationDescriptor, SetMultipleOutputTensorArray)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::array<HipdnnBackendDescriptor*, 2> outputs = {_output0.get(), _output1.get()};
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -231,7 +231,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetMultipleOutputTensorArray)
 
 TEST_F(TestCustomOpOperationDescriptor, SetCustomOpId)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT,
                                        HIPDNN_TYPE_CHAR,
                                        static_cast<int64_t>(K_CUSTOM_OP_ID.size()),
@@ -242,7 +242,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetCustomOpId)
 
 TEST_F(TestCustomOpOperationDescriptor, SetOpaqueData)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT,
                                        HIPDNN_TYPE_CHAR,
                                        static_cast<int64_t>(K_CUSTOM_OP_OPAQUE_DATA.size()),
@@ -253,7 +253,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetOpaqueData)
 
 TEST_F(TestCustomOpOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
@@ -263,7 +263,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::array<HipdnnBackendDescriptor*, 1> inputs = {_unfinalizedTensor.get()};
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -274,7 +274,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsNotFinalized)
 
 TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -284,7 +284,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsWrongType)
 
 TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -293,7 +293,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsNullPointer)
 
 TEST_F(TestCustomOpOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -304,7 +304,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetComputeDataTypeWrongElementCount)
 TEST_F(TestCustomOpOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -315,7 +315,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestCustomOpOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &dummy),
@@ -329,7 +329,7 @@ TEST_F(TestCustomOpOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
@@ -346,8 +346,8 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
                                        &elementCount,
                                        static_cast<void*>(rawRetrieved.data())));
 
-    auto retrieved0 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[0]);
-    auto retrieved1 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[1]);
+    const auto retrieved0 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[0]);
+    const auto retrieved1 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[1]);
     ASSERT_NE(retrieved0, nullptr);
     ASSERT_NE(retrieved1, nullptr);
 }
@@ -355,7 +355,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
@@ -372,14 +372,14 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
                                        &elementCount,
                                        static_cast<void*>(&rawRetrieved)));
 
-    auto retrieved = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved);
+    const auto retrieved = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved);
     ASSERT_NE(retrieved, nullptr);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeCustomOpId)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -398,7 +398,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeCustomOpId)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOpaqueData)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -417,7 +417,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeOpaqueData)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeComputeType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_DOUBLE;
     int64_t elementCount = 0;
@@ -430,7 +430,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept();
 
     int64_t elementCount = 0;
@@ -445,7 +445,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -456,7 +456,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeCustomOpIdQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
@@ -467,7 +467,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeCustomOpIdQueryFailsNullElem
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOpaqueDataQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
@@ -482,7 +482,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeOpaqueDataQueryFailsNullElem
 TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -494,7 +494,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsOrderIsInputsThenOutputs)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -508,7 +508,7 @@ TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsOrderIsInputsThenOut
 TEST_F(TestCustomOpOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
@@ -528,7 +528,7 @@ TEST_F(TestCustomOpOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
 TEST_F(TestCustomOpOperationDescriptor, BuildNodeWithHalfComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     std::array<HipdnnBackendDescriptor*, 2> inputs = {_input0.get(), _input1.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
@@ -564,7 +564,7 @@ TEST_F(TestCustomOpOperationDescriptor, BuildNodeWithHalfComputeType)
 TEST_F(TestCustomOpOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_EQ(desc->getInputDescs().size(), 2);
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
@@ -580,7 +580,7 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestCustomOpOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setAllAttributesExcept();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("CustomOpOperationDescriptor"), std::string::npos);
@@ -601,15 +601,15 @@ TEST_F(TestCustomOpOperationDescriptor, TryAsGraphOperationReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
-    auto tensors = graphOp->getTensorDescriptors();
+    const auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, TryAsGraphOperationReturnsNullForWrongType)
 {
-    auto graphOp = _input0->tryAsGraphOperation();
+    const auto graphOp = _input0->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

@@ -67,7 +67,7 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<float, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1, x=[-1,1], scale=[-1,1], no bias
@@ -94,7 +94,7 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1
@@ -111,8 +111,8 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<half, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1
@@ -131,7 +131,7 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<half, half, half>>()
 {
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1: gamma via computeGamma (linear at this nU)
@@ -148,8 +148,8 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<bfloat16, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1
@@ -167,7 +167,7 @@ std::vector<RMSNormFwdToleranceTestCase>
     getRMSNormFwdToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    const auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// nChannels = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // C=1
@@ -200,15 +200,15 @@ protected:
         }
         else
         {
-            auto tol = calculateRMSNormFwdTolerance<Out, In, Comp>(params.xMin,
-                                                                   params.xMax,
-                                                                   params.scaleMin,
-                                                                   params.scaleMax,
-                                                                   params.nChannels,
-                                                                   params.biasMin,
-                                                                   params.biasMax);
+            const auto tol = calculateRMSNormFwdTolerance<Out, In, Comp>(params.xMin,
+                                                                         params.xMax,
+                                                                         params.scaleMin,
+                                                                         params.scaleMax,
+                                                                         params.nChannels,
+                                                                         params.biasMin,
+                                                                         params.biasMax);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(
                 tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
@@ -296,7 +296,7 @@ TEST(TestCalculateRMSNormFwdTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.000001f); // Small error (1e-6 < tol ~1.25e-5)
     actualFailing->fillTensorWithValue(1.2f); // Large error
 
-    auto tol = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
+    const auto tol = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
 
     // For FP32, C=100: tolerance should be small (dominated by nonlinear ops term)
     EXPECT_LT(tol, 0.01f);
@@ -364,27 +364,28 @@ TEST(TestCalculateRMSNormFwdTolerance, ZeroInput)
 {
     // When x=0, maxAbsX=0, sumAbsProductBound=0, accTol=0
     // propagatedTolerance = 0 + 0 + maxAbsBias * epsilon
-    auto tol = calculateRMSNormFwdTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10);
+    const auto tol = calculateRMSNormFwdTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10);
     EXPECT_EQ(tol, 0.0f);
 
     // With bias (float)
-    auto tolBias
+    const auto tolBias
         = calculateRMSNormFwdTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10, -0.5, 0.5);
     EXPECT_GT(tolBias, 0.0f);
 
     // Zero input with bfloat16 output casting: outputEpsilon(bf16) > epsilon(float), but
     // maxOutputMagnitude=0, so output cast term also vanishes
-    auto tolBf16 = calculateRMSNormFwdTolerance<bfloat16, float, float>(0.0, 0.0, -1.0, 1.0, 10);
+    const auto tolBf16
+        = calculateRMSNormFwdTolerance<bfloat16, float, float>(0.0, 0.0, -1.0, 1.0, 10);
     EXPECT_EQ(tolBf16, 0.0f);
 
     // Zero input with bias and half output: bias term + output cast of bias
-    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto tolHalfBias
+    const auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto tolHalfBias
         = calculateRMSNormFwdTolerance<half, float, float>(0.0, 0.0, -1.0, 1.0, 10, -0.5, 0.5);
     // Expected: maxAbsBias * epsilon + maxOutputMagnitude * outputEpsilon
     //         = 0.5 * uFloat + 0.5 * uHalf
-    auto expectedHalfBias = static_cast<float>(0.5 * uFloat + 0.5 * uHalf);
+    const auto expectedHalfBias = static_cast<float>(0.5 * uFloat + 0.5 * uHalf);
     EXPECT_NEAR(tolHalfBias, expectedHalfBias, 1e-10f);
 }
 
@@ -394,29 +395,32 @@ TEST(TestCalculateRMSNormFwdTolerance, ZeroInput)
 TEST(TestCalculateRMSNormFwdTolerance, ToleranceScalesWithChannels)
 {
     // FP32: tolerance should grow roughly linearly with C (gamma/2 ~ C*u)
-    auto tolFp32C1 = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 1);
-    auto tolFp32C10 = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 10);
-    auto tolFp32C100 = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
+    const auto tolFp32C1
+        = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 1);
+    const auto tolFp32C10
+        = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 10);
+    const auto tolFp32C100
+        = calculateRMSNormFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
 
     EXPECT_LT(tolFp32C1, tolFp32C10) << "FP32: C=10 should have higher tolerance than C=1";
     EXPECT_LT(tolFp32C10, tolFp32C100) << "FP32: C=100 should have higher tolerance than C=10";
 
     // Ratio check: C=100 vs C=1 (use wider spread so gamma term dominates the constant 5u)
-    auto ratioFp32 = static_cast<double>(tolFp32C100) / static_cast<double>(tolFp32C1);
+    const auto ratioFp32 = static_cast<double>(tolFp32C100) / static_cast<double>(tolFp32C1);
     EXPECT_GT(ratioFp32, 10.0) << "FP32: ratio C100/C1 should reflect ~C growth";
 
     // BF16 (statistical): tolerance should grow ~ sqrt(C)
     // C=100 exceeds gamma >= 0.5 for bf16 (gamma ~ 0.663), so use C=50 as upper bound
-    auto tolBf16C1
+    const auto tolBf16C1
         = calculateRMSNormFwdTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 1);
-    auto tolBf16C10
+    const auto tolBf16C10
         = calculateRMSNormFwdTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 10);
-    auto tolBf16C50
+    const auto tolBf16C50
         = calculateRMSNormFwdTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, -1.0, 1.0, 50);
 
     EXPECT_LT(tolBf16C1, tolBf16C10) << "BF16: C=10 should have higher tolerance than C=1";
     EXPECT_LT(tolBf16C10, tolBf16C50) << "BF16: C=50 should have higher tolerance than C=10";
 
-    auto ratioBf16 = static_cast<double>(tolBf16C10) / static_cast<double>(tolBf16C1);
+    const auto ratioBf16 = static_cast<double>(tolBf16C10) / static_cast<double>(tolBf16C1);
     EXPECT_GT(ratioBf16, 1.5) << "BF16: ratio C10/C1 should reflect sqrt(C) growth";
 }

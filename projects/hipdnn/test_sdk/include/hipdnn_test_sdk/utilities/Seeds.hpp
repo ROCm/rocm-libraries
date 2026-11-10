@@ -18,7 +18,7 @@ inline unsigned int getGlobalTestSeed()
     // This ensures consistent test runs unless randomness is explicitly desired.
     constexpr unsigned int DEFAULT_SEED = 1;
 
-    auto seedStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
+    const auto seedStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
 
     if(seedStr.empty())
     {
@@ -40,7 +40,7 @@ inline unsigned int getGlobalTestSeed()
 
     try
     {
-        auto seed = std::stoul(seedStr);
+        const auto seed = std::stoul(seedStr);
         return static_cast<unsigned int>(seed);
     }
     catch(...)

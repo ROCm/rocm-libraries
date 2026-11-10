@@ -197,7 +197,7 @@ std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<ha
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -226,10 +226,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvWrwTolerance<Out, In, Comp>(
+            const auto tol = calculateConvWrwTolerance<Out, In, Comp>(
                 params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(tol, expected, 1e-5f);
         }
@@ -322,7 +322,7 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.05f);
     actualFailing->fillTensorWithValue(1.2f);
 
-    auto tol = calculateConvWrwTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
+    const auto tol = calculateConvWrwTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
 
     // tol approx 0.1
     EXPECT_LT(tol, 0.15f);
@@ -596,7 +596,7 @@ template <>
 std::vector<ConvDgradToleranceTestCase>
     getConvDgradToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -627,10 +627,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvDgradTolerance<Out, In, Comp>(
+            const auto tol = calculateConvDgradTolerance<Out, In, Comp>(
                 params.dyMin, params.dyMax, params.wMin, params.wMax, params.wDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(tol, expected, 1e-5f);
         }
@@ -720,7 +720,7 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     actualFailing->fillTensorWithValue(2.5f); // Large error
 
     const std::vector<int64_t> wDims = {10, 1, 10, 10}; // Accum = 1000
-    auto tol = calculateConvDgradTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, wDims);
+    const auto tol = calculateConvDgradTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, wDims);
 
     // tol should be reasonable for 1000 accumulations with half/half/float
     // For half precision with statistical bound, can be > 1.0
@@ -945,7 +945,7 @@ template <>
 std::vector<ConvFpropToleranceTestCase>
     getConvFpropToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -978,10 +978,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvFpropTolerance<Out, In, Comp>(
+            const auto tol = calculateConvFpropTolerance<Out, In, Comp>(
                 params.inputMin, params.inputMax, params.wMin, params.wMax, params.wDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(static_cast<float>(tol), expected, 1e-5f)
                 << "Failed for dims size: " << params.wDims.size();
@@ -1071,7 +1071,7 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.05f);
     actualFailing->fillTensorWithValue(1.2f);
 
-    auto tol = calculateConvFpropTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
+    const auto tol = calculateConvFpropTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
 
     // tol approx 0.1
     EXPECT_LT(tol, 0.15f);

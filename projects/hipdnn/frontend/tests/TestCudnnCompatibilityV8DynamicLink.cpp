@@ -22,7 +22,7 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 {
     const std::array<std::int64_t, 4> dims = {1, 1, 1, 4};
     const std::array<std::int64_t, 4> strides = {4, 4, 4, 1};
-    auto tensor = [&](std::int64_t uid) {
+    const auto tensor = [&](std::int64_t uid) {
         return fe::TensorBuilder()
             .setDataType(fe::DataType_t::FLOAT)
             .setDim(static_cast<std::int64_t>(dims.size()), dims.data())

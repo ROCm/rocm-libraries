@@ -33,12 +33,12 @@ TEST(TestMiopenUtils, TensorDataTypeToMiopenDataTypeThrowsOnUnsupported)
 TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
 {
     flatbuffers::FlatBufferBuilder builder1;
-    auto attrOffset1
+    const auto attrOffset1
         = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder1, 1);
     builder1.Finish(attrOffset1);
 
     flatbuffers::FlatBufferBuilder builder2;
-    auto attrOffset2
+    const auto attrOffset2
         = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder2, 2);
     builder2.Finish(attrOffset2);
 
@@ -47,7 +47,7 @@ TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
     auto attrPtr2 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder2.GetBufferPointer());
 
-    auto attrMap
+    const auto attrMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {1, attrPtr1}, {2, attrPtr2}};
@@ -58,7 +58,7 @@ TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
 
 TEST(TestMiopenUtils, FindTensorAttributesThrowsIfNotFound)
 {
-    auto attrMap
+    const auto attrMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{};
 
@@ -71,7 +71,7 @@ TEST(TestMiopenUtils, GetSpatialDimCountReturnsCorrectValue)
     const std::vector<int64_t> dims = {1, 1, 1, 1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, nullptr, &dims);
     builder.Finish(attrOffset);
 
@@ -86,7 +86,7 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
     const std::vector<int64_t> dims = {1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, nullptr, &dims);
     builder.Finish(attrOffset);
 
@@ -104,19 +104,19 @@ TEST(TestMiopenUtils, CreatePaddedTensor4dPassthrough)
     const std::vector<int64_t> strides = {588, 196, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 42, "", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims);
     builder.Finish(attrOffset);
 
     auto attrPtr = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    auto tensorMap
+    const auto tensorMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
+    const auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -149,19 +149,19 @@ TEST(TestMiopenUtils, CreatePaddedTensor5dPassthrough)
     const std::vector<int64_t> strides = {2352, 784, 196, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 42, "", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims);
     builder.Finish(attrOffset);
 
     auto attrPtr = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    auto tensorMap
+    const auto tensorMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
+    const auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -197,19 +197,19 @@ TEST(TestMiopenUtils, CreatePaddedTensor3dNclPadsToNchw)
     const std::vector<int64_t> strides = {42, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 42, "", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims);
     builder.Finish(attrOffset);
 
     auto attrPtr = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    auto tensorMap
+    const auto tensorMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
+    const auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=1 for NCHW
     int numDims = 0;
@@ -238,19 +238,19 @@ TEST(TestMiopenUtils, CreatePaddedTensor3dNlcPadsToNhwc)
     const std::vector<int64_t> strides = {42, 1, 3};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 42, "", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims);
     builder.Finish(attrOffset);
 
     auto attrPtr = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    auto tensorMap
+    const auto tensorMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
+    const auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=C for NHWC
     int numDims = 0;
@@ -274,7 +274,7 @@ TEST(TestMiopenUtils, CreatePaddedTensor3dNlcPadsToNhwc)
 TEST(TestMiopenUtils, MapPointwiseModeStandardRelu)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -291,7 +291,7 @@ TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipOnly)
 {
     const float lowerClip = 0.1f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
     builder.Finish(attrOffset);
     const auto* attr
@@ -306,7 +306,7 @@ TEST(TestMiopenUtils, MapPointwiseModeReluZeroLowerClipOnly)
 {
     const float lowerClip = 0.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
     builder.Finish(attrOffset);
     const auto* attr
@@ -323,7 +323,7 @@ TEST(TestMiopenUtils, MapPointwiseModeClippedRelu)
 {
     const float upperClip = 6.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
         flatbuffers::nullopt,
@@ -343,7 +343,7 @@ TEST(TestMiopenUtils, MapPointwiseModeLeakyRelu)
 {
     const float slope = 0.01f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -365,7 +365,7 @@ TEST(TestMiopenUtils, MapPointwiseModeClamp)
     const float lowerClip = -1.0f;
     const float upperClip = 6.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
         lowerClip,
@@ -456,7 +456,7 @@ TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipAndZeroSlopeThrows)
 TEST(TestMiopenUtils, MapPointwiseModeSigmoid)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -471,7 +471,7 @@ TEST(TestMiopenUtils, MapPointwiseModeSigmoid)
 TEST(TestMiopenUtils, MapPointwiseModeTanh)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -489,7 +489,7 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithCustomAlpha)
 {
     const float eluAlpha = 2.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
         flatbuffers::nullopt,
@@ -516,7 +516,7 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithCustomAlpha)
 TEST(TestMiopenUtils, MapPointwiseModeEluWithDefaultAlpha)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -532,7 +532,7 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithDefaultAlpha)
 TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithoutBeta)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -548,7 +548,7 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithBetaOne)
 {
     const float beta = 1.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
         flatbuffers::nullopt,
@@ -576,7 +576,7 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
 {
     const float beta = 2.0f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
         flatbuffers::nullopt,
@@ -602,7 +602,7 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
 TEST(TestMiopenUtils, MapPointwiseModeAbs)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS);
     builder.Finish(attrOffset);
     const auto* attr
@@ -617,7 +617,7 @@ TEST(TestMiopenUtils, MapPointwiseModeAbs)
 TEST(TestMiopenUtils, MapPointwiseModeIdentity)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
     builder.Finish(attrOffset);
     const auto* attr
@@ -632,7 +632,7 @@ TEST(TestMiopenUtils, MapPointwiseModeIdentity)
 TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD);
     builder.Finish(attrOffset);
     const auto* attr
@@ -709,7 +709,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
         const ScopedTuningPolicy guard(_miopenHandle, true);
 
         miopenTuningPolicy_t currentPolicy;
-        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
+        const auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
         ASSERT_EQ(status, miopenStatusSuccess);
         EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
     }
@@ -721,7 +721,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
         const ScopedTuningPolicy guard(_miopenHandle, false);
 
         miopenTuningPolicy_t currentPolicy;
-        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
+        const auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
         ASSERT_EQ(status, miopenStatusSuccess);
         EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
     }
@@ -730,7 +730,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
 TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
 {
     // Set a non-default policy first
-    auto preSetStatus = miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyDbUpdate);
+    const auto preSetStatus = miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyDbUpdate);
     ASSERT_EQ(preSetStatus, miopenStatusSuccess);
 
     {
@@ -744,7 +744,7 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
 
     // Verify it was restored to original
     miopenTuningPolicy_t afterPolicy;
-    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
+    const auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
     ASSERT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(afterPolicy, miopenTuningPolicyDbUpdate);
 }
@@ -759,7 +759,7 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresToNoneWhenOriginalWasNone)
     }
 
     miopenTuningPolicy_t afterPolicy;
-    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
+    const auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
     ASSERT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(afterPolicy, miopenTuningPolicyNone);
 }

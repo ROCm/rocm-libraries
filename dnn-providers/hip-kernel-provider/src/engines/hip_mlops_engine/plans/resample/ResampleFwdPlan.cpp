@@ -213,7 +213,7 @@ uint64_t ResampleFwdPlan::outputElementCount() const
 {
     const auto* yDims = _params.y()->dims();
     uint64_t total = 1;
-    for(auto dim : *yDims)
+    for(auto const dim : *yDims)
     {
         total *= static_cast<uint64_t>(dim);
     }

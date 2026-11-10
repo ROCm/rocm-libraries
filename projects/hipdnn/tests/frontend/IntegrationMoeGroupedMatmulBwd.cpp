@@ -49,25 +49,26 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     firstTokenOffsetTensor.fillWithValue(0);
     dweightTensor.fillWithValue(0.0F);
 
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name("MoeGroupedMatmulBwdDispatch")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto doutput = std::make_shared<TensorAttributes>(
+    const auto doutput = std::make_shared<TensorAttributes>(
         makeTensorAttributes("doutput", getDataTypeEnumFromType<float>(), doutputTensor));
     doutput->set_uid(1);
-    auto token = std::make_shared<TensorAttributes>(
+    const auto token = std::make_shared<TensorAttributes>(
         makeTensorAttributes("token", getDataTypeEnumFromType<float>(), tokenTensor));
     token->set_uid(2);
-    auto firstTokenOffset = std::make_shared<TensorAttributes>(makeTensorAttributes(
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>(makeTensorAttributes(
         "first_token_offset", getDataTypeEnumFromType<int32_t>(), firstTokenOffsetTensor));
     firstTokenOffset->set_uid(3);
 
     MoeGroupedMatmulBwdAttributes attributes;
     attributes.set_name("moe_grouped_matmul_bwd");
-    auto dweight = graph->moe_grouped_matmul_bwd(doutput, token, firstTokenOffset, attributes);
+    const auto dweight
+        = graph->moe_grouped_matmul_bwd(doutput, token, firstTokenOffset, attributes);
     dweight->set_uid(4).set_output(true).set_name("dweight");
 
     auto result = graph->validate();

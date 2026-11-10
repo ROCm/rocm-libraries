@@ -186,7 +186,7 @@ public:
         //   x's element at redIdx i   = xBase[xLeadOffset + xRedOffsets[i]]
         //   scale's/bias's element    = scaleBase[scaleRedOffsets[i]] (no leading component)
         //   invRms's element          = invRmsBase[flat offset of (n, c) in invRms's N,C strides]
-        auto rmsnormFwdFunc = [&](const std::vector<int64_t>& leadingIdx) {
+        const auto rmsnormFwdFunc = [&](const std::vector<int64_t>& leadingIdx) {
             const int64_t xLeadOffset = hipdnn_test_sdk::detail::flatOffset(
                 leadingIdx.data(), xStrides.data(), reductionStart);
 
@@ -234,7 +234,7 @@ public:
             }
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(rmsnormFwdFunc, leadingDims);
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -346,7 +346,7 @@ public:
         // redIdx = [h, w] is fixed for the whole functor call, so its contribution to the
         // dy/x/dscale/dbias offsets (dyRedOffset, xRedOffset, dscaleOffset, dbiasOffset
         // below) is a scalar computed once, not a table.
-        auto rmsnormBwdWeightBiasFunc = [&](const std::vector<int64_t>& redIdx) {
+        const auto rmsnormBwdWeightBiasFunc = [&](const std::vector<int64_t>& redIdx) {
             auto sumDScale = static_cast<ComputeDataType>(0.0);
             auto sumDBias = static_cast<ComputeDataType>(0.0);
 
@@ -379,7 +379,7 @@ public:
             }
         };
 
-        auto parallelWeightBiasFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+        const auto parallelWeightBiasFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             rmsnormBwdWeightBiasFunc, reductionDims);
         parallelWeightBiasFunc(std::thread::hardware_concurrency());
         dscale.memory().markHostModified();
@@ -400,7 +400,7 @@ public:
             reductionDims, dxStrides.data() + reductionStart);
         const size_t redCount = dyRedOffsets.size();
 
-        auto rmsnormBwdDataFunc = [&](const std::vector<int64_t>& leadingIdx) {
+        const auto rmsnormBwdDataFunc = [&](const std::vector<int64_t>& leadingIdx) {
             auto meanDyXW = static_cast<ComputeDataType>(0.0);
 
             const int64_t dyLeadOffset = hipdnn_test_sdk::detail::flatOffset(
@@ -444,7 +444,7 @@ public:
             }
         };
 
-        auto parallelDataFunc
+        const auto parallelDataFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(rmsnormBwdDataFunc, leadingDims);
         parallelDataFunc(std::thread::hardware_concurrency());
         dx.memory().markHostModified();

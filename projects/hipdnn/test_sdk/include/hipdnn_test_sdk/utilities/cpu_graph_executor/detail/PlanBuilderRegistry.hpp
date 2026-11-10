@@ -55,7 +55,7 @@ public:
 
         HIPDNN_SDK_LOG_INFO("Looking up plan builder for signature key: " << key);
 
-        auto it = _registry.find(key);
+        const auto it = _registry.find(key);
         if(it != _registry.end())
         {
             return *it->second;

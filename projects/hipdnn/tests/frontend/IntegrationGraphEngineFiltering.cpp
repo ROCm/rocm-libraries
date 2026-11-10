@@ -155,7 +155,7 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(1)
             .set_name("X")
             .set_dim(dims)
@@ -166,7 +166,7 @@ protected:
         attrs.set_name("relu_node");
         attrs.set_mode(PointwiseMode::RELU_FWD);
 
-        auto y = graph->pointwise(x, attrs);
+        const auto y = graph->pointwise(x, attrs);
         y->set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
 
         return graph;
@@ -189,7 +189,7 @@ protected:
         const std::vector<int64_t> dims = {1, 3, 4, 4};
         SimpleTensorBundle<float> tensorBundle(dims);
 
-        auto graph = createSimplePointwiseGraph("EngineFilteringTest", dims);
+        const auto graph = createSimplePointwiseGraph("EngineFilteringTest", dims);
 
         // Set preferred engine ID if specified
         if(testCase.preferredEngineId.has_value())
@@ -345,7 +345,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(pluginEngineName()));
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("DeselectByPluginSuppliedEngineName", dims);
+    const auto graph = buildGraph("DeselectByPluginSuppliedEngineName", dims);
 
     std::vector<EngineConfigInfo> configs;
     auto result = graph->get_engine_configs(_handle, configs);
@@ -411,7 +411,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNot
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(unmatchedName));
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("DeselectByUnmatchedEngineName", dims);
+    const auto graph = buildGraph("DeselectByUnmatchedEngineName", dims);
 
     auto result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -433,7 +433,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNot
 TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("CreateExecutionPlansResetsNameFilter", dims);
+    const auto graph = buildGraph("CreateExecutionPlansResetsNameFilter", dims);
 
     graph->deselect_engines(std::vector<std::string>{pluginEngineName()});
 
@@ -470,7 +470,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     _handle = createHandle(defaultEnginePluginPaths());
 
-    auto graph = createSimplePointwiseGraph("PreferByPluginSuppliedEngineName", dims);
+    const auto graph = createSimplePointwiseGraph("PreferByPluginSuppliedEngineName", dims);
     graph->set_preferred_engine_id_ext(pluginEngineName());
 
     // The hashed ID is stored too, so the preference is observable before the
@@ -507,7 +507,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByIdAfterNameDiscardsTheName)
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     _handle = createHandle(defaultEnginePluginPaths());
 
-    auto graph = createSimplePointwiseGraph("PreferByIdAfterNameDiscardsTheName", dims);
+    const auto graph = createSimplePointwiseGraph("PreferByIdAfterNameDiscardsTheName", dims);
     graph->set_preferred_engine_id_ext(pluginEngineName());
     graph->set_preferred_engine_id_ext(std::optional<int64_t>{goodEngineId});
 
@@ -529,7 +529,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByIdAfterNameDiscardsTheName)
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("DeselectBarsPluginEnginePlan", dims);
+    const auto graph = buildGraph("DeselectBarsPluginEnginePlan", dims);
 
     auto result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -571,7 +571,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(hashedPluginEngineName()));
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph(
+    const auto graph = buildGraph(
         "DeselectByHashedPluginSuppliedEngineName", dims, pluginPathsWithHashedNameEngine());
 
     // Confirm the engine carrying this name really is the hashed-name plugin's,

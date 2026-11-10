@@ -166,10 +166,10 @@ TEST(TestRaggedSdpaDensify, RaggedBackwardEqualsDensePaddedBackward)
         std::memcpy(t.memory().hostData(), values.data(), values.size() * sizeof(float));
         return t;
     };
-    auto qd = toTensor(unpack(q, Q_TOKENS, SQ, D), SQ, D);
-    auto kd = toTensor(unpack(k, KV_TOKENS, SKV, D), SKV, D);
-    auto vd = toTensor(unpack(v, KV_TOKENS, SKV, D), SKV, D);
-    auto dOd = toTensor(unpack(dO, Q_TOKENS, SQ, D), SQ, D);
+    const auto qd = toTensor(unpack(q, Q_TOKENS, SQ, D), SQ, D);
+    const auto kd = toTensor(unpack(k, KV_TOKENS, SKV, D), SKV, D);
+    const auto vd = toTensor(unpack(v, KV_TOKENS, SKV, D), SKV, D);
+    const auto dOd = toTensor(unpack(dO, Q_TOKENS, SQ, D), SQ, D);
     Tensor<int32_t> seqQ({B, 1, 1, 1});
     Tensor<int32_t> seqKv({B, 1, 1, 1});
     for(int64_t b = 0; b < B; ++b)
@@ -322,8 +322,8 @@ TEST(TestRaggedSdpaDensify, RaggedQOverPagedKvEqualsGatheredDense)
         Tensor<float> qd({B, H, SQ, D});
         const auto unpacked = unpack(q, Q_TOKENS, SQ, D);
         std::memcpy(qd.memory().hostData(), unpacked.data(), unpacked.size() * sizeof(float));
-        auto kd = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, seqKv, SKV);
-        auto vd = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, seqKv, SKV);
+        const auto kd = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, seqKv, SKV);
+        const auto vd = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, seqKv, SKV);
         Tensor<float> od({B, H, SQ, D});
         CpuFpReferenceSdpa::forward(qd,
                                     kd,

@@ -786,7 +786,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderTensor, UndeclaredEnumValuesRejected)
         appended.setChoice(8);
         knobs.push_back(appended);
         return hipdnn_shim_test::failureOf([&engine] {
-            [[maybe_unused]] auto config = v8fe::EngineConfigBuilder().setEngine(engine).build();
+            [[maybe_unused]] const auto config
+                = v8fe::EngineConfigBuilder().setEngine(engine).build();
         });
     };
 

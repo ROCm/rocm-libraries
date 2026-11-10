@@ -81,7 +81,7 @@ TEST_F(ExampleProviderEngineTest, IsApplicable_WithMatchingBuilder_ReturnsTrue)
     ExampleProviderEngine engine(1);
     engine.addPlanBuilder(std::make_unique<MockPlanBuilder>(true));
 
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
@@ -93,7 +93,7 @@ TEST_F(ExampleProviderEngineTest, IsApplicable_WithNoMatchingBuilder_ReturnsFals
     ExampleProviderEngine engine(1);
     engine.addPlanBuilder(std::make_unique<MockPlanBuilder>(false));
 
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                                            fbb.GetSize());
     ASSERT_TRUE(graph.isValid());

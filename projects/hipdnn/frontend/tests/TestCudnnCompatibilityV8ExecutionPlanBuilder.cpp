@@ -175,7 +175,7 @@ TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, LoadFromJsonRoundTrip)
 
     fe::ExecutionPlanBuilder_v8 noHandle;
     const BuildFailure failure = failureOf([&noHandle, &plan] {
-        [[maybe_unused]] auto built = noHandle.loadFromJson(plan.getJsonRepresentation());
+        [[maybe_unused]] const auto built = noHandle.loadFromJson(plan.getJsonRepresentation());
     });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
@@ -191,7 +191,7 @@ TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, KernelCacheNotSupported)
     builder.setEngineConfig(configs[0], graph.getTag())
         .setKernelCache(std::make_shared<fe::KernelCache>());
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
 
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);

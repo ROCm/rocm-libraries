@@ -17,7 +17,7 @@ namespace hip_kernel_provider::batchnorm
 
 TEST(TestBatchnormBwdParams, InitializesAllTensorsFromValidBwdGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -41,7 +41,7 @@ TEST(TestBatchnormBwdParams, InitializesAllTensorsFromValidBwdGraph)
 
 TEST(TestBatchnormBwdParams, HandlesMissingOptionalSavedStats)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
         {1, 1, 1, 1}, {1, 1, 1, 1}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -58,7 +58,7 @@ TEST(TestBatchnormBwdParams, HandlesMissingOptionalSavedStats)
 
 TEST(TestBatchnormBwdParams, InitializesFusedActivationWithAllTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -93,7 +93,7 @@ TEST(TestBatchnormBwdParams, InitializesFusedActivationWithAllTensors)
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -109,7 +109,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 
 TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -148,7 +148,7 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
             return program;
         });
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -162,11 +162,11 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
     BatchnormBwdParams params(*bnBwdAttrs, *pointwiseAttrs, *bnInfAttrs, graph.getTensorMap());
     BatchnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -215,7 +215,7 @@ TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)
     const MockKernelCompiler mockCompiler;
 
     // 2D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({4, 1}, {1, 4});
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({4, 1}, {1, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -225,7 +225,7 @@ TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)
     BatchnormBwdParams params(attr, graph.getTensorMap());
     BatchnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

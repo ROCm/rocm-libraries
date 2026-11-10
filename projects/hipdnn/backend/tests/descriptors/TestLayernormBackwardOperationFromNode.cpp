@@ -137,8 +137,8 @@ protected:
 
 TEST_F(TestLayernormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -148,11 +148,11 @@ TEST_F(TestLayernormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestLayernormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -161,7 +161,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::LayernormBackwardAttributes);
-    auto desc = std::static_pointer_cast<LayernormBackwardOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<LayernormBackwardOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -189,16 +189,16 @@ TEST_F(TestLayernormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestLayernormBackwardOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestLayernormBackwardOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DY_UID);
@@ -223,8 +223,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestLayernormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_LAYERNORMBACKWARD_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_LAYERNORMBACKWARD_TENSOR_X_UID]);
@@ -239,8 +239,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestLayernormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DY_UID);
@@ -301,7 +301,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, SetsTensorReferencesWithFullValue
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDyTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_DY_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -310,7 +310,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDyTensor)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -319,7 +319,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -328,7 +328,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDxTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_DX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -337,7 +337,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDxTensor)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -346,7 +346,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWithMissingDbiasTensor)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -363,7 +363,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -383,7 +383,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -392,7 +392,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalMeanUidSetButTen
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -401,7 +401,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalInvVarianceUidSe
 TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalEpsilonUidSetButTensorMissing)
 {
     _tensorMap.erase(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -409,8 +409,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, FailsWhenOptionalEpsilonUidSetBut
 
 TEST_F(TestLayernormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 9);
@@ -427,8 +427,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTen
 
 TEST_F(TestLayernormBackwardOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -450,8 +450,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -618,7 +618,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_layernormbackward_1";
 
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -633,8 +633,8 @@ TEST_F(TestLayernormBackwardOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestLayernormBackwardOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -646,7 +646,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = LayernormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

@@ -537,7 +537,7 @@ public:
         std::vector<ComputeDataType> rowAmaxS(static_cast<size_t>(batch * numHeads * seqQ),
                                               static_cast<ComputeDataType>(0.0));
 
-        auto rowFunc = [&](const std::vector<int64_t>& indices) {
+        const auto rowFunc = [&](const std::vector<int64_t>& indices) {
             const auto b = indices[0];
             const auto h = indices[1];
             const auto sq = indices[2];
@@ -605,7 +605,7 @@ public:
             }
         };
 
-        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+        const auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             rowFunc, std::vector<int64_t>{batch, numHeads, seqQ});
         parallelFunc(std::thread::hardware_concurrency());
 

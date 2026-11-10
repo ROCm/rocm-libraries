@@ -37,7 +37,7 @@ TEST_F(IntegrationGraphDescriptorApi, CreateAndDeserializeGraphExtWithNullGraph)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
-    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(&descriptor, nullptr, 0);
+    const auto status = hipdnnBackendCreateAndDeserializeGraph_ext(&descriptor, nullptr, 0);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(descriptor, nullptr);
@@ -308,7 +308,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     ASSERT_GT(queriedSize, 0u);
 
     // Copy with oversized buffer
-    auto oversizedSize = queriedSize * 2;
+    const auto oversizedSize = queriedSize * 2;
     std::vector<uint8_t> buffer(oversizedSize);
     size_t reportedSize = 0;
     ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
@@ -401,7 +401,7 @@ namespace
 flatbuffers::DetachedBuffer
     serializeReductionGraphWithVersion(uint32_t major, uint32_t minor, uint32_t patch)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
@@ -419,7 +419,7 @@ flatbuffers::DetachedBuffer
 // left unstamped (null), simulating a writer that never populated the field.
 flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;

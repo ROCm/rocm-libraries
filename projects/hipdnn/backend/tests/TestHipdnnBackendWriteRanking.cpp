@@ -41,7 +41,7 @@ std::unique_ptr<HipdnnBackendDescriptor> makeFinalizedGraph()
 {
     auto bundle = test_utilities::createDefaultConvOp();
     auto wrapper = test_utilities::createDescriptor<GraphDescriptor>();
-    auto graphDesc = wrapper->asDescriptor<GraphDescriptor>();
+    const auto graphDesc = wrapper->asDescriptor<GraphDescriptor>();
 
     const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
     graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -98,7 +98,7 @@ protected:
 
 TEST_F(TestHipdnnBackendWriteRanking, NullHandleReturnsBadParamNullPointer)
 {
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {1, 2};
 
     EXPECT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
@@ -109,7 +109,7 @@ TEST_F(TestHipdnnBackendWriteRanking, NullHandleReturnsBadParamNullPointer)
 TEST_F(TestHipdnnBackendWriteRanking, UnfinalizedDescriptorDeclinesWithSuccess)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    auto wrapper = test_utilities::createDescriptor<GraphDescriptor>();
+    const auto wrapper = test_utilities::createDescriptor<GraphDescriptor>();
     const std::array<int64_t, 2> order = {1, 2};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
 
@@ -122,7 +122,7 @@ TEST_F(TestHipdnnBackendWriteRanking, UnfinalizedDescriptorDeclinesWithSuccess)
 TEST_F(TestHipdnnBackendWriteRanking, NullOrderDeclinesWithSuccess)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
 
     EXPECT_EQ(
@@ -134,7 +134,7 @@ TEST_F(TestHipdnnBackendWriteRanking, NullOrderDeclinesWithSuccess)
 TEST_F(TestHipdnnBackendWriteRanking, EmptyOrderDeclinesWithSuccess)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 1> order = {1};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
 
@@ -150,7 +150,7 @@ TEST_F(TestHipdnnBackendWriteRanking, DisabledCacheDeclinesWithSuccess)
                                                                                     "1");
 
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {5, 6};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
 
@@ -165,7 +165,7 @@ TEST_F(TestHipdnnBackendWriteRanking, NullOutcomePointerIsAccepted)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enableDisable(DISABLE_ENV,
                                                                                     "1");
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {7, 8};
 
     EXPECT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
@@ -211,7 +211,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, DisabledCacheLeavesStoreUntouched)
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED);
 
-    auto graphDesc = graph->asDescriptor<GraphDescriptor>();
+    const auto graphDesc = graph->asDescriptor<GraphDescriptor>();
     graphDesc->buildSerializedGraph();
     const auto serializedGraph = graphDesc->getSerializedGraph();
 
@@ -229,7 +229,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, DisabledCacheLeavesStoreUntouched)
 
 TEST_F(TestGpuHipdnnBackendWriteRanking, EnabledCacheReportsWritten)
 {
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {5, 6};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
 
@@ -248,7 +248,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, EnabledCacheReportsWritten)
 /// hipdnnBackendWriteEngineRankingResults_ext instead of mapping the store's status.
 TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingAnIdenticalRankingReportsUnchanged)
 {
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {5, 6};
 
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
@@ -284,7 +284,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingADifferentRankingReportsWritte
                   &_handle, graph.get(), second.data(), second.size(), &outcome),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN);
-    auto graphDesc = graph->asDescriptor<GraphDescriptor>();
+    const auto graphDesc = graph->asDescriptor<GraphDescriptor>();
     graphDesc->buildSerializedGraph();
     const auto serializedGraph = graphDesc->getSerializedGraph();
 
@@ -314,7 +314,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, WrittenRankingIsVisibleThroughTheCExpor
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN);
 
-    auto graphDesc = graph->asDescriptor<GraphDescriptor>();
+    const auto graphDesc = graph->asDescriptor<GraphDescriptor>();
     graphDesc->buildSerializedGraph();
     const auto serializedGraph = graphDesc->getSerializedGraph();
 

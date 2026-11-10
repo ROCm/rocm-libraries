@@ -180,7 +180,8 @@ protected:
     static BuildFailure configFailure(const fe::Engine_v8& built)
     {
         return failureOf([&built] {
-            [[maybe_unused]] auto config = fe::EngineConfigBuilder_v8().setEngine(built).build();
+            [[maybe_unused]] const auto config
+                = fe::EngineConfigBuilder_v8().setEngine(built).build();
         });
     }
 
@@ -350,7 +351,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, FailedModeQueryKeepsBackendStatus
     fe::EngineHeuristicsBuilder_v8 builder;
     builder.setOperationGraph(graph).setHeurMode(CUDNN_HEUR_MODE_A);
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_ALLOC_FAILED);
     EXPECT_NE(failure.what.find("mock policy heuristic failed to finalize"), std::string::npos)
@@ -367,7 +368,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, HeuristicRequiresGraph)
     fe::EngineHeuristicsBuilder_v8 builder;
     builder.setHeurMode(CUDNN_HEUR_MODE_FALLBACK);
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -381,15 +382,15 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, WrongKindGraphRejected)
     heuristicsBuilder.setOperationGraph(notAGraph.get_desc(), "")
         .setHeurMode(CUDNN_HEUR_MODE_FALLBACK);
     const BuildFailure heuristicsFailure = failureOf(
-        [&heuristicsBuilder] { [[maybe_unused]] auto built = heuristicsBuilder.build(); });
+        [&heuristicsBuilder] { [[maybe_unused]] const auto built = heuristicsBuilder.build(); });
     ASSERT_TRUE(heuristicsFailure.thrown);
     EXPECT_EQ(heuristicsFailure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).empty());
 
     fe::EngineBuilder_v8 engineBuilder;
     engineBuilder.setOperationGraph(notAGraph.get_desc()).setGlobalEngineIdx(0);
-    const BuildFailure engineFailure
-        = failureOf([&engineBuilder] { [[maybe_unused]] auto built = engineBuilder.build(); });
+    const BuildFailure engineFailure = failureOf(
+        [&engineBuilder] { [[maybe_unused]] const auto built = engineBuilder.build(); });
     ASSERT_TRUE(engineFailure.thrown);
     EXPECT_EQ(engineFailure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -483,7 +484,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, EngineIndexResolvesId)
         fe::EngineBuilder_v8 builder;
         builder.setOperationGraph(graph).setGlobalEngineIdx(outOfRange);
         const BuildFailure failure
-            = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+            = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, status);
     }
@@ -491,7 +492,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, EngineIndexResolvesId)
     fe::EngineBuilder_v8 noGraph;
     noGraph.setGlobalEngineIdx(0);
     const BuildFailure failure
-        = failureOf([&noGraph] { [[maybe_unused]] auto built = noGraph.build(); });
+        = failureOf([&noGraph] { [[maybe_unused]] const auto built = noGraph.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -573,7 +574,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, ConcurrentPlansShareOneKnobConfig
     std::atomic<int> failures{0};
     runConcurrently(THREAD_COUNT, [&](std::size_t /*thread*/) {
         const BuildFailure failure = failureOf([&config] {
-            [[maybe_unused]] auto plan
+            [[maybe_unused]] const auto plan
                 = fe::ExecutionPlanBuilder_v8().setEngineConfig(config).build();
         });
         if(failure.thrown)

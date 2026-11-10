@@ -460,7 +460,7 @@ TEST(TestKnob, ValidateIntKnobWithStep)
 
     // Invalid step value
     const KnobSetting invalidSetting(knob.knobId(), 15);
-    auto err = knob.validate(invalidSetting);
+    const auto err = knob.validate(invalidSetting);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("step constraint"), std::string::npos);
 }
@@ -477,7 +477,7 @@ TEST(TestKnob, ValidateIntKnobWithValidValues)
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
 
     // Valid values
-    for(auto val : {1, 2, 4, 8, 16})
+    for(const auto val : {1, 2, 4, 8, 16})
     {
         const KnobSetting setting(knob.knobId(), static_cast<int64_t>(val));
         EXPECT_EQ(knob.validate(setting).code, ErrorCode::OK);
@@ -485,7 +485,7 @@ TEST(TestKnob, ValidateIntKnobWithValidValues)
 
     // Invalid value
     const KnobSetting invalidSetting(knob.knobId(), 3);
-    auto err = knob.validate(invalidSetting);
+    const auto err = knob.validate(invalidSetting);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("not in the list of valid values"), std::string::npos);
 }
@@ -537,7 +537,7 @@ TEST(TestKnob, ValidateStringKnobWithValidValues)
 
     // Invalid value
     const KnobSetting invalidSetting(knob.knobId(), std::string("invalid"));
-    auto err = knob.validate(invalidSetting);
+    const auto err = knob.validate(invalidSetting);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("not in the list of valid values"), std::string::npos);
 }
@@ -562,7 +562,7 @@ TEST(TestKnob, ValidateStringKnobMaxLength)
 
     // Exceeds max length
     const KnobSetting invalidSetting(knob.knobId(), std::string("12345678901"));
-    auto err = knob.validate(invalidSetting);
+    const auto err = knob.validate(invalidSetting);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("exceeds maximum length"), std::string::npos);
 }
@@ -575,7 +575,7 @@ TEST(TestKnob, ValidateKnobIdMismatch)
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
 
     const KnobSetting wrongId("wrong_id", 50);
-    auto err = knob.validate(wrongId);
+    const auto err = knob.validate(wrongId);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -588,7 +588,7 @@ TEST(TestKnob, ValidateWrongValueType)
 
     // Pass a float value for an int knob
     const KnobSetting wrongType(knob.knobId(), 3.14);
-    auto err = knob.validate(wrongType);
+    const auto err = knob.validate(wrongType);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 

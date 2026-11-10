@@ -81,7 +81,7 @@ TEST_F(TestReductionPlan, NotSetModeFailsSerialization)
     auto graphTuple = buildReductionGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::ReductionMode::NOT_SET);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     EXPECT_FALSE(serErr.is_good());
 }
@@ -95,7 +95,7 @@ TEST(TestReductionPlanBuilder, IsApplicable)
 
     auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -146,7 +146,7 @@ TEST(TestReductionPlanBuilder, BuildNodePlan)
 
         auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -165,7 +165,7 @@ TEST(TestReductionPlanBuilder, BuildNodePlan)
                                                    1,
                                                    TensorLayout::NCHW);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -182,14 +182,14 @@ TEST(TestReductionPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
 
     const ReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<ReductionPlan<float, float, float>*>(builtPlan.get()) != nullptr;

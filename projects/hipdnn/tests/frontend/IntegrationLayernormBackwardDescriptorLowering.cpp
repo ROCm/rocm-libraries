@@ -40,13 +40,13 @@ protected:
     hipdnn_flatbuffers_sdk::data_objects::GraphT
         buildAndDeserialize(LayernormBackwardAttributes& attrs, bool withOptionals, bool manualUids)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("LayernormBackwardIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         if(manualUids)
         {
             dy->set_uid(K_LAYERNORMBACKWARD_TENSOR_DY_UID);
@@ -56,7 +56,7 @@ protected:
             .set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS))
             .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         if(manualUids)
         {
             x->set_uid(K_LAYERNORMBACKWARD_TENSOR_X_UID);
@@ -66,7 +66,7 @@ protected:
             .set_dim(toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS))
             .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         if(manualUids)
         {
             scale->set_uid(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID);

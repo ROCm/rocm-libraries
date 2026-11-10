@@ -87,7 +87,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    auto tolerance = batchnorm::getToleranceTraining<float>();
+    const auto tolerance = batchnorm::getToleranceTraining<float>();
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
@@ -116,7 +116,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
                                                       /*useOptionalTensors=*/true,
                                                       /*runtimeEpsilon=*/true,
                                                       /*runtimeMomentum=*/true);
-    auto& runtimeGraph = std::get<0>(runtimeGraphTuple);
+    const auto& runtimeGraph = std::get<0>(runtimeGraphTuple);
     auto& runtimeVariantPack = std::get<1>(runtimeGraphTuple);
     auto [runtimeSerialized, runtimeSerErr] = runtimeGraph->to_binary();
     ASSERT_TRUE(runtimeSerErr.is_good()) << runtimeSerErr.get_message();
@@ -149,8 +149,8 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
                                                     DataType::FLOAT,
                                                     DataType::FLOAT,
                                                     /*useOptionalTensors=*/true);
-    auto& bakedGraph = std::get<0>(bakedGraphTuple);
-    auto& bakedVariantPack = std::get<1>(bakedGraphTuple);
+    const auto& bakedGraph = std::get<0>(bakedGraphTuple);
+    const auto& bakedVariantPack = std::get<1>(bakedGraphTuple);
     auto [bakedSerialized, bakedSerErr] = bakedGraph->to_binary();
     ASSERT_TRUE(bakedSerErr.is_good()) << bakedSerErr.get_message();
     const GraphWrapper bakedWrapper(bakedSerialized.data(), bakedSerialized.size());
@@ -164,7 +164,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
     auto bakedPlan = bakedBuilder.buildNodePlan(bakedWrapper, bakedWrapper.getNode(0));
     bakedPlan->execute(bakedVariantPack);
 
-    auto tolerance = batchnorm::getToleranceTraining<float>();
+    const auto tolerance = batchnorm::getToleranceTraining<float>();
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(bakedBundle.yTensor, runtimeBundle.yTensor));
     EXPECT_TRUE(cpuRefOutputValidation.allClose(bakedBundle.meanTensor, runtimeBundle.meanTensor));
@@ -184,11 +184,11 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
     auto graphTuple = buildBatchnormTrainGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, false);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const BatchnormTrainPlanBuilder<DataType::FLOAT,
@@ -198,7 +198,7 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
                                     DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<BatchnormTrainPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -214,11 +214,11 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
     auto graphTuple = buildBatchnormTrainGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, false);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const BatchnormTrainPlanBuilder<DataType::FLOAT,

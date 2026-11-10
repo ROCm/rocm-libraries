@@ -43,7 +43,7 @@ public:
     void setAllAttributesExcept(std::initializer_list<hipdnnBackendAttributeName_t> skip = {}) const
     {
         auto desc = getDescriptor();
-        auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
+        const auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
             if(std::find(skip.begin(), skip.end(), attr) == skip.end())
             {
                 desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
@@ -79,7 +79,7 @@ public:
     void makeFinalized() const
     {
         setRequiredAttributes();
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
@@ -149,7 +149,7 @@ protected:
 
 TEST_F(TestLayernormOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT);
@@ -175,7 +175,7 @@ TEST_F(TestLayernormOperationDescriptor, DoubleFinalizeSucceeds)
     // All required fields remain set after the first finalize, so the second call
     // succeeds without throwing. This documents the current behavior.
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->finalize());
 }
 
@@ -208,7 +208,7 @@ INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
 TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyMean)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_meanDesc);
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -217,7 +217,7 @@ TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyMean)
 TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyInvVariance)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
@@ -231,7 +231,7 @@ TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyInvVariance)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorX)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
 
@@ -241,7 +241,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorX)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorScale)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_scaleDesc));
 
@@ -251,7 +251,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorScale)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorBias)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_biasDesc));
 
@@ -261,7 +261,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorBias)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorEpsilon)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -273,7 +273,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorEpsilon)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorY)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc));
 
@@ -283,7 +283,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorY)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorMean)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_meanDesc));
 
@@ -294,7 +294,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorMean)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorInvVariance)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -307,7 +307,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorDescriptorInvVariance)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -317,7 +317,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_INT64, 1, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
@@ -325,7 +325,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_xDesc),
@@ -334,7 +334,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -347,7 +347,7 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestLayernormOperationDescriptor, SetNormalizedDimCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dimCount = 3;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -358,7 +358,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormalizedDimCount)
 
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto forwardPhase = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -371,7 +371,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -384,7 +384,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -396,7 +396,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseWrongElementCount)
 
 TEST_F(TestLayernormOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -407,7 +407,7 @@ TEST_F(TestLayernormOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestLayernormOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -423,7 +423,7 @@ TEST_F(TestLayernormOperationDescriptor, SetComputeDataTypeWrongElementCount)
 TEST_F(TestLayernormOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -433,7 +433,7 @@ TEST_F(TestLayernormOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestLayernormOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -461,7 +461,7 @@ class TestLayernormOperationDescriptorGetTensor
 TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorReturnsCorrectTensor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const auto& tc = GetParam();
 
     // getAttribute packs the stored TensorDescriptor into a fresh HipdnnBackendDescriptor*.
@@ -475,7 +475,7 @@ TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorRe
     ASSERT_NE(retrieved, nullptr);
 
     // Unpack the wrapper to inspect the underlying TensorDescriptor.
-    auto tensorImpl = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto tensorImpl = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         retrieved, HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack retrieved tensor descriptor");
     delete retrieved;
 
@@ -488,7 +488,7 @@ TEST_P(TestLayernormOperationDescriptorGetTensor, QueryModeReturnsOne)
     // makeFinalized() sets all tensors including optional mean/inv_variance.
     // Query mode (elementCount=0, arrayOfElements=nullptr) should report 1 for each.
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const auto& tc = GetParam();
 
     int64_t elementCount = 0;
@@ -522,7 +522,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeNormalizedDimCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dimCount = 3;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT, HIPDNN_TYPE_INT64, 1, &dimCount);
@@ -543,7 +543,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeNormalizedDimCount)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnNormFwdPhase_t forwardPhase = {};
     int64_t forwardPhaseCount = 0;
@@ -558,7 +558,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -579,7 +579,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -594,7 +594,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -607,7 +607,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -622,7 +622,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
@@ -636,7 +636,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT,
@@ -650,7 +650,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT,
@@ -664,7 +664,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorEpsilonQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
@@ -678,7 +678,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorEpsilonQueryReturnsOn
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT,
@@ -692,7 +692,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorMeanQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT,
@@ -706,7 +706,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorMeanQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorInvVarianceQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
@@ -720,7 +720,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorInvVarianceQueryRetur
 TEST_F(TestLayernormOperationDescriptor, GetAttributeNormFwdPhaseQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -734,7 +734,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeNormFwdPhaseQueryReturnsOne
 TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -745,7 +745,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -762,7 +762,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorQueryFailsNullElement
 TEST_F(TestLayernormOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
@@ -788,7 +788,7 @@ TEST_F(TestLayernormOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("LayernormOperationDescriptor"), std::string::npos);
@@ -823,7 +823,7 @@ TEST_F(TestLayernormOperationDescriptor, ToStringIncludesOptionalTensorsWhenSet)
 TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7u);
@@ -843,7 +843,7 @@ TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsWithoutOptional)
     setRequiredAttributes();
     getDescriptor()->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 5u);
     ASSERT_EQ(tensors[0].get(), desc->getXDesc().get());
@@ -857,7 +857,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     makeFinalized();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
@@ -880,7 +880,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
 TEST_F(TestLayernormOperationDescriptor, BuildNodePreservesNormalizedDimCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dimCount = 3;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT, HIPDNN_TYPE_INT64, 1, &dimCount);
@@ -898,7 +898,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -926,7 +926,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto tensors = graphOp->getTensorDescriptors();
@@ -936,7 +936,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _xDesc->tryAsGraphOperation();
+    const auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

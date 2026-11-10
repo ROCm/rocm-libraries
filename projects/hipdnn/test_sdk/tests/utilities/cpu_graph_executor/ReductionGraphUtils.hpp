@@ -21,7 +21,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
                         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                         hipdnn_frontend::ReductionMode mode = hipdnn_frontend::ReductionMode::ADD)
 {
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ReductionTest");
     graph->set_compute_data_type(
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
@@ -32,14 +32,16 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.xTensor);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto yAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "Y",
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.yTensor);
     yAttr.set_uid(uid++);
-    auto yTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(yAttr));
+    const auto yTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(yAttr));
     yTensorAttr->set_output(true);
 
     hipdnn_frontend::graph::ReductionAttributes redAttrs;
@@ -49,7 +51,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
     graph->reduction(xTensorAttr, yTensorAttr, redAttrs);
 
-    auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *yTensorAttr);
+    const auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *yTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }

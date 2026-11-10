@@ -38,7 +38,7 @@ auto pointsToVector(const std::vector<T>& expected)
 inline auto pointsToString(const std::string& expected)
 {
     return ::testing::Truly([expected](const void* ptr) {
-        auto actual = std::string(static_cast<const char*>(ptr), expected.size());
+        const auto actual = std::string(static_cast<const char*>(ptr), expected.size());
         return actual == expected;
     });
 }

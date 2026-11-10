@@ -64,7 +64,7 @@ inline flatbuffers::FlatBufferBuilder createReluFwdGraph(const std::vector<int64
         &strides,
         &dims));
 
-    auto pointwiseAttrs = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto pointwiseAttrs = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt, // relu_lower_clip
@@ -84,7 +84,7 @@ inline flatbuffers::FlatBufferBuilder createReluFwdGraph(const std::vector<int64
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttrs.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test_relu",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -116,7 +116,7 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 3, "out", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    auto pointwiseAttrs = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto pointwiseAttrs = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         mode,
         flatbuffers::nullopt,
@@ -136,7 +136,7 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttrs.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test_non_relu",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -182,7 +182,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeReluGraph()
         &strides,
         &dims));
 
-    auto relu1 = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto relu1 = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -194,7 +194,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeReluGraph()
         flatbuffers::nullopt,
         2);
 
-    auto relu2 = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto relu2 = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -220,7 +220,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeReluGraph()
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         relu2.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test_multi_node",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -319,16 +319,17 @@ inline flatbuffers::FlatBufferBuilder createConvFwdGraph(int64_t inputUid = 1,
     const std::vector<int64_t> stride = {strideH, strideW};
     const std::vector<int64_t> dilation = {dilationH, dilationW};
 
-    auto convAttrs = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
-        builder,
-        inputUid,
-        weightUid,
-        outputUid,
-        &prePadding,
-        &postPadding,
-        &stride,
-        &dilation,
-        hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    const auto convAttrs
+        = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+            builder,
+            inputUid,
+            weightUid,
+            outputUid,
+            &prePadding,
+            &postPadding,
+            &stride,
+            &dilation,
+            hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -338,7 +339,7 @@ inline flatbuffers::FlatBufferBuilder createConvFwdGraph(int64_t inputUid = 1,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
         convAttrs.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test_conv_fwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -416,7 +417,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
     const std::vector<int64_t> stride1 = {1, 1};
     const std::vector<int64_t> dilation1 = {1, 1};
 
-    auto conv1 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+    const auto conv1 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
         1,
         2,
@@ -431,7 +432,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
     const std::vector<int64_t> stride2 = {1, 1};
     const std::vector<int64_t> dilation2 = {1, 1};
 
-    auto conv2 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+    const auto conv2 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
         3,
         4,
@@ -456,7 +457,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
         conv2.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test_multi_node_conv",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -472,7 +473,7 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
 inline flatbuffers::FlatBufferBuilder createEngineConfig(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineConfigOffset
+    const auto engineConfigOffset
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, engineId);
     builder.Finish(engineConfigOffset);
     return builder;
@@ -487,7 +488,8 @@ inline flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto floatVal = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, knobValue);
+    const auto floatVal
+        = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, knobValue);
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>
         knobSettings;
@@ -497,7 +499,7 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue,
         floatVal.Union()));
 
-    auto engineConfigOffset = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfigDirect(
+    const auto engineConfigOffset = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfigDirect(
         builder, engineId, &knobSettings);
     builder.Finish(engineConfigOffset);
     return builder;

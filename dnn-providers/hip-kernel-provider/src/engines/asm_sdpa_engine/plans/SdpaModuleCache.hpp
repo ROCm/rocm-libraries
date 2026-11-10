@@ -45,7 +45,7 @@ public:
         load(const std::string& tocKey, const std::string& arch, const char* funcName)
     {
         auto& archive = asm_kernels::AsmKpackArchive::instance();
-        auto kernelData = archive.getKernel(tocKey, arch);
+        auto const kernelData = archive.getKernel(tocKey, arch);
         auto loaded = loadKernelModuleFromMemory(kernelData.data, kernelData.size, funcName);
         if(!loaded)
         {

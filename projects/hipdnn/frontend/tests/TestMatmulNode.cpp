@@ -14,20 +14,20 @@ using namespace hipdnn_frontend::graph;
 TEST(TestMatmulNode, PreValidateNodeSucceeds2D)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 8}).set_stride({8, 1});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5}).set_stride({5, 1});
     attrs.set_b(b);
 
-    auto c = std::make_shared<TensorAttributes>();
+    const auto c = std::make_shared<TensorAttributes>();
     attrs.set_c(c);
 
     const GraphAttributes graphAttrs;
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -39,7 +39,7 @@ TEST(TestMatmulNode, PreValidateNodeMissingA)
     const GraphAttributes graphAttrs;
 
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -51,7 +51,7 @@ TEST(TestMatmulNode, PreValidateNodeMissingB)
     const GraphAttributes graphAttrs;
 
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -63,18 +63,18 @@ TEST(TestMatmulNode, PreValidateNodeMissingC)
     const GraphAttributes graphAttrs;
 
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
 TEST(TestMatmulNode, PreValidateNodeMismatchedRanks)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({2, 4, 8});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5});
     attrs.set_b(b);
 
@@ -82,18 +82,18 @@ TEST(TestMatmulNode, PreValidateNodeMismatchedRanks)
 
     const GraphAttributes graphAttrs;
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestMatmulNode, PreValidateNodeMismatchedInnerK)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 7});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5});
     attrs.set_b(b);
 
@@ -101,18 +101,18 @@ TEST(TestMatmulNode, PreValidateNodeMismatchedInnerK)
 
     const GraphAttributes graphAttrs;
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestMatmulNode, PreValidateNodeIncompatibleBatch)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({2, 4, 8});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({3, 8, 5});
     attrs.set_b(b);
 
@@ -120,18 +120,18 @@ TEST(TestMatmulNode, PreValidateNodeIncompatibleBatch)
 
     const GraphAttributes graphAttrs;
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestMatmulNode, PreValidateNodeBroadcastableBatch)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({2, 4, 8});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({1, 8, 5});
     attrs.set_b(b);
 
@@ -139,7 +139,7 @@ TEST(TestMatmulNode, PreValidateNodeBroadcastableBatch)
 
     const GraphAttributes graphAttrs;
     const MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -151,7 +151,7 @@ TEST(TestMatmulNode, InferPropertiesNodeMissingA)
     const GraphAttributes graphAttrs;
 
     MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -163,7 +163,7 @@ TEST(TestMatmulNode, InferPropertiesNodeMissingB)
     const GraphAttributes graphAttrs;
 
     MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -175,27 +175,27 @@ TEST(TestMatmulNode, InferPropertiesNodeMissingC)
     const GraphAttributes graphAttrs;
 
     MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
 TEST(TestMatmulNode, InferPropertiesNodeInfer2DOutputDimsAndStrides)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 8});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5});
     attrs.set_b(b);
 
-    auto c = std::make_shared<TensorAttributes>();
+    const auto c = std::make_shared<TensorAttributes>();
     attrs.set_c(c);
 
     const GraphAttributes graphAttrs;
     MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     auto dims = c->get_dim();
@@ -212,20 +212,20 @@ TEST(TestMatmulNode, InferPropertiesNodeInfer2DOutputDimsAndStrides)
 TEST(TestMatmulNode, InferPropertiesNodeInferBatchedDimsAndStrides)
 {
     MatmulAttributes attrs;
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({2, 4, 8});
     attrs.set_a(a);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({1, 8, 5});
     attrs.set_b(b);
 
-    auto c = std::make_shared<TensorAttributes>();
+    const auto c = std::make_shared<TensorAttributes>();
     attrs.set_c(c);
 
     const GraphAttributes graphAttrs;
     MatmulNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     auto dims = c->get_dim();

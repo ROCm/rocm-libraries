@@ -81,8 +81,8 @@ protected:
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -92,11 +92,11 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, CreatesValidFinalizedDescripto
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -105,7 +105,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BlockScaleDequantizeAttributes);
-    auto desc = std::static_pointer_cast<BlockScaleDequantizeOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<BlockScaleDequantizeOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -120,16 +120,16 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BSD_TENSOR_X_UID);
@@ -141,8 +141,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_BSD_TENSOR_X_UID]);
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_BSD_TENSOR_SCALE_UID]);
@@ -151,8 +151,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, TensorReferencesMatchTensorMap
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BSD_TENSOR_X_UID);
@@ -176,7 +176,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, SetsTensorReferencesWithFullVa
 TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_BSD_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -185,7 +185,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_BSD_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -194,7 +194,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_BSD_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -202,8 +202,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FailsWithMissingYTensor)
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -214,8 +214,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetTensorDescriptorsReturnsAll
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -239,7 +239,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FromNodePreservesIsNegativeSca
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_EQ(desc->getData().is_negative_scale, true);
@@ -252,8 +252,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FromNodePreservesIsNegativeSca
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -354,7 +354,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_blockscaledequantize_1";
 
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -369,8 +369,8 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestBlockScaleDequantizeOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -382,7 +382,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

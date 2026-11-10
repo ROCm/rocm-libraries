@@ -49,21 +49,21 @@ hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnn
 
     const bool wantStats = sdpaAttrs.generate_stats.has_value() && sdpaAttrs.generate_stats.value();
 
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("TestGraph")
         .set_io_data_type(tensorDataType)
         .set_intermediate_data_type(tensorDataType)
         .set_compute_data_type(tensorDataType);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("Q").set_data_type(tensorDataType);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_uid(K_SDPA_TENSOR_K_UID).set_name("K").set_data_type(tensorDataType);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_uid(K_SDPA_TENSOR_V_UID).set_name("V").set_data_type(tensorDataType);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -161,21 +161,21 @@ protected:
 // in the frontend.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("TestSdpaFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("Q").set_data_type(DataType::FLOAT);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_uid(K_SDPA_TENSOR_K_UID).set_name("K").set_data_type(DataType::FLOAT);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_uid(K_SDPA_TENSOR_V_UID).set_name("V").set_data_type(DataType::FLOAT);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -285,7 +285,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
 // Verifies that a tensor attention scale survives descriptor lowering and serialization.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdTensorScaleRoundTrip)
 {
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
     scale->set_value(0.125f);
 
@@ -325,21 +325,21 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdTensorScaleRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("AutoUidSdpaGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_name("Q").set_data_type(DataType::FLOAT);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_name("K").set_data_type(DataType::FLOAT);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_name("V").set_data_type(DataType::FLOAT);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -403,21 +403,21 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
 // the stats tensor through the round-trip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    const auto graph = std::make_shared<TestableGraph>();
     graph->set_name("TestSdpaFwdWithStatsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("Q").set_data_type(DataType::FLOAT);
     q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_uid(K_SDPA_TENSOR_K_UID).set_name("K").set_data_type(DataType::FLOAT);
     k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_uid(K_SDPA_TENSOR_V_UID).set_name("V").set_data_type(DataType::FLOAT);
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
@@ -491,23 +491,23 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
 // and int64 scalars, and non-default enum values.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalars)
 {
-    auto attnMask = std::make_shared<TensorAttributes>();
+    const auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID).set_name("ATTN_MASK");
     attnMask->set_data_type(DataType::FLOAT);
     attnMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
     attnMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    auto seed = std::make_shared<TensorAttributes>();
+    const auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED").set_data_type(DataType::FLOAT);
     seed->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     seed->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET").set_data_type(DataType::FLOAT);
     offset->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     offset->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto dropoutMask = std::make_shared<TensorAttributes>();
+    const auto dropoutMask = std::make_shared<TensorAttributes>();
     dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID).set_name("DROPOUT_MASK");
     dropoutMask->set_data_type(DataType::FLOAT);
     dropoutMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
@@ -606,73 +606,73 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 // both seq_len tensors it requires, as in cuDNN), and the conditional mma_core_mode enum branch.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
 {
-    auto descaleQ = std::make_shared<TensorAttributes>();
+    const auto descaleQ = std::make_shared<TensorAttributes>();
     descaleQ->set_uid(K_SDPA_TENSOR_DESCALE_Q_UID).set_name("DESCALE_Q");
     descaleQ->set_data_type(DataType::FLOAT);
     descaleQ->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     descaleQ->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto descaleK = std::make_shared<TensorAttributes>();
+    const auto descaleK = std::make_shared<TensorAttributes>();
     descaleK->set_uid(K_SDPA_TENSOR_DESCALE_K_UID).set_name("DESCALE_K");
     descaleK->set_data_type(DataType::FLOAT);
     descaleK->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     descaleK->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto descaleV = std::make_shared<TensorAttributes>();
+    const auto descaleV = std::make_shared<TensorAttributes>();
     descaleV->set_uid(K_SDPA_TENSOR_DESCALE_V_UID).set_name("DESCALE_V");
     descaleV->set_data_type(DataType::FLOAT);
     descaleV->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     descaleV->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto descaleS = std::make_shared<TensorAttributes>();
+    const auto descaleS = std::make_shared<TensorAttributes>();
     descaleS->set_uid(K_SDPA_TENSOR_DESCALE_S_UID).set_name("DESCALE_S");
     descaleS->set_data_type(DataType::FLOAT);
     descaleS->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     descaleS->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto scaleS = std::make_shared<TensorAttributes>();
+    const auto scaleS = std::make_shared<TensorAttributes>();
     scaleS->set_uid(K_SDPA_TENSOR_SCALE_S_UID).set_name("SCALE_S");
     scaleS->set_data_type(DataType::FLOAT);
     scaleS->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     scaleS->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto scaleO = std::make_shared<TensorAttributes>();
+    const auto scaleO = std::make_shared<TensorAttributes>();
     scaleO->set_uid(K_SDPA_TENSOR_SCALE_O_UID).set_name("SCALE_O");
     scaleO->set_data_type(DataType::FLOAT);
     scaleO->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     scaleO->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto amaxS = std::make_shared<TensorAttributes>();
+    const auto amaxS = std::make_shared<TensorAttributes>();
     amaxS->set_uid(K_SDPA_TENSOR_AMAX_S_UID).set_name("AMAX_S");
     amaxS->set_data_type(DataType::FLOAT).set_output(true);
     amaxS->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     amaxS->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto amaxO = std::make_shared<TensorAttributes>();
+    const auto amaxO = std::make_shared<TensorAttributes>();
     amaxO->set_uid(K_SDPA_TENSOR_AMAX_O_UID).set_name("AMAX_O");
     amaxO->set_data_type(DataType::FLOAT).set_output(true);
     amaxO->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     amaxO->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto seqLenQ = std::make_shared<TensorAttributes>();
+    const auto seqLenQ = std::make_shared<TensorAttributes>();
     seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID).set_name("SEQ_LEN_Q");
     seqLenQ->set_data_type(DataType::INT32);
     seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
     seqLenQ->set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto seqLenKv = std::make_shared<TensorAttributes>();
+    const auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID).set_name("SEQ_LEN_KV");
     seqLenKv->set_data_type(DataType::INT32);
     seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
     seqLenKv->set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto pageTableK = std::make_shared<TensorAttributes>();
+    const auto pageTableK = std::make_shared<TensorAttributes>();
     pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID).set_name("PAGE_TABLE_K");
     pageTableK->set_data_type(DataType::INT32);
     pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));
     pageTableK->set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    auto pageTableV = std::make_shared<TensorAttributes>();
+    const auto pageTableV = std::make_shared<TensorAttributes>();
     pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID).set_name("PAGE_TABLE_V");
     pageTableV->set_data_type(DataType::INT32);
     pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));

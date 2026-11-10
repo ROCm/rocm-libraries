@@ -524,7 +524,7 @@ const Graph* parseGraphBuffer(const std::vector<uint8_t>& buffer)
 std::optional<std::vector<int64_t>>
     reorderWithPreferredFirst(const std::vector<int64_t>& candidates, int64_t preferredEngineId)
 {
-    auto it = std::find(candidates.begin(), candidates.end(), preferredEngineId);
+    const auto it = std::find(candidates.begin(), candidates.end(), preferredEngineId);
     if(it == candidates.end())
     {
         return std::nullopt;

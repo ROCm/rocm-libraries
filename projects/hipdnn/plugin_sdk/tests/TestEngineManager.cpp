@@ -95,7 +95,7 @@ std::unique_ptr<TestEngine>
 TEST(TestEngineManager, InitiallyHasNoEngines)
 {
     const TestEngineManager manager;
-    auto engineIds = manager.getAllEngineIds();
+    const auto engineIds = manager.getAllEngineIds();
     EXPECT_TRUE(engineIds.empty());
 }
 
@@ -116,7 +116,7 @@ TEST(TestEngineManager, AddMultipleEngines)
     manager.addEngine(createTestEngine(2, false));
     manager.addEngine(createTestEngine(3, true));
 
-    auto engineIds = manager.getAllEngineIds();
+    const auto engineIds = manager.getAllEngineIds();
     EXPECT_EQ(engineIds.size(), 3u);
 }
 
@@ -127,7 +127,7 @@ TEST(TestEngineManager, AddMultipleEngines)
 /// hand-written engines.
 TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true, 2048));
     manager.addEngine(createTestEngine(1, true, 4096));
@@ -150,7 +150,7 @@ TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
 
 TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateWhenTheCallerSuppliesAName)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true, 2048), "hipkernel:ConvFwd");
     manager.addEngine(createTestEngine(1, true, 4096), "hipkernel:ConvFwd");
@@ -167,7 +167,7 @@ TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateFromTheRegistryWhenNo
     using hipdnn_data_sdk::utilities::formatEngineIdHex;
     using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
 
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     TestEngineManager manager;
     manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 2048));
     manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 4096));
@@ -235,7 +235,7 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
     const NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
 
-    auto workspaceSize = manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig);
+    const auto workspaceSize = manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig);
     EXPECT_EQ(workspaceSize, 2048u);
 }
 

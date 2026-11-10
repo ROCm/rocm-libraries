@@ -39,7 +39,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                             const std::string& name = "")
 {
     auto wrapper = createDescriptor<MatmulOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_ADESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -105,7 +105,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -130,16 +130,16 @@ protected:
 
 TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
 {
-    auto aDesc = createFinalizedTensor(
+    const auto aDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_A_UID, toVec(K_MATMUL_TENSOR_A_DIMS), toVec(K_MATMUL_TENSOR_A_STRIDES));
-    auto bDesc = createFinalizedTensor(
+    const auto bDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_B_UID, toVec(K_MATMUL_TENSOR_B_DIMS), toVec(K_MATMUL_TENSOR_B_STRIDES));
-    auto cDesc = createFinalizedTensor(
+    const auto cDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_C_UID, toVec(K_MATMUL_TENSOR_C_DIMS), toVec(K_MATMUL_TENSOR_C_STRIDES));
 
-    auto matmulOp = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get());
+    const auto matmulOp = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
@@ -149,7 +149,7 @@ TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -190,23 +190,23 @@ TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
 
 TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
 {
-    auto aDesc = createFinalizedTensor(K_MATMUL_TENSOR_A_UID,
-                                       toVec(K_MATMUL_TENSOR_A_DIMS),
-                                       toVec(K_MATMUL_TENSOR_A_STRIDES),
-                                       HIPDNN_DATA_HALF);
-    auto bDesc = createFinalizedTensor(K_MATMUL_TENSOR_B_UID,
-                                       toVec(K_MATMUL_TENSOR_B_DIMS),
-                                       toVec(K_MATMUL_TENSOR_B_STRIDES),
-                                       HIPDNN_DATA_HALF);
-    auto cDesc = createFinalizedTensor(K_MATMUL_TENSOR_C_UID,
-                                       toVec(K_MATMUL_TENSOR_C_DIMS),
-                                       toVec(K_MATMUL_TENSOR_C_STRIDES),
-                                       HIPDNN_DATA_HALF);
+    const auto aDesc = createFinalizedTensor(K_MATMUL_TENSOR_A_UID,
+                                             toVec(K_MATMUL_TENSOR_A_DIMS),
+                                             toVec(K_MATMUL_TENSOR_A_STRIDES),
+                                             HIPDNN_DATA_HALF);
+    const auto bDesc = createFinalizedTensor(K_MATMUL_TENSOR_B_UID,
+                                             toVec(K_MATMUL_TENSOR_B_DIMS),
+                                             toVec(K_MATMUL_TENSOR_B_STRIDES),
+                                             HIPDNN_DATA_HALF);
+    const auto cDesc = createFinalizedTensor(K_MATMUL_TENSOR_C_UID,
+                                             toVec(K_MATMUL_TENSOR_C_DIMS),
+                                             toVec(K_MATMUL_TENSOR_C_STRIDES),
+                                             HIPDNN_DATA_HALF);
 
-    auto matmulOp
+    const auto matmulOp
         = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
@@ -216,7 +216,7 @@ TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -236,18 +236,18 @@ TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
 // preserved in the serialized FlatBuffer graph node.
 TEST_F(TestGraphDescriptorMatmul, NamePreservedInFlatBuffer)
 {
-    auto aDesc = createFinalizedTensor(
+    const auto aDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_A_UID, toVec(K_MATMUL_TENSOR_A_DIMS), toVec(K_MATMUL_TENSOR_A_STRIDES));
-    auto bDesc = createFinalizedTensor(
+    const auto bDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_B_UID, toVec(K_MATMUL_TENSOR_B_DIMS), toVec(K_MATMUL_TENSOR_B_STRIDES));
-    auto cDesc = createFinalizedTensor(
+    const auto cDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_C_UID, toVec(K_MATMUL_TENSOR_C_DIMS), toVec(K_MATMUL_TENSOR_C_STRIDES));
 
     const std::string opName = "my_matmul_op";
-    auto matmulOp
+    const auto matmulOp
         = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get(), HIPDNN_DATA_FLOAT, opName);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
@@ -257,7 +257,7 @@ TEST_F(TestGraphDescriptorMatmul, NamePreservedInFlatBuffer)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -268,18 +268,18 @@ TEST_F(TestGraphDescriptorMatmul, NamePreservedInFlatBuffer)
 // operation name and attribute type survive the FlatBuffer → NodeFactory lifting path.
 TEST_F(TestGraphDescriptorMatmul, OperationNameRoundTripThroughLifting)
 {
-    auto aDesc = createFinalizedTensor(
+    const auto aDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_A_UID, toVec(K_MATMUL_TENSOR_A_DIMS), toVec(K_MATMUL_TENSOR_A_STRIDES));
-    auto bDesc = createFinalizedTensor(
+    const auto bDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_B_UID, toVec(K_MATMUL_TENSOR_B_DIMS), toVec(K_MATMUL_TENSOR_B_STRIDES));
-    auto cDesc = createFinalizedTensor(
+    const auto cDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_C_UID, toVec(K_MATMUL_TENSOR_C_DIMS), toVec(K_MATMUL_TENSOR_C_STRIDES));
 
     const std::string opName = "lift_matmul_name";
-    auto matmulOp
+    const auto matmulOp
         = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get(), HIPDNN_DATA_FLOAT, opName);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
@@ -290,14 +290,14 @@ TEST_F(TestGraphDescriptorMatmul, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize and deserialize via FlatBuffer
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
-    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
-    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    const auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
     ASSERT_NE(rebuilt, nullptr);
 
     auto* graphOp = rebuilt->asGraphOperation();

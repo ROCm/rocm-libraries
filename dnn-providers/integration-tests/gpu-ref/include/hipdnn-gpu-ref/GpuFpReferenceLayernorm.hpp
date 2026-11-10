@@ -33,7 +33,7 @@ inline void getLayernormDimensions(int64_t& outerSize,
     outerSize = 1;
     innerSize = 1;
     stride = 1;
-    auto strideOrder = extractStrideOrder(strides);
+    const auto strideOrder = extractStrideOrder(strides);
     const int64_t normalizedDim = static_cast<int64_t>(dims.size()) - normalizedDimCount;
 
     // Set stride to C if there is a stride between blocks of inner size (i.e. C not part of normalized dimensions and channel-last layout)
@@ -115,7 +115,7 @@ public:
     {
         validateFwd(x, scale, bias, y, normalizedDimCount, mean, rstd);
 
-        auto defines
+        const auto defines
             = detail::buildLayernormDefines<XDataType,
                                             YDataType,
                                             ScaleBiasDataType,
@@ -166,12 +166,12 @@ public:
     {
         validateBwd(dy, x, scale, dx, dscale, dbias, mean, rstd, normalizedDimCount);
 
-        auto defines = detail::buildLayernormDefines<XDataType,
-                                                     YDataType,
-                                                     ScaleBiasDataType,
-                                                     MeanRstdDataType,
-                                                     ComputeDataType,
-                                                     LOCAL_SIZE>(
+        const auto defines = detail::buildLayernormDefines<XDataType,
+                                                           YDataType,
+                                                           ScaleBiasDataType,
+                                                           MeanRstdDataType,
+                                                           ComputeDataType,
+                                                           LOCAL_SIZE>(
             dy.dims(), dy.strides(), normalizedDimCount);
 
         std::shared_ptr<Workspace<>> workspace;

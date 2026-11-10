@@ -83,7 +83,7 @@ uint32_t
     MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
 {
     const auto& engineDefinitions = getEngineDefinitions();
-    auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
+    const auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
 
     if(maxEngines == 0)
     {
@@ -92,7 +92,7 @@ uint32_t
         return totalEngines;
     }
 
-    auto enginesToCopy = std::min(maxEngines, totalEngines);
+    const auto enginesToCopy = std::min(maxEngines, totalEngines);
     for(uint32_t i = 0; i < enginesToCopy; ++i)
     {
         engineIds[i] = engineDefinitions[i].id;

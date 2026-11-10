@@ -22,6 +22,6 @@ int main(int argc, char** argv)
     // logs are routed to the log recorder for capture and use by the unit tests.
     hipdnn_frontend::initializeFrontendLogging(recordingCallback);
 
-    auto result = RUN_ALL_TESTS();
+    const auto result = RUN_ALL_TESTS();
     return result;
 }

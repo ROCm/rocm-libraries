@@ -54,7 +54,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                const std::string& name = "")
 {
     auto wrapper = createDescriptor<BatchnormOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<BatchnormOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<BatchnormOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -159,7 +159,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -290,9 +290,9 @@ protected:
 
 TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
 {
-    auto opDesc = makeOp(_meanDesc.get(), _invVarianceDesc.get());
+    const auto opDesc = makeOp(_meanDesc.get(), _invVarianceDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -302,7 +302,7 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -334,10 +334,10 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
 
 TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
 {
-    auto opDesc = makeOp(
+    const auto opDesc = makeOp(
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, {}, HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -347,7 +347,7 @@ TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -358,10 +358,10 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
 {
     const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
-    auto opDesc
+    const auto opDesc
         = makeOp(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, peerStatsDescs);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -371,7 +371,7 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -386,18 +386,18 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
 
 TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
 {
-    auto opDesc = makeOp(_meanDesc.get(),
-                         _invVarianceDesc.get(),
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         {},
-                         HIPDNN_DATA_FLOAT,
-                         "bn_fwd_train");
+    const auto opDesc = makeOp(_meanDesc.get(),
+                               _invVarianceDesc.get(),
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               {},
+                               HIPDNN_DATA_FLOAT,
+                               "bn_fwd_train");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -408,13 +408,13 @@ TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -425,7 +425,7 @@ TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -445,18 +445,18 @@ TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
 {
     const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
-    auto opDesc = makeOp(_meanDesc.get(),
-                         _invVarianceDesc.get(),
-                         _prevRunningMeanDesc.get(),
-                         _prevRunningVarianceDesc.get(),
-                         _momentumDesc.get(),
-                         _nextRunningMeanDesc.get(),
-                         _nextRunningVarianceDesc.get(),
-                         peerStatsDescs,
-                         HIPDNN_DATA_FLOAT,
-                         "bn_all_tensors");
+    const auto opDesc = makeOp(_meanDesc.get(),
+                               _invVarianceDesc.get(),
+                               _prevRunningMeanDesc.get(),
+                               _prevRunningVarianceDesc.get(),
+                               _momentumDesc.get(),
+                               _nextRunningMeanDesc.get(),
+                               _nextRunningVarianceDesc.get(),
+                               peerStatsDescs,
+                               HIPDNN_DATA_FLOAT,
+                               "bn_all_tensors");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -467,13 +467,13 @@ TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -484,7 +484,7 @@ TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
     liftedDesc->finalize();
 
     // Re-serialize and verify everything survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

@@ -123,7 +123,7 @@ template <typename T>
                                                    const std::string& errorContext)
 {
     int64_t count = 0;
-    auto countStatus = hipdnnBackend()->backendGetAttribute(
+    const auto countStatus = hipdnnBackend()->backendGetAttribute(
         desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
     if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
     {
@@ -168,12 +168,12 @@ template <typename T>
 {
     hipdnnBackendDescriptor_t rawDesc = nullptr;
     int64_t actualCount = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(sourceDescriptor,
-                                                       attrName,
-                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                       1,
-                                                       &actualCount,
-                                                       static_cast<void*>(&rawDesc));
+    const auto status = hipdnnBackend()->backendGetAttribute(sourceDescriptor,
+                                                             attrName,
+                                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                             1,
+                                                             &actualCount,
+                                                             static_cast<void*>(&rawDesc));
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
@@ -196,7 +196,7 @@ template <typename T>
 {
     // Query count
     int64_t count = 0;
-    auto countStatus = hipdnnBackend()->backendGetAttribute(
+    const auto countStatus = hipdnnBackend()->backendGetAttribute(
         sourceDescriptor, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
     if(countStatus != HIPDNN_STATUS_SUCCESS)
     {
@@ -216,12 +216,13 @@ template <typename T>
     // Retrieve raw descriptors
     std::vector<hipdnnBackendDescriptor_t> rawDescs(static_cast<size_t>(count));
     int64_t actualCount = 0;
-    auto getStatus = hipdnnBackend()->backendGetAttribute(sourceDescriptor,
-                                                          attrName,
-                                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                          count,
-                                                          &actualCount,
-                                                          static_cast<void*>(rawDescs.data()));
+    const auto getStatus
+        = hipdnnBackend()->backendGetAttribute(sourceDescriptor,
+                                               attrName,
+                                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                               count,
+                                               &actualCount,
+                                               static_cast<void*>(rawDescs.data()));
     if(getStatus != HIPDNN_STATUS_SUCCESS)
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
@@ -291,7 +292,7 @@ template <typename T>
                         const std::string& errorContext)
 {
     int64_t count = 0;
-    auto countStatus = hipdnnBackend()->backendGetAttribute(
+    const auto countStatus = hipdnnBackend()->backendGetAttribute(
         desc, attrName, HIPDNN_TYPE_DATA_TYPE, 0, &count, nullptr);
     if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
     {
@@ -312,7 +313,8 @@ template <typename T>
     }
 
     hipdnnDataType_t dt{};
-    auto err = getDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, dt, errorContext);
+    const auto err
+        = getDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, dt, errorContext);
     if(err.is_bad())
     {
         return {DataType::NOT_SET, err};
@@ -528,7 +530,7 @@ template <typename T>
                                                "tensor UID for " + errorContext));
 
     // Check if this tensor already exists in the map
-    auto it = tensorMap.find(uid);
+    const auto it = tensorMap.find(uid);
     if(it != tensorMap.end())
     {
         outTensor = it->second;
@@ -554,7 +556,7 @@ template <typename T>
     const std::string& errorContext)
 {
     int64_t count = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(
+    const auto status = hipdnnBackend()->backendGetAttribute(
         opDesc, tensorAttrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
 
     if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
@@ -584,7 +586,7 @@ template <typename T>
                                                            const std::string& errorContext)
 {
     int64_t count = 0;
-    auto status
+    const auto status
         = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
     if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
     {
@@ -623,7 +625,7 @@ template <typename T>
 
     outTensors.clear();
     outTensors.reserve(descs.size());
-    for(auto& scopedDesc : descs)
+    for(const auto& scopedDesc : descs)
     {
         if(scopedDesc.get() == nullptr)
         {
@@ -637,7 +639,7 @@ template <typename T>
                                                    uid,
                                                    errorContext + " tensor UID"));
 
-        auto it = tensorMap.find(uid);
+        const auto it = tensorMap.find(uid);
         if(it != tensorMap.end())
         {
             outTensors.push_back(it->second);
@@ -662,7 +664,7 @@ template <typename T>
                                                       const std::string& errorContext)
 {
     int64_t count = 0;
-    auto countStatus = hipdnnBackend()->backendGetAttribute(
+    const auto countStatus = hipdnnBackend()->backendGetAttribute(
         desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
     if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
     {

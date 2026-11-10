@@ -19,7 +19,7 @@ using namespace hip_kernel_provider::layernorm;
 TEST(TestLayernormBwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid layernorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -35,7 +35,7 @@ TEST(TestLayernormBwdParams, InitializesAllTensorsFromValidGraph)
 TEST(TestLayernormBwdParams, HasCorrectTensorPointersForSingleNode)
 {
     // Create a valid layernorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -60,7 +60,7 @@ TEST(TestLayernormBwdParams, HasCorrectTensorPointersForSingleNode)
 
 TEST(TestLayernormBwdParams, TensorPointersMatchExpectedUids)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -84,7 +84,7 @@ TEST(TestLayernormBwdParams, TensorPointersMatchExpectedUids)
 
 TEST(TestLayernormBwdParams, IsMoveConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -150,7 +150,7 @@ TEST(TestLayernormBwdPlan, GetWorkspaceSizeParallelReturnsNonzero)
 
     const Handle handle;
     // The answer is dependent on the number of multiprocessors
-    auto multiProcessorCount = static_cast<int64_t>(
+    auto const multiProcessorCount = static_cast<int64_t>(
         hip_kernel_provider_common::getDeviceProperties(handle.getStream()).multiProcessorCount);
     auto [fbb, plan]
         = createPlanFromGraph({3072 * multiProcessorCount, 1024 * multiProcessorCount, 32, 1},
@@ -220,7 +220,7 @@ TEST(TestLayernormBwdPlan, CompileCallsCompilerWithCorrectKernelName)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -250,7 +250,7 @@ TEST(TestLayernormBwdPlan, CompileIncludesOffloadArchOption)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps("gfx942");
+    auto const deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -280,11 +280,11 @@ TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -337,11 +337,11 @@ TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefinesParallel)
         });
 
     auto [fbb, plan] = createPlanFromGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -385,11 +385,11 @@ TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefines)
                                            {1, 3, 224, 224},
                                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -444,11 +444,11 @@ TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefinesParallel)
     auto [fbb, plan] = createPlanFromGraph(
         {768, 256, 16, 1}, {1024, 3, 16, 16}, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -492,11 +492,11 @@ TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefines)
         = createPlanFromGraph({150528, 50176, 224, 1},
                               {1, 3, 224, 224},
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -552,11 +552,11 @@ TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefinesParallel)
         = createPlanFromGraph({768, 256, 16, 1},
                               {1024, 3, 16, 16},
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -577,7 +577,7 @@ TEST(TestLayernormBwdPlan, CompileWithUnsupportedDimensionThrows)
     const MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         {12, 4, 1}, {1, 3, 4}, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -588,7 +588,7 @@ TEST(TestLayernormBwdPlan, CompileWithUnsupportedDimensionThrows)
     LayernormBwdParams params(attr, graph.getTensorMap());
     LayernormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

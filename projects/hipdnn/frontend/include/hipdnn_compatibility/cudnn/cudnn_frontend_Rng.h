@@ -176,7 +176,7 @@ public:
     {
         return detail::v8::buildDescriptor(m_RngDesc, CUDNN_BACKEND_RNG_DESCRIPTOR, [&] {
             cudnnRngDistribution_t cudnn_rng_distribution;
-            auto status
+            const auto status
                 = detail::convert_to_cudnn_type(m_RngDesc.distribution, cudnn_rng_distribution);
             if(status != CUDNN_STATUS_SUCCESS)
             {

@@ -196,7 +196,7 @@ rtol = 1e-2
 
     const TestSettings settings(file.path());
 
-    auto result
+    const auto result
         = settings.findToleranceOverride("IntegrationGpuBatchnormFp32/Smoke.Correctness/params");
     EXPECT_FALSE(result.has_value());
 }
@@ -210,7 +210,7 @@ version = 1
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findToleranceOverride("AnyTestName");
+    const auto result = settings.findToleranceOverride("AnyTestName");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -229,12 +229,12 @@ rtol = 1e-2
     const TestSettings settings(file.path());
 
     // Should match the first filter
-    auto result1
+    const auto result1
         = settings.findToleranceOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/params");
     ASSERT_TRUE(result1.has_value());
 
     // Should match the second filter
-    auto result2
+    const auto result2
         = settings.findToleranceOverride("IntegrationGpuConvFwdHalf/Smoke.Correctness/params");
     ASSERT_TRUE(result2.has_value());
 }
@@ -794,12 +794,12 @@ reason  = "xnack-only issue"
 
     const TestSettings settings(file.path());
 
-    auto matched
+    const auto matched
         = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     ASSERT_FALSE(matched.has_value())
         << "literal substring 'gfx942:xnack-' should not appear in 'gfx942:sramecc+:xnack-'";
 
-    auto matchedExact
+    const auto matchedExact
         = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:xnack-", "linux");
     ASSERT_TRUE(matchedExact.has_value());
 }
@@ -818,7 +818,7 @@ reason  = "rdna3 only"
 
     const TestSettings settings(file.path());
 
-    auto result
+    const auto result
         = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     EXPECT_FALSE(result.has_value());
 }
@@ -837,7 +837,7 @@ reason  = "batchnorm only"
 
     const TestSettings settings(file.path());
 
-    auto result
+    const auto result
         = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     EXPECT_FALSE(result.has_value());
 }
@@ -857,7 +857,7 @@ reason  = "r"
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "", "linux");
+    const auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -895,7 +895,7 @@ version = 1
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("AnyTest.Name", "gfx942", "linux");
+    const auto result = settings.findSkip("AnyTest.Name", "gfx942", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -982,7 +982,7 @@ reason    = "windows-only"
     ASSERT_TRUE(winMatch.has_value());
     EXPECT_EQ(*winMatch, "windows-only");
 
-    auto linuxMiss = settings.findSkip("Foo.Test", "gfx942", "linux");
+    const auto linuxMiss = settings.findSkip("Foo.Test", "gfx942", "linux");
     EXPECT_FALSE(linuxMiss.has_value());
 }
 
@@ -1019,7 +1019,7 @@ reason    = "should not fire"
 )");
 
     const TestSettings settings(file.path());
-    auto result = settings.findSkip("Foo.Test", "gfx942", "windows");
+    const auto result = settings.findSkip("Foo.Test", "gfx942", "windows");
     EXPECT_FALSE(result.has_value());
 }
 

@@ -30,8 +30,8 @@ TEST(TestTensorAttributesWrapper, EnsureTheTensorAttributesIsWrappedCorrectly)
 
     flatbuffers::FlatBufferBuilder builder;
     const Float32Value floatValue(value);
-    auto valueOffset = builder.CreateStruct(floatValue).Union();
-    auto attributeOffset = CreateTensorAttributesDirect(
+    const auto valueOffset = builder.CreateStruct(floatValue).Union();
+    const auto attributeOffset = CreateTensorAttributesDirect(
         builder, uid, name.c_str(), dataType, &strides, &dims, isVirtual, valueType, valueOffset);
     builder.Finish(attributeOffset);
 

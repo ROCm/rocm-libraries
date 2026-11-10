@@ -70,7 +70,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation2D)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Sample 0 outputs
     EXPECT_NEAR(dx.getHostValue(0, 0), -2.1465994991753945e-05, tolerance);
@@ -156,7 +156,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional2
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Sample 0 outputs
     EXPECT_NEAR(dx.getHostValue(0, 0), -2.1465994991753945e-05, tolerance);
@@ -252,7 +252,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation3D)
     dbiasRef.setHostValue(-5.0, 1, 1);
     dbiasRef.setHostValue(6.0, 1, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each output element: y = (x - mean) * rstd
     for(int i = 0; i < 2; i++)
@@ -340,7 +340,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional3
     dbiasRef.setHostValue(-5.0, 1, 1);
     dbiasRef.setHostValue(6.0, 1, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each output element: y = (x - mean) * rstd
     for(int i = 0; i < 2; i++)
@@ -423,7 +423,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationEntire3D)
     dbiasRef.setHostValue(-5.0, 0, 1, 1);
     dbiasRef.setHostValue(6.0, 0, 1, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Verify each output element: y = (x - mean) * rstd
     for(int i = 0; i < 2; i++)
@@ -472,7 +472,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllZeros)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(int f = 0; f < 4; f++)
     {
@@ -516,7 +516,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllOnes)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(int f = 0; f < 5; f++)
     {
@@ -560,7 +560,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropConstantInput)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(int f = 0; f < 3; f++)
     {
@@ -615,7 +615,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSingleFeature)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(dx.getHostValue(0, 0), 0.0, tolerance);
     EXPECT_NEAR(dx.getHostValue(1, 0), 0.0, tolerance);
@@ -670,7 +670,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNegativeAndMixedValues)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // dx and dbias should be antisymmetric: dx[0]=-dx[3], dx[1]=-dx[2]
     EXPECT_NEAR(dx.getHostValue(0, 0), -dx.getHostValue(0, 3), tolerance);
@@ -748,7 +748,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropLargeValueNumericalStability)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // Normalized output should match the small-value case exactly
     EXPECT_NEAR(dx.getHostValue(0, 0), 1.375, tolerance);
@@ -814,7 +814,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropTypicalTransformerShape)
     CpuFpReferenceLayernorm::bprop(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<float>();
+    const auto tolerance = layernorm::getTolerance<float>();
 
     for(size_t i = 0; i < 2; ++i)
     {
@@ -910,7 +910,7 @@ TYPED_TEST(CpuFpReferenceLayernormBpropTyped, BpropRunsWithoutError)
     CpuFpReferenceLayernorm::bprop(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // All zeroes dy -> all dx, dscale and dbias are zero
     for(size_t k = 0; k < 32; ++k)
@@ -952,7 +952,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
         for(int j = 0; j < 4; j++)
         {
             dy.setHostValue(static_cast<double>(i * 4 + j + 1) / 10.0, 0, i, j);
-            auto xVal = static_cast<double>(i * 4 + j + 1);
+            const auto xVal = static_cast<double>(i * 4 + j + 1);
             x.setHostValue(xVal, 0, i, j);
             batchVar += (xVal - 6.5) * (xVal - 6.5);
         }
@@ -967,7 +967,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
         for(int j = 0; j < 4; j++)
         {
             dy.setHostValue(static_cast<double>(i * 4 + j + 13) / 10.0, 1, i, j);
-            auto xVal = static_cast<double>(i * 4 + j + 13);
+            const auto xVal = static_cast<double>(i * 4 + j + 13);
             x.setHostValue(xVal, 1, i, j);
             batchVar += (xVal - 18.5) * (xVal - 18.5);
         }
@@ -980,7 +980,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(size_t i = 0; i < 2; ++i)
     {
@@ -1068,7 +1068,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropOneHotRows)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // The "hot" position output should be identical across rows
     // dx[0,0] should equal dx[1,1] and dx[2,2]
@@ -1122,7 +1122,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropPerFeatureScale)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     // a         = rstd³ * (sum(dy[i] * scale[i] * x[i]) - sum(dy[i] * scale[i]) * mean)
     // b         = rstd * sum(dy[i] * scale[i]) - a * mean
@@ -1314,7 +1314,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop1D)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     const double batchRstd = rstd.getHostValue(0);
     double sumDyScaleX = 0.0;
@@ -1386,7 +1386,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast1)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(size_t i = 0; i < 2; ++i)
     {
@@ -1477,7 +1477,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast3)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 3);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(size_t i = 0; i < 2; ++i)
     {
@@ -1577,7 +1577,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropFullTensorNormalization)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     const double batchRstd = rstd.getHostValue(0);
     double sumDyScaleX = 0.0;
@@ -1672,7 +1672,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop5DNormalizeLast2)
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
         dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
-    auto tolerance = layernorm::getTolerance<double>();
+    const auto tolerance = layernorm::getTolerance<double>();
 
     for(size_t i = 0; i < 2; ++i)
     {

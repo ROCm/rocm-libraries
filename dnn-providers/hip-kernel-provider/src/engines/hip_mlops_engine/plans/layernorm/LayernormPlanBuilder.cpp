@@ -30,11 +30,12 @@ size_t getMaxBwdWorkspaceSize(const Handle& handle,
 {
     // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
     const auto& node = opGraph.getNode(0);
-    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    auto const deviceProperties
+        = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
     auto attr = node.attributes_as_LayernormBackwardAttributes();
     auto xTensorAttr = opGraph.getTensorMap().at(attr->x_tensor_uid());
     auto scaleTensorAttr = std::make_optional(opGraph.getTensorMap().at(attr->scale_tensor_uid()));
-    auto meanTensorAttr
+    auto const meanTensorAttr
         = attr->mean_tensor_uid().has_value()
               ? std::make_optional(opGraph.getTensorMap().at(attr->mean_tensor_uid().value()))
               : std::nullopt;
@@ -84,7 +85,7 @@ bool LayernormPlanBuilder::isApplicable(
         return false;
     }
 
-    auto anyNodeIsNotF32Compute = [&]() {
+    auto const anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType()

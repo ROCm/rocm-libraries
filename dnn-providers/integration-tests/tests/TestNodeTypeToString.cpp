@@ -38,7 +38,7 @@ TEST(TestNodeTypeToString, AllNodeTypesHaveNonNullString)
         NodeType::REDUCTION,
     };
 
-    for(auto type : allTypes)
+    for(const auto type : allTypes)
     {
         EXPECT_NE(to_string(type), nullptr) << "NodeType " << static_cast<int>(type);
     }
@@ -65,7 +65,7 @@ TEST(TestNodeTypeToString, StreamInsertionMatchesToString)
         NodeType::BATCHNORM,
     };
 
-    for(auto type : testTypes)
+    for(const auto type : testTypes)
     {
         std::ostringstream oss;
         oss << type;

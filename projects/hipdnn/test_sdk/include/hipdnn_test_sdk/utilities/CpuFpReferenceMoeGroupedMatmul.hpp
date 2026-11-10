@@ -176,7 +176,7 @@ public:
         const int64_t outputStride1 = outputStrides[1];
         const int64_t outputStride2 = outputStrides[2];
 
-        auto moeRowFunc = [&](const std::vector<int64_t>& indices) {
+        const auto moeRowFunc = [&](const std::vector<int64_t>& indices) {
             const int64_t o = indices[0];
             OutputDataType* outRow = outputBase + o * outputStride1;
             const int64_t expert = expertOfRow[static_cast<size_t>(o)];
@@ -243,7 +243,7 @@ public:
             }
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(moeRowFunc, {outputRows});
         parallelFunc(std::thread::hardware_concurrency());
 

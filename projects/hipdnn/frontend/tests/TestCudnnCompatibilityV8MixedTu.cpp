@@ -37,22 +37,22 @@ TEST_F(TestCudnnCompatibilityV8MixedTu, GraphAndBuildersShareTu)
     cudnn_frontend::graph::Graph graph;
     graph.set_io_data_type(cudnn_frontend::DataType_t::FLOAT)
         .set_compute_data_type(cudnn_frontend::DataType_t::FLOAT);
-    auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes()
-                              .set_name("x")
-                              .set_dim(xDims)
-                              .set_stride(packedStrides(xDims))
-                              .set_uid(1));
-    auto w = graph.tensor(cudnn_frontend::graph::Tensor_attributes()
-                              .set_name("w")
-                              .set_dim(wDims)
-                              .set_stride(packedStrides(wDims))
-                              .set_uid(2));
-    auto y = graph.conv_fprop(x,
-                              w,
-                              cudnn_frontend::graph::Conv_fprop_attributes()
-                                  .set_padding({1, 1})
-                                  .set_stride({1, 1})
-                                  .set_dilation({1, 1}));
+    const auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes()
+                                    .set_name("x")
+                                    .set_dim(xDims)
+                                    .set_stride(packedStrides(xDims))
+                                    .set_uid(1));
+    const auto w = graph.tensor(cudnn_frontend::graph::Tensor_attributes()
+                                    .set_name("w")
+                                    .set_dim(wDims)
+                                    .set_stride(packedStrides(wDims))
+                                    .set_uid(2));
+    const auto y = graph.conv_fprop(x,
+                                    w,
+                                    cudnn_frontend::graph::Conv_fprop_attributes()
+                                        .set_padding({1, 1})
+                                        .set_stride({1, 1})
+                                        .set_dilation({1, 1}));
     ASSERT_NE(y, nullptr);
     y->set_output(true).set_uid(3);
     ASSERT_TRUE(graph.validate().is_good());

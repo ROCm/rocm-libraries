@@ -160,14 +160,14 @@ inline flatbuffers::FlatBufferBuilder makeSdpaGraph(const SdpaGraphSpec& spec)
         attrs.dropout_scale_tensor_uid = DROPOUT_SCALE;
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "SdpaFwdTestGraph", spec.fp8Type, spec.oType, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return builder;

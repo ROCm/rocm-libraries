@@ -43,7 +43,7 @@ public:
     void setAllAttributesExcept(std::initializer_list<hipdnnBackendAttributeName_t> skip = {}) const
     {
         auto desc = getDescriptor();
-        auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
+        const auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
             if(std::find(skip.begin(), skip.end(), attr) == skip.end())
             {
                 desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
@@ -162,7 +162,7 @@ protected:
 
 TEST_F(TestSdpaBwdOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_SDPA_BWD_DESCRIPTOR_EXT);
@@ -178,7 +178,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, FinalizeWithRequiredAttributes)
 TEST_F(TestSdpaBwdOperationDescriptor, DoubleFinalizeThrows)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->finalize());
 }
 
@@ -213,7 +213,7 @@ INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorQ)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc));
 
@@ -223,7 +223,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorQ)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorK)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_kDesc));
 
@@ -233,7 +233,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorK)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorV)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_vDesc));
 
@@ -243,7 +243,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorV)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorO)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_oDesc));
 
@@ -253,7 +253,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorO)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDo)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_DO_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_doDesc));
 
@@ -263,7 +263,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDo)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorStats)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_STATS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_statsDesc));
 
@@ -273,7 +273,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorStats)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDq)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_DQ_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dqDesc));
 
@@ -283,7 +283,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDq)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDk)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_DK_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dkDesc));
 
@@ -293,7 +293,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDk)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDv)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_DV_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dvDesc));
 
@@ -307,7 +307,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDv)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorScale)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_scaleDesc));
     ASSERT_TRUE(desc->getData().scale_tensor_uid.has_value());
@@ -317,7 +317,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorScale)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorAttnMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_ATTN_MASK_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -329,7 +329,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorAttnMask)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeqLenQ)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_SEQ_LEN_Q_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -339,7 +339,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeqLenQ)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeqLenKv)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_SEQ_LEN_KV_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -349,7 +349,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeqLenKv)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeed)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_SEED_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_seedDesc));
     ASSERT_NE(desc->getSeedDesc(), nullptr);
@@ -357,7 +357,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorSeed)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorOffset)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_OFFSET_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -367,7 +367,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorOffset)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_MASK_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -377,7 +377,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutMask)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutScale)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -387,7 +387,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutScale)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutScaleInv)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_SCALE_INV_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -397,7 +397,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDropoutScaleInv)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDbias)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_DBIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dbiasDesc));
     ASSERT_NE(desc->getDBiasDesc(), nullptr);
@@ -409,7 +409,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorDescriptorDbias)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetCausalMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool val = true;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val));
@@ -418,7 +418,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetCausalMask)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAlibiMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool val = true;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_ALIBI_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val));
@@ -427,7 +427,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAlibiMask)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetPaddingMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool val = true;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_PADDING_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val));
@@ -436,7 +436,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetPaddingMask)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetCausalMaskBottomRight)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool val = true;
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_BOTTOM_RIGHT_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val));
@@ -449,7 +449,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetCausalMaskBottomRight)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetDropoutProbability)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     float val = 0.1f;
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_SDPA_BWD_DROPOUT_PROBABILITY_EXT, HIPDNN_TYPE_FLOAT, 1, &val));
@@ -459,7 +459,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDropoutProbability)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAttnScaleValue)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     float val = 0.125f;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_ATTN_SCALE_VALUE_EXT, HIPDNN_TYPE_FLOAT, 1, &val));
@@ -469,7 +469,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAttnScaleValue)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetLeftBound)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t val = 10;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &val));
@@ -479,7 +479,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetLeftBound)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetRightBound)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t val = 20;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &val));
@@ -489,7 +489,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetRightBound)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignment)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto val = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, &val));
@@ -498,7 +498,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignment)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetOperationName)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "my_bwd_op";
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                                        HIPDNN_TYPE_CHAR,
@@ -512,7 +512,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetOperationName)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
@@ -526,7 +526,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetComputeDataType)
 TEST_F(TestSdpaBwdOperationDescriptor, SetAttributeOnFinalizedThrows)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc),
@@ -539,7 +539,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAttributeOnFinalizedThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_FLOAT, 1, &_qDesc),
         HIPDNN_STATUS_BAD_PARAM);
@@ -547,7 +547,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_qDesc),
@@ -556,7 +556,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -565,7 +565,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -575,7 +575,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAttributeUnsupportedNameThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &dummy),
@@ -584,7 +584,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAttributeUnsupportedNameThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalTensorWrongTypeThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_SCALE_EXT, HIPDNN_TYPE_INT64, 1, &dummy),
@@ -593,7 +593,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalTensorWrongTypeThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalTensorWrongElementCountThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_SCALE_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
@@ -603,7 +603,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalTensorWrongElementCountThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalScalarWrongTypeThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t val = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -613,7 +613,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalScalarWrongTypeThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalScalarWrongElementCountThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     float val = 0.5f;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -623,7 +623,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetOptionalScalarWrongElementCountThrows)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto val = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
                                                   HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
@@ -634,7 +634,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -649,7 +649,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorQ)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT,
@@ -665,7 +665,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorQ)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorK)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_K_EXT,
@@ -681,7 +681,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorK)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorV)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_V_EXT,
@@ -697,7 +697,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorV)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorO)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_O_EXT,
@@ -713,7 +713,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorO)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDo)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DO_EXT,
@@ -729,7 +729,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDo)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorStats)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_STATS_EXT,
@@ -745,7 +745,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorStats)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDq)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DQ_EXT,
@@ -761,7 +761,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDq)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDk)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DK_EXT,
@@ -777,7 +777,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDk)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorDv)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_DV_EXT,
@@ -798,7 +798,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetOptionalTensorSetReturnsCount1)
 {
     // All optional tensors are set via makeFinalized()
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Scale tensor (set)
     hipdnnBackendDescriptor_t result = nullptr;
@@ -816,7 +816,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetOptionalTensorSetReturnsCount1)
 TEST_F(TestSdpaBwdOperationDescriptor, GetOptionalTensorUnsetReturnsCount0)
 {
     // Build with required-only attributes, no optional tensors
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc);
     desc->setAttribute(
@@ -868,7 +868,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetOptionalTensorUnsetReturnsCount0)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetAllBooleanAttributes)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
 
     bool trueVal = true;
@@ -905,7 +905,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetAllBooleanAttributes)
 
 TEST_F(TestSdpaBwdOperationDescriptor, GetCausalMask)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool val = true;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val);
     setAllAttributesExcept();
@@ -926,7 +926,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetCausalMask)
 TEST_F(TestSdpaBwdOperationDescriptor, GetComputeDataType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnDataType_t result = HIPDNN_DATA_DOUBLE;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -937,7 +937,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetComputeDataType)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetComputeDataTypeHalf)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT});
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -957,7 +957,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetComputeDataTypeHalf)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetDropoutProbability)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     float dropoutProb = 0.5f;
     desc->setAttribute(
@@ -975,7 +975,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetDropoutProbability)
 TEST_F(TestSdpaBwdOperationDescriptor, GetDropoutProbabilityUnsetReturnsCount0)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     // dropout_probability is not explicitly set via makeFinalized, but setAllAttributesExcept
     // does not set optional scalars either, so it should be unset
     int64_t count = 99;
@@ -986,7 +986,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetDropoutProbabilityUnsetReturnsCount0)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetAttnScaleValue)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     float attnScale = 1.5f;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_ATTN_SCALE_VALUE_EXT, HIPDNN_TYPE_FLOAT, 1, &attnScale);
@@ -1003,7 +1003,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetAttnScaleValue)
 TEST_F(TestSdpaBwdOperationDescriptor, GetAttnScaleValueUnsetReturnsCount0)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t count = 99;
     desc->getAttribute(
         HIPDNN_ATTR_SDPA_BWD_ATTN_SCALE_VALUE_EXT, HIPDNN_TYPE_FLOAT, 1, &count, nullptr);
@@ -1016,7 +1016,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetAttnScaleValueUnsetReturnsCount0)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetLeftBound)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     int64_t leftBound = 10;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &leftBound);
@@ -1031,7 +1031,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetLeftBound)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetRightBound)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     int64_t rightBound = 20;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &rightBound);
@@ -1047,7 +1047,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetRightBound)
 TEST_F(TestSdpaBwdOperationDescriptor, GetLeftBoundUnsetReturnsCount0)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t count = 99;
     desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &count, nullptr);
     ASSERT_EQ(count, 0);
@@ -1056,7 +1056,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetLeftBoundUnsetReturnsCount0)
 TEST_F(TestSdpaBwdOperationDescriptor, GetRightBoundUnsetReturnsCount0)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t count = 99;
     desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &count, nullptr);
     ASSERT_EQ(count, 0);
@@ -1068,7 +1068,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetRightBoundUnsetReturnsCount0)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetDiagonalAlignment)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     auto diagAlign = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
@@ -1091,7 +1091,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetDiagonalAlignment)
 TEST_F(TestSdpaBwdOperationDescriptor, GetDiagonalAlignmentDefault)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto result = static_cast<hipdnnDiagonalAlignment_t>(-1);
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
@@ -1109,7 +1109,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetDiagonalAlignmentDefault)
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetOperationName)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     const std::string name = "sdpa_bwd_test";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -1137,7 +1137,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetOperationName)
 
 TEST_F(TestSdpaBwdOperationDescriptor, GetAttributeOnUnfinalizedThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     hipdnnBackendDescriptor_t result = nullptr;
     int64_t count = 0;
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT,
@@ -1151,7 +1151,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetAttributeOnUnfinalizedThrows)
 TEST_F(TestSdpaBwdOperationDescriptor, GetAttributeUnsupportedNameThrows)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
     int64_t count = 0;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1166,7 +1166,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetAttributeUnsupportedNameThrows)
 TEST_F(TestSdpaBwdOperationDescriptor, BuildNode)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto node = desc->buildNode();
 
     ASSERT_NE(node, nullptr);
@@ -1188,7 +1188,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNode)
 
 TEST_F(TestSdpaBwdOperationDescriptor, BuildNodeWithNonDefaultScalars)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
 
     // Set non-default scalar/enum attributes
@@ -1237,7 +1237,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodeWithNonDefaultScalars)
 
 TEST_F(TestSdpaBwdOperationDescriptor, BuildNodePreservesName)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setAllAttributesExcept({});
     const std::string name = "bwd_node_name";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -1258,8 +1258,8 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodePreservesName)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
-    auto tensors = desc->getTensorDescriptors();
+    const auto desc = getDescriptor();
+    const auto tensors = desc->getTensorDescriptors();
 
     // 9 required + 10 optional tensors
     ASSERT_EQ(tensors.size(), 19u);
@@ -1338,7 +1338,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptors)
 
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorsRequiredOnly)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc);
     desc->setAttribute(
@@ -1361,7 +1361,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorsRequiredOnly)
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto tensors = desc->getTensorDescriptors();
+    const auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 9u);
 
     // Build UID->tensor map and verify dims/strides for each required tensor
@@ -1439,7 +1439,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorsRequiredOnly)
 TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorsOrder)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 19u);
@@ -1472,7 +1472,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetTensorDescriptorsOrder)
 TEST_F(TestSdpaBwdOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_NE(desc->getQDesc(), nullptr);
     ASSERT_NE(desc->getKDesc(), nullptr);
@@ -1523,8 +1523,8 @@ TEST_F(TestSdpaBwdOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestSdpaBwdOperationDescriptor, ToString)
 {
     makeFinalized();
-    auto desc = getDescriptor();
-    auto str = desc->toString();
+    const auto desc = getDescriptor();
+    const auto str = desc->toString();
     ASSERT_FALSE(str.empty());
     ASSERT_NE(str.find("SdpaBwdOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("q_uid="), std::string::npos);
@@ -1543,9 +1543,9 @@ protected:
 
     void SetUp() override
     {
-        auto makeTensor = [this](int64_t uid,
-                                 const std::vector<int64_t>& dims,
-                                 const std::vector<int64_t>& strides) {
+        const auto makeTensor = [this](int64_t uid,
+                                       const std::vector<int64_t>& dims,
+                                       const std::vector<int64_t>& strides) {
             TensorAttributesT attrs;
             attrs.uid = uid;
             attrs.data_type = DataType::FLOAT;
@@ -1584,7 +1584,7 @@ protected:
                    toVec(K_SDPA_BWD_TENSOR_DV_STRIDES));
 
         // Optional tensors
-        auto makeScalarTensor = [this](int64_t uid) {
+        const auto makeScalarTensor = [this](int64_t uid) {
             TensorAttributesT attrs;
             attrs.uid = uid;
             attrs.data_type = DataType::FLOAT;
@@ -1664,8 +1664,8 @@ protected:
 
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeRequiredOnly)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -1708,8 +1708,9 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeRequiredOnly)
 
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeAllFields)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -1757,7 +1758,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodePreservesNameAndComputeType)
 {
     auto node = createRequiredOnlyNode(DataType::HALF);
     node.name = "my_bprop_node";
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->getComputeDataType(), DataType::HALF);
@@ -1770,6 +1771,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodePreservesNameAndComputeType)
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeFailsMissingRequiredTensor)
 {
     _tensorMap.erase(K_SDPA_BWD_TENSOR_Q_UID);
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createRequiredOnlyNode();
 
     ASSERT_THROW_HIPDNN_STATUS(SdpaBwdOperationDescriptor::fromNode(node, _tensorMap),
@@ -1781,6 +1783,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeOptionalTensorUidSetButMissingInMap
     // Set scale_tensor_uid in the node attributes, but remove it from tensor map
     _tensorMap.erase(K_SDPA_BWD_TENSOR_SCALE_UID);
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto allAttrs = createAllAttrs();
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
@@ -1788,7 +1791,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeOptionalTensorUidSetButMissingInMap
 
     // The implementation uses findOptional which returns nullptr when UID is set
     // but not in the map. This is handled gracefully: the optional desc is just null.
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     EXPECT_EQ(desc->getScaleDesc(), nullptr);
@@ -1796,8 +1799,8 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeOptionalTensorUidSetButMissingInMap
 
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeRoundTrip)
 {
-    auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createAllNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -1825,8 +1828,8 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeRoundTrip)
 
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeTensorReferencesMatchMap)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getQDesc(), _tensorMap[K_SDPA_BWD_TENSOR_Q_UID]);
     EXPECT_EQ(desc->getKDesc(), _tensorMap[K_SDPA_BWD_TENSOR_K_UID]);

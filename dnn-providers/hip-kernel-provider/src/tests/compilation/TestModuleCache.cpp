@@ -92,7 +92,7 @@ TEST(TestModuleCache, EmptyOnConstruction)
 TEST(TestModuleCache, GetOrLoadCallsLoadOnMiss)
 {
     MockModuleCache cache;
-    auto result = cache.getOrLoad("kernel_a");
+    auto const result = cache.getOrLoad("kernel_a");
 
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(*result, static_cast<int>(std::string("kernel_a").size()));
@@ -103,8 +103,8 @@ TEST(TestModuleCache, GetOrLoadCallsLoadOnMiss)
 TEST(TestModuleCache, GetOrLoadReturnsCachedOnHit)
 {
     MockModuleCache cache;
-    auto first = cache.getOrLoad("kernel_b");
-    auto second = cache.getOrLoad("kernel_b");
+    auto const first = cache.getOrLoad("kernel_b");
+    auto const second = cache.getOrLoad("kernel_b");
 
     // Must be the exact same object (pointer equality).
     EXPECT_EQ(first.get(), second.get());
@@ -114,7 +114,7 @@ TEST(TestModuleCache, GetOrLoadReturnsCachedOnHit)
 TEST(TestModuleCache, FailedLoadNotCached)
 {
     MockModuleCache cache;
-    auto result = cache.getOrLoad("FAIL_kernel");
+    auto const result = cache.getOrLoad("FAIL_kernel");
 
     EXPECT_EQ(result, nullptr);
     EXPECT_EQ(cache.size(), 0u);

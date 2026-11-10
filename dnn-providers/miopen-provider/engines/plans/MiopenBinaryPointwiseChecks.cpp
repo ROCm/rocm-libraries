@@ -136,8 +136,8 @@ void validateBinaryPointwise(const IGraph& opGraph)
     const auto outUid = attrs.out_0_tensor_uid();
 
     const auto& tensorMap = opGraph.getTensorMap();
-    auto findAttr = [&tensorMap](int64_t uid) -> const TensorAttributes* {
-        auto it = tensorMap.find(uid);
+    const auto findAttr = [&tensorMap](int64_t uid) -> const TensorAttributes* {
+        const auto it = tensorMap.find(uid);
         return it == tensorMap.end() ? nullptr : it->second;
     };
 

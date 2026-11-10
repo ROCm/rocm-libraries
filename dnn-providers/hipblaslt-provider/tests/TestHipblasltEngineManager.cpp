@@ -95,7 +95,7 @@ TEST(TestHipblasltEngineManager, ReturnsNoApplicableEngineIds)
 
     MockGraph const mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
-    auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
+    auto const applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_TRUE(applicable.empty());
 }

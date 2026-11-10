@@ -67,7 +67,7 @@ inline Error checkTensorUidsSetImpl(
     {
         if(tensor && !tensor->has_uid())
         {
-            auto name = tensor->get_name();
+            const auto name = tensor->get_name();
             missingUidTensors.push_back(name.empty() ? "(unnamed)" : name);
         }
     }
@@ -97,7 +97,7 @@ inline Error checkNoDuplicateTensorIdsImpl(
     {
         if(tensor && tensor->has_uid())
         {
-            auto uid = tensor->get_uid();
+            const auto uid = tensor->get_uid();
             if(!seenUids.insert(uid).second)
             {
                 duplicateUids.insert(uid);

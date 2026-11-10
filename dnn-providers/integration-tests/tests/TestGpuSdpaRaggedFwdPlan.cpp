@@ -143,20 +143,20 @@ void checkPlanLseAgainstCpu(RaggedStatsLayout statsLayout, bool tokenOffsets = f
         options.raggedOffsetStatsUid = RAGGED_OFFSET_STATS_UID;
     }
     options.tokenOffsets = tokenOffsets;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 qDims,
-                                                 kvDims,
-                                                 kvDims,
-                                                 qDims,
-                                                 DataType::FLOAT,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       qDims,
+                                                       kvDims,
+                                                       kvDims,
+                                                       qDims,
+                                                       DataType::FLOAT,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -238,8 +238,8 @@ void checkPlanLseAgainstCpu(RaggedStatsLayout statsLayout, bool tokenOffsets = f
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForBf16RaggedNode)
 {
-    auto graphBuilder = makeRaggedGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeRaggedGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const Bf16Builder bf16Builder;
@@ -249,9 +249,9 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForBf16RaggedNode)
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForDenseNode)
 {
     // No ragged_offset on the primaries, so this node belongs to the dense plan.
-    auto graphBuilder = createSdpaFwdGraph(
+    const auto graphBuilder = createSdpaFwdGraph(
         Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const Bf16Builder bf16Builder;
@@ -321,17 +321,17 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorAndNotForAliasingL
 {
     const Bf16Builder bf16Builder;
     // DIMS is [1, H = 2, S = 8, D = 16]. Head-major: head stride S * D.
-    auto graphBuilder = makeRaggedGraph();
+    const auto graphBuilder = makeRaggedGraph();
     const auto qHeadMajor = withShape(
         graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 128, 16, 1});
-    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qHeadMajor.data(),
-                                                                            qHeadMajor.size());
+    const auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        qHeadMajor.data(), qHeadMajor.size());
     EXPECT_TRUE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
 
     // Head stride 8 inside a 16-element feature span: heads alias features.
     const auto qAliasing = withShape(
         graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 8, 32, 1});
-    auto aliasingWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto aliasingWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         qAliasing.data(), qAliasing.size());
     EXPECT_FALSE(bf16Builder.isApplicable(aliasingWrap.getNode(0), aliasingWrap.getTensorMap()));
 
@@ -339,20 +339,20 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorAndNotForAliasingL
     options.statsUid = STATS_UID;
     options.statsLayout = RaggedStatsLayout::PACKED;
     options.raggedOffsetStatsUid = RAGGED_OFFSET_STATS_UID;
-    auto statsGraph = createRaggedSdpaFwdGraph(Q_UID,
-                                               K_UID,
-                                               V_UID,
-                                               O_UID,
-                                               RAGGED_OFFSET_Q_UID,
-                                               RAGGED_OFFSET_KV_UID,
-                                               /*batch=*/1,
-                                               DIMS,
-                                               DIMS,
-                                               DIMS,
-                                               DIMS,
-                                               DataType::BFLOAT16,
-                                               options);
-    auto statsWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto statsGraph = createRaggedSdpaFwdGraph(Q_UID,
+                                                     K_UID,
+                                                     V_UID,
+                                                     O_UID,
+                                                     RAGGED_OFFSET_Q_UID,
+                                                     RAGGED_OFFSET_KV_UID,
+                                                     /*batch=*/1,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DataType::BFLOAT16,
+                                                     options);
+    const auto statsWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         statsGraph.GetBufferPointer(), statsGraph.GetSize());
     ASSERT_TRUE(bf16Builder.isApplicable(statsWrap.getNode(0), statsWrap.getTensorMap()));
     // [H, T] Stats: sequence stride 1, head stride = rows.
@@ -360,15 +360,15 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorAndNotForAliasingL
                                         STATS_UID,
                                         std::vector<int64_t>{1, 2, 8, 1},
                                         std::vector<int64_t>{16, 8, 1, 1});
-    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(lseHeadMajor.data(),
-                                                                              lseHeadMajor.size());
+    const auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        lseHeadMajor.data(), lseHeadMajor.size());
     EXPECT_TRUE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForDtypeMismatch)
 {
-    auto graphBuilder = makeRaggedGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeRaggedGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     // A half builder must not be applicable to a bf16 ragged graph.
@@ -391,8 +391,8 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
     const Bf16Builder bf16Builder;
 
     const auto isApplicableWith = [&](const SdpaAttributesT& attrs) {
-        auto graphBuilder = makeRaggedGraph(attrs);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeRaggedGraph(attrs);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return bf16Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -446,8 +446,8 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, AcceptsSeqLenPairAndDeclinesPartialPadding
     const auto isApplicableWith = [&](bool seqLenQ, bool seqLenKv, bool paddingMask) {
         const auto graph
             = withSeqLens(graphBuilder.GetBufferPointer(), seqLenQ, seqLenKv, paddingMask);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graph.data(),
-                                                                                    graph.size());
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graph.data(), graph.size());
         return bf16Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
     EXPECT_TRUE(isApplicableWith(true, true, true));
@@ -459,12 +459,12 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, AcceptsSeqLenPairAndDeclinesPartialPadding
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 {
-    auto graphBuilder = makeRaggedGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeRaggedGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const Bf16Builder bf16Builder;
-    auto builtPlan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     // Cast outside EXPECT_NE: the template's commas would split the macro arguments.
     auto* casted
@@ -492,20 +492,20 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
 
     RaggedSdpaFwdGraphOptions options;
     options.statsUid = STATS_UID; // default dense stats layout
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 DataType::BFLOAT16,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       DataType::BFLOAT16,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Bf16Builder bf16Builder;
     auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
@@ -577,19 +577,19 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
 
     const auto qDims = raggedDims(1, 1, 1, 1);
     const auto kvDims = raggedDims(1, 4, 1, 1);
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 /*batch=*/1,
-                                                 qDims,
-                                                 kvDims,
-                                                 kvDims,
-                                                 qDims,
-                                                 DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       /*batch=*/1,
+                                                       qDims,
+                                                       kvDims,
+                                                       kvDims,
+                                                       qDims,
+                                                       DataType::BFLOAT16);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Bf16Builder bf16Builder;
     auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
@@ -669,20 +669,20 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MatchesDirectFpropRagged)
     options.descaleK = FloatOperandSpec{DESCALE_K_UID};
     options.descaleV = FloatOperandSpec{DESCALE_V_UID};
     options.oDataType = DataType::BFLOAT16;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 DataType::FP8_E4M3,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       DataType::FP8_E4M3,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaRaggedFwdPlanBuilder<DataType::FP8_E4M3,
                                       DataType::FP8_E4M3,
@@ -806,20 +806,20 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
     options.descaleK = spec(DESCALE_K_UID, kCase);
     options.descaleV = spec(DESCALE_V_UID, vCase);
     options.oDataType = DataType::BFLOAT16;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 qkvDims,
-                                                 DataType::FP8_E4M3,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       qkvDims,
+                                                       DataType::FP8_E4M3,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp8Builder fp8Builder;
     ASSERT_TRUE(fp8Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -944,20 +944,20 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonScalarHostDescale)
         options.descaleV = FloatOperandSpec{32};
         options.oDataType = DataType::BFLOAT16;
         const auto dims = raggedDims(2, 4, 2, 128);
-        auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                     K_UID,
-                                                     V_UID,
-                                                     O_UID,
-                                                     RAGGED_OFFSET_Q_UID,
-                                                     RAGGED_OFFSET_KV_UID,
-                                                     /*batch=*/2,
-                                                     dims,
-                                                     dims,
-                                                     dims,
-                                                     dims,
-                                                     DataType::FP8_E4M3,
-                                                     options);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                           K_UID,
+                                                           V_UID,
+                                                           O_UID,
+                                                           RAGGED_OFFSET_Q_UID,
+                                                           RAGGED_OFFSET_KV_UID,
+                                                           /*batch=*/2,
+                                                           dims,
+                                                           dims,
+                                                           dims,
+                                                           dims,
+                                                           DataType::FP8_E4M3,
+                                                           options);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         const Fp8Builder fp8Builder;
         EXPECT_FALSE(fp8Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -990,7 +990,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteTokenOffsetsMatchesCpu)
 // RFC-0014 requires ragged_offset_multiplier >= 1; the plan declines anything else.
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
 {
-    auto graphBuilder = makeRaggedGraph();
+    const auto graphBuilder = makeRaggedGraph();
     auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuilder.GetBufferPointer())->UnPack());
     for(auto& tensor : graphT->tensors)
     {
@@ -1001,7 +1001,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
     }
     flatbuffers::FlatBufferBuilder rewritten;
     rewritten.Finish(CreateGraph(rewritten, graphT.get()));
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         rewritten.GetBufferPointer(), rewritten.GetSize());
 
     const Bf16Builder bf16Builder;
@@ -1022,20 +1022,20 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteRejectsKvSequenceLengthMismatch)
 
     RaggedSdpaFwdGraphOptions options;
     options.raggedOffsetVUid = RAGGED_OFFSET_V_UID;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 /*batch=*/2,
-                                                 dims,
-                                                 dims,
-                                                 dims,
-                                                 dims,
-                                                 DataType::FLOAT,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       /*batch=*/2,
+                                                       dims,
+                                                       dims,
+                                                       dims,
+                                                       dims,
+                                                       DataType::FLOAT,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -1144,20 +1144,20 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
         scale.bakedValue = SCALE;
         options.scale = scale;
     }
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 dims,
-                                                 dims,
-                                                 dims,
-                                                 dims,
-                                                 DataType::FLOAT,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       dims,
+                                                       dims,
+                                                       dims,
+                                                       dims,
+                                                       DataType::FLOAT,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -1250,20 +1250,20 @@ void checkPlanMaskAgainstCpu(const SdpaAttributesT& attrs,
 
     RaggedSdpaFwdGraphOptions options;
     options.attrs = attrs;
-    auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
-                                                 K_UID,
-                                                 V_UID,
-                                                 O_UID,
-                                                 RAGGED_OFFSET_Q_UID,
-                                                 RAGGED_OFFSET_KV_UID,
-                                                 batch,
-                                                 qDims,
-                                                 kvDims,
-                                                 kvDims,
-                                                 qDims,
-                                                 DataType::FLOAT,
-                                                 options);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createRaggedSdpaFwdGraph(Q_UID,
+                                                       K_UID,
+                                                       V_UID,
+                                                       O_UID,
+                                                       RAGGED_OFFSET_Q_UID,
+                                                       RAGGED_OFFSET_KV_UID,
+                                                       batch,
+                                                       qDims,
+                                                       kvDims,
+                                                       kvDims,
+                                                       qDims,
+                                                       DataType::FLOAT,
+                                                       options);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
@@ -1433,16 +1433,16 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)
     SdpaAttributesT bothCausal;
     bothCausal.causal_mask = true;
     bothCausal.causal_mask_bottom_right = true;
-    auto bothCausalGraph = makeRaggedGraph(bothCausal);
-    auto bothCausalWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto bothCausalGraph = makeRaggedGraph(bothCausal);
+    const auto bothCausalWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         bothCausalGraph.GetBufferPointer(), bothCausalGraph.GetSize());
     EXPECT_THROW(bf16Builder.buildNodePlan(bothCausalWrap, bothCausalWrap.getNode(0)),
                  std::invalid_argument);
 
     SdpaAttributesT badBound;
     badBound.left_bound = -2;
-    auto badBoundGraph = makeRaggedGraph(badBound);
-    auto badBoundWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto badBoundGraph = makeRaggedGraph(badBound);
+    const auto badBoundWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         badBoundGraph.GetBufferPointer(), badBoundGraph.GetSize());
     EXPECT_THROW(bf16Builder.buildNodePlan(badBoundWrap, badBoundWrap.getNode(0)),
                  std::invalid_argument);
@@ -1450,16 +1450,16 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)
     // cuDNN's left_bound counts the diagonal, so 0 keeps no key at or before it.
     SdpaAttributesT zeroLeftBound;
     zeroLeftBound.left_bound = 0;
-    auto zeroLeftGraph = makeRaggedGraph(zeroLeftBound);
-    auto zeroLeftWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto zeroLeftGraph = makeRaggedGraph(zeroLeftBound);
+    const auto zeroLeftWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         zeroLeftGraph.GetBufferPointer(), zeroLeftGraph.GetSize());
     EXPECT_THROW(bf16Builder.buildNodePlan(zeroLeftWrap, zeroLeftWrap.getNode(0)),
                  std::invalid_argument);
 
     SdpaAttributesT badRightBound;
     badRightBound.right_bound = -2;
-    auto badRightGraph = makeRaggedGraph(badRightBound);
-    auto badRightWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto badRightGraph = makeRaggedGraph(badRightBound);
+    const auto badRightWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         badRightGraph.GetBufferPointer(), badRightGraph.GetSize());
     EXPECT_THROW(bf16Builder.buildNodePlan(badRightWrap, badRightWrap.getNode(0)),
                  std::invalid_argument);

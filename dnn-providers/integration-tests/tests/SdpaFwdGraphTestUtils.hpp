@@ -111,7 +111,7 @@ inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
             builder, maskUid.value(), "Mask", maskDataType.value(), &maskStrides, &maskDims));
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -120,7 +120,7 @@ inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "SdpaFwdTestGraph", dataType, dataType, DataType::FLOAT, &tensors, &nodes);
 
     builder.Finish(graph);

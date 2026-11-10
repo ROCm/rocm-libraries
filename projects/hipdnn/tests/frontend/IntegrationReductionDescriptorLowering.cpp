@@ -44,18 +44,18 @@ protected:
     /// graph method, validates, lowers, serializes, and deserializes.
     hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(ReductionAttributes& attrs)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("ReductionIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_REDUCTION_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_REDUCTION_TENSOR_X_DIMS))
             .set_stride(toVec(K_REDUCTION_TENSOR_X_STRIDES));
 
-        auto y = graph->reduction(x, attrs);
+        const auto y = graph->reduction(x, attrs);
         y->set_uid(K_REDUCTION_TENSOR_Y_UID).set_output(true).set_name("y");
         y->set_dim(toVec(K_REDUCTION_TENSOR_Y_DIMS))
             .set_stride(toVec(K_REDUCTION_TENSOR_Y_STRIDES));

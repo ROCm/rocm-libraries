@@ -31,6 +31,7 @@ public:
     {
         initializeRegistry();
 
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto it = _registry.find(key);
         if(it != _registry.end())
         {

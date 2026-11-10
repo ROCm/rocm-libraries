@@ -494,7 +494,7 @@ inline Error syncDevice()
                 "autotune: failed to create sync descriptor for device synchronization"};
     }
     bool syncVal = true;
-    auto syncStatus = ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+    const auto syncStatus = ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
         syncDesc.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &syncVal);
     if(syncStatus != HIPDNN_STATUS_SUCCESS)
     {

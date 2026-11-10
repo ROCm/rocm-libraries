@@ -42,7 +42,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                     const std::string& name = "")
 {
     auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -98,7 +98,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -123,18 +123,18 @@ protected:
 
 TEST_F(TestGraphDescriptorConvolutionBwd, BuildFromSingleOperation)
 {
-    auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
-    auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
-    auto opDesc = createFinalizedConvolutionBwdOp(dyDesc.get(), wDesc.get(), dxDesc.get());
+    const auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    const auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    const auto opDesc = createFinalizedConvolutionBwdOp(dyDesc.get(), wDesc.get(), dxDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -145,7 +145,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -171,19 +171,19 @@ TEST_F(TestGraphDescriptorConvolutionBwd, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorConvolutionBwd, ComputeDataTypePreserved)
 {
-    auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
-    auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
-    auto opDesc = createFinalizedConvolutionBwdOp(
+    const auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    const auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    const auto opDesc = createFinalizedConvolutionBwdOp(
         dyDesc.get(), wDesc.get(), dxDesc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -193,7 +193,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -202,19 +202,19 @@ TEST_F(TestGraphDescriptorConvolutionBwd, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorConvolutionBwd, OperationNamePreservedInSerialization)
 {
-    auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
-    auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
-    auto opDesc = createFinalizedConvolutionBwdOp(
+    const auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    const auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    const auto opDesc = createFinalizedConvolutionBwdOp(
         dyDesc.get(), wDesc.get(), dxDesc.get(), HIPDNN_DATA_FLOAT, "test_conv_bwd_op");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -224,7 +224,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNamePreservedInSerialization)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -233,19 +233,19 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNamePreservedInSerialization)
 
 TEST_F(TestGraphDescriptorConvolutionBwd, OperationNameRoundTripThroughLifting)
 {
-    auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
-    auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
-                                       hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
-                                        hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
-    auto opDesc = createFinalizedConvolutionBwdOp(
+    const auto dyDesc = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    const auto wDesc = createFinalizedTensor(K_DGRAD_TENSOR_W_UID,
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_DIMS),
+                                             hipdnn_tests::toVec(K_DGRAD_TENSOR_W_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID,
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_DIMS),
+                                              hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    const auto opDesc = createFinalizedConvolutionBwdOp(
         dyDesc.get(), wDesc.get(), dxDesc.get(), HIPDNN_DATA_FLOAT, "bwd_round_trip_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -256,14 +256,14 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     // Lift: rebuild the descriptor from the FlatBuffer node
-    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
-    auto rebuiltOp = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    const auto rebuiltOp = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
     ASSERT_NE(rebuiltOp, nullptr);
 
     // Rebuild node to get name

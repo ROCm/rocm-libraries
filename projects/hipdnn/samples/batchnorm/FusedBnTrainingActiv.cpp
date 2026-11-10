@@ -23,8 +23,8 @@ using namespace hipdnn_data_sdk;
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
-    auto inputType = getDataTypeEnumFromType<InputType>();
-    auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
+    const auto inputType = getDataTypeEnumFromType<InputType>();
+    const auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization training + ReLU activation graph " << inputType
               << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
@@ -40,12 +40,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -63,7 +63,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // variant pack at execute(), allowing it to vary across executions without rebuilding the
     // graph. Requires plugin SDK >= 1.2.0.
     constexpr auto EPSILON = utilities::BATCHNORM_DEFAULT_EPSILON;
-    auto epsilon = std::make_shared<graph::TensorAttributes>();
+    const auto epsilon = std::make_shared<graph::TensorAttributes>();
     epsilon->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<double>());
     if(config.useRuntimePassByValue)
     {
@@ -222,11 +222,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto savedMeanHostPtr = savedMeanTensor.memory().hostData();
     auto savedInvVarHostPtr = savedInvVarTensor.memory().hostData();
 
-    auto runCpuValidation = [&,
-                             savedMean = savedMean,
-                             savedInvVariance = savedInvVariance,
-                             nextRunningMean = nextRunningMean,
-                             nextRunningVariance = nextRunningVariance]() -> bool {
+    const auto runCpuValidation = [&,
+                                   savedMean = savedMean,
+                                   savedInvVariance = savedInvVariance,
+                                   nextRunningMean = nextRunningMean,
+                                   nextRunningVariance = nextRunningVariance]() -> bool {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
 
         // Create reference tensors
@@ -275,11 +275,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
-        auto floatTolerance = static_cast<float>(tolerance);
-        auto yValidator
+        const auto tolerance
+            = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+        const auto floatTolerance = static_cast<float>(tolerance);
+        const auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-        auto statsValidator
+        const auto statsValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
@@ -418,7 +419,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
+        const auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

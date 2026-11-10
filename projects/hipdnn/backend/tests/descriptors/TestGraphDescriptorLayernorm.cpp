@@ -46,7 +46,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<LayernormOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<LayernormOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<LayernormOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -108,7 +108,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -133,36 +133,37 @@ protected:
 
 TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
-                                       toVec(K_LAYERNORM_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
-                                       toVec(K_LAYERNORM_TENSOR_Y_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORM_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_INV_VARIANCE_UID,
-                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS),
-                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
-    auto opDesc = createFinalizedLayernormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             meanDesc.get(),
-                                             invVarianceDesc.get());
+    const auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
+                                             toVec(K_LAYERNORM_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
+                                             toVec(K_LAYERNORM_TENSOR_Y_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORM_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
+        = createFinalizedTensor(K_LAYERNORM_TENSOR_INV_VARIANCE_UID,
+                                toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS),
+                                toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
+    const auto opDesc = createFinalizedLayernormOp(xDesc.get(),
+                                                   scaleDesc.get(),
+                                                   biasDesc.get(),
+                                                   epsilonDesc.get(),
+                                                   yDesc.get(),
+                                                   meanDesc.get(),
+                                                   invVarianceDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -173,7 +174,7 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -211,37 +212,38 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
-                                       toVec(K_LAYERNORM_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
-                                       toVec(K_LAYERNORM_TENSOR_Y_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORM_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_INV_VARIANCE_UID,
-                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS),
-                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
-    auto opDesc = createFinalizedLayernormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             meanDesc.get(),
-                                             invVarianceDesc.get(),
-                                             HIPDNN_DATA_HALF);
+    const auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
+                                             toVec(K_LAYERNORM_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
+                                             toVec(K_LAYERNORM_TENSOR_Y_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORM_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
+        = createFinalizedTensor(K_LAYERNORM_TENSOR_INV_VARIANCE_UID,
+                                toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS),
+                                toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
+    const auto opDesc = createFinalizedLayernormOp(xDesc.get(),
+                                                   scaleDesc.get(),
+                                                   biasDesc.get(),
+                                                   epsilonDesc.get(),
+                                                   yDesc.get(),
+                                                   meanDesc.get(),
+                                                   invVarianceDesc.get(),
+                                                   HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -251,7 +253,7 @@ TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -272,31 +274,31 @@ TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorLayernorm, BuildFromOperationWithoutOptionalTensors)
 {
-    auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
-                                       toVec(K_LAYERNORM_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
-                                       toVec(K_LAYERNORM_TENSOR_Y_DIMS),
-                                       toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
+                                             toVec(K_LAYERNORM_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
+                                                toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
+                                             toVec(K_LAYERNORM_TENSOR_Y_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
     // Pass nullptr for optional mean and inv_variance
-    auto opDesc = createFinalizedLayernormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             nullptr,
-                                             nullptr);
+    const auto opDesc = createFinalizedLayernormOp(xDesc.get(),
+                                                   scaleDesc.get(),
+                                                   biasDesc.get(),
+                                                   epsilonDesc.get(),
+                                                   yDesc.get(),
+                                                   nullptr,
+                                                   nullptr);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -306,7 +308,7 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromOperationWithoutOptionalTensors)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);

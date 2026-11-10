@@ -46,13 +46,13 @@ protected:
                             bool includeTokenKs = false,
                             bool assignUids = true)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("MoeGroupedMatmulIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto token = std::make_shared<TensorAttributes>();
+        const auto token = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             token->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID);
@@ -61,7 +61,7 @@ protected:
         token->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
 
-        auto weight = std::make_shared<TensorAttributes>();
+        const auto weight = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             weight->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID);
@@ -70,7 +70,7 @@ protected:
         weight->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
 
-        auto firstTokenOffset = std::make_shared<TensorAttributes>();
+        const auto firstTokenOffset = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             firstTokenOffset->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID);
@@ -105,7 +105,7 @@ protected:
                 .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_STRIDES));
         }
 
-        auto output = graph->moe_grouped_matmul(
+        const auto output = graph->moe_grouped_matmul(
             token, weight, firstTokenOffset, tokenIndex, tokenKs, attrs);
         if(assignUids)
         {

@@ -44,7 +44,7 @@ std::shared_ptr<HipdnnBackendDescriptor>
                                  std::optional<bool> generateIndex = std::nullopt)
 {
     auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -121,7 +121,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -200,18 +200,18 @@ protected:
 
 TEST_F(TestGraphDescriptorResampleFwd, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
-    auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
-    auto opDesc = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get());
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    const auto opDesc = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -222,7 +222,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -269,19 +269,19 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
-    auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
     auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
-    auto opDesc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
+    const auto opDesc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* const xPtr = xDesc.get(); // NOLINT(misc-const-correctness)
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC,
@@ -332,7 +332,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
                          opName.c_str());
     opDesc->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
@@ -342,7 +342,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -383,19 +383,19 @@ TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
 
 TEST_F(TestGraphDescriptorResampleFwd, OperationNameRoundTripThroughLifting)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
-    auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
-    auto opDesc
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    const auto opDesc
         = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get(), "roundtrip_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -404,7 +404,7 @@ TEST_F(TestGraphDescriptorResampleFwd, OperationNameRoundTripThroughLifting)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "roundtrip_name");
@@ -412,16 +412,16 @@ TEST_F(TestGraphDescriptorResampleFwd, OperationNameRoundTripThroughLifting)
 
 TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
 
     // Create op WITHOUT index tensor
     auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
-    auto op = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
+    const auto op = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* const xPtr = xDesc.get();
     op->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC,
@@ -450,7 +450,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
     op->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
     op->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -459,7 +459,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 2);
@@ -473,18 +473,18 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
 
 TEST_F(TestGraphDescriptorResampleFwd, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
-    auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
-    auto opDesc = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get());
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    const auto opDesc = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -493,7 +493,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
@@ -501,18 +501,19 @@ TEST_F(TestGraphDescriptorResampleFwd, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorResampleFwd, GenerateIndexPreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
-                                       toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
-    auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
-                                           toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
-    auto opDesc = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get(), "", true);
+    const auto xDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_X_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_Y_UID,
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_DIMS),
+                                             toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
+    const auto indexDesc = createFinalizedTensor(K_RESAMPLE_FWD_TENSOR_INDEX_UID,
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS),
+                                                 toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    const auto opDesc
+        = createFinalizedResampleFwdOp(xDesc.get(), yDesc.get(), indexDesc.get(), "", true);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -521,7 +522,7 @@ TEST_F(TestGraphDescriptorResampleFwd, GenerateIndexPreservedInSerialization)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 

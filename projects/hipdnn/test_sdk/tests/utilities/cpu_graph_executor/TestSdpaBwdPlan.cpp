@@ -135,20 +135,20 @@ flatbuffers::FlatBufferBuilder
         addTensor(extra.uid, "extra", extra.dataType, extraStrides.back(), extra.dims);
     }
 
-    auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "SdpaBwdRawGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "SdpaBwdRawGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -184,8 +184,8 @@ TEST(TestSdpaBwdPlan, ExecutePlan)
         SdpaFwdOptions<float>{}.setMask(noMask).setLse(&directTensorBundle.statsTensor));
 
     auto graphTuple = buildSdpaBwdGraph(planTensorBundle, DataType::FLOAT);
-    auto& graph = std::get<0>(graphTuple);
-    auto& variantPack = std::get<1>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
+    const auto& variantPack = std::get<1>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -258,8 +258,8 @@ TEST(TestSdpaBwdPlan, ExecutePlanWithRuntimeScaleFromPack)
             .setLse(&directTensorBundle.statsTensor));
     auto graphTuple = buildSdpaBwdGraph(
         planTensorBundle, DataType::FLOAT, /*runtimeScaleHostPtr=*/&scaleHostValue);
-    auto& graph = std::get<0>(graphTuple);
-    auto& variantPack = std::get<1>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
+    const auto& variantPack = std::get<1>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -345,8 +345,8 @@ void executeSdpaBwdPlan(SdpaBwdTensorBundle<float>& bundle, const MaskSpelling& 
                                         mask.leftBound,
                                         mask.rightBound,
                                         mask.alignment);
-    auto& graph = std::get<0>(graphTuple);
-    auto& variantPack = std::get<1>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
+    const auto& variantPack = std::get<1>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -445,7 +445,7 @@ TEST(TestSdpaBwdPlan, BothDeprecatedCausalMasksThrow)
                                         /*runtimeScaleHostPtr=*/nullptr,
                                         /*causalMask=*/true,
                                         /*causalMaskBottomRight=*/true);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -565,7 +565,7 @@ TEST(TestSdpaBwdPlanMask, UnsupportedMaskDtypeHasNoPlan)
 
 TEST(TestSdpaBwdPlanMask, MaskTensorWithUnsetDtypeIsNotApplicable)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}, DataType::UNSET);
+    const auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}, DataType::UNSET);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -587,7 +587,7 @@ class TestSdpaBwdPlanUnsupportedAttribute : public TestWithParam<UnsupportedBwdA
 
 TEST(TestSdpaBwdPlan, RawBaselineGraphIsApplicable)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
+    const auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
 
     CpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -601,7 +601,7 @@ TEST(TestSdpaBwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
     constexpr float SCALE = 0.5F;
     SdpaBackwardAttributesT tensorScaleAttrs;
     tensorScaleAttrs.scale_tensor_uid = SCALE_UID;
-    auto tensorScaleGraph
+    const auto tensorScaleGraph
         = makeRawSdpaBwdGraph(tensorScaleAttrs,
                               std::nullopt,
                               std::nullopt,
@@ -610,8 +610,8 @@ TEST(TestSdpaBwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
                               {RawBwdExtraTensor{SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}}});
     SdpaBackwardAttributesT bakedScaleAttrs;
     bakedScaleAttrs.attn_scale_value = SCALE;
-    auto bakedScaleGraph = makeRawSdpaBwdGraph(bakedScaleAttrs);
-    auto unscaledGraph = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
+    const auto bakedScaleGraph = makeRawSdpaBwdGraph(bakedScaleAttrs);
+    const auto unscaledGraph = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
 
     CpuReferenceGraphExecutor executor;
     ASSERT_TRUE(
@@ -661,7 +661,7 @@ TEST_P(TestSdpaBwdPlanUnsupportedAttribute, IsNotApplicable)
 {
     SdpaBackwardAttributesT attrs;
     GetParam().apply(attrs);
-    auto graphBuilder = makeRawSdpaBwdGraph(attrs);
+    const auto graphBuilder = makeRawSdpaBwdGraph(attrs);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -690,7 +690,7 @@ INSTANTIATE_TEST_SUITE_P(
 // the bias tensor's shape). The raw graph's mask is FLOAT [1, 1, 4, 4].
 TEST(TestSdpaBwdPlanDbias, MatchingShapeAndDtypeIsApplicable)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(
+    const auto graphBuilder = makeRawSdpaBwdGraph(
         SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
 
     CpuReferenceGraphExecutor executor;
@@ -699,7 +699,7 @@ TEST(TestSdpaBwdPlanDbias, MatchingShapeAndDtypeIsApplicable)
 
 TEST(TestSdpaBwdPlanDbias, DtypeMismatchIsNotApplicable)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(
+    const auto graphBuilder = makeRawSdpaBwdGraph(
         SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::HALF, {1, 1, 4, 4}});
 
     CpuReferenceGraphExecutor executor;
@@ -708,7 +708,7 @@ TEST(TestSdpaBwdPlanDbias, DtypeMismatchIsNotApplicable)
 
 TEST(TestSdpaBwdPlanDbias, ShapeMismatchIsNotApplicable)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(
+    const auto graphBuilder = makeRawSdpaBwdGraph(
         SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 2, 4, 4}});
 
     CpuReferenceGraphExecutor executor;
@@ -718,7 +718,7 @@ TEST(TestSdpaBwdPlanDbias, ShapeMismatchIsNotApplicable)
 // The plan writes dBias, and it equals the reference called directly.
 TEST(TestSdpaBwdPlanDbias, ExecuteMatchesDirectReference)
 {
-    auto graphBuilder = makeRawSdpaBwdGraph(
+    const auto graphBuilder = makeRawSdpaBwdGraph(
         SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
 
     const std::vector<int64_t> dims = {1, 2, 4, 8};
@@ -800,7 +800,7 @@ TEST(TestSdpaBwdPlanDropout, Applicability)
             attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
             extras.push_back({BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}});
         }
-        auto graphBuilder = makeRawSdpaBwdGraph(
+        const auto graphBuilder = makeRawSdpaBwdGraph(
             attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -819,7 +819,7 @@ TEST(TestSdpaBwdPlanDropout, ExecuteMatchesDirectReference)
     attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
     attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
     attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
-    auto graphBuilder
+    const auto graphBuilder
         = makeRawSdpaBwdGraph(attrs,
                               std::nullopt,
                               std::nullopt,
@@ -938,7 +938,7 @@ TEST_P(TestSdpaBwdPlanDropoutFields, MatchesContract)
            {BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}},
            {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}};
     GetParam().apply(attrs, extras);
-    auto graphBuilder = makeRawSdpaBwdGraph(
+    const auto graphBuilder = makeRawSdpaBwdGraph(
         attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
 
     CpuReferenceGraphExecutor executor;
@@ -1043,7 +1043,7 @@ TEST(TestSdpaBwdPlanStats, Rank3StatsEqualRank4)
     std::vector<hipdnn_data_sdk::utilities::Tensor<float>> grads;
     for(const auto& statsDims : {std::vector<int64_t>{1, 2, 4, 1}, std::vector<int64_t>{1, 2, 4}})
     {
-        auto graphBuilder
+        const auto graphBuilder
             = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims);
         grads.emplace_back(dims);
         grads.emplace_back(dims);
@@ -1078,7 +1078,7 @@ TEST(TestSdpaBwdPlanStats, NonFloatOrBadShapeIsNotApplicable)
          std::pair{std::vector<int64_t>{1, 2, 4, 2}, DataType::FLOAT},
          std::pair{std::vector<int64_t>{8}, DataType::FLOAT}})
     {
-        auto graphBuilder = makeRawSdpaBwdGraph(
+        const auto graphBuilder = makeRawSdpaBwdGraph(
             SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims, type);
         EXPECT_FALSE(
             executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -1089,7 +1089,7 @@ TEST(TestSdpaBwdPlanMask, DanglingMaskUidIsNotApplicable)
 {
     SdpaBackwardAttributesT attrs;
     attrs.attn_mask_tensor_uid = 99;
-    auto graphBuilder = makeRawSdpaBwdGraph(attrs);
+    const auto graphBuilder = makeRawSdpaBwdGraph(attrs);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));

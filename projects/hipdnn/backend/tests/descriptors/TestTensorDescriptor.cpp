@@ -33,7 +33,7 @@ public:
 
     void setRequiredAttributes() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         std::vector<int64_t> dims = {1, 3, 32, 32};
         std::vector<int64_t> strides = {3072, 1024, 32, 1};
         auto dataType = HIPDNN_DATA_FLOAT;
@@ -69,7 +69,7 @@ protected:
 
 TEST_F(TestTensorDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_TENSOR_DESCRIPTOR);
@@ -84,7 +84,7 @@ TEST_F(TestTensorDescriptor, FinalizeWithRequiredAttributes)
 
 TEST_F(TestTensorDescriptor, FinalizeFailsWithoutDimensions)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> strides = {3072, 1024, 32, 1};
     auto dataType = HIPDNN_DATA_FLOAT;
 
@@ -96,7 +96,7 @@ TEST_F(TestTensorDescriptor, FinalizeFailsWithoutDimensions)
 
 TEST_F(TestTensorDescriptor, FinalizeFailsWithoutStrides)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> dims = {1, 3, 32, 32};
     auto dataType = HIPDNN_DATA_FLOAT;
 
@@ -108,7 +108,7 @@ TEST_F(TestTensorDescriptor, FinalizeFailsWithoutStrides)
 
 TEST_F(TestTensorDescriptor, FinalizeFailsWithoutDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> dims = {1, 3, 32, 32};
     std::vector<int64_t> strides = {3072, 1024, 32, 1};
 
@@ -120,7 +120,7 @@ TEST_F(TestTensorDescriptor, FinalizeFailsWithoutDataType)
 
 TEST_F(TestTensorDescriptor, FinalizeFailsDimsStridesMismatch)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> dims = {1, 3, 32, 32};
     std::vector<int64_t> strides = {3072, 1024, 32}; // Only 3 elements
     auto dataType = HIPDNN_DATA_FLOAT;
@@ -138,7 +138,7 @@ TEST_F(TestTensorDescriptor, FinalizeFailsDimsStridesMismatch)
 
 TEST_F(TestTensorDescriptor, SetAttributeUniqueId)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 42;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid));
@@ -149,7 +149,7 @@ TEST_F(TestTensorDescriptor, SetAttributeUniqueId)
 
 TEST_F(TestTensorDescriptor, SetAttributeUniqueIdWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 42;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -159,7 +159,7 @@ TEST_F(TestTensorDescriptor, SetAttributeUniqueIdWrongElementCount)
 
 TEST_F(TestTensorDescriptor, SetAttributeUniqueIdWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 42;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -173,7 +173,7 @@ TEST_F(TestTensorDescriptor, SetAttributeUniqueIdWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeName)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "test_tensor";
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -184,7 +184,7 @@ TEST_F(TestTensorDescriptor, SetAttributeName)
 
 TEST_F(TestTensorDescriptor, SetAttributeNameWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "test";
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -198,7 +198,7 @@ TEST_F(TestTensorDescriptor, SetAttributeNameWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_HALF;
 
     ASSERT_NO_THROW(
@@ -209,7 +209,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDataType)
 
 TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -219,7 +219,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongElementCount)
 
 TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -233,7 +233,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeDimensions)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> dims = {2, 64, 112, 112};
 
     ASSERT_NO_THROW(
@@ -249,7 +249,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDimensions)
 
 TEST_F(TestTensorDescriptor, SetAttributeDimensionsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> dims = {1, 2, 3, 4};
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -263,7 +263,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDimensionsWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeStrides)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> strides = {802816, 12544, 112, 1};
 
     ASSERT_NO_THROW(
@@ -279,7 +279,7 @@ TEST_F(TestTensorDescriptor, SetAttributeStrides)
 
 TEST_F(TestTensorDescriptor, SetAttributeStridesWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> strides = {1, 2, 3, 4};
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -293,7 +293,7 @@ TEST_F(TestTensorDescriptor, SetAttributeStridesWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeIsVirtual)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool isVirtual = true;
 
     ASSERT_NO_THROW(
@@ -304,7 +304,7 @@ TEST_F(TestTensorDescriptor, SetAttributeIsVirtual)
 
 TEST_F(TestTensorDescriptor, SetAttributeIsVirtualWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool isVirtual = true;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -314,7 +314,7 @@ TEST_F(TestTensorDescriptor, SetAttributeIsVirtualWrongElementCount)
 
 TEST_F(TestTensorDescriptor, SetAttributeIsVirtualWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool isVirtual = true;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -328,7 +328,7 @@ TEST_F(TestTensorDescriptor, SetAttributeIsVirtualWrongType)
 
 TEST_F(TestTensorDescriptor, SetAttributeFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, nullptr),
@@ -338,7 +338,7 @@ TEST_F(TestTensorDescriptor, SetAttributeFailsNullPointer)
 TEST_F(TestTensorDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 100;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -348,7 +348,7 @@ TEST_F(TestTensorDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestTensorDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -362,7 +362,7 @@ TEST_F(TestTensorDescriptor, SetAttributeUnsupported)
 
 TEST_F(TestTensorDescriptor, GetAttributeUniqueId)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 123;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
     setRequiredAttributes();
@@ -383,7 +383,7 @@ TEST_F(TestTensorDescriptor, GetAttributeUniqueId)
 
 TEST_F(TestTensorDescriptor, GetAttributeName)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "my_tensor";
     desc->setAttribute(
         HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
@@ -400,7 +400,7 @@ TEST_F(TestTensorDescriptor, GetAttributeName)
 
 TEST_F(TestTensorDescriptor, GetAttributeNamePartialCopy)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "this_is_a_long_tensor_name";
     desc->setAttribute(
         HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
@@ -423,7 +423,7 @@ TEST_F(TestTensorDescriptor, GetAttributeNamePartialCopy)
 
 TEST_F(TestTensorDescriptor, GetAttributeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BFLOAT16;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -449,7 +449,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDataType)
 TEST_F(TestTensorDescriptor, GetAttributeDimensions)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     std::vector<int64_t> dims(4);
     int64_t elementCount = 0;
@@ -466,7 +466,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDimensions)
 TEST_F(TestTensorDescriptor, GetAttributeDimensionsPartialCopy)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     std::vector<int64_t> dims(2);
     int64_t elementCount = 0;
@@ -486,7 +486,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDimensionsPartialCopy)
 TEST_F(TestTensorDescriptor, GetAttributeStrides)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     std::vector<int64_t> strides(4);
     int64_t elementCount = 0;
@@ -506,7 +506,7 @@ TEST_F(TestTensorDescriptor, GetAttributeStrides)
 
 TEST_F(TestTensorDescriptor, GetAttributeIsVirtual)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool isVirtual = true;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, 1, &isVirtual);
     setRequiredAttributes();
@@ -527,7 +527,7 @@ TEST_F(TestTensorDescriptor, GetAttributeIsVirtual)
 
 TEST_F(TestTensorDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     int64_t uid = 0;
@@ -539,7 +539,7 @@ TEST_F(TestTensorDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestTensorDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, nullptr, nullptr),
@@ -549,7 +549,7 @@ TEST_F(TestTensorDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestTensorDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -560,7 +560,7 @@ TEST_F(TestTensorDescriptor, GetAttributeUnsupported)
 TEST_F(TestTensorDescriptor, GetAttributeWrongType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -571,7 +571,7 @@ TEST_F(TestTensorDescriptor, GetAttributeWrongType)
 TEST_F(TestTensorDescriptor, GetAttributeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -586,7 +586,7 @@ TEST_F(TestTensorDescriptor, GetAttributeQueryFailsNullElementCount)
 TEST_F(TestTensorDescriptor, GetAttributeElementCountNullable)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t uid = 0;
     // elementCount is nullptr - should still work
@@ -601,7 +601,7 @@ TEST_F(TestTensorDescriptor, GetAttributeElementCountNullable)
 TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryReturnsSize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -613,7 +613,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryReturnsSize)
 TEST_F(TestTensorDescriptor, GetAttributeStridesQueryReturnsSize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -625,7 +625,7 @@ TEST_F(TestTensorDescriptor, GetAttributeStridesQueryReturnsSize)
 TEST_F(TestTensorDescriptor, GetAttributeUniqueIdQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -637,7 +637,7 @@ TEST_F(TestTensorDescriptor, GetAttributeUniqueIdQueryReturnsOne)
 TEST_F(TestTensorDescriptor, GetAttributeDataTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -649,7 +649,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDataTypeQueryReturnsOne)
 TEST_F(TestTensorDescriptor, GetAttributeIsVirtualQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -661,7 +661,7 @@ TEST_F(TestTensorDescriptor, GetAttributeIsVirtualQueryReturnsOne)
 TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryThenRetrieve)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // First call: query the size
     int64_t elementCount = 0;
@@ -687,7 +687,7 @@ TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryThenRetrieve)
 
 TEST_F(TestTensorDescriptor, GetAttributeNameQueryReturnsSize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "test_tensor";
     desc->setAttribute(
         HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
@@ -703,7 +703,7 @@ TEST_F(TestTensorDescriptor, GetAttributeNameQueryReturnsSize)
 
 TEST_F(TestTensorDescriptor, GetAttributeNameQueryThenRetrieve)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const char* name = "test_tensor";
     desc->setAttribute(
         HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
@@ -731,7 +731,7 @@ TEST_F(TestTensorDescriptor, GetAttributeNameQueryThenRetrieve)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryReturnsSize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     float setVal = 1.5f;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
@@ -746,7 +746,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryReturnsSize)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryThenRetrieve)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     float setVal = 1.5f;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
@@ -771,7 +771,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryThenRetrieve)
 TEST_F(TestTensorDescriptor, GetAttributeValueQueryFailsWhenNotSet)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -783,7 +783,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueQueryFailsWhenNotSet)
 TEST_F(TestTensorDescriptor, IsByValueReturnsFalseWhenNoValueSet)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     bool isByValue = true;
     int64_t count = 0;
@@ -794,7 +794,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsFalseWhenNoValueSet)
 
 TEST_F(TestTensorDescriptor, IsByValueReturnsTrueWhenValueSet)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     float val = 1.5f;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &val);
@@ -813,7 +813,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsTrueWhenValueSet)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueFloat32)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     float val = 1.5f;
@@ -828,7 +828,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueFloat32)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueDouble)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_DOUBLE;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     double val = 2.718281828;
@@ -843,7 +843,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueDouble)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueInt32)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT32;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     int32_t val = 42;
@@ -858,7 +858,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueInt32)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueInt64)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT64;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     int64_t val = 123456789012345LL;
@@ -873,7 +873,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueInt64)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueBoolean)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BOOLEAN;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     bool val = true;
@@ -888,7 +888,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueBoolean)
 
 TEST_F(TestTensorDescriptor, SetGetValueBoolean)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BOOLEAN;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -917,7 +917,7 @@ TEST_F(TestTensorDescriptor, SetGetValueBoolean)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueFloat16)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     hipdnn_data_sdk::types::half val(1.5f);
@@ -932,7 +932,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueFloat16)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueBFloat16)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BFLOAT16;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     hipdnn_data_sdk::types::bfloat16 val(1.5f);
@@ -947,7 +947,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueBFloat16)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     float val = 1.0f;
@@ -959,7 +959,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueWrongElementCount)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueUnsupportedType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     bool val = true;
@@ -971,7 +971,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueUnsupportedType)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueFailsWithoutDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     float val = 1.0f;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -981,7 +981,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueFailsWithoutDataType)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueOverwritesPrevious)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     float val1 = 1.0f;
@@ -997,7 +997,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueOverwritesPrevious)
 
 TEST_F(TestTensorDescriptor, SetAttributeValueCopiesData)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     {
@@ -1016,7 +1016,7 @@ TEST_F(TestTensorDescriptor, SetAttributeValueCopiesData)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat32)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     float setVal = 1.5f;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
@@ -1033,7 +1033,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueFloat32)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueDouble)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_DOUBLE;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     double setVal = 2.718281828;
@@ -1056,7 +1056,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueDouble)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueInt32)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT32;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     int32_t setVal = 42;
@@ -1082,7 +1082,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueInt32)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueInt64)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT64;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     int64_t setVal = 123456789012345LL;
@@ -1108,7 +1108,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueInt64)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueBoolean)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BOOLEAN;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     bool setVal = true;
@@ -1131,7 +1131,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueBoolean)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat16)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     hipdnn_data_sdk::types::half setVal(1.5f);
@@ -1157,7 +1157,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueFloat16)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueBFloat16)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_BFLOAT16;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
     hipdnn_data_sdk::types::bfloat16 setVal(1.5f);
@@ -1184,7 +1184,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueBFloat16)
 TEST_F(TestTensorDescriptor, GetAttributeValueNotSet)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     float val = 0.0f;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1195,7 +1195,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueNotSet)
 
 TEST_F(TestTensorDescriptor, GetAttributeValueWrongAttributeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     float setVal = 1.0f;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
@@ -1213,7 +1213,7 @@ TEST_F(TestTensorDescriptor, GetAttributeValueWrongAttributeType)
 
 TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t uid = 999;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
     setRequiredAttributes();
@@ -1225,7 +1225,7 @@ TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
 
 TEST_F(TestTensorDescriptor, ToStringValueBool)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto dataType = HIPDNN_DATA_BOOLEAN;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
@@ -1241,7 +1241,7 @@ TEST_F(TestTensorDescriptor, ToStringValueBool)
 
 TEST_F(TestTensorDescriptor, ToStringHandlesUnsetDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     // Do not set data type — it remains UNSET
 
     std::string str;
@@ -1279,8 +1279,8 @@ protected:
 
 TEST_P(TestTensorDescriptorDataTypeRoundTrip, SetAndGetDataType)
 {
-    auto param = GetParam();
-    auto desc = getDescriptor();
+    const auto param = GetParam();
+    const auto desc = getDescriptor();
 
     // Set the data type
     auto dataType = param.apiType;
@@ -1329,7 +1329,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_F(TestTensorDescriptor, SetGetValueUint8)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_UINT8;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -1361,7 +1361,7 @@ TEST_F(TestTensorDescriptor, SetGetValueUint8)
 
 TEST_F(TestTensorDescriptor, SetGetValueInt8)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT8;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -1390,7 +1390,7 @@ TEST_F(TestTensorDescriptor, SetGetValueInt8)
 
 TEST_F(TestTensorDescriptor, SetGetValueFp8E4M3)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FP8_E4M3;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -1422,7 +1422,7 @@ TEST_F(TestTensorDescriptor, SetGetValueFp8E4M3)
 
 TEST_F(TestTensorDescriptor, SetGetValueFp8E5M2)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_FP8_E5M2;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -1454,7 +1454,7 @@ TEST_F(TestTensorDescriptor, SetGetValueFp8E5M2)
 
 TEST_F(TestTensorDescriptor, SetGetValueInt64)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto dataType = HIPDNN_DATA_INT64;
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
@@ -1486,7 +1486,7 @@ TEST_F(TestTensorDescriptor, SetGetValueInt64)
 
 TEST_F(TestTensorDescriptor, SetGetByteAlignment)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     desc->finalize();
 
@@ -1501,7 +1501,7 @@ TEST_F(TestTensorDescriptor, SetGetByteAlignment)
 
 TEST_F(TestTensorDescriptor, SetGetRaggedOffsetDesc)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Before setting: elementCount should be 0 (unset)
     setRequiredAttributes();
@@ -1528,7 +1528,7 @@ TEST_F(TestTensorDescriptor, SetUnfinalizedRaggedOffset)
     const hipdnnDataType_t dataType = HIPDNN_DATA_FP8_E4M3;
 
     auto wrapper = createDescriptor<TensorDescriptor>();
-    auto tensorDesc = wrapper->asDescriptor<TensorDescriptor>();
+    const auto tensorDesc = wrapper->asDescriptor<TensorDescriptor>();
 
     tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
     tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
@@ -1558,7 +1558,7 @@ TEST_F(TestTensorDescriptor, SetRaggedOffsetDescStored)
     const std::vector<int64_t> strides = {1, 1};
     const hipdnnDataType_t dataType = HIPDNN_DATA_FP8_E4M3;
 
-    auto offsetTensor = test_utilities::createFinalizedTensor(uid, dims, strides, dataType);
+    const auto offsetTensor = test_utilities::createFinalizedTensor(uid, dims, strides, dataType);
     auto rawOffset = offsetTensor.get();
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,

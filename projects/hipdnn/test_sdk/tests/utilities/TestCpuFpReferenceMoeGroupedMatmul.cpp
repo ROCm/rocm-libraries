@@ -84,7 +84,7 @@ void runNoneModeGroupsTokensByOffset()
 {
     auto token = createTensor<Type>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<Type>();
+    const auto weight = makeIdentitySwapWeight<Type>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {0, 2});
     auto output = createTensor<Type>({1, 4, 2});
@@ -118,7 +118,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, NoneModeZeroFillsRowsBeforeFirstOffset)
 {
     auto token = createTensor<float>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<float>();
+    const auto weight = makeIdentitySwapWeight<float>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {1, 3});
     auto output = createTensor<float>({1, 4, 2});
@@ -136,7 +136,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, NoneModeEmptyGroupIsSkipped)
 {
     auto token = createTensor<float>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<float>();
+    const auto weight = makeIdentitySwapWeight<float>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {0, 0});
     auto output = createTensor<float>({1, 4, 2});
@@ -151,7 +151,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherModeReadsTokenIndex)
 {
     auto token = createTensor<float>({1, 3, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F});
-    auto weight = makeIdentitySwapWeight<float>();
+    const auto weight = makeIdentitySwapWeight<float>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {0, 2});
     auto tokenIndex = createTensor<int32_t>({1, 4, 1});
@@ -168,7 +168,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterModePermutesOutputRows)
 {
     auto token = createTensor<float>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<float>();
+    const auto weight = makeIdentitySwapWeight<float>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {0, 2});
     auto tokenIndex = createTensor<int32_t>({1, 4, 1});
@@ -187,7 +187,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, BatchedOffsetsCycleExperts)
 {
     auto token = createTensor<float>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<float>();
+    const auto weight = makeIdentitySwapWeight<float>();
     auto offsets = createTensor<int32_t>({4, 1, 1});
     setValues(offsets, {0, 1, 2, 3});
     auto output = createTensor<float>({1, 4, 2});
@@ -453,8 +453,8 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidCoreShapesThrow)
 TEST(TestCpuFpReferenceMoeGroupedMatmul, RaggedWeightThrows)
 {
     auto token = createTensor<float>({1, 1, 1});
-    auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1, 1},
-                                                          std::vector<int64_t>{1, 1, 1, 1});
+    const auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1, 1},
+                                                                std::vector<int64_t>{1, 1, 1, 1});
     setValues(*raggedOffset, {0.0F, 1.0F, 1.0F});
     RaggedTensor<float> weight({2, 1, 1}, {1, 1, 1}, 1, raggedOffset);
     auto offsets = createTensor<int32_t>({2, 1, 1});

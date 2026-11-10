@@ -208,7 +208,7 @@ void setSingleEnginePluginPath(const std::string& pluginPath)
 TEST_F(IntegrationPluginLoading, EmptyPluginPath)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory pluginDir("empty_plugins");
-    auto pluginPath = pluginDir.path().string();
+    const auto pluginPath = pluginDir.path().string();
     const std::array<const char*, 1> paths = {pluginPath.c_str()};
     ASSERT_EQ(
         hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
@@ -268,7 +268,7 @@ TEST_F(IntegrationPluginLoading, IncorrectEngineID)
 // minus that engine, and the drop is reported as an error.
 TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedBackendLogCapture logCapture(
@@ -743,7 +743,7 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdDropsTheEn
 {
     // The recorder is constructed first so it captures the log level in force before this test
     // touched it. The scope guard nests inside it, so the two restorations unwind in order.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedBackendLogCapture logCapture(

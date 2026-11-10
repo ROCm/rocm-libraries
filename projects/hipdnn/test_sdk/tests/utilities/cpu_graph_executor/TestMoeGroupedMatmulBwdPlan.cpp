@@ -104,7 +104,7 @@ TEST(TestMoeGroupedMatmulBwdPlanBuilder, IsApplicable)
 
     auto graphTuple = buildMoeGroupedMatmulBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -160,7 +160,7 @@ TEST(TestMoeGroupedMatmulBwdPlanBuilder, BuildNodePlan)
         MoeGroupedMatmulBwdTensorBundle<float> tensorBundle(2, 3, 4, 8, getGlobalTestSeed());
         auto graphTuple
             = buildMoeGroupedMatmulBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -180,7 +180,7 @@ TEST(TestMoeGroupedMatmulBwdPlanBuilder, PlanConstruction)
 {
     MoeGroupedMatmulBwdTensorBundle<float> tensorBundle(2, 3, 4, 8, getGlobalTestSeed());
     auto graphTuple = buildMoeGroupedMatmulBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -191,7 +191,7 @@ TEST(TestMoeGroupedMatmulBwdPlanBuilder, PlanConstruction)
                                          DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<MoeGroupedMatmulBwdPlan<float, float, float, float>*>(builtPlan.get())

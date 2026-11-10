@@ -330,7 +330,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecSuccess)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(
+    const auto err = getDescriptorAttrVec(
         desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -348,7 +348,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecZeroCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(
+    const auto err = getDescriptorAttrVec(
         desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -363,7 +363,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecNegativeCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(
+    const auto err = getDescriptorAttrVec(
         desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -379,7 +379,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecCountFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(
+    const auto err = getDescriptorAttrVec(
         desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_bad());
@@ -398,7 +398,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecCountMismatch)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(
+    const auto err = getDescriptorAttrVec(
         desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_bad());
@@ -431,11 +431,11 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32Success)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
-    auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
-                                    HIPDNN_TYPE_INT32,
-                                    values,
-                                    "test block_size");
+    const auto err = getDescriptorAttrVec(desc,
+                                          HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
+                                          HIPDNN_TYPE_INT32,
+                                          values,
+                                          "test block_size");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_EQ(values.size(), 2u);
@@ -451,11 +451,11 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32ZeroCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
-    auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
-                                    HIPDNN_TYPE_INT32,
-                                    values,
-                                    "test block_size");
+    const auto err = getDescriptorAttrVec(desc,
+                                          HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
+                                          HIPDNN_TYPE_INT32,
+                                          values,
+                                          "test block_size");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(values.empty());
@@ -473,11 +473,11 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32CountMismatch)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
-    auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
-                                    HIPDNN_TYPE_INT32,
-                                    values,
-                                    "test block_size");
+    const auto err = getDescriptorAttrVec(desc,
+                                          HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
+                                          HIPDNN_TYPE_INT32,
+                                          values,
+                                          "test block_size");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -505,7 +505,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrScalarSuccess)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     int64_t value = 0;
-    auto err = getDescriptorAttrScalar(
+    const auto err = getDescriptorAttrScalar(
         desc, HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, value, "test uid");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -520,7 +520,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrScalarFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     int64_t value = 0;
-    auto err = getDescriptorAttrScalar(
+    const auto err = getDescriptorAttrScalar(
         desc, HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, value, "test uid");
 
     EXPECT_TRUE(err.is_bad());
@@ -563,7 +563,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesSuccess)
     expectFullTensorMocks();
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -582,7 +582,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValue)
         *_mockBackend, _fakeDesc, K_UID, HIPDNN_DATA_FLOAT, K_SCALAR_VALUE);
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -606,7 +606,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt6
         *_mockBackend, _fakeDesc, K_UID, HIPDNN_DATA_INT64, K_SCALAR_VALUE);
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -628,7 +628,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueBool
         *_mockBackend, _fakeDesc, K_UID, HIPDNN_DATA_BOOLEAN, K_SCALAR_VALUE);
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -789,7 +789,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dD
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -850,7 +850,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesMissingDimsFails)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -897,7 +897,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorNewTensor)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -910,7 +910,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorNewTensor)
 TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorExistingUid)
 {
     // Pre-populate the tensor map
-    auto existingTensor = std::make_shared<TensorAttributes>();
+    const auto existingTensor = std::make_shared<TensorAttributes>();
     existingTensor->set_uid(K_UID)
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 3, 32, 32})
@@ -945,7 +945,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorExistingUid)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -980,7 +980,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorNullDescFails)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_bad());
@@ -1009,7 +1009,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorUIDFails)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_bad());
@@ -1053,7 +1053,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorUnpackFails)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_bad());
@@ -1088,7 +1088,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrStringSuccess)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::string value = "initial";
-    auto err = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
+    const auto err
+        = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(value, kExpected);
@@ -1102,7 +1103,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrStringNotSupported)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::string value = "initial";
-    auto err = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
+    const auto err
+        = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(value.empty());
@@ -1116,7 +1118,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrStringEmptyCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::string value = "initial";
-    auto err = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
+    const auto err
+        = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(value.empty());
@@ -1131,7 +1134,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrStringCountFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::string value = "initial";
-    auto err = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
+    const auto err
+        = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1150,7 +1154,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrStringDataFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::string value = "initial";
-    auto err = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
+    const auto err
+        = getDescriptorAttrString(desc, HIPDNN_ATTR_TENSOR_NAME_EXT, value, "tensor name");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1363,7 +1368,7 @@ protected:
     void expectDescArrayQuery(hipdnnBackendAttributeName_t attrName,
                               const std::vector<hipdnnBackendDescriptor_t>& descs)
     {
-        auto count = static_cast<int64_t>(descs.size());
+        const auto count = static_cast<int64_t>(descs.size());
 
         // Count query
         EXPECT_CALL(*_mockBackend,
@@ -1415,7 +1420,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, SuccessNewTensors)
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
     std::vector<std::shared_ptr<TensorAttributes>> outTensors;
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1430,7 +1435,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, SuccessNewTensors)
 TEST_F(TestUnpackAndRegisterTensorArray, SuccessExistingTensorReuse)
 {
     // Pre-populate the tensor map with UID1
-    auto existingTensor = std::make_shared<TensorAttributes>();
+    const auto existingTensor = std::make_shared<TensorAttributes>();
     existingTensor->set_uid(K_UID1)
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 3, 32, 32})
@@ -1456,7 +1461,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, SuccessExistingTensorReuse)
 
     std::vector<std::shared_ptr<TensorAttributes>> outTensors;
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1478,7 +1483,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, SuccessEmptyArray)
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
     std::vector<std::shared_ptr<TensorAttributes>> outTensors;
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1502,7 +1507,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, CountFails)
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
     std::vector<std::shared_ptr<TensorAttributes>> outTensors;
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     EXPECT_TRUE(err.is_bad());
@@ -1512,7 +1517,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, CountFails)
 TEST_F(TestUnpackAndRegisterTensorArray, NullDescriptorInArray)
 {
     // Return 2 descriptors, second is nullptr
-    auto count = int64_t{2};
+    const auto count = int64_t{2};
 
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(_fakeSource,
@@ -1547,7 +1552,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, NullDescriptorInArray)
     expectUidOnlyForDesc(_fakeDesc1, K_UID1);
 
     // Pre-populate the map so that _fakeDesc1 is found (avoids full unpack)
-    auto existingTensor = std::make_shared<TensorAttributes>();
+    const auto existingTensor = std::make_shared<TensorAttributes>();
     existingTensor->set_uid(K_UID1);
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
@@ -1558,7 +1563,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, NullDescriptorInArray)
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_fakeDesc1))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     // Null descriptors are silently skipped; only the valid descriptor is returned.
@@ -1586,7 +1591,7 @@ TEST_F(TestUnpackAndRegisterTensorArray, UidQueryFails)
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
     std::vector<std::shared_ptr<TensorAttributes>> outTensors;
 
-    auto err = unpackAndRegisterTensorArray(
+    const auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
     EXPECT_TRUE(err.is_bad());
@@ -1607,7 +1612,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesUIDFails)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1639,7 +1644,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesDataTypeFails)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1703,7 +1708,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesStridesFails)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1798,7 +1803,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesInvalidDataType)
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     // fromHipdnnDataType returns an error for unknown data types
     EXPECT_TRUE(err.is_bad());
@@ -1922,7 +1927,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArraySuccess)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_EQ(value.size(), 5u);
@@ -1941,7 +1947,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayNotSupported)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(value.empty());
@@ -1955,7 +1962,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayZeroCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(value.empty());
@@ -1970,7 +1978,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayCountFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1989,7 +1998,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayDataFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -2007,7 +2017,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayCountMismatch)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<uint8_t> value;
-    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+    const auto err
+        = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);

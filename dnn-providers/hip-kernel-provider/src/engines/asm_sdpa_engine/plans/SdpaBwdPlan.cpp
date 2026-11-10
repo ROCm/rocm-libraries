@@ -250,14 +250,14 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args
     // mask_y/mask_x (left at zero-init default).
     if(p.maskOrdinal == static_cast<int32_t>(asm_sdpa_engine::plan_utils::MaskType::SLIDING_WINDOW))
     {
-        auto [mask_y, mask_x]
+        const auto [maskY, maskX]
             = asm_sdpa_engine::plan_utils::computeMaskCoordinates(a.window_size_left,
                                                                   a.window_size_right,
                                                                   static_cast<int32_t>(a.seqlen_q),
                                                                   static_cast<int32_t>(a.seqlen_k),
                                                                   p.topLeftAlignment);
-        dqdkdv.mask_y = mask_y;
-        dqdkdv.mask_x = mask_x;
+        dqdkdv.mask_y = maskY;
+        dqdkdv.mask_x = maskX;
     }
 
     return dqdkdv;

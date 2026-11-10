@@ -202,7 +202,7 @@ void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::D
     testing_support::HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
-    auto bundle = makeMxMatmulBundle(xType);
+    const auto bundle = makeMxMatmulBundle(xType);
     fillOnHost(harness, bundle);
 
     ASSERT_FALSE(harness.inputs().empty());
@@ -246,7 +246,7 @@ void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::D
 TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
 {
     SKIP_IF_NO_DEVICES();
-    auto bundle = makeRuntimePassByValueBundle();
+    const auto bundle = makeRuntimePassByValueBundle();
     const auto wrapper = bundle->graphWrapper();
     const auto& tensorAttributes = wrapper.getTensorMap();
 
@@ -324,7 +324,7 @@ std::shared_ptr<IntegrationTestBundle> makeMixedTypeOutputBundle()
 TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
 {
     SKIP_IF_NO_DEVICES();
-    auto bundle = makeMixedTypeOutputBundle();
+    const auto bundle = makeMixedTypeOutputBundle();
     const auto wrapper = bundle->graphWrapper();
     const auto& attributes = wrapper.getTensorMap();
 
@@ -411,7 +411,8 @@ TEST_F(TestGoldenHarnessFixture, NonSubByteBundleHasNoPackedInputs)
     testing_support::HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
-    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
+    const auto bundle
+        = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
     fillOnHost(harness, bundle);
 
     EXPECT_FALSE(harness.inputs().empty());
@@ -423,7 +424,8 @@ TEST_F(TestGoldenHarnessFixture, NonSubByteBundleHasNoPackedInputs)
 // same values from the same seed.
 TEST_F(TestGoldenHarnessFixture, GeneratedInputsBelongToTheRunAndRepeatIdentically)
 {
-    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
+    const auto bundle
+        = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
 
     testing_support::HarnessMocks firstMocks;
     IntegrationBundleVerificationHarness first(
@@ -454,7 +456,7 @@ TEST_F(TestGoldenHarnessFixture, GeneratedInputsBelongToTheRunAndRepeatIdentical
 // second run reads its own copy instead of finding the first one's.
 TEST_F(TestGoldenHarnessFixture, GoldenBundleCanBeRunAgainBecauseEachRunReadsItsTensors)
 {
-    auto bundle = loadRunnableBundle("golden_run_twice");
+    const auto bundle = loadRunnableBundle("golden_run_twice");
 
     for(int run = 0; run < 2; ++run)
     {
@@ -478,7 +480,7 @@ TEST_F(TestGoldenHarnessFixture, UnreadableGoldenBlobFailsTheRunWithTheReason)
     testing_support::engineWrites(
         mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
 
-    auto bundle = loadRunnableBundle("golden_bad_blob");
+    const auto bundle = loadRunnableBundle("golden_bad_blob");
     ASSERT_TRUE(bundle->blobs.has_value());
     const auto blob = bundle->blobs->pathForUid(bundle->blobs->inputUids.front());
     std::ofstream(blob, std::ios::binary | std::ios::trunc) << "too short";
@@ -520,7 +522,7 @@ TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
             return testing_support::declinedSession();
         });
 
-    auto bundle = makeRuntimePbvFillBundle();
+    const auto bundle = makeRuntimePbvFillBundle();
     ASSERT_FALSE(bundle->blobs.has_value());
 
     IntegrationBundleVerificationHarness harness(
@@ -542,7 +544,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedBundleWithoutBlobsIsUnverifiable)
     testing_support::HarnessMocks mocks;
     EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
-    auto bundle = makeRuntimePbvFillBundle();
+    const auto bundle = makeRuntimePbvFillBundle();
     bundle->graphBuffer = test_utils::markFirstTensorRagged(bundle->graphBuffer.data());
     ASSERT_FALSE(bundle->blobs.has_value());
 

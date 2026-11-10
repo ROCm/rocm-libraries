@@ -70,20 +70,20 @@ TEST(TestGpuMatmulSignatureKey, CreateFromNodeAndTensorMap)
     const std::vector<int64_t> dims = {4, 8, 2, 2};
     const std::vector<int64_t> strides = generateStrides(dims);
 
-    auto graphBuilder = createMatmulGraph(A_UID,
-                                          B_UID,
-                                          C_UID,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
-                                          DataType::FLOAT,
-                                          DataType::HALF,
-                                          DataType::BFLOAT16,
-                                          DataType::DOUBLE);
-    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createMatmulGraph(A_UID,
+                                                B_UID,
+                                                C_UID,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                DataType::FLOAT,
+                                                DataType::HALF,
+                                                DataType::BFLOAT16,
+                                                DataType::DOUBLE);
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuMatmulSignatureKey keyFromNode(

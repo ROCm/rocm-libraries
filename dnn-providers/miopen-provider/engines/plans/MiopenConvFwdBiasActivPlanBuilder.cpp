@@ -285,7 +285,7 @@ void nodeAttrsCheckTensors(
         }
 
         // Intermediate data-types
-        auto biasDataType = biasOtherInputAttr.data_type();
+        const auto biasDataType = biasOtherInputAttr.data_type();
         if(convTensorAttrY.data_type() != DataType::FLOAT
            && convTensorAttrY.data_type() != biasDataType)
         {

@@ -80,7 +80,7 @@ TEST(TestFp8E8M0, RoundTripConversion)
     for(const float val : powersOfTwo)
     {
         const fp8_e8m0 e8m0(val);
-        auto result = static_cast<float>(e8m0);
+        const auto result = static_cast<float>(e8m0);
         EXPECT_EQ(result, val) << "Failed for value: " << val;
     }
 }
@@ -114,7 +114,7 @@ TEST(TestFp8E8M0, MinimumValue)
     const fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
     EXPECT_EQ(minVal.data, E8M0_BITS_MIN);
 
-    auto minFloat = static_cast<float>(minVal);
+    const auto minFloat = static_cast<float>(minVal);
     EXPECT_EQ(minFloat, 0x1p-127f);
 
     // Round-trip: convert float back to fp8_e8m0

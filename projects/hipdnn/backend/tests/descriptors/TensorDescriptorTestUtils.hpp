@@ -26,7 +26,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                           hipdnnDataType_t dataType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<TensorDescriptor>();
-    auto desc = wrapper->asDescriptor<TensorDescriptor>();
+    const auto desc = wrapper->asDescriptor<TensorDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
     desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,

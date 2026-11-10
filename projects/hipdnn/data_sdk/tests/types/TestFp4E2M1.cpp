@@ -213,11 +213,11 @@ TEST(TestFp4E2M1, NumericLimitsSpecificValues)
 TEST(TestFp4E2M1, NamedConstants)
 {
     // E2M1 has no infinity - returns max
-    auto maxVal = std::numeric_limits<fp4_e2m1>::max();
+    const auto maxVal = std::numeric_limits<fp4_e2m1>::max();
     EXPECT_EQ(std::numeric_limits<fp4_e2m1>::infinity().data, maxVal.data);
 
     // E2M1 has no NaN - returns zero (consistent with float-to-E2M1 conversion)
-    auto zeroVal = fp4_e2m1();
+    const auto zeroVal = fp4_e2m1();
     EXPECT_EQ(std::numeric_limits<fp4_e2m1>::quiet_NaN().data, zeroVal.data);
     EXPECT_EQ(std::numeric_limits<fp4_e2m1>::signaling_NaN().data, zeroVal.data);
 }

@@ -358,7 +358,7 @@ public:
             const auto& dims = tensor.get().dims();
             for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
             {
-                auto dimIdx = static_cast<size_t>(dim);
+                const auto dimIdx = static_cast<size_t>(dim);
                 indices[dimIdx]++;
                 if(indices[dimIdx] < dims[dimIdx])
                 {
@@ -939,6 +939,8 @@ template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = Devic
 class Tensor : public TensorBase<T>
 {
 public:
+    // The overrides below are instantiated together with the class (they fill its vtable).
+    // NOLINTBEGIN(portability-template-virtual-member-function)
     Tensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
         : _dims(dims)
         , _strides(strides)
@@ -1035,6 +1037,8 @@ public:
     {
         return _packed;
     }
+
+    // NOLINTEND(portability-template-virtual-member-function)
 
 private:
     void validateDimsAndStridesSameSize() const

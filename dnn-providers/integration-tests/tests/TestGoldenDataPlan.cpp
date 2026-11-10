@@ -318,7 +318,7 @@ TEST(TestGoldenDataPlanJudgeLane, EachBundleGetsTheVerdictItsLaneEarns)
 // counts as accounted for: a deliberate opt-out is not an `_Unvalidated` failure.
 TEST(TestGoldenDataPlanDisabledLane, ADisabledLaneIsAVisibleSkipNotAnUnvalidatedFailure)
 {
-    auto bundle = loaded("quick_BatchnormFwdInference_x", "Small", buildBatchnormGraph());
+    const auto bundle = loaded("quick_BatchnormFwdInference_x", "Small", buildBatchnormGraph());
     bundle.bundle->metadata.noCpuReference = true;
 
     const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
@@ -337,7 +337,7 @@ TEST(TestGoldenDataPlanDisabledLane, ADisabledLaneIsAVisibleSkipNotAnUnvalidated
 // be consulted again and could never go stale. That has to be loud.
 TEST(TestGoldenDataPlanDisabledLane, AFlagBesideAKnownGapEntryFailsNamingBoth)
 {
-    auto bundle = loaded("quick_SdpaFwd_gpu_gap_Small", "Small", buildSdpaGraph(256));
+    const auto bundle = loaded("quick_SdpaFwd_gpu_gap_Small", "Small", buildSdpaGraph(256));
     bundle.bundle->metadata.noGpuReference = true;
 
     const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
@@ -355,7 +355,7 @@ TEST(TestGoldenDataPlanDisabledLane, AFlagBesideAKnownGapEntryFailsNamingBoth)
 
 TEST(TestGoldenDataPlanJudgeLane, ADisabledReferenceIsJudgedBeforeItsOpSetOrCost)
 {
-    auto costly = graphBundle(buildSdpaGraph(8192), true);
+    const auto costly = graphBundle(buildSdpaGraph(8192), true);
     costly->metadata.noCpuReference = true;
     EXPECT_EQ(judgeLane(*costly, "quick_SdpaFwd_x.Small", ReferenceExecutorType::CPU),
               LaneVerdict::DISABLED_BY_METADATA);
@@ -363,13 +363,13 @@ TEST(TestGoldenDataPlanJudgeLane, ADisabledReferenceIsJudgedBeforeItsOpSetOrCost
     EXPECT_EQ(judgeLane(*costly, "quick_SdpaFwd_x.Small", ReferenceExecutorType::GPU),
               LaneVerdict::VALIDATE);
 
-    auto outsideOpSet = graphBundle(buildBatchnormGraph(), true);
+    const auto outsideOpSet = graphBundle(buildBatchnormGraph(), true);
     outsideOpSet->metadata.noGpuReference = true;
     EXPECT_EQ(
         judgeLane(*outsideOpSet, "quick_BatchnormFwdInference_x.Small", ReferenceExecutorType::GPU),
         LaneVerdict::DISABLED_BY_METADATA);
 
-    auto gap = graphBundle(buildSdpaGraph(256), true);
+    const auto gap = graphBundle(buildSdpaGraph(256), true);
     gap->metadata.noGpuReference = true;
     EXPECT_EQ(
         judgeLane(

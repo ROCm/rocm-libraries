@@ -38,7 +38,7 @@ public:
 
     void setTensors() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
         desc->setAttribute(
@@ -95,7 +95,7 @@ protected:
 
 TEST_F(TestReductionOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
@@ -110,7 +110,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeWithRequiredAttributes)
 
 TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutXTensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
 
@@ -119,7 +119,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutXTensor)
 
 TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutYTensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
 
@@ -150,7 +150,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutReductionMode)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorX)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
 
@@ -161,7 +161,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorX)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorY)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc));
 
@@ -171,7 +171,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorY)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -181,7 +181,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_INT64, 1, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
@@ -189,7 +189,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_xDesc),
@@ -198,7 +198,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestReductionOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -211,7 +211,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestReductionOperationDescriptor, SetReductionMode)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto mode = HIPDNN_REDUCE_TENSOR_ADD;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -222,7 +222,7 @@ TEST_F(TestReductionOperationDescriptor, SetReductionMode)
 
 TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto mode = HIPDNN_REDUCE_TENSOR_ADD;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -233,7 +233,7 @@ TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongElementCount)
 
 TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t wrongValue = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -243,7 +243,7 @@ TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongType)
 
 TEST_F(TestReductionOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -254,7 +254,7 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -264,7 +264,7 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongElementCount)
 
 TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t wrongValue = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -278,7 +278,7 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongType)
 
 TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify default is false
     setRequiredAttributes();
@@ -291,7 +291,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
 
     // Now test with explicit true
     auto wrapper2 = createDescriptor<ReductionOperationDescriptor>();
-    auto desc2 = wrapper2->asDescriptor<ReductionOperationDescriptor>();
+    const auto desc2 = wrapper2->asDescriptor<ReductionOperationDescriptor>();
     desc2->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
     desc2->setAttribute(
@@ -316,7 +316,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
 TEST_F(TestReductionOperationDescriptor, GetAttributeIsDeterministicQueryMode)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -331,7 +331,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeIsDeterministicQueryMode)
 TEST_F(TestReductionOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -341,7 +341,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestReductionOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -356,7 +356,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestReductionOperationDescriptor, GetAttributeTensorDescriptor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     HipdnnBackendDescriptor* retrievedX = nullptr;
     int64_t elementCount = 0;
@@ -378,7 +378,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorDescriptor)
 TEST_F(TestReductionOperationDescriptor, GetAttributeReductionParams)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // mode
     hipdnnReduceTensorOp_t mode = HIPDNN_REDUCE_TENSOR_ADD;
@@ -391,7 +391,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionParams)
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -412,7 +412,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -427,7 +427,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestReductionOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -440,7 +440,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestReductionOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -455,7 +455,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestReductionOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
@@ -469,7 +469,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
 TEST_F(TestReductionOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
@@ -483,7 +483,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
 TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_REDUCTION_OPERATOR,
@@ -497,7 +497,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryReturnsOn
 TEST_F(TestReductionOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -508,7 +508,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 TEST_F(TestReductionOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -521,7 +521,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorQueryFailsNullElement
 TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_REDUCTION_OPERATOR,
                                                   HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
@@ -538,7 +538,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryFailsNull
 TEST_F(TestReductionOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify the tensor descriptors are preserved
     ASSERT_NE(desc->getXDesc(), nullptr);
@@ -556,7 +556,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestReductionOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("ReductionOperationDescriptor"), std::string::npos);
@@ -572,7 +572,7 @@ TEST_F(TestReductionOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestReductionOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 2);
@@ -584,7 +584,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -605,7 +605,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -618,7 +618,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeWithHalfComputeType)
 TEST_F(TestReductionOperationDescriptor, GetTensorDescriptorsOrderIsXY)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 2);
@@ -631,7 +631,7 @@ TEST_F(TestReductionOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -643,7 +643,7 @@ TEST_F(TestReductionOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestReductionOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsGraphOperation();
+    const auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -653,7 +653,7 @@ TEST_F(TestReductionOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 
 TEST_F(TestReductionOperationDescriptor, SetAttributeNameSuccess)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "test_reduction_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -678,7 +678,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeNameSuccess)
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeNameQueryReturnsSizeInclNull)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
@@ -699,7 +699,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeNameQueryReturnsSizeInclNul
 TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeReturnsCorrectType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
@@ -713,7 +713,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeReturnsCorrect
 TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -724,7 +724,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeQueryReturnsOn
 TEST_F(TestReductionOperationDescriptor, BuildNodePreservesName)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string opName = "test_reduction";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,

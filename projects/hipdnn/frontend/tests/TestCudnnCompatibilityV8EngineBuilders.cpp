@@ -103,7 +103,7 @@ TEST_F(TestCudnnCompatibilityV8EngineBuilders, GlobalIndexPastEngineCountNotSupp
         fe::EngineBuilder_v8 builder;
         builder.setOperationGraph(graph).setGlobalEngineIdx(index);
         const BuildFailure failure
-            = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+            = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
         EXPECT_NE(failure.what.find("EngineBuilder: global engine index = "), std::string::npos)
@@ -114,7 +114,7 @@ TEST_F(TestCudnnCompatibilityV8EngineBuilders, GlobalIndexPastEngineCountNotSupp
     fe::EngineBuilder_v8 negative;
     negative.setOperationGraph(graph).setGlobalEngineIdx(-1);
     const BuildFailure failure
-        = failureOf([&negative] { [[maybe_unused]] auto built = negative.build(); });
+        = failureOf([&negative] { [[maybe_unused]] const auto built = negative.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_NE(failure.what.find("EngineBuilder: the global engine index must be non-negative"),
@@ -139,7 +139,7 @@ TEST_F(TestCudnnCompatibilityV8EngineBuilders, KnobReadFailureFailsBuild)
     fe::EngineBuilder_v8 builder;
     builder.setOperationGraph(graph).setGlobalEngineIdx(0);
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_NE(failure.status, CUDNN_STATUS_SUCCESS);
     EXPECT_NE(failure.what.find("reading the knobs of engine"), std::string::npos) << failure.what;

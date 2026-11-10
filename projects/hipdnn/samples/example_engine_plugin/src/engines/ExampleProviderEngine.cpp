@@ -47,7 +47,7 @@ void ExampleProviderEngine::getDetails(
 
     for(const auto& planBuilder : _planBuilders)
     {
-        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+        const auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
         if(customKnobs.empty())
         {
             continue;
@@ -55,7 +55,8 @@ void ExampleProviderEngine::getDetails(
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
+            const auto knobOffset
+                = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -63,7 +64,7 @@ void ExampleProviderEngine::getDetails(
         break;
     }
 
-    auto knobs = builder.CreateVector(knobsVector);
+    const auto knobs = builder.CreateVector(knobsVector);
 
     // An unnamed engine leaves the field unset rather than writing an empty string.
     flatbuffers::Offset<flatbuffers::String> name;
@@ -72,7 +73,7 @@ void ExampleProviderEngine::getDetails(
         name = builder.CreateString(_name);
     }
 
-    auto engineDetails
+    const auto engineDetails
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs, {}, name);
     builder.Finish(engineDetails);
 

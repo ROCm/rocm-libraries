@@ -14,7 +14,7 @@ using namespace miopen_plugin;
 TEST(TestBatchnormBwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -44,7 +44,7 @@ TEST(TestBatchnormBwdParams, InitializesAllTensorsFromValidGraph)
 TEST(TestBatchnormBwdParams, HandlesMissingOptionalTensors)
 {
     // Create a valid batchnorm graph and remove mean/variance from tensor map
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
         {1, 1, 1, 1}, {1, 1, 1, 1}, false // Set has_optional_attributes to false
     );
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -66,7 +66,7 @@ TEST(TestBatchnormBwdParams, HandlesMissingOptionalTensors)
 TEST(TestBatchnormBwdParams, InitializesFusedActivationBiasWithAllTensors)
 {
     // Create a fused batchnorm backward + activation + bias graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -108,7 +108,7 @@ TEST(TestBatchnormBwdParams, InitializesFusedActivationBiasWithAllTensors)
 TEST(TestBatchnormBwdParams, FusedParamsHandlesMissingOptionalMeanVariance)
 {
     // Create a fused graph without optional mean/variance
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
         {1, 1, 1, 1}, {1, 1, 1, 1}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -140,7 +140,7 @@ TEST(TestBatchnormBwdParams, FusedParamsHandlesMissingOptionalMeanVariance)
 TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 {
     // Create a fused batchnorm backward + activation + bias graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -168,7 +168,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -197,7 +197,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -215,7 +215,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 
 TEST(TestBatchnormBwdPlan, OptionalTensorsAreNotPresentInBasicMode)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

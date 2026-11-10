@@ -47,7 +47,7 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
     // Verify each mapping is consistent
     for(const auto& [id, name] : idToName)
     {
-        auto calculatedId = engineNameToId(name);
+        const auto calculatedId = engineNameToId(name);
         EXPECT_EQ(id, calculatedId)
             << "ID mismatch for engine: " << name << " (stored: 0x" << std::hex << id
             << ", calculated: 0x" << calculatedId << std::dec << ")";
@@ -144,7 +144,7 @@ TEST_F(TestEngineNames, EngineCountMatches)
     // Also verify all names in one are in the other
     for(const auto& name : allEngines)
     {
-        auto id = engineNameToId(name);
+        const auto id = engineNameToId(name);
         EXPECT_NE(idToName.find(id), idToName.end())
             << "Engine '" << name << "' is in getAllEngineNames but not in getEngineIdToNameMap";
     }
@@ -157,7 +157,7 @@ TEST_F(TestEngineNames, RegistrarSucceedsForNewUniqueName)
 
     // Verify it was registered
     EXPECT_TRUE(isEngineNameRegistered("TEST_UNIQUE_ENGINE_FOR_REGISTRAR"));
-    auto id = engineNameToId("TEST_UNIQUE_ENGINE_FOR_REGISTRAR");
+    const auto id = engineNameToId("TEST_UNIQUE_ENGINE_FOR_REGISTRAR");
     EXPECT_EQ(getEngineNameFromId(id), "TEST_UNIQUE_ENGINE_FOR_REGISTRAR");
 }
 
@@ -174,7 +174,7 @@ TEST_F(TestEngineNames, RegistrarDetectsCollision)
     // Simulate a collision by inserting a fake entry into the ID map
     // with the same ID that "COLLISION_TEST_ENGINE" would generate,
     // but mapped to a different name
-    auto collisionId = engineNameToId("COLLISION_TEST_ENGINE");
+    const auto collisionId = engineNameToId("COLLISION_TEST_ENGINE");
     detail::getMutableEngineIdToNameMap()[collisionId] = "SOME_OTHER_ENGINE";
 
     // Now registering "COLLISION_TEST_ENGINE" should throw because the ID
@@ -188,18 +188,18 @@ TEST_F(TestEngineNames, RegistrarDetectsCollision)
 TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
 {
     {
-        auto engineIdCString = engineNameToId(MIOPEN_ENGINE_NAME);
-        auto engineIdString = engineNameToId(std::string(MIOPEN_ENGINE_NAME));
-        auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_ENGINE_NAME));
+        const auto engineIdCString = engineNameToId(MIOPEN_ENGINE_NAME);
+        const auto engineIdString = engineNameToId(std::string(MIOPEN_ENGINE_NAME));
+        const auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_ENGINE_NAME));
 
         EXPECT_EQ(engineIdCString, engineIdString);
         EXPECT_EQ(engineIdCString, engineIdStringView);
     }
 
     {
-        auto engineIdCString = engineNameToId(HIPBLASLT_ENGINE_NAME);
-        auto engineIdString = engineNameToId(std::string(HIPBLASLT_ENGINE_NAME));
-        auto engineIdStringView = engineNameToId(std::string_view(HIPBLASLT_ENGINE_NAME));
+        const auto engineIdCString = engineNameToId(HIPBLASLT_ENGINE_NAME);
+        const auto engineIdString = engineNameToId(std::string(HIPBLASLT_ENGINE_NAME));
+        const auto engineIdStringView = engineNameToId(std::string_view(HIPBLASLT_ENGINE_NAME));
 
         EXPECT_EQ(engineIdCString, engineIdString);
         EXPECT_EQ(engineIdCString, engineIdStringView);

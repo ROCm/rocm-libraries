@@ -112,7 +112,7 @@ TEST_F(TestHandle, CreateHandleSuccess)
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     HipdnnHandlePtr handle;
-    auto error = createHipdnnHandle(handle);
+    const auto error = createHipdnnHandle(handle);
     EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
     EXPECT_EQ(*handle, fakeHandle);
@@ -125,7 +125,7 @@ TEST_F(TestHandle, CreateHandleFailure)
     });
 
     HipdnnHandlePtr handle;
-    auto error = createHipdnnHandle(handle);
+    const auto error = createHipdnnHandle(handle);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(handle, nullptr);
 }
@@ -144,7 +144,7 @@ TEST_F(TestHandle, CreateHandleWithStreamSuccess)
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     HipdnnHandlePtr handle;
-    auto error = createHipdnnHandle(handle, fakeStream);
+    const auto error = createHipdnnHandle(handle, fakeStream);
     EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
     EXPECT_EQ(*handle, fakeHandle);
@@ -164,7 +164,7 @@ TEST_F(TestHandle, CreateHandleWithStreamFailure)
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     HipdnnHandlePtr handle;
-    auto error = createHipdnnHandle(handle, fakeStream);
+    const auto error = createHipdnnHandle(handle, fakeStream);
     EXPECT_TRUE(error.is_bad());
 }
 
@@ -202,7 +202,7 @@ TEST_F(TestHandle, MoveTransfersOwnership)
     EXPECT_TRUE(error.is_good());
     EXPECT_EQ(*handle1, fakeHandle);
 
-    auto handle2 = std::move(handle1);
+    const auto handle2 = std::move(handle1);
     EXPECT_EQ(handle1, nullptr); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(*handle2, fakeHandle);
 }
@@ -228,7 +228,7 @@ TEST_F(TestHandle, DestroyerHandlesFailure)
 
     {
         HipdnnHandlePtr handle;
-        auto error = createHipdnnHandle(handle);
+        const auto error = createHipdnnHandle(handle);
         EXPECT_TRUE(error.is_good());
     }
     // Scope exits, deleter runs, destroy fails but logs error without throwing
@@ -249,7 +249,7 @@ TEST_F(TestHandle, SetStreamOnValidHandle)
 
     auto [handle, error] = createHipdnnHandle();
     EXPECT_TRUE(error.is_good());
-    auto streamError = setHipdnnHandleStream(handle, fakeStream);
+    const auto streamError = setHipdnnHandleStream(handle, fakeStream);
     EXPECT_TRUE(streamError.is_good());
 }
 
@@ -258,7 +258,7 @@ TEST_F(TestHandle, SetStreamOnNullHandle)
     const HipdnnHandlePtr handle{nullptr};
     auto fakeStream = reinterpret_cast<hipStream_t>(0xF012);
 
-    auto error = setHipdnnHandleStream(handle, fakeStream);
+    const auto error = setHipdnnHandleStream(handle, fakeStream);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
@@ -268,7 +268,7 @@ TEST_F(TestHandle, GetStreamFromNullHandle)
     const HipdnnHandlePtr handle{nullptr};
     hipStream_t stream = nullptr;
 
-    auto error = getHipdnnHandleStream(handle, &stream);
+    const auto error = getHipdnnHandleStream(handle, &stream);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
@@ -292,7 +292,7 @@ TEST_F(TestHandle, GetStreamFromValidHandle)
     auto [handle, error] = createHipdnnHandle();
     EXPECT_TRUE(error.is_good());
     hipStream_t stream = nullptr;
-    auto streamError = getHipdnnHandleStream(handle, &stream);
+    const auto streamError = getHipdnnHandleStream(handle, &stream);
     EXPECT_TRUE(streamError.is_good());
     EXPECT_EQ(stream, fakeStream);
 }
@@ -309,7 +309,7 @@ TEST_F(TestHandle, GetStreamNullPointer)
 
     auto [handle, error] = createHipdnnHandle();
     EXPECT_TRUE(error.is_good());
-    auto streamError = getHipdnnHandleStream(handle, nullptr);
+    const auto streamError = getHipdnnHandleStream(handle, nullptr);
     EXPECT_TRUE(streamError.is_bad());
     EXPECT_EQ(streamError.get_code(), ErrorCode::INVALID_VALUE);
 }

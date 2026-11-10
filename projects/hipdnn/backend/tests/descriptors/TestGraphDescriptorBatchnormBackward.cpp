@@ -49,7 +49,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                        const std::string& name = "")
 {
     auto wrapper = createDescriptor<BatchnormBackwardOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<BatchnormBackwardOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<BatchnormBackwardOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -116,7 +116,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -141,33 +141,33 @@ protected:
 
 TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
 {
-    auto dyDesc = createFinalizedTensor(
+    const auto dyDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
-                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
-    auto dxDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    const auto dxDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
-    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get());
+    const auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    const auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    const auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -178,7 +178,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -212,34 +212,34 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
 {
-    auto dyDesc = createFinalizedTensor(
+    const auto dyDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
-                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
-    auto dxDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    const auto dxDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
-    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     HIPDNN_DATA_HALF);
+    const auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    const auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    const auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -249,7 +249,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -258,40 +258,40 @@ TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
 {
-    auto dyDesc = createFinalizedTensor(
+    const auto dyDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
-                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
-    auto dxDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    const auto dxDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
-    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto peerStatsDesc0 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
-    auto peerStatsDesc1 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_1_UID);
+    const auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    const auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    const auto peerStatsDesc0 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    const auto peerStatsDesc1 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_1_UID);
 
     const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {peerStatsDesc0.get(), peerStatsDesc1.get()};
-    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     HIPDNN_DATA_FLOAT,
-                                                     peerStatsDescs);
+    const auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           HIPDNN_DATA_FLOAT,
+                                                           peerStatsDescs);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -301,7 +301,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -317,36 +317,36 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
 
 TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerialization)
 {
-    auto dyDesc = createFinalizedTensor(
+    const auto dyDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
-                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
-    auto dxDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    const auto dxDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
-    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     HIPDNN_DATA_FLOAT,
-                                                     {},
-                                                     "bn_bwd_train");
+    const auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    const auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    const auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           HIPDNN_DATA_FLOAT,
+                                                           {},
+                                                           "bn_bwd_train");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -356,7 +356,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerializati
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -365,36 +365,36 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerializati
 
 TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLifting)
 {
-    auto dyDesc = createFinalizedTensor(
+    const auto dyDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
-                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
-    auto dxDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    const auto dxDesc = createFinalizedTensor(
         K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
-    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     HIPDNN_DATA_FLOAT,
-                                                     {},
-                                                     "bn_bwd_train");
+    const auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    const auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    const auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           HIPDNN_DATA_FLOAT,
+                                                           {},
+                                                           "bn_bwd_train");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -405,13 +405,13 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLiftin
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -422,7 +422,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLiftin
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

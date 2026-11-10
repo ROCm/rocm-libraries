@@ -36,21 +36,21 @@ int main(int argc, char** argv)
             .set_compute_data_type(cudnn_frontend::DataType_t::FLOAT)
             .set_intermediate_data_type(cudnn_frontend::DataType_t::FLOAT);
 
-        auto q = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_dim({2, 8, 16, 64})
-                                  .set_stride({8192, 1024, 64, 1})
-                                  .set_data_type(cudnn_frontend::DataType_t::HALF)
-                                  .set_uid(1));
-        auto k = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_dim({2, 8, 32, 64})
-                                  .set_stride({16384, 2048, 64, 1})
-                                  .set_data_type(cudnn_frontend::DataType_t::HALF)
-                                  .set_uid(2));
-        auto v = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_dim({2, 8, 32, 64})
-                                  .set_stride({16384, 2048, 64, 1})
-                                  .set_data_type(cudnn_frontend::DataType_t::HALF)
-                                  .set_uid(3));
+        const auto q = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_dim({2, 8, 16, 64})
+                                        .set_stride({8192, 1024, 64, 1})
+                                        .set_data_type(cudnn_frontend::DataType_t::HALF)
+                                        .set_uid(1));
+        const auto k = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_dim({2, 8, 32, 64})
+                                        .set_stride({16384, 2048, 64, 1})
+                                        .set_data_type(cudnn_frontend::DataType_t::HALF)
+                                        .set_uid(2));
+        const auto v = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_dim({2, 8, 32, 64})
+                                        .set_stride({16384, 2048, 64, 1})
+                                        .set_data_type(cudnn_frontend::DataType_t::HALF)
+                                        .set_uid(3));
 
         auto [o, stats] = graph.sdpa(q,
                                      k,

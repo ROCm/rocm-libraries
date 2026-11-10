@@ -20,7 +20,7 @@ TEST(TestConvolutionDgradAttributes, CreateConvolutionDgradAttributes)
     convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
     // Configure dy tensor (gradient of output)
-    auto dyTensor = convAttributes.get_dy();
+    const auto dyTensor = convAttributes.get_dy();
     dyTensor->set_uid(1)
         .set_name("DyTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -28,7 +28,7 @@ TEST(TestConvolutionDgradAttributes, CreateConvolutionDgradAttributes)
         .set_stride({65536, 1024, 32, 1});
 
     // Configure weights tensor
-    auto wTensor = convAttributes.get_w();
+    const auto wTensor = convAttributes.get_w();
     wTensor->set_uid(2)
         .set_name("WeightsTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -36,7 +36,7 @@ TEST(TestConvolutionDgradAttributes, CreateConvolutionDgradAttributes)
         .set_stride({27, 9, 3, 1});
 
     // Configure dx tensor (gradient of input)
-    auto dxTensor = convAttributes.get_dx();
+    const auto dxTensor = convAttributes.get_dx();
     dxTensor->set_uid(3)
         .set_name("DxTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -163,7 +163,7 @@ TEST(TestConvolutionDgradAttributes, SetDyMove)
     EXPECT_EQ(dyTensor, nullptr);
 
     // The moved tensor should be accessible through get_dy()
-    auto retrievedTensor = convAttributes.get_dy();
+    const auto retrievedTensor = convAttributes.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -187,7 +187,7 @@ TEST(TestConvolutionDgradAttributes, SetWMove)
     EXPECT_EQ(wTensor, nullptr);
 
     // The moved tensor should be accessible through get_w()
-    auto retrievedTensor = convAttributes.get_w();
+    const auto retrievedTensor = convAttributes.get_w();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -211,7 +211,7 @@ TEST(TestConvolutionDgradAttributes, SetDxWithMove)
     EXPECT_EQ(dxTensor, nullptr);
 
     // The moved tensor should be accessible through get_dx()
-    auto retrievedTensor = convAttributes.get_dx();
+    const auto retrievedTensor = convAttributes.get_dx();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -220,13 +220,13 @@ TEST(TestConvolutionDgradAttributes, SetTensorsConstRef)
     hipdnn_frontend::graph::ConvDgradAttributes convAttributes;
 
     // Create tensors
-    auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dyTensor->set_uid(40).set_name("DyConstRef");
 
-    auto wTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto wTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     wTensor->set_uid(50).set_name("WeightConstRef");
 
-    auto dxTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dxTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dxTensor->set_uid(60).set_name("DxConstRef");
 
     // Set using const reference (copy)
@@ -248,19 +248,19 @@ TEST(TestConvolutionDgradAttributes, LogicalAndStrictEquality)
     hipdnn_frontend::graph::ConvDgradAttributes attrD;
 
     // Common structurally defined sharing tensors
-    auto dyShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dyShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dyShared->set_uid(10)
         .set_name("dy")
         .set_dim({1, 64, 32, 32})
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto wShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto wShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     wShared->set_uid(20)
         .set_name("w")
         .set_dim({64, 3, 3, 3})
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto dxShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dxShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dxShared->set_uid(30)
         .set_name("dx")
         .set_dim({1, 3, 32, 32})
@@ -285,7 +285,7 @@ TEST(TestConvolutionDgradAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attrA == attrB);
 
     //  Metadata Discrepancy (Names/UID variance, identical layout shapes)
-    auto dyMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*dyShared);
+    const auto dyMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*dyShared);
     dyMetaDiff->set_uid(999).set_name("altered_dy_name");
 
     attrC.set_dy(dyMetaDiff)

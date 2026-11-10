@@ -140,8 +140,8 @@ protected:
 
 TEST_F(TestRMSNormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -151,11 +151,11 @@ TEST_F(TestRMSNormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -164,7 +164,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::RMSNormBackwardAttributes);
-    auto desc = std::static_pointer_cast<RMSNormBackwardOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<RMSNormBackwardOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -187,16 +187,16 @@ TEST_F(TestRMSNormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DY_UID);
@@ -216,8 +216,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_X_UID]);
@@ -230,8 +230,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DY_UID);
@@ -288,7 +288,7 @@ class TestRMSNormBackwardMissingRequiredTensor : public TestRMSNormBackwardOpera
 TEST_P(TestRMSNormBackwardMissingRequiredTensor, FailsWithMissingRequiredTensor)
 {
     _tensorMap.erase(GetParam());
-    auto node = createRequiredOnlyNode();
+    const auto node = createRequiredOnlyNode();
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
@@ -305,7 +305,7 @@ INSTANTIATE_TEST_SUITE_P(AllRequiredTensors,
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDyTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_DY_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -314,7 +314,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDyTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -323,7 +323,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -332,7 +332,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingInvRmsTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -341,7 +341,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingInvRmsTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDxTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_DX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -350,7 +350,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDxTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -365,7 +365,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -383,7 +383,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWhenOptionalDbiasUidSetButTensorMissing)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -391,8 +391,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWhenOptionalDbiasUidSetButTens
 
 TEST_F(TestRMSNormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7);
@@ -407,8 +407,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTenso
 
 TEST_F(TestRMSNormBackwardOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -428,8 +428,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -567,7 +567,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_rmsnormbackward_1";
 
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -582,8 +582,8 @@ TEST_F(TestRMSNormBackwardOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestRMSNormBackwardOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -595,7 +595,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

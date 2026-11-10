@@ -115,7 +115,8 @@ LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
 
 size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
-    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    auto const deviceProperties
+        = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
 
     // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
     const bool parallel = isParallel(deviceProperties,

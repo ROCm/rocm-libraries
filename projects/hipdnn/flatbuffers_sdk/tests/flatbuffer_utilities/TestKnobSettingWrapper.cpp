@@ -17,9 +17,9 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdOffset = builder.CreateString(knobId);
+        const auto knobIdOffset = builder.CreateString(knobId);
         // Create the value
-        auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+        const auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
 
         // Create the knob setting
         hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder settingBuilder(builder);
@@ -27,7 +27,7 @@ protected:
         settingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
         settingBuilder.add_value(intValue.Union());
 
-        auto setting = settingBuilder.Finish();
+        const auto setting = settingBuilder.Finish();
         builder.Finish(setting);
 
         return builder.Release();
@@ -38,9 +38,9 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdOffset = builder.CreateString(knobId);
-        auto strOffset = builder.CreateString(value);
-        auto stringValue
+        const auto knobIdOffset = builder.CreateString(knobId);
+        const auto strOffset = builder.CreateString(value);
+        const auto stringValue
             = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strOffset);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder settingBuilder(builder);
@@ -48,7 +48,7 @@ protected:
         settingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
         settingBuilder.add_value(stringValue.Union());
 
-        auto setting = settingBuilder.Finish();
+        const auto setting = settingBuilder.Finish();
         builder.Finish(setting);
 
         return builder.Release();
@@ -59,15 +59,16 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdOffset = builder.CreateString(knobId);
-        auto floatValue = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, value);
+        const auto knobIdOffset = builder.CreateString(knobId);
+        const auto floatValue
+            = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, value);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder settingBuilder(builder);
         settingBuilder.add_knob_id(knobIdOffset);
         settingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
         settingBuilder.add_value(floatValue.Union());
 
-        auto setting = settingBuilder.Finish();
+        const auto setting = settingBuilder.Finish();
         builder.Finish(setting);
 
         return builder.Release();

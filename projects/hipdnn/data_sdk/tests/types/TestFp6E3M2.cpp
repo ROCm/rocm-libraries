@@ -247,11 +247,11 @@ TEST(TestFp6E3M2, NumericLimitsSpecificValues)
 TEST(TestFp6E3M2, NamedConstants)
 {
     // E3M2 has no infinity - returns max
-    auto maxVal = std::numeric_limits<fp6_e3m2>::max();
+    const auto maxVal = std::numeric_limits<fp6_e3m2>::max();
     EXPECT_EQ(std::numeric_limits<fp6_e3m2>::infinity().data, maxVal.data);
 
     // E3M2 has no NaN - returns zero (consistent with float-to-E3M2 conversion)
-    auto zeroVal = fp6_e3m2();
+    const auto zeroVal = fp6_e3m2();
     EXPECT_EQ(std::numeric_limits<fp6_e3m2>::quiet_NaN().data, zeroVal.data);
     EXPECT_EQ(std::numeric_limits<fp6_e3m2>::signaling_NaN().data, zeroVal.data);
 }
@@ -350,8 +350,8 @@ TEST(TestFp6x4E3M2, DefaultConstruction)
     EXPECT_EQ(val.data[1], 0);
     EXPECT_EQ(val.data[2], 0);
 
-    auto loPair = val.lo_pair();
-    auto hiPair = val.hi_pair();
+    const auto loPair = val.lo_pair();
+    const auto hiPair = val.hi_pair();
     EXPECT_EQ(static_cast<float>(loPair.lo()), 0.0f);
     EXPECT_EQ(static_cast<float>(loPair.hi()), 0.0f);
     EXPECT_EQ(static_cast<float>(hiPair.lo()), 0.0f);
@@ -364,8 +364,8 @@ TEST(TestFp6x4E3M2, TwoPairConstruction)
     const fp6x2_e3m2 hiPair(fp6_e3m2(4.0f), fp6_e3m2(8.0f));
     const fp6x4_e3m2 packed(loPair, hiPair);
 
-    auto extractedLo = packed.lo_pair();
-    auto extractedHi = packed.hi_pair();
+    const auto extractedLo = packed.lo_pair();
+    const auto extractedHi = packed.hi_pair();
 
     EXPECT_EQ(static_cast<float>(extractedLo.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(extractedLo.hi()), 2.0f);
@@ -379,8 +379,8 @@ TEST(TestFp6x4E3M2, NegativeValues)
     const fp6x2_e3m2 hiPair(fp6_e3m2(-4.0f), fp6_e3m2(-8.0f));
     const fp6x4_e3m2 packed(loPair, hiPair);
 
-    auto extractedLo = packed.lo_pair();
-    auto extractedHi = packed.hi_pair();
+    const auto extractedLo = packed.lo_pair();
+    const auto extractedHi = packed.hi_pair();
 
     EXPECT_EQ(static_cast<float>(extractedLo.lo()), -1.0f);
     EXPECT_EQ(static_cast<float>(extractedLo.hi()), -2.0f);
@@ -394,8 +394,8 @@ TEST(TestFp6x4E3M2, MixedValues)
     const fp6x2_e3m2 hiPair(fp6_e3m2(-0.5f), fp6_e3m2(-28.0f));
     const fp6x4_e3m2 packed(loPair, hiPair);
 
-    auto extractedLo = packed.lo_pair();
-    auto extractedHi = packed.hi_pair();
+    const auto extractedLo = packed.lo_pair();
+    const auto extractedHi = packed.hi_pair();
 
     EXPECT_EQ(static_cast<float>(extractedLo.lo()), 0.5f);
     EXPECT_EQ(static_cast<float>(extractedLo.hi()), 28.0f);
@@ -427,8 +427,8 @@ TEST(TestFp6x4E3M2, CopyAssignment)
     EXPECT_EQ(a.data[1], b.data[1]);
     EXPECT_EQ(a.data[2], b.data[2]);
 
-    auto extractedLo = b.lo_pair();
-    auto extractedHi = b.hi_pair();
+    const auto extractedLo = b.lo_pair();
+    const auto extractedHi = b.hi_pair();
     EXPECT_EQ(static_cast<float>(extractedLo.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(extractedLo.hi()), 2.0f);
     EXPECT_EQ(static_cast<float>(extractedHi.lo()), 4.0f);

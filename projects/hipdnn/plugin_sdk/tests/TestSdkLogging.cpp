@@ -16,7 +16,7 @@
 TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 {
     // Create RAII log recorder - captures all logs for this test
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_SDK_LOG_INFO("Plugin SDK info test message");
@@ -37,7 +37,7 @@ TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 TEST(TestSdkLogging, SdkLogContainsComponentName)
 {
     // Create RAII log recorder - captures all logs for this test
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_SDK_LOG_INFO("Component name check");
@@ -58,7 +58,7 @@ TEST(TestSdkLogging, SdkLogContainsComponentName)
 TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 {
     // Create RAII log recorder - captures all logs for this test
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_SDK_LOG_INFO("SDK info message");
@@ -98,7 +98,7 @@ TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 TEST(TestSdkLogging, SdkLogRespectsLogLevel)
 {
     // Create RAII log recorder - captures all logs for this test
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     HIPDNN_SDK_LOG_INFO("SDK info message");

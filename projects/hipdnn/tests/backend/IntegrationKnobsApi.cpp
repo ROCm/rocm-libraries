@@ -135,12 +135,12 @@ protected:
 
             std::array<char, 256> knobId = {};
             int64_t idLen = 0;
-            auto status = hipdnnBackendGetAttribute(desc.get(),
-                                                    HIPDNN_ATTR_KNOB_INFO_TYPE,
-                                                    HIPDNN_TYPE_CHAR,
-                                                    static_cast<int64_t>(knobId.size()),
-                                                    &idLen,
-                                                    knobId.data());
+            const auto status = hipdnnBackendGetAttribute(desc.get(),
+                                                          HIPDNN_ATTR_KNOB_INFO_TYPE,
+                                                          HIPDNN_TYPE_CHAR,
+                                                          static_cast<int64_t>(knobId.size()),
+                                                          &idLen,
+                                                          knobId.data());
             if(status == HIPDNN_STATUS_SUCCESS && std::string(knobId.data()) == targetId)
             {
                 return desc.get();
@@ -998,7 +998,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorCount)
 TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateIntKnob)
 {
     createFinalizedEngine();
-    auto knobDescs = getKnobDescriptors(5);
+    const auto knobDescs = getKnobDescriptors(5);
     ASSERT_FALSE(knobDescs.empty());
 
     auto* intKnob = findKnobDescriptorById(knobDescs, "test.int_knob");
@@ -1058,7 +1058,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateIntKnob)
 TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateFloatKnob)
 {
     createFinalizedEngine();
-    auto knobDescs = getKnobDescriptors(5);
+    const auto knobDescs = getKnobDescriptors(5);
     ASSERT_FALSE(knobDescs.empty());
 
     auto* floatKnob = findKnobDescriptorById(knobDescs, "test.float_knob");
@@ -1116,7 +1116,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateFloatKnob)
 TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateStringKnob)
 {
     createFinalizedEngine();
-    auto knobDescs = getKnobDescriptors(5);
+    const auto knobDescs = getKnobDescriptors(5);
     ASSERT_FALSE(knobDescs.empty());
 
     auto* stringKnob = findKnobDescriptorById(knobDescs, "test.string_knob");
@@ -1189,7 +1189,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateStringKnob)
 TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateDeprecatedKnob)
 {
     createFinalizedEngine();
-    auto knobDescs = getKnobDescriptors(5);
+    const auto knobDescs = getKnobDescriptors(5);
     ASSERT_FALSE(knobDescs.empty());
 
     auto* deprecatedKnob = findKnobDescriptorById(knobDescs, "test.deprecated_knob");
@@ -1215,7 +1215,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateValidValuesIntKnob)
     const int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
     test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
 
-    auto knobDescs = getKnobDescriptors(3);
+    const auto knobDescs = getKnobDescriptors(3);
     ASSERT_FALSE(knobDescs.empty());
 
     auto* blockSizeKnob = findKnobDescriptorById(knobDescs, "test.engine_b.block_size");

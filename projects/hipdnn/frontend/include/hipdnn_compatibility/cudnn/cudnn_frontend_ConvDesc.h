@@ -239,7 +239,8 @@ public:
             }
 
             cudnnDataType_t cudnn_data_type;
-            auto status = detail::convert_to_cudnn_type(m_convDesc.compute_type, cudnn_data_type);
+            const auto status
+                = detail::convert_to_cudnn_type(m_convDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
                 throw detail::v8::CompatibilityError(

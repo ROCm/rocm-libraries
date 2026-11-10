@@ -37,7 +37,7 @@ void fillSequential(Tensor<Type>& tensor)
 
 TEST(TestResampleBwdPlan, ExecuteMatchesCpuReference)
 {
-    auto builder = createValidResampleBwdGraph(true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    const auto builder = createValidResampleBwdGraph(true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attributes = *node.attributes_as_ResampleBwdAttributes();
@@ -73,7 +73,7 @@ TEST(TestResampleBwdPlan, ExecuteMatchesCpuReference)
 
 TEST(TestResampleBwdPlan, ExecuteReadsIndexTensor)
 {
-    auto builder = createValidResampleBwdGraph(true);
+    const auto builder = createValidResampleBwdGraph(true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attributes = *node.attributes_as_ResampleBwdAttributes();
@@ -113,13 +113,13 @@ TEST(TestResampleBwdPlan, ExecuteReadsIndexTensor)
 
 TEST(TestResampleBwdPlanBuilder, PlanConstruction)
 {
-    auto builder = createValidResampleBwdGraph();
+    const auto builder = createValidResampleBwdGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
         planBuilder;
 
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<ResampleBwdPlan<float, float, float, int32_t>*>(builtPlan.get()) != nullptr;
@@ -128,7 +128,7 @@ TEST(TestResampleBwdPlanBuilder, PlanConstruction)
 
 TEST(TestResampleBwdPlanBuilder, IsApplicableRejectsTypeMismatches)
 {
-    auto builder = createValidResampleBwdGraph();
+    const auto builder = createValidResampleBwdGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     // Dy type mismatch
@@ -150,12 +150,12 @@ TEST(TestResampleBwdPlanBuilder, IsApplicableRejectsTypeMismatches)
 
 TEST(TestResampleBwdGraphBuilder, PreservesIndexTensorPresence)
 {
-    auto noIndexBuilder = createValidResampleBwdGraph(false);
+    const auto noIndexBuilder = createValidResampleBwdGraph(false);
     const GraphWrapper noIndexGraph(noIndexBuilder.GetBufferPointer(), noIndexBuilder.GetSize());
     const auto& noIndexAttr = *noIndexGraph.getNode(0).attributes_as_ResampleBwdAttributes();
     EXPECT_FALSE(noIndexAttr.index_tensor_uid().has_value());
 
-    auto indexBuilder = createValidResampleBwdGraph(true);
+    const auto indexBuilder = createValidResampleBwdGraph(true);
     const GraphWrapper indexGraph(indexBuilder.GetBufferPointer(), indexBuilder.GetSize());
     const auto& indexAttr = *indexGraph.getNode(0).attributes_as_ResampleBwdAttributes();
     ASSERT_TRUE(indexAttr.index_tensor_uid().has_value());
@@ -164,7 +164,7 @@ TEST(TestResampleBwdGraphBuilder, PreservesIndexTensorPresence)
 
 TEST(TestResampleBwdPlanBuilder, IsApplicableIndexTensorPresence)
 {
-    auto builder = createValidResampleBwdGraph(false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    const auto builder = createValidResampleBwdGraph(false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
@@ -175,7 +175,7 @@ TEST(TestResampleBwdPlanBuilder, IsApplicableIndexTensorPresence)
     EXPECT_TRUE(noIndexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
 
-    auto indexBuilderFbb = createValidResampleBwdGraph(true, ResampleMode::MAXPOOL);
+    const auto indexBuilderFbb = createValidResampleBwdGraph(true, ResampleMode::MAXPOOL);
     const GraphWrapper indexGraph(indexBuilderFbb.GetBufferPointer(), indexBuilderFbb.GetSize());
     EXPECT_FALSE(noIndexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));
     EXPECT_TRUE(indexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));
@@ -192,7 +192,7 @@ TEST(TestResampleBwdPlanBuilder, RejectsUnsupportedResampleModes)
 
     for(const auto mode : {ResampleMode::NOT_SET, static_cast<ResampleMode>(127)})
     {
-        auto builder = createValidResampleBwdGraph(true, mode);
+        const auto builder = createValidResampleBwdGraph(true, mode);
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     }
@@ -200,14 +200,14 @@ TEST(TestResampleBwdPlanBuilder, RejectsUnsupportedResampleModes)
 
 TEST(TestResampleBwdPlanBuilder, BuildNodePlan)
 {
-    auto builder = createValidResampleBwdGraph();
+    const auto builder = createValidResampleBwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
         planBuilder;
     EXPECT_NO_THROW(planBuilder.buildNodePlan(graph, graph.getNode(0)));
 
-    auto reductionBuilder = createValidReductionGraph();
+    const auto reductionBuilder = createValidReductionGraph();
     const GraphWrapper reductionGraph(reductionBuilder.GetBufferPointer(),
                                       reductionBuilder.GetSize());
     EXPECT_THROW(planBuilder.buildNodePlan(reductionGraph, reductionGraph.getNode(0)),

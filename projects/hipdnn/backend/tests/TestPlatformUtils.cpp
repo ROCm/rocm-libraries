@@ -13,28 +13,28 @@
 
 TEST(TestPlatformUtils, GetSystemInfoReturnsNonEmpty)
 {
-    auto result = hipdnn_backend::platform_utilities::getSystemInfo();
+    const auto result = hipdnn_backend::platform_utilities::getSystemInfo();
 
     EXPECT_FALSE(result.empty());
 }
 
 TEST(TestPlatformUtils, GetSystemInfoContainsSystemName)
 {
-    auto result = hipdnn_backend::platform_utilities::getSystemInfo();
+    const auto result = hipdnn_backend::platform_utilities::getSystemInfo();
 
     EXPECT_NE(result.find("System Name:"), std::string::npos);
 }
 
 TEST(TestPlatformUtils, GetSystemInfoContainsMachine)
 {
-    auto result = hipdnn_backend::platform_utilities::getSystemInfo();
+    const auto result = hipdnn_backend::platform_utilities::getSystemInfo();
 
     EXPECT_NE(result.find("Machine:"), std::string::npos);
 }
 
 TEST(TestPlatformUtils, GetCurrentModuleDirectoryReturnsExistingDirectory)
 {
-    auto result = hipdnn_backend::platform_utilities::getCurrentModuleDirectory();
+    const auto result = hipdnn_backend::platform_utilities::getCurrentModuleDirectory();
 
     EXPECT_FALSE(result.empty());
     EXPECT_TRUE(result.is_absolute());

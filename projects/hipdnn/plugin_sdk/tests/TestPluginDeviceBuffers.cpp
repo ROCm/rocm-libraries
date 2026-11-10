@@ -13,7 +13,7 @@ TEST(TestPluginDeviceBuffers, FindDeviceBufferReturnsCorrectBuffer)
     std::vector<hipdnnPluginDeviceBuffer_t> buffers
         = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
 
-    auto result = findDeviceBuffer(99, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    const auto result = findDeviceBuffer(99, buffers.data(), static_cast<uint32_t>(buffers.size()));
     EXPECT_EQ(result.uid, 99);
     EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
 }
@@ -37,7 +37,7 @@ TEST(TestPluginDeviceBuffers, FindDeviceBufferReturnsFirstMatchWhenDuplicateUids
     int data2 = 0;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{5, &data1}, {5, &data2}};
 
-    auto result = findDeviceBuffer(5, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    const auto result = findDeviceBuffer(5, buffers.data(), static_cast<uint32_t>(buffers.size()));
     EXPECT_EQ(result.uid, 5);
     EXPECT_EQ(result.ptr, &data1);
 }

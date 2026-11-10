@@ -47,8 +47,8 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowATensor = bindShallowTensor<ADataType>(_params.aTensor, variantPack);
-        auto shallowBTensor = bindShallowTensor<BDataType>(_params.bTensor, variantPack);
+        const auto shallowATensor = bindShallowTensor<ADataType>(_params.aTensor, variantPack);
+        const auto shallowBTensor = bindShallowTensor<BDataType>(_params.bTensor, variantPack);
         auto shallowCTensor = bindShallowTensor<CDataType>(_params.cTensor, variantPack);
 
         utilities::CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(

@@ -46,17 +46,17 @@ class IntegrationBlockScaleDequantizeDescriptorLowering : public IntegrationTest
 // in the frontend.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBlockScaleDequantizeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BSD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FP8_E4M3);
     x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_BSD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
@@ -65,7 +65,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
         .set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE))
         .set_is_negative_scale(true);
 
-    auto y = graph->block_scale_dequantize(x, scale, attrs);
+    const auto y = graph->block_scale_dequantize(x, scale, attrs);
     y->set_uid(K_BSD_TENSOR_Y_UID).set_name("Y");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -128,24 +128,24 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
 // through the lowering round-trip.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBlockScaleDequantizeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FP8_E4M3);
     x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
     BlockScaleDequantizeAttributes attrs;
     attrs.set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE));
 
-    auto y = graph->block_scale_dequantize(x, scale, attrs);
+    const auto y = graph->block_scale_dequantize(x, scale, attrs);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
 

@@ -37,9 +37,9 @@ void addPointwiseGraph(fe::graph::Graph& graph)
     const int64_t n = 4;
     graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
-    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
-    auto c = graph.pointwise(
+    const auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    const auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
@@ -440,19 +440,19 @@ TEST(TestCudnnShimNoteTriage, DeselectEngineIndicesBeforeBuildDoesNotPoisonNativ
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto x = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("image")
-                              .set_dim({n, c, h, w})
-                              .set_stride({c * h * w, 1, c * w, c})
-                              .set_uid(1));
-    auto weight = graph.tensor(fe::graph::Tensor_attributes{}
-                                   .set_name("filter")
-                                   .set_dim({k, c, r, s})
-                                   .set_stride({c * r * s, 1, c * s, c})
-                                   .set_uid(2));
+    const auto x = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("image")
+                                    .set_dim({n, c, h, w})
+                                    .set_stride({c * h * w, 1, c * w, c})
+                                    .set_uid(1));
+    const auto weight = graph.tensor(fe::graph::Tensor_attributes{}
+                                         .set_name("filter")
+                                         .set_dim({k, c, r, s})
+                                         .set_stride({c * r * s, 1, c * s, c})
+                                         .set_uid(2));
 
     // conv_fprop makes the graph Mode::Native.
-    auto y = graph.conv_fprop(
+    const auto y = graph.conv_fprop(
         x,
         weight,
         fe::graph::Conv_fprop_attributes{}.set_padding({0, 0}).set_stride({1, 1}).set_dilation(

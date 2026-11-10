@@ -257,7 +257,7 @@ hipdnnPluginStatus_t
         }
         hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-        auto totalEngines
+        auto const totalEngines
             = HIPDNN_PLUGIN_CONTAINER_TYPE::copyEngineIds(engineIds, maxEngines, *numEngines);
 
         LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines << " totalEngines=" << totalEngines);
@@ -375,10 +375,10 @@ hipdnnPluginStatus_t
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
             opGraph->ptr, opGraph->size);
 
-        auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
+        auto const applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
 
         *numEngines = 0;
-        for(auto& engineId : applicableEngines)
+        for(auto const& engineId : applicableEngines)
         {
             if(*numEngines == maxEngines)
             {
@@ -521,7 +521,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
         hipdnn_plugin_sdk::throwIfNull(workspaceSize);
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
-        auto& engineManager = typedHandle->getEngineManager();
+        auto const& engineManager = typedHandle->getEngineManager();
 
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
@@ -558,7 +558,7 @@ hipdnnPluginStatus_t
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
 
-        auto& engineManager = typedHandle->getEngineManager();
+        auto const& engineManager = typedHandle->getEngineManager();
 
         auto* context = new HIPDNN_PLUGIN_CONTEXT_TYPE;
 

@@ -43,16 +43,16 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     // Tensor ranges from BatchnormFwdTensorBundle:
     // x=[0,1], scale=[0,1], bias=[0,1], mean=[0,1], invVar=[1,3]
-    auto tolerance = batchnorm::calculateBatchnormInferenceTolerance<float, float>(
+    const auto tolerance = batchnorm::calculateBatchnormInferenceTolerance<float, float>(
         0.0, 1.0, 0.0, 1.0, 1.0, 3.0, 0.0, 1.0, 0.0, 1.0);
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const unsigned int seed = getGlobalTestSeed();
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 dims,
-                                                 TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       dims,
+                                                       TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
@@ -72,16 +72,16 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    auto shallowXTensor = createShallowTensor<float>(
+    const auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
-    auto shallowScaleTensor = createShallowTensor<float>(
+    const auto shallowScaleTensor = createShallowTensor<float>(
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
-    auto shallowBiasTensor = createShallowTensor<float>(
+    const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor, directTensorBundle.tensors[attributes.bias_tensor_uid()]->rawHostData());
-    auto shallowMeanTensor = createShallowTensor<float>(
+    const auto shallowMeanTensor = createShallowTensor<float>(
         params.meanTensor, directTensorBundle.tensors[attributes.mean_tensor_uid()]->rawHostData());
-    auto shallowInvVarTensor = createShallowTensor<float>(
+    const auto shallowInvVarTensor = createShallowTensor<float>(
         params.invVarianceTensor,
         directTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->rawHostData());
     auto shallowYTensor = createShallowTensor<float>(
@@ -106,12 +106,12 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
 {
     const std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 dims,
-                                                 TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       dims,
+                                                       TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
@@ -123,7 +123,7 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
                                            DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<BatchnormFwdPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -134,12 +134,12 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
 TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
 {
     const std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 dims,
-                                                 TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       dims,
+                                                       TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());

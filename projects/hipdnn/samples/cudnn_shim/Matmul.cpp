@@ -45,18 +45,18 @@ int main(int argc, char** argv)
         graph.set_io_data_type(cudnn_frontend::DataType_t::HALF)
             .set_compute_data_type(cudnn_frontend::DataType_t::FLOAT);
 
-        auto a = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_name("A")
-                                  .set_dim({b, m, k})
-                                  .set_stride({m * k, k, 1})
-                                  .set_uid(1));
-        auto bMat = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                     .set_name("B")
-                                     .set_dim({b, k, n})
-                                     .set_stride({k * n, n, 1})
-                                     .set_uid(2));
+        const auto a = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_name("A")
+                                        .set_dim({b, m, k})
+                                        .set_stride({m * k, k, 1})
+                                        .set_uid(1));
+        const auto bMat = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                           .set_name("B")
+                                           .set_dim({b, k, n})
+                                           .set_stride({k * n, n, 1})
+                                           .set_uid(2));
 
-        auto c
+        const auto c
             = graph.matmul(a, bMat, cudnn_frontend::graph::Matmul_attributes{}.set_name("matmul"));
         c->set_output(true).set_uid(3);
 

@@ -65,38 +65,38 @@ class IntegrationBatchnormInferenceDescriptorLowering : public IntegrationTestFi
 // in the frontend.
 TEST_F(IntegrationBatchnormInferenceDescriptorLowering, BnInferenceGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnInferenceGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(K_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_TENSOR_CHANNEL_DIMS)).set_stride(toVec(K_TENSOR_CHANNEL_STRIDES));
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(K_TENSOR_INV_VARIANCE_UID)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT);
     invVariance->set_dim(toVec(K_TENSOR_CHANNEL_DIMS)).set_stride(toVec(K_TENSOR_CHANNEL_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_TENSOR_CHANNEL_DIMS)).set_stride(toVec(K_TENSOR_CHANNEL_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_TENSOR_CHANNEL_DIMS)).set_stride(toVec(K_TENSOR_CHANNEL_STRIDES));
 
     BatchnormInferenceAttributes bnAttrs;
     bnAttrs.set_name("bn_inference_op");
 
-    auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
+    const auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
     y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -180,35 +180,35 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, BnInferenceGraphRoundTri
 // through the lowering round-trip.
 TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnInfGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_AUTO_X_DIMS)).set_stride(toVec(K_AUTO_X_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_name("Mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_AUTO_CHANNEL_DIMS)).set_stride(toVec(K_AUTO_CHANNEL_STRIDES));
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_name("InvVariance").set_data_type(DataType::FLOAT);
     invVariance->set_dim(toVec(K_AUTO_CHANNEL_DIMS)).set_stride(toVec(K_AUTO_CHANNEL_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_AUTO_CHANNEL_DIMS)).set_stride(toVec(K_AUTO_CHANNEL_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_AUTO_CHANNEL_DIMS)).set_stride(toVec(K_AUTO_CHANNEL_STRIDES));
 
     const BatchnormInferenceAttributes bnAttrs;
 
-    auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
+    const auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
     y->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

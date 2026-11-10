@@ -178,7 +178,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
 TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
 {
     SKIP_IF_NO_DEVICES();
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in SYNC mode
     registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC);
@@ -197,7 +197,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
 // Test: Null userHandle is rejected
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullHandle)
 {
-    auto status
+    const auto status
         = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
                                        HIPDNN_SEV_INFO,
                                        HIPDNN_LOG_CALLBACK_ASYNC,
@@ -208,7 +208,7 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsNullHandle)
 // Test: Null callback is rejected
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullCallback)
 {
-    auto status
+    const auto status
         = hipdnnSetUserLogCallback_ext(nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, this);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
@@ -216,8 +216,8 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsNullCallback)
 // Test: Invalid mode is rejected
 TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
 {
-    auto invalidMode = static_cast<hipdnnLogCallbackMode_t>(999);
-    auto status
+    const auto invalidMode = static_cast<hipdnnLogCallbackMode_t>(999);
+    const auto status
         = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
                                        HIPDNN_SEV_INFO,
                                        invalidMode,
@@ -326,7 +326,7 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
     SKIP_IF_NO_DEVICES();
     // Callback that throws exception
     static bool s_shouldThrow = true;
-    auto throwingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
+    const auto throwingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
         if(s_shouldThrow)
         {
             throw std::runtime_error("Test exception from callback");
@@ -368,7 +368,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
     static std::mutex s_callbackMtx;
     static std::condition_variable s_callbackCv;
 
-    auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
+    const auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
         s_callbackActive.store(true);
         s_callbackCount.fetch_add(1);
         s_callbackCv.notify_all();
@@ -551,7 +551,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     constexpr auto THREAD_SYNC_TIMEOUT = std::chrono::seconds(10);
 
     // Helper to wait until at least one log-generating thread has completed a full loop.
-    auto waitForIterations
+    const auto waitForIterations
         = [&](uint64_t snapshot) {
               std::unique_lock<std::mutex> lock(mutex);
               // The iteration count will need to increment by the number of threads plus one
@@ -624,7 +624,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     for(int cycle = 0; cycle < NUM_CYCLES; ++cycle)
     {
         // Use async mode for even cycles, sync mode for odd cycles
-        auto mode = (cycle % 2 == 0) ? HIPDNN_LOG_CALLBACK_ASYNC : HIPDNN_LOG_CALLBACK_SYNC;
+        const auto mode = (cycle % 2 == 0) ? HIPDNN_LOG_CALLBACK_ASYNC : HIPDNN_LOG_CALLBACK_SYNC;
 
         // With callback registered - logs should be captured
         registerIsolatedCallback(HIPDNN_SEV_INFO, mode);
@@ -708,9 +708,9 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 
     RecursiveContext recursiveCtx{&recursiveAttempts, &callbackInvocations};
 
-    auto recursiveCallback = [](hipdnnUserLogCallbackHandle_t userHandle,
-                                hipdnnSeverity_t /*severity*/,
-                                const char* /*message*/) {
+    const auto recursiveCallback = [](hipdnnUserLogCallbackHandle_t userHandle,
+                                      hipdnnSeverity_t /*severity*/,
+                                      const char* /*message*/) {
         auto* ctx = static_cast<RecursiveContext*>(userHandle);
 
         // Count this invocation
@@ -766,7 +766,7 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
         std::condition_variable cv;
     };
 
-    auto countingCallback
+    const auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
               auto* c = static_cast<CounterWithNotify*>(userHandle);
               c->count.fetch_add(1);

@@ -76,8 +76,8 @@ protected:
 
 TEST_F(TestReductionOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -87,11 +87,11 @@ TEST_F(TestReductionOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestReductionOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -100,7 +100,7 @@ TEST_F(TestReductionOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ReductionAttributes);
-    auto desc = std::static_pointer_cast<ReductionOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<ReductionOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -114,8 +114,8 @@ TEST_F(TestReductionOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestReductionOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -126,15 +126,15 @@ TEST_F(TestReductionOperationFromNode, PreservesReductionMode)
     auto attrs = createStandardReductionAttrs();
     attrs.mode = ReductionMode::AMAX;
     node.attributes.Set(attrs);
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().mode, ReductionMode::AMAX);
 }
 
 TEST_F(TestReductionOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_REDUCTION_TENSOR_X_UID);
@@ -144,8 +144,8 @@ TEST_F(TestReductionOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestReductionOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_REDUCTION_TENSOR_X_UID]);
     EXPECT_EQ(desc->getYDesc(), _tensorMap[K_REDUCTION_TENSOR_Y_UID]);
@@ -153,8 +153,8 @@ TEST_F(TestReductionOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestReductionOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_REDUCTION_TENSOR_X_UID);
@@ -172,7 +172,7 @@ TEST_F(TestReductionOperationFromNode, SetsTensorReferencesWithFullValues)
 TEST_F(TestReductionOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_REDUCTION_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ReductionOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -181,7 +181,7 @@ TEST_F(TestReductionOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestReductionOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_REDUCTION_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ReductionOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -189,8 +189,8 @@ TEST_F(TestReductionOperationFromNode, FailsWithMissingYTensor)
 
 TEST_F(TestReductionOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 2);
@@ -200,8 +200,8 @@ TEST_F(TestReductionOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestReductionOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -224,7 +224,7 @@ TEST_F(TestReductionOperationFromNode, FromNodePreservesIsDeterministic)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().is_deterministic);
@@ -237,8 +237,8 @@ TEST_F(TestReductionOperationFromNode, FromNodePreservesIsDeterministic)
 
 TEST_F(TestReductionOperationFromNode, BuildNodePreservesDefaultIsDeterministic)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsReductionAttributes();
@@ -249,8 +249,8 @@ TEST_F(TestReductionOperationFromNode, BuildNodePreservesDefaultIsDeterministic)
 
 TEST_F(TestReductionOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -306,7 +306,7 @@ TEST_F(TestReductionOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_reduction_1";
 
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -321,8 +321,8 @@ TEST_F(TestReductionOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestReductionOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -334,7 +334,7 @@ TEST_F(TestReductionOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ReductionOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

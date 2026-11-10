@@ -75,13 +75,14 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto token = bindShallowTensor<TokenDataType>(_params.tokenTensor, variantPack);
-        auto weight = bindShallowTensor<WeightDataType>(_params.weightTensor, variantPack);
-        auto firstTokenOffset
+        const auto token = bindShallowTensor<TokenDataType>(_params.tokenTensor, variantPack);
+        const auto weight = bindShallowTensor<WeightDataType>(_params.weightTensor, variantPack);
+        const auto firstTokenOffset
             = bindShallowTensor<int32_t>(_params.firstTokenOffsetTensor, variantPack);
         auto output = bindShallowTensor<OutputDataType>(_params.outputTensor, variantPack);
-        auto tokenIndex = bindOptionalShallowTensor<int32_t>(_params.tokenIndexTensor, variantPack);
-        auto tokenKs = bindOptionalShallowTensor<int32_t>(_params.tokenKsTensor, variantPack);
+        const auto tokenIndex
+            = bindOptionalShallowTensor<int32_t>(_params.tokenIndexTensor, variantPack);
+        const auto tokenKs = bindOptionalShallowTensor<int32_t>(_params.tokenKsTensor, variantPack);
 
         utilities::CpuFpReferenceMoeGroupedMatmul::
             forward<TokenDataType, WeightDataType, OutputDataType, ComputeDataType>(

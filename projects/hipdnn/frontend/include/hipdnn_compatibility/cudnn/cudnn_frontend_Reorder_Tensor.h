@@ -48,9 +48,9 @@ inline cudnnStatus_t cudnnReorderFilterAndBiasInt8x32(cudnnHandle_t handle,
         return CUDNN_STATUS_BAD_PARAM;
     }
 
-    auto conv_dims = int(conv_desc.getDimensionCount());
-    auto tensor_dims = int(tensor.getDimensionCount());
-    auto non_shape_dims = tensor_dims - conv_dims;
+    const auto conv_dims = int(conv_desc.getDimensionCount());
+    const auto tensor_dims = int(tensor.getDimensionCount());
+    const auto non_shape_dims = tensor_dims - conv_dims;
 
     if(non_shape_dims != 2 && non_shape_dims != 3)
     {

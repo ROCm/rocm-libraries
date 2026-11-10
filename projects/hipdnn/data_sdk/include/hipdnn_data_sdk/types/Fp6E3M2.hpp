@@ -130,7 +130,7 @@ inline uint8_t float_to_fp6_e3m2_bits(float f) noexcept
     if(exp <= 0)
     {
         mant |= 0x00800000; // Add implicit 1
-        auto shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
+        const auto shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
         if(shift > 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero

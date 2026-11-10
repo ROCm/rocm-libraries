@@ -31,13 +31,13 @@ TensorAttributesT makeBoolValueAttr(bool value)
 
 TEST(TestFlatbufferUtils, ExtractBoolValueAsBoolTrue)
 {
-    auto attr = makeBoolValueAttr(true);
+    const auto attr = makeBoolValueAttr(true);
     EXPECT_TRUE(extractValueFromTensorValue<bool>(attr, "p"));
 }
 
 TEST(TestFlatbufferUtils, ExtractBoolValueAsBoolFalse)
 {
-    auto attr = makeBoolValueAttr(false);
+    const auto attr = makeBoolValueAttr(false);
     EXPECT_FALSE(extractValueFromTensorValue<bool>(attr, "p"));
 }
 
@@ -62,16 +62,16 @@ flatbuffers::FlatBufferBuilder
         valueType = TensorValue::Float32Value;
     }
 
-    auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                   uid,
-                                                   "t",
-                                                   DataType::FLOAT,
-                                                   &dims,
-                                                   &dims,
-                                                   /*virtual_=*/false,
-                                                   valueType,
-                                                   valueOffset,
-                                                   isRuntimePassByValue);
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         uid,
+                                                         "t",
+                                                         DataType::FLOAT,
+                                                         &dims,
+                                                         &dims,
+                                                         /*virtual_=*/false,
+                                                         valueType,
+                                                         valueOffset,
+                                                         isRuntimePassByValue);
     builder.Finish(attrOffset);
     return builder;
 }
@@ -82,28 +82,32 @@ using hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor;
 
 TEST(TestFlatbufferUtils, IsPassByValueTensorFalseForOrdinaryDataTensor)
 {
-    auto builder = buildTensorAttributes(1, /*isRuntimePassByValue=*/false, /*withValue=*/false);
+    const auto builder
+        = buildTensorAttributes(1, /*isRuntimePassByValue=*/false, /*withValue=*/false);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
     EXPECT_FALSE(isPassByValueTensor(attr));
 }
 
 TEST(TestFlatbufferUtils, IsPassByValueTensorTrueForCompileTimeConstant)
 {
-    auto builder = buildTensorAttributes(1, /*isRuntimePassByValue=*/false, /*withValue=*/true);
+    const auto builder
+        = buildTensorAttributes(1, /*isRuntimePassByValue=*/false, /*withValue=*/true);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
     EXPECT_TRUE(isPassByValueTensor(attr));
 }
 
 TEST(TestFlatbufferUtils, IsPassByValueTensorTrueForRuntimeWithDefault)
 {
-    auto builder = buildTensorAttributes(1, /*isRuntimePassByValue=*/true, /*withValue=*/true);
+    const auto builder
+        = buildTensorAttributes(1, /*isRuntimePassByValue=*/true, /*withValue=*/true);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
     EXPECT_TRUE(isPassByValueTensor(attr));
 }
 
 TEST(TestFlatbufferUtils, IsPassByValueTensorTrueForRuntimeUserSupplied)
 {
-    auto builder = buildTensorAttributes(1, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const auto builder
+        = buildTensorAttributes(1, /*isRuntimePassByValue=*/true, /*withValue=*/false);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
     EXPECT_TRUE(isPassByValueTensor(attr));
 }
@@ -163,7 +167,7 @@ using hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack;
 
 TEST(TestFlatbufferUtils, ResolveScalarBakedValueIgnoresPack)
 {
-    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/false, /*withValue=*/true);
+    const auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/false, /*withValue=*/true);
     float differing = 99.0f;
     const std::unordered_map<int64_t, void*> pack{{7, &differing}};
     EXPECT_DOUBLE_EQ(resolveDoubleScalarFromVariantPack(attr, pack, "Epsilon"), 2.0);
@@ -171,7 +175,7 @@ TEST(TestFlatbufferUtils, ResolveScalarBakedValueIgnoresPack)
 
 TEST(TestFlatbufferUtils, ResolveScalarRuntimeWithDefaultIgnoresPack)
 {
-    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/true);
+    const auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/true);
     float differing = 99.0f;
     const std::unordered_map<int64_t, void*> pack{{7, &differing}};
     EXPECT_DOUBLE_EQ(resolveDoubleScalarFromVariantPack(attr, pack, "Epsilon"), 2.0);
@@ -179,7 +183,7 @@ TEST(TestFlatbufferUtils, ResolveScalarRuntimeWithDefaultIgnoresPack)
 
 TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarReadsPack)
 {
-    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
     float hostValue = 1e-5f;
     const std::unordered_map<int64_t, void*> pack{{7, &hostValue}};
     EXPECT_FLOAT_EQ(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), 1e-5f);
@@ -187,14 +191,14 @@ TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarReadsPack)
 
 TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarMissingSlotThrows)
 {
-    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
     const std::unordered_map<int64_t, void*> pack; // no slot for uid 7
     EXPECT_THROW(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), std::runtime_error);
 }
 
 TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarNullPointerThrows)
 {
-    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
     const std::unordered_map<int64_t, void*> pack{{7, nullptr}};
     EXPECT_THROW(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), std::runtime_error);
 }

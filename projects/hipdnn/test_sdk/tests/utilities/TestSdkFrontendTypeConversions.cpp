@@ -266,7 +266,7 @@ class TestPointwiseModeRoundTrip : public ::testing::TestWithParam<fe::Pointwise
 
 TEST_P(TestPointwiseModeRoundTrip, RoundTrip)
 {
-    auto mode = GetParam();
+    const auto mode = GetParam();
     EXPECT_EQ(sdkToFrontendPointwiseMode(frontendToSdkPointwiseMode(mode)), mode);
 }
 

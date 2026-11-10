@@ -21,11 +21,11 @@ ResampleBwdAttributes createValidAttributes()
 {
     ResampleBwdAttributes attrs;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 3, 16, 16});
     dyTensor->set_stride({768, 256, 16, 1});
     attrs.set_dy(dyTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 3, 32, 32});
     dxTensor->set_stride({3072, 1024, 32, 1});
     attrs.set_dx(dxTensor);
@@ -67,7 +67,7 @@ TEST(TestResampleBwdNode, PreValidateNode)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
@@ -78,7 +78,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingDyTensor)
     ResampleBwdAttributes attrs;
 
     // Set all required tensors except dy
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 3, 32, 32});
     dxTensor->set_stride({3072, 1024, 32, 1});
     attrs.set_dx(dxTensor);
@@ -92,7 +92,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingDyTensor)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -101,7 +101,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingDxTensor)
     ResampleBwdAttributes attrs;
 
     // Set all required tensors except dx
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 3, 16, 16});
     dyTensor->set_stride({768, 256, 16, 1});
     attrs.set_dy(dyTensor);
@@ -115,7 +115,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingDxTensor)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -124,11 +124,11 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingParameters)
     ResampleBwdAttributes attrs;
 
     // Set all required tensors but not data field parameters
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 3, 16, 16});
     dyTensor->set_stride({768, 256, 16, 1});
     attrs.set_dy(dyTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 3, 32, 32});
     dxTensor->set_stride({3072, 1024, 32, 1});
     attrs.set_dx(dxTensor);
@@ -137,7 +137,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingParameters)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -148,7 +148,7 @@ TEST(TestResampleBwdNode, PreValidateNodeAllValuesSet)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
@@ -160,7 +160,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMaxpoolRequiresIndex)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -173,7 +173,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMaxpoolAcceptsIntegerIndex)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
@@ -181,14 +181,14 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexDataType)
 {
     auto attrs = createValidAttributes();
     attrs.set_resample_mode(ResampleMode::MAXPOOL);
-    auto indexTensor = createValidIndexTensor();
+    const auto indexTensor = createValidIndexTensor();
     indexTensor->set_data_type(DataType::FLOAT);
     attrs.set_index(indexTensor);
 
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -200,7 +200,7 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidTensorRank)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -212,7 +212,7 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidDxRank)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -220,14 +220,14 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexRank)
 {
     auto attrs = createValidAttributes();
     attrs.set_resample_mode(ResampleMode::MAXPOOL);
-    auto indexTensor = createValidIndexTensor();
+    const auto indexTensor = createValidIndexTensor();
     indexTensor->set_dim({1, 3});
     attrs.set_index(indexTensor);
 
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -236,15 +236,15 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexRank)
 TEST(TestResampleBwdNode, InferPropertiesNode)
 {
     ResampleBwdAttributes attrs;
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 3, 16, 16});
     dyTensor->set_stride({768, 256, 16, 1});
     attrs.set_dy(dyTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     attrs.set_dx(dxTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_data_type(DataType::INT32);
     attrs.set_index(indexTensor);
 
@@ -256,7 +256,7 @@ TEST(TestResampleBwdNode, InferPropertiesNode)
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
     EXPECT_EQ(dxTensor->get_dim(), (std::vector<int64_t>{1, 3, 31, 31}));
     EXPECT_EQ(dxTensor->get_stride(), (std::vector<int64_t>{2883, 961, 31, 1}));
@@ -270,13 +270,13 @@ TEST(TestResampleBwdNode, GatherHipdnnTensor)
 {
     ResampleBwdAttributes attrs;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(50).set_name("DyTensor");
     attrs.set_dy(dyTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(51).set_name("DxTensor");
     attrs.set_dx(dxTensor);
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_uid(52).set_name("IndexTensor").set_data_type(DataType::INT32);
     attrs.set_index(indexTensor);
 

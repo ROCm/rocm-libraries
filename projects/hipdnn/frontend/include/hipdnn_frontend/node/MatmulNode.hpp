@@ -114,7 +114,7 @@ public:
         // Infer output strides if not set
         if(c->get_stride().empty())
         {
-            auto cStrides = hipdnn_data_sdk::utilities::generateStrides(c->get_dim());
+            const auto cStrides = hipdnn_data_sdk::utilities::generateStrides(c->get_dim());
             c->set_stride(cStrides);
         }
 

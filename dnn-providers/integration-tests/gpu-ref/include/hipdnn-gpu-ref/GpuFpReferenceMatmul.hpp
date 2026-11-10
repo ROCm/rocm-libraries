@@ -47,7 +47,7 @@ public:
     {
         validateMatmul<ADataType, BDataType, CDataType, ComputeDataType>(a, b, c);
 
-        auto defines = detail::
+        const auto defines = detail::
             buildMatmulDefines<ADataType, BDataType, CDataType, ComputeDataType, TILE_SIZE>(
                 a.dims().size());
 

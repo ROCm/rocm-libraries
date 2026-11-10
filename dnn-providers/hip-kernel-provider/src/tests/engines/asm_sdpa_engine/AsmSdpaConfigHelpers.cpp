@@ -21,7 +21,7 @@ static DataType toDataType(const std::string& configDataType)
                                                          {config::HALF, DataType::HALF},
                                                          {config::FLOAT, DataType::FLOAT}};
 
-    auto it = typeMap.find(configDataType);
+    auto const it = typeMap.find(configDataType);
     if(it == typeMap.end())
     {
         throw std::runtime_error("Unsupported datatype name in config: " + configDataType);
@@ -136,18 +136,18 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     // Use physical memory layout: B, Seq, H, D for compatibility with group mode
     const std::vector<int64_t> layout = {3, 1, 2, 0};
 
-    auto graph = std::make_shared<Graph>();
+    auto const graph = std::make_shared<Graph>();
     graph->set_io_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    auto const q = std::make_shared<TensorAttributes>();
     q->set_dim(qDims).set_stride(generateStrides(qDims, layout)).set_data_type(inDataType);
 
-    auto k = std::make_shared<TensorAttributes>();
+    auto const k = std::make_shared<TensorAttributes>();
     k->set_dim(kDims).set_stride(generateStrides(kDims, layout)).set_data_type(inDataType);
 
-    auto v = std::make_shared<TensorAttributes>();
+    auto const v = std::make_shared<TensorAttributes>();
     v->set_dim(vDims).set_stride(generateStrides(vDims, layout)).set_data_type(inDataType);
 
     if(config.mode == BatchMode::GROUP)

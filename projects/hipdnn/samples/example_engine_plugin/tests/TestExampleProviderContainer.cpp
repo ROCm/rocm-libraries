@@ -61,6 +61,7 @@ protected:
 
 TEST_F(ExampleProviderContainerTest, GetEngineManager_HasAllEngines)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto& manager = _container->getEngineManager();
     const auto ids = manager.getAllEngineIds();
     // The EngineManager should have 2 engines registered

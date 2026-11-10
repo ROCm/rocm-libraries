@@ -388,7 +388,7 @@ std::shared_ptr<BatchnormBackwardOperationDescriptor>
                               *attrs->inv_variance_tensor_uid,
                               "BatchnormBackwardOperationDescriptor::fromNode: InvVariance");
     }
-    for(auto uid : attrs->peer_stats_tensor_uid)
+    for(const auto uid : attrs->peer_stats_tensor_uid)
     {
         desc->_peerStatsDescs.push_back(findTensorInMap(
             tensorMap, uid, "BatchnormBackwardOperationDescriptor::fromNode: peer_stats"));

@@ -54,17 +54,17 @@ private:
         const std::vector<int64_t> dims = {2, 3};
         const std::vector<int64_t> strides = {3, 1};
 
-        auto offset = CreateTensorAttributesDirect(*fbb,
-                                                   uid,
-                                                   "t",
-                                                   DataType::FLOAT,
-                                                   &strides,
-                                                   &dims,
-                                                   /*virtual_=*/false,
-                                                   TensorValue::NONE,
-                                                   /*value=*/0,
-                                                   false,
-                                                   raggedOffset);
+        const auto offset = CreateTensorAttributesDirect(*fbb,
+                                                         uid,
+                                                         "t",
+                                                         DataType::FLOAT,
+                                                         &strides,
+                                                         &dims,
+                                                         /*virtual_=*/false,
+                                                         TensorValue::NONE,
+                                                         /*value=*/0,
+                                                         false,
+                                                         raggedOffset);
         fbb->Finish(offset);
 
         _map[uid] = flatbuffers::GetRoot<TensorAttributes>(fbb->GetBufferPointer());

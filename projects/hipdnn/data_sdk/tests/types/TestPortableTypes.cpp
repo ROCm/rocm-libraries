@@ -419,14 +419,14 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToFloat)
 
     // Use 2.0f which is exact for all types including fp8_e8m0 (power of 2)
     const T a(2.0f);
-    auto f = static_cast<float>(a);
+    const auto f = static_cast<float>(a);
     EXPECT_EQ(f, 2.0f);
 
     // 1.5f is not exact for fp8_e8m0 (only powers of 2)
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
         const T b(1.5f);
-        auto g = static_cast<float>(b);
+        const auto g = static_cast<float>(b);
         EXPECT_EQ(g, 1.5f);
     }
 }
@@ -436,7 +436,7 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
     using T = TypeParam;
 
     const T a(2.0f);
-    auto d = static_cast<double>(a);
+    const auto d = static_cast<double>(a);
     EXPECT_EQ(d, 2.0);
 }
 

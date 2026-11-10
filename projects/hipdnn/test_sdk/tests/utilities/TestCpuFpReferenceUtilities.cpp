@@ -31,7 +31,7 @@ protected:
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculation)
 {
     // Test 1D tensor index calculation
-    auto functor = makeParallelTensorFunctor(
+    const auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{10});
 
     std::vector<int64_t> indices0;
@@ -52,7 +52,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculati
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculation)
 {
-    auto functor = makeParallelTensorFunctor(
+    const auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{3, 4});
 
     std::vector<int64_t> indices0;
@@ -84,7 +84,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculati
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculation)
 {
-    auto functor = makeParallelTensorFunctor(
+    const auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{2, 3, 4});
 
     std::vector<int64_t> indices0;
@@ -109,7 +109,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculati
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculation)
 {
-    auto functor
+    const auto functor
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2});
 
@@ -154,10 +154,10 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleThreadExec
 {
     std::atomic<int> sum{0};
 
-    auto sumFunction
+    const auto sumFunction
         = [&sum](const std::vector<int64_t>& indices) { sum += static_cast<int>(indices[0]); };
 
-    auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{10});
+    const auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{10});
     functor(1); // Single thread
 
     EXPECT_EQ(sum.load(), 45);
@@ -167,10 +167,10 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicMultiThreadExecu
 {
     std::atomic<int> sum{0};
 
-    auto sumFunction
+    const auto sumFunction
         = [&sum](const std::vector<int64_t>& indices) { sum += static_cast<int>(indices[0]); };
 
-    auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{100});
+    const auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{100});
     functor(4); // Four threads
 
     // Sum should be 0+1+2+...+99 = 4950
@@ -187,11 +187,12 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicElementCoverage)
         count = 0;
     }
 
-    auto countFunction = [&counts](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&counts](const std::vector<int64_t>& indices) {
         counts[static_cast<size_t>(indices[0])]++;
     };
 
-    auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{TENSOR_SIZE});
+    const auto functor
+        = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{TENSOR_SIZE});
     functor(3);
 
     for(size_t i = 0; i < TENSOR_SIZE; ++i)
@@ -207,13 +208,14 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DElementCoverag
     std::set<std::pair<size_t, size_t>> processedElements;
     std::mutex elementsMutex;
 
-    auto recordFunction
+    const auto recordFunction
         = [&processedElements, &elementsMutex](const std::vector<int64_t>& indices) {
               const std::lock_guard<std::mutex> lock(elementsMutex);
               processedElements.insert({indices[0], indices[1]});
           };
 
-    auto functor = makeParallelTensorFunctor(recordFunction, std::vector<int64_t>{HEIGHT, WIDTH});
+    const auto functor
+        = makeParallelTensorFunctor(recordFunction, std::vector<int64_t>{HEIGHT, WIDTH});
     functor(2); // Two threads
 
     EXPECT_EQ(processedElements.size(), HEIGHT * WIDTH);
@@ -259,17 +261,17 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStrideSizesValid
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
 {
     std::atomic<int> count{0};
-    auto countFunction = [&count](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&count](const std::vector<int64_t>& indices) {
         (void)indices;
         count++;
     };
 
-    auto functor1x1 = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1});
+    const auto functor1x1 = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1});
     functor1x1(1);
     EXPECT_EQ(count.load(), 1);
 
     count = 0;
-    auto functor1x10 = makeParallelTensorFunctor(
+    const auto functor1x10 = makeParallelTensorFunctor(
         [&count](const std::vector<int64_t>& indices) {
             (void)indices;
             count++;
@@ -279,7 +281,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
     EXPECT_EQ(count.load(), 10);
 
     count = 0;
-    auto functorSmall = makeParallelTensorFunctor(
+    const auto functorSmall = makeParallelTensorFunctor(
         [&count](const std::vector<int64_t>& indices) {
             (void)indices;
             count++;
@@ -292,12 +294,12 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreadsFallsBackToSingleThread)
 {
     std::atomic<int> count{0};
-    auto countFunction = [&count](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&count](const std::vector<int64_t>& indices) {
         (void)indices;
         count++;
     };
 
-    auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{5});
+    const auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{5});
     functor(0);
 
     EXPECT_EQ(count.load(), 5);
@@ -308,19 +310,19 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerf
     constexpr size_t TENSOR_SIZE = 10000;
     std::atomic<size_t> sum{0};
 
-    auto sumFunction
+    const auto sumFunction
         = [&sum](const std::vector<int64_t>& indices) { sum += static_cast<size_t>(indices[0]); };
 
-    auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{TENSOR_SIZE});
+    const auto functor = makeParallelTensorFunctor(sumFunction, std::vector<int64_t>{TENSOR_SIZE});
 
-    auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::high_resolution_clock::now();
     functor(std::thread::hardware_concurrency());
-    auto end = std::chrono::high_resolution_clock::now();
+    const auto end = std::chrono::high_resolution_clock::now();
 
     // Verify correctness: sum of 0 to 9999 = 49995000
     EXPECT_EQ(sum.load(), 49995000);
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     if(duration.count() >= 1000)
     {
         FAIL() << "Parallel execution took too long: " << duration.count() << "ms";
@@ -331,19 +333,19 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerf
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEmptyTensor)
 {
     std::atomic<int> count{0};
-    auto countFunction = [&count](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&count](const std::vector<int64_t>& indices) {
         (void)indices;
         count++;
     };
 
     // Test with empty dimensions vector
-    auto functorEmpty = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{});
+    const auto functorEmpty = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{});
     functorEmpty(2);
     EXPECT_EQ(count.load(), 0); // No elements to process
 
     count = 0;
     // Test with zero-sized dimension
-    auto functorZero = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{0});
+    const auto functorZero = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{0});
     functorZero(2);
     EXPECT_EQ(count.load(), 0); // No elements to process
 }
@@ -351,7 +353,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEmptyTensor)
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculation)
 {
     // Test 5D tensor to ensure we support higher dimensions
-    auto functor
+    const auto functor
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2, 2});
 
@@ -385,19 +387,19 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargeDimensions)
 {
     // Test with large dimension sizes
     std::atomic<int> count{0};
-    auto countFunction = [&count](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&count](const std::vector<int64_t>& indices) {
         (void)indices;
         count++;
     };
 
     // Test with large single dimension
-    auto functorLarge = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1000});
+    const auto functorLarge = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1000});
     functorLarge(4);
     EXPECT_EQ(count.load(), 1000);
 
     count = 0;
     // Test with multiple large dimensions
-    auto functorMultiLarge
+    const auto functorMultiLarge
         = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{10, 100});
     functorMultiLarge(2);
     EXPECT_EQ(count.load(), 1000);
@@ -409,14 +411,14 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicIrregularShapes)
     std::set<std::tuple<size_t, size_t, size_t>> processedElements;
     std::mutex elementsMutex;
 
-    auto recordFunction
+    const auto recordFunction
         = [&processedElements, &elementsMutex](const std::vector<int64_t>& indices) {
               const std::lock_guard<std::mutex> lock(elementsMutex);
               processedElements.insert({indices[0], indices[1], indices[2]});
           };
 
     // Irregular 3D tensor: 7x3x5
-    auto functor = makeParallelTensorFunctor(recordFunction, std::vector<int64_t>{7, 3, 5});
+    const auto functor = makeParallelTensorFunctor(recordFunction, std::vector<int64_t>{7, 3, 5});
     functor(3);
 
     EXPECT_EQ(processedElements.size(), 7 * 3 * 5);
@@ -439,13 +441,13 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDim
 {
     // Test with dimensions that have size 1 (broadcasting-like scenarios)
     std::atomic<int> count{0};
-    auto countFunction = [&count](const std::vector<int64_t>& indices) {
+    const auto countFunction = [&count](const std::vector<int64_t>& indices) {
         (void)indices;
         count++;
     };
 
     // Test 4D tensor with some dimensions of size 1: [1, 5, 1, 3]
-    auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1, 5, 1, 3});
+    const auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{1, 5, 1, 3});
     functor(2);
     EXPECT_EQ(count.load(), 15); // 1 * 5 * 1 * 3 = 15
 
@@ -476,12 +478,13 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicThreadSafety)
         count = 0;
     }
 
-    auto threadSafeFunction = [&elementCounts](const std::vector<int64_t>& indices) {
+    const auto threadSafeFunction = [&elementCounts](const std::vector<int64_t>& indices) {
         // Each element should be processed exactly once across all threads
         elementCounts[static_cast<size_t>(indices[0])]++;
     };
 
-    auto functor = makeParallelTensorFunctor(threadSafeFunction, std::vector<int64_t>{TENSOR_SIZE});
+    const auto functor
+        = makeParallelTensorFunctor(threadSafeFunction, std::vector<int64_t>{TENSOR_SIZE});
     functor(8); // Use many threads to stress test
 
     // Verify each element was processed exactly once
@@ -733,7 +736,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchConstructsOn
     constexpr std::size_t THREAD_COUNT = 4;
 
     std::atomic<int> visits{0};
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)indices;
             scratch.itemsSeen++;
@@ -755,7 +758,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchReusesScratc
     constexpr int64_t ELEMENT_COUNT = 10;
     int maxItemsSeen = 0;
 
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&maxItemsSeen](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)indices;
             scratch.itemsSeen++;
@@ -781,7 +784,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchIsolatesThre
     std::size_t arrivals = 0;
     std::set<const void*> addresses;
 
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)indices;
             if(scratch.itemsSeen++ > 0)
@@ -817,7 +820,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchVisitsEveryI
         count = 0;
     }
 
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&visitCounts](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)scratch;
             visitCounts[static_cast<size_t>((indices[0] * WIDTH) + indices[1])]++;
@@ -838,7 +841,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchDoesNothingF
     CountingScratch::constructions = 0;
     std::atomic<int> visits{0};
 
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)scratch;
             (void)indices;
@@ -874,7 +877,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStopsOnFalseForM
 {
     std::atomic<int> visits{0};
 
-    auto functor
+    const auto functor
         = makeParallelTensorFunctor(MutableIndexEarlyExit{&visits}, std::vector<int64_t>{100});
     functor(1);
 
@@ -886,7 +889,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchStopsOnFalse
 {
     std::atomic<int> visits{0};
 
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+    const auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&visits](CountingScratch& scratch, std::vector<int64_t>& indices) {
             (void)scratch;
             visits++;

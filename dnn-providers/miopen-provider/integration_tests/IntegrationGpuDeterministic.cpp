@@ -81,8 +81,8 @@ void assertBundleOutputsMatch(GraphTensorBundle& bundle1,
 {
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    auto& tensor1 = bundle1.tensors.at(outputTensorId);
-    auto& tensor2 = bundle2.tensors.at(outputTensorId);
+    const auto& tensor1 = bundle1.tensors.at(outputTensorId);
+    const auto& tensor2 = bundle2.tensors.at(outputTensorId);
 
     tensor1->markDeviceModified();
     tensor2->markDeviceModified();
@@ -165,7 +165,7 @@ inline std::vector<FusedConvTestCase> getDeterministicFusedConvTestCases()
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
     };
 
-    auto activCases = test_activation_common::createFwdActivationSmokeCases();
+    const auto activCases = test_activation_common::createFwdActivationSmokeCases();
 
     std::vector<FusedConvTestCase> fusedCases;
     for(const auto& convCase : convCases)
@@ -198,14 +198,14 @@ protected:
         graphObj.set_name("DeterministicConvForwardTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder)));
-        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder)));
 
         ConvFpropAttributes convAttrs;
@@ -214,7 +214,7 @@ protected:
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
-        auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yAttr->set_output(true);
 
         auto result = graphObj.build(_handle);
@@ -279,14 +279,14 @@ protected:
         graphObj.set_name("DeterministicConvDgradTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder)));
-        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder)));
 
         ConvDgradAttributes convAttrs;
@@ -295,7 +295,7 @@ protected:
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
-        auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        const auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
         dxTensorAttr->set_output(true);
         dxTensorAttr->set_dim(testCase.xDims);
         dxTensorAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
@@ -361,14 +361,14 @@ protected:
         graphObj.set_name("DeterministicConvWgradTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder)));
-        auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder)));
 
         ConvWgradAttributes convAttrs;
@@ -377,7 +377,7 @@ protected:
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
-        auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
+        const auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwTensorAttr->set_output(true);
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
@@ -445,14 +445,14 @@ protected:
                                  : "DeterministicConvFwdActivTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder)));
-        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder)));
 
         ConvFpropAttributes convAttrs;
@@ -461,7 +461,7 @@ protected:
         convAttrs.set_stride(convTestCase.convStride);
         convAttrs.set_dilation(convTestCase.convDilation);
 
-        auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
         std::shared_ptr<TensorAttributes> biasTensorAttr;
         std::shared_ptr<TensorAttributes> yBiasTensorAttr;
@@ -489,7 +489,7 @@ protected:
             activAttrs.set_relu_upper_clip(activTestCase.reluUpperClip.value());
         }
 
-        auto yTensorAttr
+        const auto yTensorAttr
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
         yTensorAttr->set_output(true);
 
@@ -541,36 +541,36 @@ protected:
     void runNoSolverTest()
     {
         const BatchnormTestCase& testCase = GetParam();
-        auto derivedDims = getDerivedShape(testCase.dims);
+        const auto derivedDims = getDerivedShape(testCase.dims);
 
         Graph graphObj;
         graphObj.set_name("IntegrationGpuDeterministicBnNoSolverTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = hipdnn_frontend::DataType::FLOAT;
+        const auto dataType = hipdnn_frontend::DataType::FLOAT;
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(dataType)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("X", testCase.dims, generateStrides(testCase.dims)));
-        auto meanTensorAttr = std::make_shared<TensorAttributes>(
+        const auto meanTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("mean", dataType, derivedDims, generateStrides(derivedDims)));
-        auto invVarianceTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto invVarianceTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "inv_variance", dataType, derivedDims, generateStrides(derivedDims)));
-        auto scaleTensorAttr = std::make_shared<TensorAttributes>(
+        const auto scaleTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("scale", dataType, derivedDims, generateStrides(derivedDims)));
-        auto biasTensorAttr = std::make_shared<TensorAttributes>(
+        const auto biasTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("bias", dataType, derivedDims, generateStrides(derivedDims)));
 
         const BatchnormInferenceAttributes bnAttrs;
 
-        auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
-                                                        meanTensorAttr,
-                                                        invVarianceTensorAttr,
-                                                        scaleTensorAttr,
-                                                        biasTensorAttr,
-                                                        bnAttrs);
+        const auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
+                                                              meanTensorAttr,
+                                                              invVarianceTensorAttr,
+                                                              scaleTensorAttr,
+                                                              biasTensorAttr,
+                                                              bnAttrs);
         yTensorAttr->set_output(true);
 
         auto result = graphObj.validate();
@@ -583,7 +583,7 @@ protected:
         result = graphObj.get_ranked_engine_ids(rankedEngineIds);
 
         bool deterministicEngineFound = false;
-        for(auto engineId : rankedEngineIds)
+        for(const auto engineId : rankedEngineIds)
         {
             if(engineId == MIOPEN_ENGINE_DETERMINISTIC_ID)
             {
@@ -621,12 +621,12 @@ protected:
         graphObj.set_name("DeterministicUnaryActivationTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("x", dims, generateStrides(dims)));
 
         PointwiseAttributes pwAttrs;
@@ -644,7 +644,7 @@ protected:
             pwAttrs.set_relu_lower_clip_slope(testCase.reluLowerClipSlope.value());
         }
 
-        auto yTensorAttr = graphObj.pointwise(xTensorAttr, pwAttrs);
+        const auto yTensorAttr = graphObj.pointwise(xTensorAttr, pwAttrs);
         yTensorAttr->set_output(true);
 
         auto result = graphObj.build(_handle);
@@ -699,20 +699,20 @@ protected:
         graphObj.set_name("DeterministicBinaryPointwiseTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xTensorAttr = std::make_shared<TensorAttributes>(
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("x", dims, generateStrides(dims)));
-        auto yTensorAttr = std::make_shared<TensorAttributes>(
+        const auto yTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("y", dims, generateStrides(dims)));
 
         PointwiseAttributes pwAttrs;
         pwAttrs.set_mode(sdkToFrontendPointwiseMode(testCase.mode));
 
-        auto outTensorAttr = graphObj.pointwise(xTensorAttr, yTensorAttr, pwAttrs);
+        const auto outTensorAttr = graphObj.pointwise(xTensorAttr, yTensorAttr, pwAttrs);
         outTensorAttr->set_output(true);
 
         auto result = graphObj.build(_handle);

@@ -40,7 +40,7 @@ protected:
 
     void SetUp() override
     {
-        auto addTensor =
+        const auto addTensor =
             [&](int64_t uid, const auto& dims, const auto& strides, DataType dt = DataType::FLOAT) {
                 TensorAttributesT attrs;
                 attrs.uid = uid;
@@ -100,8 +100,8 @@ protected:
 
 TEST_F(TestBatchnormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -111,16 +111,16 @@ TEST_F(TestBatchnormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestBatchnormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BatchnormBackwardAttributes);
-    auto desc = std::static_pointer_cast<BatchnormBackwardOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<BatchnormBackwardOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     EXPECT_EQ(desc->getData().dy_tensor_uid, K_BN_BWD_TENSOR_DY_UID);
@@ -134,16 +134,16 @@ TEST_F(TestBatchnormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestBatchnormBackwardOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestBatchnormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     // DY tensor
     ASSERT_NE(desc->getDyDesc(), nullptr);
@@ -205,8 +205,8 @@ TEST_F(TestBatchnormBackwardOperationFromNode, SetsTensorReferencesWithFullValue
 
 TEST_F(TestBatchnormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_BN_BWD_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_BN_BWD_TENSOR_X_UID]);
@@ -221,7 +221,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDyTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_DY_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -230,7 +230,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDyTensor)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -239,7 +239,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -248,7 +248,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDxTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_DX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -257,7 +257,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDxTensor)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_DSCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -266,7 +266,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingDbiasTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_DBIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -283,7 +283,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -300,7 +300,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -309,7 +309,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWhenOptionalMeanUidSetButTen
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -319,7 +319,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, BuildNodeRoundTrip)
 {
     auto node = createStandardNode();
     node.name = "bn_bwd_round_trip";
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -355,7 +355,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, BuildNodeRoundTripWithOnlyRequire
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsBatchnormBackwardAttributes();
@@ -378,7 +378,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_bn_bwd_1";
 
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -393,8 +393,8 @@ TEST_F(TestBatchnormBackwardOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestBatchnormBackwardOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -406,7 +406,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -417,7 +417,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
 {
     auto node = createStandardNode();
     node.name = "bn_bwd_getattr";
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type via getAttribute
     hipdnnDataType_t computeType = {};
@@ -623,8 +623,8 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
 
 TEST_F(TestBatchnormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     // 6 required + 2 optional (mean, inv_variance) + 2 peer_stats = 10
@@ -654,7 +654,7 @@ TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithWrongAttributesType)
 TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingPeerStatsTensor)
 {
     _tensorMap.erase(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);

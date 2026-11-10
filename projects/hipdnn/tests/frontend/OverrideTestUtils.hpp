@@ -117,7 +117,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     const std::vector<int64_t> packedStrides
         = strides.empty() ? hipdnn_data_sdk::utilities::generateStrides(dims) : strides;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim(dims)
@@ -128,7 +128,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     attrs.set_name("relu_node");
     attrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2)
         .set_dim(dims)
         .set_stride(packedStrides)

@@ -46,27 +46,27 @@ class IntegrationLayerNormDescriptorLowering : public IntegrationTestFixture
 // serialized graph, and verifies all tensor and operation attributes match.
 TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestLayerNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_LAYERNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_LAYERNORM_TENSOR_X_DIMS)).set_stride(toVec(K_LAYERNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_LAYERNORM_TENSOR_SCALE_UID).set_name("SCALE").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_LAYERNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_LAYERNORM_TENSOR_BIAS_UID).set_name("BIAS").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_LAYERNORM_TENSOR_BIAS_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(K_LAYERNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
@@ -188,27 +188,27 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidLayerNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_LAYERNORM_TENSOR_X_DIMS)).set_stride(toVec(K_LAYERNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("SCALE").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_LAYERNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("BIAS").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_LAYERNORM_TENSOR_BIAS_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
@@ -286,27 +286,27 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 // Inference mode: mean and inv_variance should not appear in the serialized graph.
 TEST_F(IntegrationLayerNormDescriptorLowering, InferenceModeOmitsMeanAndInvVariance)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("InferenceLayerNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_LAYERNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_LAYERNORM_TENSOR_X_DIMS)).set_stride(toVec(K_LAYERNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_LAYERNORM_TENSOR_SCALE_UID).set_name("SCALE").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_LAYERNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_LAYERNORM_TENSOR_BIAS_UID).set_name("BIAS").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_LAYERNORM_TENSOR_BIAS_DIMS))
         .set_stride(toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(K_LAYERNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
         .set_data_type(DataType::FLOAT)

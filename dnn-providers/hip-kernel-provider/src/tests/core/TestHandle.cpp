@@ -29,7 +29,7 @@ TEST(TestHandle, GetEngineManagerWithContainer)
     Handle handle;
     handle.container = std::make_shared<hip_kernel_provider::core::Container>();
 
-    auto& engineManager = handle.getEngineManager();
+    auto const& engineManager = handle.getEngineManager();
     (void)engineManager;
 }
 

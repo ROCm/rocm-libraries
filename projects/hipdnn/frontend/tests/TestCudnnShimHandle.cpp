@@ -156,7 +156,7 @@ TEST_F(TestCudnnShimHandle, CreateCudnnHandleReturnsManagedHandleAndDestroysOnSc
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     {
-        auto handle = create_cudnn_handle();
+        const auto handle = create_cudnn_handle();
         ASSERT_NE(handle, nullptr);
         EXPECT_EQ(*handle, fakeHandle);
     }

@@ -108,7 +108,7 @@ public:
 
     VariantPack_v8&& build()
     {
-        auto status = m_variant_pack.initialize_managed_backend_pointer(
+        const auto status = m_variant_pack.initialize_managed_backend_pointer(
             CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(status != CUDNN_STATUS_SUCCESS)
         {

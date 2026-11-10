@@ -96,7 +96,7 @@ int main(int argc, char** argv) noexcept
     // runs, so per-fixture SKIP_IF_NO_DEVICES is too late. Bail early on a
     // no-GPU runner so ctest reports PASS.
     int deviceCount = 0;
-    auto deviceStatus = hipGetDeviceCount(&deviceCount);
+    const auto deviceStatus = hipGetDeviceCount(&deviceCount);
     if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
     {
         std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
@@ -224,13 +224,13 @@ int main(int argc, char** argv) noexcept
         {
             engineName = parser.get<std::string>("--test-engine");
         }
-        auto failOnUnsupported = parser.get<bool>("--fail-on-unsupported");
-        auto skipGraphValidation = parser.get<bool>("--skip-graph-validation");
+        const auto failOnUnsupported = parser.get<bool>("--fail-on-unsupported");
+        const auto skipGraphValidation = parser.get<bool>("--skip-graph-validation");
 
         std::optional<std::filesystem::path> configPath;
         if(parser.is_used("--test-config"))
         {
-            auto configPathArg = parser.get<std::string>("--test-config");
+            const auto configPathArg = parser.get<std::string>("--test-config");
             try
             {
                 configPath = std::filesystem::canonical(configPathArg);
@@ -267,7 +267,7 @@ int main(int argc, char** argv) noexcept
 
         // Bundles are on by default; --no-bundles is the explicit opt-out.
         // HIPDNN_TEST_ALLOW_BUNDLES (handled in TestConfig) overrides.
-        auto allowBundles = !parser.get<bool>("--no-bundles");
+        const auto allowBundles = !parser.get<bool>("--no-bundles");
 
         std::optional<std::filesystem::path> goldenDataDir;
         if(parser.is_used("--golden-data-dir"))
@@ -331,7 +331,7 @@ int main(int argc, char** argv) noexcept
         if(parser.is_used("--test-article"))
         {
             // Validate and canonicalize article path (resolves relative paths)
-            auto articlePathArg = parser.get<std::string>("--test-article");
+            const auto articlePathArg = parser.get<std::string>("--test-article");
             try
             {
                 articlePath = std::filesystem::canonical(articlePathArg);
@@ -356,7 +356,7 @@ int main(int argc, char** argv) noexcept
         // Enable support matrix generation if requested
         if(parser.is_used("--generate-support-matrix"))
         {
-            auto outputFile = parser.get<std::string>("--generate-support-matrix");
+            const auto outputFile = parser.get<std::string>("--generate-support-matrix");
             hipdnn_integration_tests::SupportMatrixCollector::get().setEnabled(true);
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
@@ -575,7 +575,8 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
-            auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+            const auto& observationLog
+                = hipdnn_integration_tests::bundle::SupportObservationLog::get();
 
             // Named field assignment, not designated initializers: this is C++17.
             hipdnn_integration_tests::bundle::AuthoringRunSummary runSummary;

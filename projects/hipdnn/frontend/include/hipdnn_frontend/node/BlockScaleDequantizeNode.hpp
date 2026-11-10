@@ -62,8 +62,8 @@ public:
                                "BlockScaleDequantizeNode block_size must not be empty");
 
         // SECTION 2: Validate tensor dimensions (when set)
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(detail::areTensorDimensionsSet(x))
         {
@@ -104,8 +104,8 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(!x)
         {

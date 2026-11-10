@@ -51,7 +51,7 @@ TYPED_TEST(CpuFpReferenceBlockScaleDequantizeTyped, IdentityScale)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     for(int b = 0; b < 2; ++b)
     {
         for(int c = 0; c < 4; ++c)
@@ -78,7 +78,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeTyped, BFloat16InBFloat16Out)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-2f; // bfloat16 has ~2 decimal digits of precision
+    const auto tolerance = 1e-2f; // bfloat16 has ~2 decimal digits of precision
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 0)), 2.0f * 0.5f, tolerance);
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 1)), 4.0f * 0.5f, tolerance);
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 2)), 1.0f * 2.0f, tolerance);
@@ -102,7 +102,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, NonTrivialScale)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), 1.0f * 2.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), 2.0f * 2.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 2), 3.0f * 0.5f, tolerance);
@@ -135,7 +135,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, MultiDimBlocking)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {4}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     // Block (0,0,0): x[0][0][0..3] => scale[0][0][0] = 1.0
     EXPECT_NEAR(yTensor.getHostValue(0, 0, 0), 1.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 0, 3), 1.0f, tolerance);
@@ -170,7 +170,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, MultiTrailingDimBlockSize)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2, 2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     // Block (0,0): x[0][0..1][0..1] => scale[0][0][0] = 1.0
     EXPECT_NEAR(yTensor.getHostValue(0, 0, 0), 1.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1, 1), 1.0f, tolerance);
@@ -205,7 +205,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, NegativeXValues)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), -2.0f * 3.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), -1.0f * 3.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 2), 0.0f * 0.5f, tolerance);
@@ -229,7 +229,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, IsNegativeScaleFloat)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, true);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), 8.0f * 0.125f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), 8.0f * 0.125f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 2), 16.0f * 0.5f, tolerance);
@@ -249,7 +249,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, NormalScaleMultiplication)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), 0.5f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), 1.0f, tolerance);
 }
@@ -278,7 +278,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp8, E8M0ScaleDequantize)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), 3.0f * 1.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), 3.0f * 1.0f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 2), 5.0f * 2.0f, tolerance);
@@ -305,7 +305,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp8, IsNegativeScaleE8M0)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, true);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     EXPECT_NEAR(yTensor.getHostValue(0, 0), 8.0f * 0.5f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 1), 8.0f * 0.5f, tolerance);
     EXPECT_NEAR(yTensor.getHostValue(0, 2), 16.0f * 0.25f, tolerance);
@@ -432,7 +432,7 @@ TYPED_TEST(CpuFpReferenceMxDequantize, WithE8m0Scale)
 
     CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false);
 
-    auto tolerance = 1e-2f;
+    const auto tolerance = 1e-2f;
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 0)), 1.0f * 1.0f, tolerance);
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 1)), 1.0f * 1.0f, tolerance);
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 2)), 2.0f * 2.0f, tolerance);

@@ -113,7 +113,7 @@ function(add_clang_tidy_custom_target)
         )
     else()
         message(${_not_found_log_level}
-                "run-clang-tidy-20 not found. The 'tidy' targets will not be available."
+                "run-clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} not found. The 'tidy' targets will not be available."
         )
     endif()
 endfunction()

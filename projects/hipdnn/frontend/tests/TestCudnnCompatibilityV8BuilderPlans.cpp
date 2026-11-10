@@ -83,7 +83,7 @@ protected:
 
     BuildFailure loadFailure(const std::string& json)
     {
-        return failureOf([this, &json] { [[maybe_unused]] auto plan = loaded(json); });
+        return failureOf([this, &json] { [[maybe_unused]] const auto plan = loaded(json); });
     }
 
     // The hipDNN ENGINECFG of the engine's knob-free plans.
@@ -147,7 +147,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, ConfigRequired)
 {
     fe::ExecutionPlanBuilder_v8 builder;
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto plan = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).empty());
@@ -161,7 +161,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, WrongKindConfigRejected)
     builder.setEngineConfig(notAConfig.get_desc(), "ConvFwd_");
 
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto plan = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).empty());
@@ -173,7 +173,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, HandleRequiredForLoadedPlan)
 
     fe::ExecutionPlanBuilder_v8 noHandle;
     const BuildFailure failure = failureOf(
-        [&noHandle, &text] { [[maybe_unused]] auto plan = noHandle.loadFromJson(text); });
+        [&noHandle, &text] { [[maybe_unused]] const auto plan = noHandle.loadFromJson(text); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(deserializeCalls(), 0);
@@ -420,7 +420,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, VariantPackCountMismatchRejected)
         .setUids(static_cast<std::int64_t>(uids.size()), uids.data());
 
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto pack = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR).empty());
@@ -438,7 +438,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, VariantPackRequiresPointersAndIds)
             builder.setDataPointers(static_cast<std::int64_t>(pointers.size()), pointers.data());
         }
         const BuildFailure failure
-            = failureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
+            = failureOf([&builder] { [[maybe_unused]] const auto pack = builder.build(); });
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     }
@@ -449,7 +449,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, VariantPackRequiresPointersAndIds)
     fe::VariantPackBuilder_v8 empty;
     empty.setDataPointers(0, noPointers.data()).setUids(0, noUids.data());
     const BuildFailure failure
-        = failureOf([&empty] { [[maybe_unused]] auto pack = empty.build(); });
+        = failureOf([&empty] { [[maybe_unused]] const auto pack = empty.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 
@@ -464,7 +464,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, ExecuteIsOneBackendCall)
     auto* const hipdnnPack = created(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR).back();
 
     // Any other backend call fails the strict mock.
-    auto strict = std::make_shared<::testing::StrictMock<Mock_hipdnn_backend>>();
+    const auto strict = std::make_shared<::testing::StrictMock<Mock_hipdnn_backend>>();
     EXPECT_CALL(*strict, backendExecute(_handle, hipdnnPlan, hipdnnPack))
         .WillOnce(::testing::Return(HIPDNN_STATUS_SUCCESS));
     hipdnn_frontend::detail::IHipdnnBackend::setInstance(strict);
@@ -542,7 +542,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, PlansFromTwoThreadsShareDefaultConf
         for(int i = 0; i < PLANS; ++i)
         {
             const BuildFailure failure = failureOf(
-                [&config] { [[maybe_unused]] auto plan = planFor(config, "ConvFwd_"); });
+                [&config] { [[maybe_unused]] const auto plan = planFor(config, "ConvFwd_"); });
             if(failure.thrown)
             {
                 ++failures;

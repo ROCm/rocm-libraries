@@ -72,7 +72,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     std::mutex mtx;
     std::atomic<size_t> comparedCount(0);
 
-    auto diffFunc = [&](const std::vector<int64_t>& indices) {
+    const auto diffFunc = [&](const std::vector<int64_t>& indices) {
         if(isRagged && raggedLayout->isOutOfBlock(indices))
         {
             return;
@@ -91,8 +91,9 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
             comparedCount.fetch_add(1, std::memory_order_relaxed);
         }
 
-        auto absDiff = static_cast<float>(fabs(implValue - refValue));
-        auto threshold = absoluteTolerance + relativeTolerance * fabs(static_cast<float>(refValue));
+        const auto absDiff = static_cast<float>(fabs(implValue - refValue));
+        const auto threshold
+            = absoluteTolerance + relativeTolerance * fabs(static_cast<float>(refValue));
 
         if(absDiff > threshold)
         {
@@ -117,7 +118,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
                 }
                 else
                 {
-                    auto minIt
+                    const auto minIt
                         = std::min_element(summary.worstMismatches.begin(),
                                            summary.worstMismatches.end(),
                                            [](const TensorDiffEntry& a, const TensorDiffEntry& b) {
@@ -135,7 +136,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
         }
     };
 
-    auto parallelFunc
+    const auto parallelFunc
         = hipdnn_test_sdk::detail::makeParallelTensorFunctor(diffFunc, reference.dims());
     parallelFunc(std::thread::hardware_concurrency());
 
@@ -197,7 +198,7 @@ inline void printRaggedLayoutMismatch(std::ostream& os,
                                       const hipdnn_data_sdk::utilities::ITensor& reference,
                                       const hipdnn_data_sdk::utilities::ITensor& implementation)
 {
-    auto describeLayout = [](const hipdnn_data_sdk::utilities::ITensor& tensor) {
+    const auto describeLayout = [](const hipdnn_data_sdk::utilities::ITensor& tensor) {
         const auto layout = tensor.raggedIterationInfo();
         if(!layout.has_value())
         {
@@ -224,7 +225,7 @@ void printTensorDiff(std::ostream& os,
                      float relativeTolerance,
                      size_t maxMismatches = 5)
 {
-    auto summary = computeTensorDiff<T>(
+    const auto summary = computeTensorDiff<T>(
         reference, implementation, absoluteTolerance, relativeTolerance, maxMismatches);
     printTensorDiffSummary(os, tensorName, summary);
 }

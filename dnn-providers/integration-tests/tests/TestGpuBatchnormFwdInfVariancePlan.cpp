@@ -68,7 +68,7 @@ flatbuffers::FlatBufferBuilder
     tensors.push_back(
         createScalarTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType, "epsilon"));
 
-    auto attrs = CreateBatchnormInferenceAttributesVarianceExt(
+    const auto attrs = CreateBatchnormInferenceAttributesVarianceExt(
         builder, xUid, meanUid, varianceUid, scaleUid, biasUid, yUid, epsilonUid);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -76,13 +76,13 @@ flatbuffers::FlatBufferBuilder
                                      computeDataType,
                                      NodeAttributes::BatchnormInferenceAttributesVarianceExt,
                                      attrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "batchnormWithVariance_Graph",
-                                   computeDataType,
-                                   ioDataType,
-                                   ioDataType,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "batchnormWithVariance_Graph",
+                                         computeDataType,
+                                         ioDataType,
+                                         ioDataType,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -122,7 +122,7 @@ flatbuffers::FlatBufferBuilder createBatchnormWithVarianceGraphWithRuntimeEpsilo
                                                    builder.CreateStruct(epsilonValue).Union(),
                                                    true));
 
-    auto attrs = CreateBatchnormInferenceAttributesVarianceExt(builder, 1, 5, 6, 3, 4, 2, 7);
+    const auto attrs = CreateBatchnormInferenceAttributesVarianceExt(builder, 1, 5, 6, 3, 4, 2, 7);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -131,7 +131,7 @@ flatbuffers::FlatBufferBuilder createBatchnormWithVarianceGraphWithRuntimeEpsilo
                                      NodeAttributes::BatchnormInferenceAttributesVarianceExt,
                                      attrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "test", DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
@@ -141,8 +141,9 @@ flatbuffers::FlatBufferBuilder createBatchnormWithVarianceGraphWithRuntimeEpsilo
 
 TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -152,7 +153,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, PlanConstruction)
                                                 DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuBatchnormFwdInfVariancePlan<float, float, float, float, float>*>(
@@ -163,8 +164,9 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, PlanConstruction)
 
 TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -195,8 +197,8 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicable)
 
 TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -211,8 +213,8 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, BuildNodePlanThrowsForWrongAttri
 
 TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -227,8 +229,8 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicableReturnsFalseForWrong
 
 TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicableFalseWhenEpsilonIsRuntimePassByValue)
 {
-    auto builder = createBatchnormWithVarianceGraphWithRuntimeEpsilon();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormWithVarianceGraphWithRuntimeEpsilon();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -245,14 +247,14 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder,
      IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
 {
     // Helper uses float for epsilon type, which differs for double type we've passed for compute
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, // input
         hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE // compute
     );
 
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
@@ -283,10 +285,10 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     const auto perChannelDims = getDerivedShape(dims); // {1, C, 1, 1}
     const auto perChannelStrides = generateStrides(perChannelDims, layout.strideOrder);
 
-    auto ioDataType = nativeTypeToDataType<IOType>();
-    auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
-    auto meanVarianceDataType = nativeTypeToDataType<MeanVarType>();
-    auto computeDataType = nativeTypeToDataType<ComputeType>();
+    const auto ioDataType = nativeTypeToDataType<IOType>();
+    const auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+    const auto meanVarianceDataType = nativeTypeToDataType<MeanVarType>();
+    const auto computeDataType = nativeTypeToDataType<ComputeType>();
     if(epsilonDataType == DataType::UNSET)
     {
         epsilonDataType = computeDataType;
@@ -300,26 +302,28 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr int64_t VARIANCE_UID = 6;
     constexpr int64_t EPSILON_UID = 7;
 
-    // NOLINTNEXTLINE(readability-suspicious-call-argument)
-    auto graphBuilder = createValidBatchnormWithVarianceInferenceGraph(X_UID,
-                                                                       Y_UID,
-                                                                       SCALE_UID,
-                                                                       BIAS_UID,
-                                                                       MEAN_UID,
-                                                                       VARIANCE_UID,
-                                                                       EPSILON_UID,
-                                                                       dims,
-                                                                       perChannelDims,
-                                                                       ioStrides,
-                                                                       perChannelStrides,
-                                                                       BATCHNORM_DEFAULT_EPSILON,
-                                                                       ioDataType,
-                                                                       scaleBiasDataType,
-                                                                       meanVarianceDataType,
-                                                                       computeDataType,
-                                                                       epsilonDataType);
+    // NOLINTBEGIN(readability-suspicious-call-argument)
+    const auto graphBuilder
+        = createValidBatchnormWithVarianceInferenceGraph(X_UID,
+                                                         Y_UID,
+                                                         SCALE_UID,
+                                                         BIAS_UID,
+                                                         MEAN_UID,
+                                                         VARIANCE_UID,
+                                                         EPSILON_UID,
+                                                         dims,
+                                                         perChannelDims,
+                                                         ioStrides,
+                                                         perChannelStrides,
+                                                         BATCHNORM_DEFAULT_EPSILON,
+                                                         ioDataType,
+                                                         scaleBiasDataType,
+                                                         meanVarianceDataType,
+                                                         computeDataType,
+                                                         epsilonDataType);
+    // NOLINTEND(readability-suspicious-call-argument)
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const auto* nodeAttributes

@@ -125,7 +125,7 @@ BatchnormLaunchGeometry computeFwdInfGeometry(const std::vector<int64_t>& dims,
     else if(dims.size() == 5)
     {
         // For 5D, combine D*H*W into spatial dimension
-        auto d = dims[2];
+        const auto d = dims[2];
         h = d * dims[3];
         w = dims[4];
         wStride = strides[4];
@@ -156,7 +156,7 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
                                            void* outputPtr,
                                            std::vector<std::string>& defines)
 {
-    auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
+    const auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel
         = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfRef");
@@ -190,7 +190,7 @@ void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
                                                   double epsilon,
                                                   std::vector<std::string>& defines)
 {
-    auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
+    const auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel
         = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfWithVarRef");
@@ -230,8 +230,8 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
                                              void* nextRunningVariancePtr,
                                              std::vector<std::string>& defines)
 {
-    auto n = inputDims[0];
-    auto c = inputDims[1];
+    const auto n = inputDims[0];
+    const auto c = inputDims[1];
     int64_t h = 0;
     int64_t w = 0;
     if(inputDims.size() == 3)
@@ -247,7 +247,7 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
     else if(inputDims.size() == 5)
     {
         // For 5D, combine D*H*W into spatial dimension
-        auto d = inputDims[2];
+        const auto d = inputDims[2];
         h = d * inputDims[3];
         w = inputDims[4];
     }

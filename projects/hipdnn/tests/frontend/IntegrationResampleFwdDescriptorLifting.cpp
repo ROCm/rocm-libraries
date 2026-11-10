@@ -36,7 +36,7 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
             .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
@@ -50,7 +50,7 @@ protected:
         attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
         attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
 
-        auto y = graph->resample(x, attrs)[0];
+        const auto y = graph->resample(x, attrs)[0];
         y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
         return graph;
@@ -62,7 +62,7 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -73,7 +73,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -142,7 +142,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -153,7 +153,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdTensorSharingPreserve
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -178,7 +178,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdTensorSharingPreserve
 // all fields survive the FlatBuffer-direct path.
 TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -192,7 +192,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdLiftWithoutFinalizati
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(graphDesc.get());
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -245,13 +245,13 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdLiftWithoutFinalizati
 // Verifies that the optional generate_index attribute survives a lifting round-trip.
 TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     graph->set_name("ResampleFwdGenerateIndexLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
@@ -280,7 +280,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -310,13 +310,13 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
 // survive the round trip and are all distinct.
 TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdAutoAssignedUidsPreserved)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     graph->set_name("AutoUidResampleFwdLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
@@ -330,7 +330,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdAutoAssignedUidsPrese
     attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
     attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
 
-    auto y = graph->resample(x, attrs)[0];
+    const auto y = graph->resample(x, attrs)[0];
     y->set_output(true).set_name("y");
 
     auto result = graph->validate();
@@ -342,7 +342,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdAutoAssignedUidsPrese
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -368,8 +368,8 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdAutoAssignedUidsPrese
     ASSERT_NE(opNode, nullptr);
 
     // Verify tensor UIDs are distinct
-    auto xUid = opNode->attributes.get_x()->get_uid();
-    auto yUid = opNode->attributes.get_y()->get_uid();
+    const auto xUid = opNode->attributes.get_x()->get_uid();
+    const auto yUid = opNode->attributes.get_y()->get_uid();
 
     EXPECT_NE(xUid, yUid);
 

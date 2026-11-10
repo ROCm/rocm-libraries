@@ -553,14 +553,14 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
            && d->Get(1) == q->Get(1) && d->Get(2) == q->Get(2) && d->Get(3) == k->Get(2);
 }
 
-#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
-    do                                              \
-    {                                               \
-        auto it = (tensor_map).find((tensor_uid));  \
-        if(it == (tensor_map).end())                \
-        {                                           \
-            return false;                           \
-        }                                           \
+#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid)      \
+    do                                                   \
+    {                                                    \
+        const auto it = (tensor_map).find((tensor_uid)); \
+        if(it == (tensor_map).end())                     \
+        {                                                \
+            return false;                                \
+        }                                                \
     } while(0)
 
 #define CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum) \

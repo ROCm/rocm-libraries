@@ -42,13 +42,13 @@ protected:
     hipdnn_flatbuffers_sdk::data_objects::GraphT
         buildAndDeserialize(MoeGroupedMatmulBwdAttributes& attrs, bool assignUids = true)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("MoeGroupedMatmulBwdIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dOutput = std::make_shared<TensorAttributes>();
+        const auto dOutput = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             dOutput->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID);
@@ -57,7 +57,7 @@ protected:
         dOutput->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES));
 
-        auto token = std::make_shared<TensorAttributes>();
+        const auto token = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             token->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID);
@@ -66,7 +66,7 @@ protected:
         token->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES));
 
-        auto firstTokenOffset = std::make_shared<TensorAttributes>();
+        const auto firstTokenOffset = std::make_shared<TensorAttributes>();
         if(assignUids)
         {
             firstTokenOffset->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID);
@@ -75,7 +75,7 @@ protected:
         firstTokenOffset->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
 
-        auto dweight = graph->moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attrs);
+        const auto dweight = graph->moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attrs);
         if(assignUids)
         {
             dweight->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID);

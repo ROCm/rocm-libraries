@@ -36,16 +36,16 @@ flatbuffers::FlatBufferBuilder buildScalarTensorAttributes(int64_t uid,
         valueType = TensorValue::Float32Value;
     }
 
-    auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                   uid,
-                                                   "scalar",
-                                                   dataType,
-                                                   &dims,
-                                                   &dims,
-                                                   /*virtual_=*/false,
-                                                   valueType,
-                                                   valueOffset,
-                                                   isRuntimePassByValue);
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         uid,
+                                                         "scalar",
+                                                         dataType,
+                                                         &dims,
+                                                         &dims,
+                                                         /*virtual_=*/false,
+                                                         valueType,
+                                                         valueOffset,
+                                                         isRuntimePassByValue);
     builder.Finish(attrOffset);
     return builder;
 }
@@ -65,16 +65,16 @@ flatbuffers::FlatBufferBuilder buildScalarTensorAttributesWithValue(int64_t uid,
 
     const auto valueOffset = builder.CreateStruct(value).Union();
 
-    auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                   uid,
-                                                   "scalar",
-                                                   dataType,
-                                                   &dims,
-                                                   &dims,
-                                                   /*virtual_=*/false,
-                                                   valueType,
-                                                   valueOffset,
-                                                   isRuntimePassByValue);
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         uid,
+                                                         "scalar",
+                                                         dataType,
+                                                         &dims,
+                                                         &dims,
+                                                         /*virtual_=*/false,
+                                                         valueType,
+                                                         valueOffset,
+                                                         isRuntimePassByValue);
     builder.Finish(attrOffset);
     return builder;
 }
@@ -86,16 +86,16 @@ flatbuffers::FlatBufferBuilder buildScalarTensorAttributesNoValue(int64_t uid, D
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> dims = {1};
 
-    auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                   uid,
-                                                   "scalar",
-                                                   dataType,
-                                                   &dims,
-                                                   &dims,
-                                                   /*virtual_=*/false,
-                                                   TensorValue::NONE,
-                                                   0,
-                                                   /*is_runtime_pass_by_value=*/false);
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         uid,
+                                                         "scalar",
+                                                         dataType,
+                                                         &dims,
+                                                         &dims,
+                                                         /*virtual_=*/false,
+                                                         TensorValue::NONE,
+                                                         0,
+                                                         /*is_runtime_pass_by_value=*/false);
     builder.Finish(attrOffset);
     return builder;
 }
@@ -122,7 +122,7 @@ void expectPluginThrowWithStatus(Fn&& fn, hipdnnPluginStatus_t expectedStatus)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandCompileTimeConstantBakesValue)
 {
-    auto builder = buildScalarTensorAttributes(1, DataType::FLOAT, false, 1e-5f);
+    const auto builder = buildScalarTensorAttributes(1, DataType::FLOAT, false, 1e-5f);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{1, attr}};
@@ -135,7 +135,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandCompileTimeConstantBakesValue)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandRuntimeWithDefaultBakesValue)
 {
-    auto builder = buildScalarTensorAttributes(2, DataType::FLOAT, true, 1e-3f);
+    const auto builder = buildScalarTensorAttributes(2, DataType::FLOAT, true, 1e-3f);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{2, attr}};
@@ -148,11 +148,11 @@ TEST(TestRuntimePassByValue, MakeScalarOperandRuntimeWithDefaultBakesValue)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandPureRuntimeUserSuppliedDefersRead)
 {
-    auto builder = buildScalarTensorAttributes(3, DataType::FLOAT, true, std::nullopt);
+    const auto builder = buildScalarTensorAttributes(3, DataType::FLOAT, true, std::nullopt);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{3, attr}};
-    auto op = makeScalarOperand(tensorMap, 3, "Epsilon");
+    const auto op = makeScalarOperand(tensorMap, 3, "Epsilon");
 
     EXPECT_EQ(op.uid, 3);
     EXPECT_TRUE(op.isRuntimeUserSupplied);
@@ -161,7 +161,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandPureRuntimeUserSuppliedDefersRead)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandBakesDoubleValue)
 {
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         21, DataType::DOUBLE, false, TensorValue::Float64Value, Float64Value(2.5));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -174,7 +174,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesDoubleValue)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandBakesHalfValue)
 {
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         22, DataType::HALF, false, TensorValue::Float16Value, Float16Value(0.5f));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -188,7 +188,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesHalfValue)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandBakesBfloat16Value)
 {
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         23, DataType::BFLOAT16, false, TensorValue::BFloat16Value, BFloat16Value(0.25f));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -203,7 +203,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesBfloat16Value)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandBakesInt32Value)
 {
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         24, DataType::INT32, false, TensorValue::Int32Value, Int32Value(42));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -219,7 +219,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesLargeInt64Value)
     // 2^53 + 1: not exactly representable in double. Proves the baked path also
     // carries INT64 without widening (the resolve-side path is covered separately
     // by ResolveScalarOperandPreservesLargeInt64).
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         25, DataType::INT64, false, TensorValue::Int64Value, Int64Value(9007199254740993LL));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -232,7 +232,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesLargeInt64Value)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandBakesBooleanValue)
 {
-    auto builder = buildScalarTensorAttributesWithValue(
+    const auto builder = buildScalarTensorAttributesWithValue(
         26, DataType::BOOLEAN, false, TensorValue::BoolValue, BoolValue(true));
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
@@ -245,7 +245,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandBakesBooleanValue)
 
 TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsetDataType)
 {
-    auto builder = buildScalarTensorAttributesNoValue(27, DataType::UNSET);
+    const auto builder = buildScalarTensorAttributesNoValue(27, DataType::UNSET);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{27, attr}};
@@ -257,7 +257,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsupportedDataType)
 {
     // A dtype with no case in the baked switch (e.g. FP8) must hit the default throw,
     // regardless of union-value presence.
-    auto builder = buildScalarTensorAttributesNoValue(28, DataType::FP8_E4M3);
+    const auto builder = buildScalarTensorAttributesNoValue(28, DataType::FP8_E4M3);
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{28, attr}};

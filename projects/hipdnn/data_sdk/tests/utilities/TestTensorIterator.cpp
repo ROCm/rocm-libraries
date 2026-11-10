@@ -151,7 +151,7 @@ TEST(TestTypeErasedIterator, EndComparison)
     ITensor* iTensor = &tensor;
 
     auto it = iTensor->begin();
-    auto end = iTensor->end();
+    const auto end = iTensor->end();
 
     EXPECT_NE(it, end);
 
@@ -193,7 +193,7 @@ TEST(TestTypeErasedIterator, CopyAssignment)
 
     ITensor* iTensor = &tensor;
 
-    auto it1 = iTensor->begin();
+    const auto it1 = iTensor->begin();
     auto it2 = iTensor->end();
     EXPECT_NE(it1, it2);
 
@@ -236,7 +236,7 @@ TEST(TestTensor, ThrowsWhenIncrementingPastEnd)
 {
     Tensor<float> tensor({2, 2});
     auto it = tensor.begin();
-    auto endIt = tensor.end();
+    const auto endIt = tensor.end();
 
     // Increment to the end
     ++it; // (0,1)
@@ -467,10 +467,10 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 
 TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
-    auto it = tensor.begin();
+    const auto it = tensor.begin();
 
     // The iterator resolves to a RaggedCompositeIndex (not Linear/Composite).
     auto indices = std::get<ITensorIterator<false>::RaggedCompositeIndex>(it.index()).indices;
@@ -496,8 +496,8 @@ TEST(TestTypeErasedIteratorRagged, IteratesLiveRowsFromEachOrigin)
 {
     const std::vector<int64_t> dims = {2, 1, 4, 2};
     const std::vector<int64_t> strides = {8, 2, 2, 1};
-    auto offsets = makeOffsetAux<int32_t>({10, 0, 0}); // origins at rows 5 and 0
-    auto lengths = makeOffsetAux<int32_t>({2, 3});
+    const auto offsets = makeOffsetAux<int32_t>({10, 0, 0}); // origins at rows 5 and 0
+    const auto lengths = makeOffsetAux<int32_t>({2, 3});
     RaggedTensor<float> tensor(dims, strides, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths);
     tensor.fillWithValue(0.0f);
 
@@ -515,11 +515,11 @@ TEST(TestTypeErasedIteratorRagged, IteratesLiveRowsFromEachOrigin)
 TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
 {
     // Same geometry, over a borrowed buffer.
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
     ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
-    auto it = tensor.begin();
+    const auto it = tensor.begin();
 
     // The iterator resolves to a RaggedCompositeIndex for the shallow type too.
     EXPECT_NO_THROW(std::ignore
@@ -536,7 +536,7 @@ TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
 TEST(TestTypeErasedIteratorRagged, DensePackedStillLinear)
 {
     Tensor<float> tensor({2, 3});
-    auto it = tensor.begin();
+    const auto it = tensor.begin();
 
     // Dense packed tensors still resolve to LinearIndex.
     EXPECT_NO_THROW(std::ignore = std::get<ITensorIterator<false>::LinearIndex>(it.index()));
@@ -545,7 +545,7 @@ TEST(TestTypeErasedIteratorRagged, DensePackedStillLinear)
 TEST(TestTypeErasedIteratorRagged, DenseStridedStillComposite)
 {
     Tensor<float> tensor({2, 3}, {6, 2});
-    auto it = tensor.begin();
+    const auto it = tensor.begin();
 
     // Dense strided tensors still resolve to CompositeIndex.
     EXPECT_NO_THROW(std::ignore = std::get<ITensorIterator<false>::CompositeIndex>(it.index()));

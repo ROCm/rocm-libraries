@@ -156,8 +156,8 @@ private:
 
         for(const auto& tensor : _spec.tensors)
         {
-            auto dims = _builder.CreateVector(tensor.dims);
-            auto strides = _builder.CreateVector(tensor.strides);
+            const auto dims = _builder.CreateVector(tensor.dims);
+            const auto strides = _builder.CreateVector(tensor.strides);
             flatbuffers::Offset<void> value = 0;
             if(tensor.value.has_value())
             {
@@ -201,7 +201,7 @@ private:
             }
             const auto attributes = attributesBuilder.Finish();
 
-            auto nodeName = _builder.CreateString(node.name);
+            const auto nodeName = _builder.CreateString(node.name);
             NodeBuilder nodeBuilder(_builder);
             nodeBuilder.add_name(nodeName);
             nodeBuilder.add_compute_data_type(node.computeDataType);
@@ -210,9 +210,9 @@ private:
             nodeOffsets.push_back(nodeBuilder.Finish());
         }
 
-        auto tensors = _builder.CreateVector(tensorOffsets);
-        auto nodes = _builder.CreateVector(nodeOffsets);
-        auto name = _builder.CreateString(_spec.name);
+        const auto tensors = _builder.CreateVector(tensorOffsets);
+        const auto nodes = _builder.CreateVector(nodeOffsets);
+        const auto name = _builder.CreateString(_spec.name);
 
         std::optional<hipdnn_flatbuffers_sdk::data_objects::Uuid> uuid;
         if(_spec.graphId.has_value())
@@ -273,7 +273,7 @@ class EmptyTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGra
 public:
     explicit EmptyTestGraph(std::optional<GraphId> graphId = std::nullopt)
     {
-        auto name = _builder.CreateString("empty_test_graph");
+        const auto name = _builder.CreateString("empty_test_graph");
         hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
         graphBuilder.add_name(name);
         if(graphId.has_value())

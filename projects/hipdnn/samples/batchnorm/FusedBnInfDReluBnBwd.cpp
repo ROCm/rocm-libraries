@@ -24,20 +24,20 @@ using namespace hipdnn_data_sdk;
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
-    auto inputType = getDataTypeEnumFromType<InputType>();
-    auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
+    const auto inputType = getDataTypeEnumFromType<InputType>();
+    const auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running fused BN Inference + Activation Backward + BN Backward graph "
               << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 1; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 1; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 14; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 14; // WIDTH (SPATIAL DIMENSION)
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -45,12 +45,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     setPreferredEngine(graph, config);
 
     // Input tensors
-    auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto dy = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
-    auto savedMean = createTensor({1, c, 1, 1}, intermediateType, layout);
-    auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
+    const auto x = createTensor({n, c, h, w}, inputType, layout);
+    const auto dy = createTensor({n, c, h, w}, inputType, layout);
+    const auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+    const auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+    const auto savedMean = createTensor({1, c, 1, 1}, intermediateType, layout);
+    const auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
     // Build fused graph: BN Inference -> Activation Backward -> BN Backward
 
@@ -58,7 +58,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto bnInfAttributes = graph::BatchnormInferenceAttributes();
     bnInfAttributes.set_name("bn_inference_node");
 
-    auto bnY
+    const auto bnY
         = graph->batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttributes);
     bnY->set_name("bn_y");
 
@@ -67,7 +67,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     activBwdAttributes.set_name("activation_backward_node");
     activBwdAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
 
-    auto dxDrelu = graph->pointwise(dy, bnY, activBwdAttributes);
+    const auto dxDrelu = graph->pointwise(dy, bnY, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
 
     // Step 3: Batchnorm Backward
@@ -177,9 +177,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Issue is due to the reference not splitting the input / output datatypes.
         const auto inputTol = 4e-2f;
 
-        auto dxValidator
+        const auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(inputTol, inputTol);
-        auto dscaleDbiasValidator
+        const auto dscaleDbiasValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(inputTol,
                                                                                      inputTol);
 
@@ -206,8 +206,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }
 
-    auto printCount = std::min<int64_t>(10, n * c * h * w);
-    auto perChannelPrintCount = std::min<int64_t>(10, c);
+    const auto printCount = std::min<int64_t>(10, n * c * h * w);
+    const auto perChannelPrintCount = std::min<int64_t>(10, c);
 
     std::cout << "First " << printCount << " dx values: ";
     for(int64_t i = 0; i < printCount; ++i)
@@ -236,7 +236,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv);
+        const auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

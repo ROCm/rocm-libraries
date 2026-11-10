@@ -26,7 +26,7 @@ using namespace hipdnn_sdk_test_utils;
 TEST(TestRMSNormBwdPlanBuilder, PlanConstruction)
 {
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NCHW);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -39,7 +39,7 @@ TEST(TestRMSNormBwdPlanBuilder, PlanConstruction)
                                 DataType::FLOAT>
         builder;
 
-    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<RMSNormBwdPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -50,7 +50,7 @@ TEST(TestRMSNormBwdPlanBuilder, PlanConstruction)
 TEST(TestRMSNormBwdPlanBuilder, IsApplicable)
 {
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -98,7 +98,7 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
     const std::vector<int64_t> dims = {4, 8, 16, 32};
     const unsigned int seed = getGlobalTestSeed();
 
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
 
     auto [serializedGraph, serErr] = graph->to_binary();
@@ -122,14 +122,14 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    auto shallowDyTensor = createShallowTensor<float>(
+    const auto shallowDyTensor = createShallowTensor<float>(
         params.dyTensor, directTensorBundle.tensors[attributes.dy_tensor_uid()]->rawHostData());
-    auto shallowXTensor = createShallowTensor<float>(
+    const auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
-    auto shallowScaleTensor = createShallowTensor<float>(
+    const auto shallowScaleTensor = createShallowTensor<float>(
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
-    auto shallowInvRmsTensor = createShallowTensor<float>(
+    const auto shallowInvRmsTensor = createShallowTensor<float>(
         params.invRmsTensor,
         directTensorBundle.tensors[attributes.inv_rms_tensor_uid()]->rawHostData());
 
@@ -165,7 +165,7 @@ TEST(TestRMSNormBwdPlan, ExecutePlanWithOptionalDbias)
     const std::vector<int64_t> dims = {4, 8, 16, 32};
     const unsigned int seed = getGlobalTestSeed();
 
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
 
     auto [serializedGraph, serErr] = graph->to_binary();
@@ -190,14 +190,14 @@ TEST(TestRMSNormBwdPlan, ExecutePlanWithOptionalDbias)
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    auto shallowDyTensor = createShallowTensor<float>(
+    const auto shallowDyTensor = createShallowTensor<float>(
         params.dyTensor, directTensorBundle.tensors[attributes.dy_tensor_uid()]->rawHostData());
-    auto shallowXTensor = createShallowTensor<float>(
+    const auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
-    auto shallowScaleTensor = createShallowTensor<float>(
+    const auto shallowScaleTensor = createShallowTensor<float>(
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
-    auto shallowInvRmsTensor = createShallowTensor<float>(
+    const auto shallowInvRmsTensor = createShallowTensor<float>(
         params.invRmsTensor,
         directTensorBundle.tensors[attributes.inv_rms_tensor_uid()]->rawHostData());
 
@@ -206,7 +206,7 @@ TEST(TestRMSNormBwdPlan, ExecutePlanWithOptionalDbias)
     auto shallowDScaleTensor = createShallowTensor<float>(
         params.dscaleTensor,
         directTensorBundle.tensors[attributes.dscale_tensor_uid()]->rawHostData());
-    auto shallowDBiasTensor = createShallowTensor<float>(
+    const auto shallowDBiasTensor = createShallowTensor<float>(
         params.dbiasTensor.value(),
         directTensorBundle.tensors[attributes.dbias_tensor_uid().value()]->rawHostData());
 

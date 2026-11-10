@@ -26,12 +26,12 @@ protected:
                                                  DataType meanVarianceDataType)
     {
         const std::vector<int64_t> dims = {2, 3, 4, 4};
-        auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
-                                                     scaleBiasDataType,
-                                                     meanVarianceDataType,
-                                                     meanVarianceDataType,
-                                                     dims,
-                                                     TensorLayout::NCHW);
+        const auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
+                                                           scaleBiasDataType,
+                                                           meanVarianceDataType,
+                                                           meanVarianceDataType,
+                                                           dims,
+                                                           TensorLayout::NCHW);
 
         auto [serializedGraph, serErr] = graph->to_binary();
         if(serErr.is_bad())
@@ -66,13 +66,13 @@ TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
 TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 dims,
-                                                 TensorLayout::NCHW,
-                                                 true);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       dims,
+                                                       TensorLayout::NCHW,
+                                                       true);
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -107,7 +107,7 @@ TEST_F(TestGraphTensorBundle, RandomizeTensorSucceeds)
 
     // Get the first tensor UID
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
     // Randomize should not throw
     EXPECT_NO_THROW(bundle.randomizeTensor(firstUid, -1.0f, 1.0f, 42));
@@ -284,9 +284,9 @@ TEST_F(TestGraphTensorBundle, GetTensorReturnsCorrectTensor)
     GraphTensorBundle bundle(tensorMap);
 
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
-    auto& tensor = bundle.getTensor(firstUid);
+    const auto& tensor = bundle.getTensor(firstUid);
     EXPECT_EQ(&tensor, bundle.tensors.at(firstUid).get());
 }
 
@@ -309,7 +309,7 @@ TEST_F(TestGraphTensorBundle, GetTensorConstReturnsCorrectTensor)
     GraphTensorBundle bundle(tensorMap);
 
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
     const auto& constBundle = bundle;
     const auto& tensor = constBundle.getTensor(firstUid);
@@ -338,9 +338,9 @@ TEST_F(TestGraphTensorBundle, IsOutputReturnsTrueForOutputTensors)
     // Manually mark some tensors as outputs
     ASSERT_GE(bundle.tensors.size(), 2U);
     auto it = bundle.tensors.begin();
-    auto firstUid = it->first;
+    const auto firstUid = it->first;
     ++it;
-    auto secondUid = it->first;
+    const auto secondUid = it->first;
 
     bundle.outputTensorIds.insert(firstUid);
     bundle.outputTensorIds.insert(secondUid);
@@ -387,7 +387,7 @@ TEST_F(TestGraphTensorBundle, SentinelFillOutputTensorsFillsOnlyOutputs)
     }
 
     // Mark one tensor as output and sentinel-fill
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
     bundle.outputTensorIds.insert(firstUid);
     bundle.sentinelFillOutputTensors();
 

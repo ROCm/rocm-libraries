@@ -23,13 +23,13 @@ TEST(TestGraphLayernormBackward, BuildGraph)
     attributes.set_name("LayernormBackwardNode");
 
     // Create input tensors
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({16, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({16, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
@@ -63,6 +63,6 @@ TEST(TestGraphLayernormBackward, BuildGraph)
     EXPECT_TRUE(results[2]->get_is_virtual());
 
     // Verify graph validates successfully
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }

@@ -69,7 +69,7 @@ public:
 private:
     bool isApplicableAsIs(void* graphBuffer, size_t size)
     {
-        auto graphWrap
+        const auto graphWrap
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 graphBuffer, size);
 
@@ -165,7 +165,7 @@ private:
                      size_t size,
                      const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto graphWrap
+        const auto graphWrap
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 graphBuffer, size);
 
@@ -220,7 +220,7 @@ private:
     {
         try
         {
-            auto key = buildSignatureKey(node, tensorMap, computeType);
+            const auto key = buildSignatureKey(node, tensorMap, computeType);
             const auto& builder = _planRegistry.getPlanBuilder(key);
             return builder.isApplicable(node, tensorMap);
         }
@@ -234,7 +234,7 @@ private:
         buildPlanForNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
-        auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
+        const auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
 
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))

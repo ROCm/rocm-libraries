@@ -220,7 +220,7 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<graph::TensorAttrib
 
     if(it1 != dims1.end())
     {
-        auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
+        const auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
         return {ErrorCode::INVALID_VALUE,
                 getTensorNameForError(tensor1, fallbackName1) + " and "
                     + getTensorNameForError(tensor2, fallbackName2)
@@ -516,7 +516,7 @@ inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttribut
     // Scalar parameters should be single-element tensors
     // Typically [1] or [1, 1, 1, 1] depending on how they're created
     int64_t totalElements = 1;
-    for(auto dim : dims)
+    for(const auto dim : dims)
     {
         totalElements *= dim;
     }

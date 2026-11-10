@@ -17,7 +17,7 @@ using namespace hip_kernel_provider::layernorm;
 TEST(TestLayernormFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid layernorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -33,7 +33,7 @@ TEST(TestLayernormFwdParams, InitializesAllTensorsFromValidGraph)
 TEST(TestLayernormFwdParams, HasCorrectTensorPointersForSingleNode)
 {
     // Create a valid layernorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -55,7 +55,7 @@ TEST(TestLayernormFwdParams, HasCorrectTensorPointersForSingleNode)
 
 TEST(TestLayernormFwdParams, TensorPointersMatchExpectedUids)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -74,7 +74,7 @@ TEST(TestLayernormFwdParams, TensorPointersMatchExpectedUids)
 
 TEST(TestLayernormFwdParams, IsMoveConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -95,7 +95,7 @@ TEST(TestLayernormFwdParams, IsNotCopyConstructible)
 
 TEST(TestLayernormProblemDescription, ComputesExecutionGeometry)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
@@ -177,7 +177,7 @@ TEST(TestLayernormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -199,7 +199,7 @@ TEST(TestLayernormFwdPlan, CompileIncludesOffloadArchOption)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps("gfx942");
+    auto const deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -222,11 +222,11 @@ TEST(TestLayernormFwdPlanFp32, CompileSetsCorrectDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -262,11 +262,11 @@ TEST(TestLayernormFwdPlanFp16, CompileSetsCorrectDefines)
                                            {1, 3, 224, 224},
                                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -302,11 +302,11 @@ TEST(TestLayernormFwdPlanBfp16, CompileSetsCorrectDefines)
         = createPlanFromGraph({150528, 50176, 224, 1},
                               {1, 3, 224, 224},
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -326,7 +326,7 @@ TEST(TestLayernormFwdPlan, CompileWithUnsupportedDimensionThrows)
     const MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
         {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -337,7 +337,7 @@ TEST(TestLayernormFwdPlan, CompileWithUnsupportedDimensionThrows)
     LayernormFwdParams params(attr, graph.getTensorMap());
     LayernormFwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

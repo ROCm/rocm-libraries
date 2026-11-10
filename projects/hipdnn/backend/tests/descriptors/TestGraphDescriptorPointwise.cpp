@@ -41,7 +41,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<PointwiseOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<PointwiseOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<PointwiseOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -72,7 +72,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 inline std::unique_ptr<HipdnnBackendDescriptor> createFinalizedVirtualTensor(int64_t uid)
 {
     auto wrapper = createDescriptor<TensorDescriptor>();
-    auto desc = wrapper->asDescriptor<TensorDescriptor>();
+    const auto desc = wrapper->asDescriptor<TensorDescriptor>();
     auto dims = toVec(K_PW_TENSOR_DIMS);
     auto strides = toVec(K_PW_TENSOR_STRIDES);
     auto dataType = HIPDNN_DATA_INT64;
@@ -99,7 +99,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     createFinalizedTensorWithRaggedOffset(int64_t uid, HipdnnBackendDescriptor* auxDesc)
 {
     auto wrapper = createDescriptor<TensorDescriptor>();
-    auto desc = wrapper->asDescriptor<TensorDescriptor>();
+    const auto desc = wrapper->asDescriptor<TensorDescriptor>();
     auto dims = toVec(K_PW_TENSOR_DIMS);
     auto strides = toVec(K_PW_TENSOR_STRIDES);
     auto dataType = HIPDNN_DATA_FLOAT;
@@ -131,7 +131,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -156,16 +156,16 @@ protected:
 
 TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 {
-    auto in0Desc = createFinalizedTensor(
+    const auto in0Desc = createFinalizedTensor(
         K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto out0Desc = createFinalizedTensor(
+    const auto out0Desc = createFinalizedTensor(
         K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
-    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
-    auto opDesc
+    const auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    const auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    const auto opDesc
         = createFinalizedPointwiseOp(in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -176,7 +176,7 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -204,16 +204,16 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 {
-    auto in0Desc = createFinalizedTensor(
+    const auto in0Desc = createFinalizedTensor(
         K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto out0Desc = createFinalizedTensor(
+    const auto out0Desc = createFinalizedTensor(
         K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
-    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
-    auto opDesc = createFinalizedPointwiseOp(
+    const auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    const auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    const auto opDesc = createFinalizedPointwiseOp(
         in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -223,7 +223,7 @@ TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -233,15 +233,15 @@ TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 // Aux UIDs 9001/9002 do not collide with K_PW_TENSOR_{IN0,IN1,IN2,OUT0}_UID.
 TEST_F(TestGraphDescriptorPointwise, BuildRejectsVirtualRaggedAux)
 {
-    auto aux = createFinalizedVirtualTensor(9001);
-    auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, aux.get());
-    auto out0 = createFinalizedTensor(
+    const auto aux = createFinalizedVirtualTensor(9001);
+    const auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, aux.get());
+    const auto out0 = createFinalizedTensor(
         K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
-    auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
-    auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
+    const auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    const auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    const auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {op.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -254,16 +254,16 @@ TEST_F(TestGraphDescriptorPointwise, BuildRejectsVirtualRaggedAux)
 
 TEST_F(TestGraphDescriptorPointwise, BuildRejectsNestedRaggedAux)
 {
-    auto auxInner = createFinalizedTensor(9002);
-    auto auxOuter = createFinalizedTensorWithRaggedOffset(9001, auxInner.get());
-    auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, auxOuter.get());
-    auto out0 = createFinalizedTensor(
+    const auto auxInner = createFinalizedTensor(9002);
+    const auto auxOuter = createFinalizedTensorWithRaggedOffset(9001, auxInner.get());
+    const auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, auxOuter.get());
+    const auto out0 = createFinalizedTensor(
         K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
-    auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
-    auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
-    auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
+    const auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    const auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    const auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     std::array<HipdnnBackendDescriptor*, 1> ops = {op.get()};
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,

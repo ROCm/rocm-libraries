@@ -92,7 +92,7 @@ TEST(TestBlockScaleDequantizeSignatureKey, CreateFromNodeAndTensorMap)
     const BlockScaleDequantizeSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
-    auto builder = createValidBlockScaleDequantizeGraph();
+    const auto builder = createValidBlockScaleDequantizeGraph();
     const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

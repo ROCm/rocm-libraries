@@ -92,12 +92,12 @@ TEST(TestCudnnShimGraph, ScalarTensorFactoriesCompileAndValidateRuntimeParams)
 TEST(TestCudnnShimGraph, TensorLikeAndQueryByUid)
 {
     fe::graph::Graph graph;
-    auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
-                                   .set_dim({2, 3})
-                                   .set_stride({3, 1})
-                                   .set_data_type(fe::DataType_t::FLOAT)
-                                   .set_uid(7));
-    auto tensorLike = graph.tensor_like(tensor, "copy");
+    const auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
+                                         .set_dim({2, 3})
+                                         .set_stride({3, 1})
+                                         .set_data_type(fe::DataType_t::FLOAT)
+                                         .set_uid(7));
+    const auto tensorLike = graph.tensor_like(tensor, "copy");
     tensorLike->set_uid(8);
 
     fe::graph::Tensor_attributes queried;
@@ -154,12 +154,12 @@ TEST(TestCudnnShimGraph, RequiredGraphSurfaceCompiles)
             .is_bad());
     EXPECT_TRUE(graph.execute(nullptr, sortedUserPtrs, 0, nullptr).is_bad());
 
-    auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
-                                   .set_dim({1})
-                                   .set_stride({1})
-                                   .set_data_type(fe::DataType_t::FLOAT)
-                                   .set_uid(10));
-    auto tensorLike = graph.tensor_like(tensor);
+    const auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
+                                         .set_dim({1})
+                                         .set_stride({1})
+                                         .set_data_type(fe::DataType_t::FLOAT)
+                                         .set_uid(10));
+    const auto tensorLike = graph.tensor_like(tensor);
     tensorLike->set_uid(11);
     fe::graph::Tensor_attributes queried;
     EXPECT_TRUE(graph.query_tensor_attributes_of_uid(10, queried).is_good());
@@ -319,9 +319,9 @@ TEST(TestCudnnShimGraph, PrintOnGraphWithoutBackendDescriptorYieldsEmptyObject)
 TEST(TestCudnnShimGraph, ConstSerializeDoesNotLowerTheNativeGraph)
 {
     fe::graph::Graph graph;
-    auto a = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 1);
-    auto b = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 2);
-    auto c = graph.pointwise(
+    const auto a = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 1);
+    const auto b = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 2);
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
@@ -387,13 +387,13 @@ TEST(TestCudnnShimGraph, PopulatedShapeOverridesAreRefusedNotIgnored)
 // a tuple, which copy-constructs it. This is the whole reason Graph is copyable.
 TEST(TestCudnnShimGraph, CopiesOutOfABuilderIntoATuple)
 {
-    auto build = [] {
+    const auto build = [] {
         fe::graph::Graph graph;
-        auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
-                                       .set_dim({1, 2})
-                                       .set_stride({2, 1})
-                                       .set_data_type(fe::DataType_t::FLOAT)
-                                       .set_uid(1));
+        const auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
+                                             .set_dim({1, 2})
+                                             .set_stride({2, 1})
+                                             .set_data_type(fe::DataType_t::FLOAT)
+                                             .set_uid(1));
         return std::make_tuple(graph, tensor);
     };
 
@@ -416,7 +416,7 @@ TEST(TestCudnnShimGraph, CopiesOutOfABuilderIntoATuple)
 TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
 {
     constexpr int64_t N = 4;
-    auto squareTensor = [](fe::graph::Graph& g, int64_t uid) {
+    const auto squareTensor = [](fe::graph::Graph& g, int64_t uid) {
         return g.tensor(fe::graph::Tensor_attributes{}
                             .set_dim({N, N, N, N})
                             .set_stride({N * N * N, N * N, N, 1})
@@ -425,8 +425,8 @@ TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
 
     fe::graph::Graph original;
     original.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
-    auto a = squareTensor(original, 1);
-    auto b = squareTensor(original, 2);
+    const auto a = squareTensor(original, 1);
+    const auto b = squareTensor(original, 2);
     original.pointwise(a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD))
         ->set_output(true)
         .set_uid(3);
@@ -436,7 +436,7 @@ TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
 
     // A second output node whose dims cannot be inferred: invalid on whichever
     // graph owns it.
-    auto c = squareTensor(copy, 4);
+    const auto c = squareTensor(copy, 4);
     copy.pointwise(a, c, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD))
         ->set_output(true)
         .set_uid(5);

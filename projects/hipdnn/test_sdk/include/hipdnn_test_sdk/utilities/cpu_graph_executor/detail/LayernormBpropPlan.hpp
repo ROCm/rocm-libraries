@@ -85,13 +85,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDyTensor = createShallowTensor<DyDataType>(
+        const auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        auto shallowXTensor
+        const auto shallowXTensor
             = createShallowTensor<DxDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanInvVarianceDataType>>

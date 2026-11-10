@@ -219,7 +219,7 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateAlsoCreatesHipblasltHandleOnSuccess)
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
 
-    auto status = hipdnnEnginePluginCreateImpl(&handle);
+    auto const status = hipdnnEnginePluginCreateImpl(&handle);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
@@ -232,10 +232,10 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateTwiceGivesTheSameContainerHandle)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle1 = nullptr;
-    auto status1 = hipdnnEnginePluginCreateImpl(&handle1);
+    auto const status1 = hipdnnEnginePluginCreateImpl(&handle1);
 
     hipdnnEnginePluginHandle_t handle2 = nullptr;
-    auto status2 = hipdnnEnginePluginCreateImpl(&handle2);
+    auto const status2 = hipdnnEnginePluginCreateImpl(&handle2);
 
     EXPECT_EQ(status1, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(status2, HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -250,7 +250,7 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateNonNullHandlePointer)
 {
     SKIP_IF_NO_DEVICES();
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
-    auto status = hipdnnEnginePluginCreateImpl(&handle);
+    auto const status = hipdnnEnginePluginCreateImpl(&handle);
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
     // Clean up
@@ -295,7 +295,7 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
         = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
     hipdnnPluginConstData_t engineDetailsOut;
 
-    auto status = hipdnnEnginePluginGetEngineDetailsImpl(
+    auto const status = hipdnnEnginePluginGetEngineDetailsImpl(
         handle, HIPBLASLT_ENGINE_ID, &opGraph, &engineDetailsOut);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
@@ -329,7 +329,7 @@ TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
     size_t workspaceSize = 0;
-    auto status
+    auto const status
         = hipdnnEnginePluginGetWorkspaceSizeImpl(handle, &engineConfig, &opGraph, &workspaceSize);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -356,7 +356,7 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
     hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
-    auto status = hipdnnEnginePluginCreateExecutionContextImpl(
+    auto const status = hipdnnEnginePluginCreateExecutionContextImpl(
         handle, &engineConfig, &opGraph, &executionContext);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);

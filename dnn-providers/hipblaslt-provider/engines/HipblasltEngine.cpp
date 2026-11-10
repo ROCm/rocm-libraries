@@ -38,7 +38,8 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
                                  hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
+    auto const engineDetails
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

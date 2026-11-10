@@ -34,8 +34,8 @@ protected:
 
 TEST_F(TestSupportMatrixCollector, SingletonIdentity)
 {
-    auto& a = SupportMatrixCollector::get();
-    auto& b = SupportMatrixCollector::get();
+    const auto& a = SupportMatrixCollector::get();
+    const auto& b = SupportMatrixCollector::get();
     EXPECT_EQ(&a, &b);
 }
 
@@ -93,7 +93,7 @@ TEST_F(TestSupportMatrixCollector, UnknownEngineId)
     ASSERT_EQ(records[0].supportingEngines.size(), 1u);
     // An unregistered ID is rendered as its zero-padded hexadecimal, which is the
     // same spelling the backend logs use, so a matrix entry can be grepped for.
-    auto engineName = *records[0].supportingEngines.begin();
+    const auto engineName = *records[0].supportingEngines.begin();
     EXPECT_EQ(engineName, "0x00000000000F423F");
 }
 
@@ -109,7 +109,7 @@ TEST_F(TestSupportMatrixCollector, EngineIdSuppliedByNameMapRendersAsItsName)
     ASSERT_EQ(records[0].supportingEngines.size(), 1u);
     // The same id the fallback case renders as hexadecimal, so this pins the map lookup
     // rather than a difference between the two ids.
-    auto engineName = *records[0].supportingEngines.begin();
+    const auto engineName = *records[0].supportingEngines.begin();
     EXPECT_EQ(engineName, "hipkernel:Whatever");
 }
 

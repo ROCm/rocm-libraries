@@ -38,7 +38,7 @@ public:
 
     void setTensors() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
         desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT,
@@ -53,7 +53,7 @@ public:
 
     void makeUnaryFinalized(hipdnnPointwiseMode_t mode = HIPDNN_POINTWISE_RELU_FWD) const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
         desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT,
@@ -121,7 +121,7 @@ protected:
 
 TEST_F(TestPointwiseOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
@@ -136,7 +136,7 @@ TEST_F(TestPointwiseOperationDescriptor, FinalizeWithRequiredAttributes)
 
 TEST_F(TestPointwiseOperationDescriptor, FinalizeFailsWithoutIn0Tensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_out0Desc);
     desc->setAttribute(
@@ -149,7 +149,7 @@ TEST_F(TestPointwiseOperationDescriptor, FinalizeFailsWithoutIn0Tensor)
 
 TEST_F(TestPointwiseOperationDescriptor, FinalizeFailsWithoutOut0Tensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
     desc->setAttribute(
@@ -186,7 +186,7 @@ TEST_F(TestPointwiseOperationDescriptor, FinalizeFailsWithoutPointwiseMode)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn0)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc));
 
@@ -197,7 +197,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn0)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorOut0)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_out0Desc));
 
@@ -207,7 +207,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorOut0)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn1)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in1Desc));
 
@@ -217,7 +217,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn1)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn2)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in2Desc));
 
@@ -227,7 +227,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn2)
 
 TEST_F(TestPointwiseOperationDescriptor, SetAxisAsInt64)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t axisValue = 2;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue));
@@ -238,7 +238,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetAxisAsInt64)
 TEST_F(TestPointwiseOperationDescriptor, GetAxisAsInt64)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t axisValue = 3;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
     desc->finalize();
@@ -253,7 +253,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAxisAsInt64)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -263,7 +263,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_INT64, 1, &_in0Desc),
@@ -272,7 +272,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_in0Desc),
@@ -281,7 +281,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -294,7 +294,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestPointwiseOperationDescriptor, SetPointwiseMode)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto operation = HIPDNN_POINTWISE_ADD;
 
     ASSERT_NO_THROW(
@@ -305,7 +305,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetPointwiseMode)
 
 TEST_F(TestPointwiseOperationDescriptor, SetPointwiseModeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto operation = HIPDNN_POINTWISE_ADD;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -315,7 +315,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetPointwiseModeWrongElementCount)
 
 TEST_F(TestPointwiseOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -326,7 +326,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestPointwiseOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -341,7 +341,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetComputeDataTypeWrongElementCount)
 TEST_F(TestPointwiseOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -351,7 +351,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestPointwiseOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -366,7 +366,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     HipdnnBackendDescriptor* rawIn0 = nullptr;
     int64_t elementCount = 0;
@@ -388,7 +388,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributePointwiseParams)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // operation
     hipdnnPointwiseMode_t operation = HIPDNN_POINTWISE_ABS;
@@ -401,7 +401,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributePointwiseParams)
 
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -422,7 +422,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -437,7 +437,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -450,7 +450,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -478,7 +478,7 @@ class TestPointwiseOperationDescriptorQueryReturnsOne
 TEST_P(TestPointwiseOperationDescriptorQueryReturnsOne, QueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(
@@ -510,7 +510,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeAxisQueryReturnsZeroWhenUnset)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = -1;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -523,7 +523,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeAxisQueryReturnsOneWhenSet)
     int64_t axisValue = 3;
     getDescriptor()->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -534,7 +534,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeAxisQueryReturnsOneWhenSet)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -547,7 +547,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorQueryFailsNullElement
 TEST_F(TestPointwiseOperationDescriptor, GetAttributePointwiseModeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
@@ -562,7 +562,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributePointwiseModeQueryFailsNull
 TEST_F(TestPointwiseOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify the tensor descriptors are preserved
     ASSERT_NE(desc->getIn0Desc(), nullptr);
@@ -584,7 +584,7 @@ TEST_F(TestPointwiseOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("PointwiseOperationDescriptor"), std::string::npos);
@@ -603,7 +603,7 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestPointwiseOperationDescriptor, GetTensorDescriptorsReturnsBinaryOpTensors)
 {
     // Set up a binary op (IN_0, IN_1, OUT_0 only)
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
     desc->setAttribute(
@@ -627,7 +627,7 @@ TEST_F(TestPointwiseOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -650,7 +650,7 @@ TEST_F(TestPointwiseOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -663,7 +663,7 @@ TEST_F(TestPointwiseOperationDescriptor, BuildNodeWithHalfComputeType)
 TEST_F(TestPointwiseOperationDescriptor, GetTensorDescriptorsOrderIsIn0Out0In1In2)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
@@ -678,7 +678,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -690,7 +690,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _in0Desc->tryAsGraphOperation();
+    const auto graphOp = _in0Desc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -739,8 +739,8 @@ protected:
 
 TEST_P(TestPointwiseOperationDescriptorOptionalFloat, SetGetValue)
 {
-    auto param = GetParam();
-    auto desc = getDescriptor();
+    const auto param = GetParam();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
     desc->setAttribute(
@@ -797,7 +797,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatUnsetWithNullElementCount)
 {
     makeUnaryFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     float retrieved = 0.0f;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -806,7 +806,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatUnsetWithNullElementCou
 
 TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatSetWithNullElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
     desc->setAttribute(
@@ -831,7 +831,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatSetWithNullElementCount
 
 TEST_F(TestPointwiseOperationDescriptor, SetOptionalFloatRejectsWrongAttributeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto value = 1.0f;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, HIPDNN_TYPE_INT64, 1, &value),
@@ -840,7 +840,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetOptionalFloatRejectsWrongAttributeTy
 
 TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatRejectsWrongAttributeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc);
     desc->setAttribute(
@@ -863,7 +863,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetOptionalFloatRejectsWrongAttributeTy
 
 TEST_F(TestPointwiseOperationDescriptor, SetOptionalFloatRejectsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, HIPDNN_TYPE_FLOAT, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
@@ -876,7 +876,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetOptionalFloatRejectsNullPointer)
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1ReturnsZeroCountForUnaryOp)
 {
     makeUnaryFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = -1;
     HipdnnBackendDescriptor* retrieved = nullptr;
@@ -892,7 +892,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1ReturnsZeroCountForUnary
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn2ReturnsZeroCountForUnaryOp)
 {
     makeUnaryFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = -1;
     HipdnnBackendDescriptor* retrieved = nullptr;
@@ -908,7 +908,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn2ReturnsZeroCountForUnary
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1QueryReturnsZeroForUnaryOp)
 {
     makeUnaryFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = -1;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
@@ -922,7 +922,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1QueryReturnsZeroForUnary
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeNullTensorRejectsWrongType)
 {
     makeUnaryFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = -1;
     int64_t dummy = 0;

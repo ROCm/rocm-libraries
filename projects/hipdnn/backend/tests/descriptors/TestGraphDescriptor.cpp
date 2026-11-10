@@ -74,11 +74,11 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
                             static_cast<const void*>(&handle));
     descriptor.finalize();
 
-    auto output = descriptor.getSerializedGraph();
+    const auto output = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
     ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(output.ptr));
     ASSERT_NE(graph, nullptr);
     verifyGraph(*graph);
@@ -251,7 +251,7 @@ TEST_F(TestGraphDescriptor, EmptyGraphDeserializesButFailsToFinalize)
 
     // Serialization still works (not gated by finalize)
     descriptor.buildSerializedGraph();
-    auto data = descriptor.getSerializedGraph();
+    const auto data = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
     ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 }
@@ -286,11 +286,11 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
 
     // Build the serialized buffer and get JSON
     descriptor1.buildSerializedGraph();
-    auto jsonStr = descriptor1.getSerializedJsonGraph();
+    const auto jsonStr = descriptor1.getSerializedJsonGraph();
     ASSERT_FALSE(jsonStr.empty());
 
     // Verify JSON is valid
-    auto parsed = nlohmann::json::parse(jsonStr);
+    const auto parsed = nlohmann::json::parse(jsonStr);
     EXPECT_TRUE(parsed.contains("name"));
     EXPECT_TRUE(parsed.contains("compute_data_type"));
     EXPECT_TRUE(parsed.contains("nodes"));
@@ -303,12 +303,12 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
 
     // Both descriptors should produce equivalent serialized graphs
     descriptor2.buildSerializedGraph();
-    auto binary1 = descriptor1.getSerializedGraph();
-    auto binary2 = descriptor2.getSerializedGraph();
+    const auto binary1 = descriptor1.getSerializedGraph();
+    const auto binary2 = descriptor2.getSerializedGraph();
 
-    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
     EXPECT_EQ(*graph1, *graph2);
@@ -318,7 +318,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripPreservesMinimumApiVersionAndRuntimePas
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto builder = createValidGraph();
+    const auto builder = createValidGraph();
     const auto* graph = GetGraph(builder.GetBufferPointer());
     auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
     ASSERT_NE(graphT, nullptr);
@@ -446,7 +446,7 @@ TEST_F(TestGraphDescriptor, JsonMissingOverrideShapeFieldDefaultsFalse)
 TEST_F(TestGraphDescriptor, JsonSerializeNullDescriptor)
 {
     size_t size = 0;
-    auto status = hipdnnBackendGetSerializedJsonGraph_ext(nullptr, 0, &size, nullptr);
+    const auto status = hipdnnBackendGetSerializedJsonGraph_ext(nullptr, 0, &size, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -520,27 +520,27 @@ TEST_F(TestGraphDescriptor, JsonSerializeOversizedBuffer)
     EXPECT_EQ(returnedSize, requiredSize);
 
     // Verify the JSON content is valid
-    auto parsed = nlohmann::json::parse(buffer.data());
+    const auto parsed = nlohmann::json::parse(buffer.data());
     EXPECT_TRUE(parsed.contains("name"));
 }
 
 TEST_F(TestGraphDescriptor, JsonDeserializeNullInput)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, nullptr, 1);
+    const auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, nullptr, 1);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestGraphDescriptor, JsonDeserializeNullDescriptor)
 {
-    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(nullptr, "{}", 2);
+    const auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(nullptr, "{}", 2);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestGraphDescriptor, JsonDeserializeEmptySize)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, "{}", 0);
+    const auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, "{}", 0);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -548,7 +548,7 @@ TEST_F(TestGraphDescriptor, JsonDeserializeNonGraphJson)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
     const std::string json = R"({"foo": "bar", "baz": 42})";
-    auto status
+    const auto status
         = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, json.c_str(), json.size() + 1);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(desc, nullptr);
@@ -589,19 +589,19 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     const ScopedBackendDescriptor scopedDesc2(rawDesc2);
 
     // Verify the round-tripped graph matches by extracting binary from both
-    auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
-    auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
+    const auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
+    const auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
 
     // desc1 buffer was populated by the GetSerializedJsonGraph call above.
     // desc2 needs explicit buildSerializedGraph() since it was only deserialized.
     graphDesc2->buildSerializedGraph();
 
-    auto binary1 = graphDesc1->getSerializedGraph();
-    auto binary2 = graphDesc2->getSerializedGraph();
+    const auto binary1 = graphDesc1->getSerializedGraph();
+    const auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
     EXPECT_EQ(*graph1, *graph2);
@@ -614,7 +614,7 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
     const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsA;
     const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesA;
-    auto graphA = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphA = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderA,
         "graphA",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -644,7 +644,7 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
     const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsB;
     const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesB;
-    auto graphB = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphB = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderB,
         "graphB",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -697,7 +697,7 @@ TEST_F(TestGraphDescriptor, DeserializeFailsAfterFinalizeAndPreservesIdentity)
 TEST_F(TestGraphDescriptor, BinarySerializeNullDescriptor)
 {
     size_t size = 0;
-    auto status = hipdnnBackendGetSerializedBinaryGraph_ext(nullptr, 0, &size, nullptr);
+    const auto status = hipdnnBackendGetSerializedBinaryGraph_ext(nullptr, 0, &size, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -767,7 +767,7 @@ TEST_F(TestGraphDescriptor, MalformedJsonViaCApiReturnsBadParam)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
     const std::string badJson = "{ not valid json !!!";
-    auto status
+    const auto status
         = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, badJson.c_str(), badJson.size());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
@@ -776,7 +776,7 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeCorruptedData)
 {
     const std::vector<uint8_t> garbageData = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
     hipdnnBackendDescriptor_t rawDesc = nullptr;
-    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
+    const auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
         &rawDesc, garbageData.data(), garbageData.size());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(rawDesc, nullptr);
@@ -878,19 +878,19 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     const ScopedBackendDescriptor scopedDesc2(rawDesc2);
 
     // Verify the round-tripped graph matches
-    auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
-    auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
+    const auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
+    const auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
 
     // desc1 buffer was populated by the GetSerializedBinaryGraph call above.
     // desc2 needs explicit buildSerializedGraph() since it was only deserialized.
     graphDesc2->buildSerializedGraph();
 
-    auto binary1 = graphDesc1->getSerializedGraph();
-    auto binary2 = graphDesc2->getSerializedGraph();
+    const auto binary1 = graphDesc1->getSerializedGraph();
+    const auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+    const auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
     EXPECT_EQ(*graph1, *graph2);
@@ -1114,7 +1114,7 @@ TEST_F(TestGraphDescriptor, IsOverrideShapeEnabledTrueSurvivesSerializationRound
                                           static_cast<const void*>(&handle)));
     ASSERT_NO_THROW(original.finalize());
 
-    auto serialized = original.getSerializedGraph();
+    const auto serialized = original.getSerializedGraph();
 
     GraphDescriptor revived;
     revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
@@ -1199,7 +1199,7 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesSerializationRoundTrip)
                                           static_cast<const void*>(&handle)));
     ASSERT_NO_THROW(original.finalize());
 
-    auto serialized = original.getSerializedGraph();
+    const auto serialized = original.getSerializedGraph();
 
     GraphDescriptor revived;
     revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);

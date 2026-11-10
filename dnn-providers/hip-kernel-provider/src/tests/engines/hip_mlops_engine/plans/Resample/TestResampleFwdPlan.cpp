@@ -59,18 +59,20 @@ flatbuffers::FlatBufferBuilder createCustomResampleFwdGraph(
         flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndexValue);
     }
 
-    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
-        builder,
-        1,
-        2,
-        indexDataType.has_value() ? ::flatbuffers::Optional<int64_t>(3) : ::flatbuffers::nullopt,
-        &prePadding,
-        &postPadding,
-        &stride,
-        &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
-        flatbufferGenerateIndex);
+    auto const resampleAttr
+        = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
+            builder,
+            1,
+            2,
+            indexDataType.has_value() ? ::flatbuffers::Optional<int64_t>(3)
+                                      : ::flatbuffers::nullopt,
+            &prePadding,
+            &postPadding,
+            &stride,
+            &window,
+            hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+            hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+            flatbufferGenerateIndex);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -80,7 +82,7 @@ flatbuffers::FlatBufferBuilder createCustomResampleFwdGraph(
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes,
         resampleAttr.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -123,7 +125,7 @@ std::pair<flatbuffers::FlatBufferBuilder, ResampleFwdPlan>
 
 TEST(TestResampleFwdParams, ConstructsFromSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -136,7 +138,7 @@ TEST(TestResampleFwdParams, ConstructsFromSingleNodeGraph)
 
 TEST(TestResampleFwdParams, CapturesTensorPointersAndAttributes)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -158,7 +160,7 @@ TEST(TestResampleFwdParams, CapturesTensorPointersAndAttributes)
 
 TEST(TestResampleFwdParams, CapturesOptionalIndexTensor)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -174,7 +176,7 @@ TEST(TestResampleFwdParams, CapturesOptionalIndexTensor)
 
 TEST(TestResampleFwdParams, IsMoveConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -236,7 +238,7 @@ TEST(TestResampleFwdPlan, CompileCallsCompilerWithCorrectKernelName)
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -259,11 +261,11 @@ TEST(TestResampleFwdPlan, CompileSetsExpectedDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& option) {
+    auto const hasOption = [&](const std::string& option) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), option)
                != capturedOptions.end();
     };
@@ -297,11 +299,11 @@ TEST(TestResampleFwdPlan, CompileSetsIndexDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph(true);
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& option) {
+    auto const hasOption = [&](const std::string& option) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), option)
                != capturedOptions.end();
     };
@@ -330,11 +332,11 @@ TEST(TestResampleFwdPlan, CompileSetsChannelLastStrideDefines)
 
     auto [fbb, plan] = createPlanFromCustomGraph(createCustomResampleFwdGraph(
         {1, 3, 4, 4}, {48, 1, 12, 3}, {1, 3, 2, 2}, {12, 1, 6, 3}, {0, 0}, {0, 0}, {2, 2}, {2, 2}));
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& option) {
+    auto const hasOption = [&](const std::string& option) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), option)
                != capturedOptions.end();
     };
@@ -353,7 +355,7 @@ TEST(TestResampleFwdPlan, CompileRejectsUnsupportedTensorDimensions)
 {
     auto [fbb, plan] = createPlanFromCustomGraph(createCustomResampleFwdGraph(
         {1, 1, 4}, {4, 4, 1}, {1, 1, 2}, {2, 2, 1}, {0}, {0}, {2}, {2}));
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     const MockKernelCompiler mockCompiler;
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
@@ -370,7 +372,7 @@ TEST(TestResampleFwdPlan, CompileRejectsUnsupportedWorkgroups)
                                      {0, 0},
                                      {1, 1},
                                      {1, 1}));
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     const MockKernelCompiler mockCompiler;
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
@@ -389,7 +391,7 @@ TEST(TestResampleFwdPlan, CompileRejectsUnsupportedIndexDataType)
                                      {2, 2},
                                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT64,
                                      true));
-    auto deviceProps = createTestDeviceProps();
+    auto const deviceProps = createTestDeviceProps();
 
     const MockKernelCompiler mockCompiler;
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);

@@ -38,7 +38,7 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
                                << "(axis not swept).");
             continue;
         }
-        auto knobIt = knobLookup.find(axis.knobId);
+        const auto knobIt = knobLookup.find(axis.knobId);
         if(knobIt == knobLookup.end())
         {
             return {ErrorCode::INVALID_VALUE,
@@ -48,7 +48,7 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
         for(const auto& val : axis.values)
         {
             const KnobSetting testSetting(axis.knobId, val);
-            auto valErr = knobIt->second.validate(testSetting);
+            const auto valErr = knobIt->second.validate(testSetting);
             if(valErr.is_bad())
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -69,7 +69,7 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
                                << "This knob is managed by autotune() in EXHAUSTIVE mode.");
             continue;
         }
-        auto knobIt = knobLookup.find(knobId);
+        const auto knobIt = knobLookup.find(knobId);
         if(knobIt == knobLookup.end())
         {
             return {ErrorCode::INVALID_VALUE,
@@ -77,7 +77,7 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
                         + std::to_string(sweepSpec.engineId)};
         }
         const KnobSetting testSetting(knobId, value);
-        auto valErr = knobIt->second.validate(testSetting);
+        const auto valErr = knobIt->second.validate(testSetting);
         if(valErr.is_bad())
         {
             return {ErrorCode::INVALID_VALUE,

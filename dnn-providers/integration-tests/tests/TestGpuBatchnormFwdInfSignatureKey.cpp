@@ -103,8 +103,8 @@ TEST(TestGpuBatchnormFwdInfSignatureKey, Copy)
 
 TEST(TestGpuBatchnormFwdInfSignatureKey, CreateFromNodeAndTensorMap)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfSignatureKey keyFromNode(

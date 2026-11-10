@@ -29,12 +29,12 @@ TEST(TestFlatbufferTensorAttributesUtils, UnpackTensorAttributes)
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> dims = {1, 3, 224, 224};
     const std::vector<int64_t> strides = {150528, 50176, 224, 1};
-    auto attributeOffset
+    const auto attributeOffset
         = CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims);
     builder.Finish(attributeOffset);
 
     auto tensorAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
-    auto unpacked = unpackTensorAttributes(*tensorAttr);
+    const auto unpacked = unpackTensorAttributes(*tensorAttr);
 
     EXPECT_EQ(unpacked.uid, 1);
     EXPECT_EQ(unpacked.name, "x");
@@ -99,7 +99,7 @@ TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorNulloptYields
     const std::optional<TensorAttributesT> attr = std::nullopt;
     const std::unordered_map<int64_t, void*> variantPack;
 
-    auto tensor = bindOptionalShallowTensor<float>(attr, variantPack);
+    const auto tensor = bindOptionalShallowTensor<float>(attr, variantPack);
 
     EXPECT_EQ(tensor, nullptr);
 }
@@ -364,13 +364,13 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFromAttributeForwardsPackF
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
-    auto attributeOffset
+    const auto attributeOffset
         = CreateTensorAttributesDirect(builder, 1, "x", DataType::FP4_E2M1, &strides, &dims);
     builder.Finish(attributeOffset);
     auto tensorAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
-    auto unpacked = createTensorFromAttribute(*tensorAttr);
-    auto packed = createTensorFromAttribute(*tensorAttr, /*packSubByteElements=*/true);
+    const auto unpacked = createTensorFromAttribute(*tensorAttr);
+    const auto packed = createTensorFromAttribute(*tensorAttr, /*packSubByteElements=*/true);
 
     ASSERT_NE(unpacked, nullptr);
     ASSERT_NE(packed, nullptr);
@@ -434,7 +434,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAllDataTypes)
         {DataType::FP8_E4M3_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e4m3_fnuz)},
         {DataType::FP8_E5M2_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e5m2_fnuz)},
     };
-    auto offsets = makeInt32Offsets({0, 4, 8});
+    const auto offsets = makeInt32Offsets({0, 4, 8});
 
     for(const auto& [dataType, elementSize] : expectedElementSizes)
     {
@@ -450,9 +450,9 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAllDataTypes)
 
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorSharesOffsetTensor)
 {
-    auto offsets = makeInt32Offsets({0, 4, 8});
+    const auto offsets = makeInt32Offsets({0, 4, 8});
 
-    auto tensor = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
+    const auto tensor = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
 
     auto* ragged = dynamic_cast<hipdnn_data_sdk::utilities::RaggedTensor<float>*>(tensor.get());
     ASSERT_NE(ragged, nullptr);
@@ -468,7 +468,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorUnsupportedTypeThrow
 
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAppliesMultiplier)
 {
-    auto offsets = makeInt32Offsets({0, 2, 4});
+    const auto offsets = makeInt32Offsets({0, 2, 4});
 
     auto unscaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
     auto scaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets, 2);
@@ -483,24 +483,24 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorFromAttributeAndOffs
 {
     constexpr int64_t OFFSET_UID = 7;
     flatbuffers::FlatBufferBuilder builder;
-    auto attributeOffset = CreateTensorAttributesDirect(builder,
-                                                        1,
-                                                        "q",
-                                                        DataType::HALF,
-                                                        &RAGGED_STRIDES,
-                                                        &RAGGED_DIMS,
-                                                        false,
-                                                        TensorValue::NONE,
-                                                        0,
-                                                        false,
-                                                        OFFSET_UID,
-                                                        16,
-                                                        2);
+    const auto attributeOffset = CreateTensorAttributesDirect(builder,
+                                                              1,
+                                                              "q",
+                                                              DataType::HALF,
+                                                              &RAGGED_STRIDES,
+                                                              &RAGGED_DIMS,
+                                                              false,
+                                                              TensorValue::NONE,
+                                                              0,
+                                                              false,
+                                                              OFFSET_UID,
+                                                              16,
+                                                              2);
     builder.Finish(attributeOffset);
     auto tensorAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
-    auto offsets = makeInt32Offsets({0, 2, 4});
+    const auto offsets = makeInt32Offsets({0, 2, 4});
 
-    auto tensor = createRaggedTensorFromAttributeAndOffset(*tensorAttr, offsets);
+    const auto tensor = createRaggedTensorFromAttributeAndOffset(*tensorAttr, offsets);
 
     auto* ragged
         = dynamic_cast<hipdnn_data_sdk::utilities::RaggedTensor<hipdnn_data_sdk::types::half>*>(
@@ -520,7 +520,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAddressesLogicalBhsd
     constexpr int64_t HEAD_DIM = 2;
     const std::vector<int64_t> dims = {2, HEADS, 3, HEAD_DIM};
     const std::vector<int64_t> strides = {12, HEAD_DIM, HEADS * HEAD_DIM, 1};
-    auto tokenOffsets = makeInt32Offsets({0, 2, 5});
+    const auto tokenOffsets = makeInt32Offsets({0, 2, 5});
 
     auto tensor
         = createRaggedTensor(DataType::FLOAT, dims, strides, tokenOffsets, HEADS * HEAD_DIM);
@@ -558,7 +558,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorRejectsAliasingStrid
 // L9: origins in any order, lengths from the length tensor, offset[B] unused.
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorBindsLengthTensor)
 {
-    auto lengths = makeInt32Offsets({2, 3});
+    const auto lengths = makeInt32Offsets({2, 3});
 
     auto tensor = createRaggedTensor(
         DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, makeInt32Offsets({10, 0, 0}), 1, lengths);
@@ -598,7 +598,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorFromAttributeAndOffs
                                                 1));
     auto tensorAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
-    auto tensor = createRaggedTensorFromAttributeAndOffset(
+    const auto tensor = createRaggedTensorFromAttributeAndOffset(
         *tensorAttr, makeInt32Offsets({4, 8, 14}), makeInt32Offsets({2, 3}));
 
     const auto info = tensor->raggedIterationInfo();

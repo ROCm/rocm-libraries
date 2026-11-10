@@ -69,12 +69,12 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_name("X").set_dim({2, 3, 4, 4}).set_stride({48, 16, 4, 1});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
-        auto y = graph.pointwise(x, attrs);
+        const auto y = graph.pointwise(x, attrs);
         y->set_name("Y");
 
         auto result = graph.validate();
@@ -115,7 +115,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
     const Graph graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(testCase.engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(testCase.engineId, knobs);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
@@ -125,7 +125,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
     // Verify all required knob IDs are present
     for(const auto& requiredId : testCase.requiredKnobIds)
     {
-        auto it = std::find_if(knobs.begin(), knobs.end(), [&requiredId](const Knob& knob) {
+        const auto it = std::find_if(knobs.begin(), knobs.end(), [&requiredId](const Knob& knob) {
             return knob.knobId() == requiredId;
         });
         EXPECT_NE(it, knobs.end())
@@ -198,7 +198,7 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
     // Create execution plan with no knob settings (should use defaults)
     const std::vector<KnobSetting> emptySettings;
 
-    auto result = graph.create_execution_plan_ext(testCase.engineId, emptySettings);
+    const auto result = graph.create_execution_plan_ext(testCase.engineId, emptySettings);
     EXPECT_TRUE(result.is_good()) << "Engine " << testCase.engineId
                                   << " should accept empty knob settings: " << result.get_message();
 }
@@ -213,7 +213,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
     settings.emplace_back("test.float_knob", 0.75);
     settings.emplace_back("test.string_knob", std::string("accurate"));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -225,18 +225,18 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
 
     // Query knobs to get constraint information
     std::vector<Knob> knobs;
-    auto queryResult = graph.get_knobs_for_engine(engineId, knobs);
+    const auto queryResult = graph.get_knobs_for_engine(engineId, knobs);
     ASSERT_TRUE(queryResult.is_good()) << queryResult.get_message();
 
     // Find int_knob and float_knob to get their constraint information
-    auto intKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+    const auto intKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
         return knob.knobId() == "test.int_knob";
     });
     ASSERT_NE(intKnobIt, knobs.end()) << "Could not find test.int_knob";
     auto* intConstraint = dynamic_cast<const IntConstraint*>(intKnobIt->constraint());
     ASSERT_NE(intConstraint, nullptr) << "test.int_knob should have IntConstraint";
 
-    auto floatKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+    const auto floatKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
         return knob.knobId() == "test.float_knob";
     });
     ASSERT_NE(floatKnobIt, knobs.end()) << "Could not find test.float_knob";
@@ -250,7 +250,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
         settings.emplace_back("test.float_knob", floatConstraint->getMinValue());
         settings.emplace_back("test.string_knob", std::string("fast"));
 
-        auto result = graph.create_execution_plan_ext(engineId, settings);
+        const auto result = graph.create_execution_plan_ext(engineId, settings);
         EXPECT_TRUE(result.is_good())
             << "Minimum values should be accepted: " << result.get_message();
     }
@@ -262,7 +262,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
         settings.emplace_back("test.float_knob", floatConstraint->getMaxValue());
         settings.emplace_back("test.string_knob", std::string("balanced"));
 
-        auto result = graph.create_execution_plan_ext(engineId, settings);
+        const auto result = graph.create_execution_plan_ext(engineId, settings);
         EXPECT_TRUE(result.is_good())
             << "Maximum values should be accepted: " << result.get_message();
     }
@@ -277,7 +277,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithOutOfRangeIntKnob)
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(150)); // Above max
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_FALSE(result.is_good()) << "Should reject int value above maximum";
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
@@ -291,7 +291,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithMisalignedIntKnobStep)
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(15)); // Not aligned with step
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_FALSE(result.is_good()) << "Should reject int value not aligned with step";
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
@@ -305,7 +305,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.string_knob", std::string("invalid_choice"));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_FALSE(result.is_good()) << "Should reject invalid string choice";
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
@@ -313,7 +313,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 {
     // Set up log recorder to capture warning about deprecated knob
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     Graph graph = createAndBuildSimpleGraph();
@@ -323,7 +323,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
     std::vector<KnobSetting> settings;
     settings.emplace_back("nonexistent.knob", static_cast<int64_t>(42));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - unsupported knobs are ignored with warning
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
@@ -338,7 +338,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
     // Set up log recorder to capture warning about deprecated knob
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     Graph graph = createAndBuildSimpleGraph();
@@ -347,7 +347,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.deprecated_knob", static_cast<int64_t>(5));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - deprecated knobs are used with warning
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
@@ -362,7 +362,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 {
     // Set up log recorder to verify no deprecation warning is emitted
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     Graph graph = createAndBuildSimpleGraph();
@@ -396,18 +396,18 @@ TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
     Graph graph;
     graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_dim({2, 3, 4, 4});
 
     PointwiseAttributes attrs;
     attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph.pointwise(x, attrs);
+    const auto y = graph.pointwise(x, attrs);
     y->set_name("Y");
 
     // Try to query knobs WITHOUT building the graph first
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
 
     EXPECT_FALSE(result.is_good()) << "Should fail when graph not built";
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);

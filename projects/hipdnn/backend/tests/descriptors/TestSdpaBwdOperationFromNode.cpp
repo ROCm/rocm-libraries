@@ -35,9 +35,9 @@ protected:
 
     void SetUp() override
     {
-        auto makeTensor = [this](int64_t uid,
-                                 const std::vector<int64_t>& dims,
-                                 const std::vector<int64_t>& strides) {
+        const auto makeTensor = [this](int64_t uid,
+                                       const std::vector<int64_t>& dims,
+                                       const std::vector<int64_t>& strides) {
             TensorAttributesT attrs;
             attrs.uid = uid;
             attrs.data_type = DataType::FLOAT;
@@ -46,7 +46,7 @@ protected:
             _tensorMap[uid] = TensorDescriptor::fromFlatBuffer(attrs);
         };
 
-        auto makeScalarTensor = [this](int64_t uid) {
+        const auto makeScalarTensor = [this](int64_t uid) {
             TensorAttributesT attrs;
             attrs.uid = uid;
             attrs.data_type = DataType::FLOAT;
@@ -166,7 +166,7 @@ class TestSdpaBwdMissingRequiredTensor : public TestSdpaBwdOperationFromNode,
 TEST_P(TestSdpaBwdMissingRequiredTensor, FailsWithMissingRequiredTensor)
 {
     _tensorMap.erase(GetParam());
-    auto node = createRequiredOnlyNode();
+    const auto node = createRequiredOnlyNode();
     ASSERT_THROW_HIPDNN_STATUS(SdpaBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
@@ -189,8 +189,8 @@ INSTANTIATE_TEST_SUITE_P(AllRequiredTensors,
 
 TEST_F(TestSdpaBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -200,9 +200,9 @@ TEST_F(TestSdpaBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestSdpaBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createRequiredOnlyNode();
+    const auto node = createRequiredOnlyNode();
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
@@ -210,7 +210,7 @@ TEST_F(TestSdpaBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 
-    auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     EXPECT_EQ(desc->getData().q_tensor_uid, K_SDPA_BWD_TENSOR_Q_UID);
@@ -227,16 +227,16 @@ TEST_F(TestSdpaBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestSdpaBwdOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createRequiredOnlyNode(DataType::HALF);
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode(DataType::HALF);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, SetsTensorReferences)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getQDesc(), nullptr);
     EXPECT_EQ(desc->getQDesc()->getData().uid, K_SDPA_BWD_TENSOR_Q_UID);
@@ -260,8 +260,8 @@ TEST_F(TestSdpaBwdOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorReferencesSetWhenAllFieldsPresent)
 {
-    auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createAllNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getScaleDesc(), nullptr);
     EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_SDPA_BWD_TENSOR_SCALE_UID);
@@ -288,8 +288,8 @@ TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorReferencesSetWhenAllFieldsPre
 
 TEST_F(TestSdpaBwdOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getQDesc(), _tensorMap[K_SDPA_BWD_TENSOR_Q_UID]);
     EXPECT_EQ(desc->getKDesc(), _tensorMap[K_SDPA_BWD_TENSOR_K_UID]);
@@ -304,8 +304,8 @@ TEST_F(TestSdpaBwdOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestSdpaBwdOperationFromNode, RequiredOnlyHasNullOptionalTensors)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Optional tensor descs are null
     EXPECT_EQ(desc->getScaleDesc(), nullptr);
@@ -334,8 +334,9 @@ TEST_F(TestSdpaBwdOperationFromNode, RequiredOnlyHasNullOptionalTensors)
 
 TEST_F(TestSdpaBwdOperationFromNode, AllFieldsScalarsAndBoolsPreserved)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_TRUE(desc->getData().alibi_mask);
     EXPECT_TRUE(desc->getData().causal_mask);
@@ -372,7 +373,7 @@ TEST_F(TestSdpaBwdOperationFromNode, SucceedsWithOnlyRequiredTensorsInAttrs)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -393,13 +394,14 @@ TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorUidSetButMissingInMap)
     // Set scale_tensor_uid in attrs but erase it from the map
     _tensorMap.erase(K_SDPA_BWD_TENSOR_SCALE_UID);
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto allAttrs = createAllAttrs();
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(allAttrs);
 
     // findOptional returns nullptr gracefully when UID is set but missing from map
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     EXPECT_EQ(desc->getScaleDesc(), nullptr);
@@ -407,8 +409,8 @@ TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorUidSetButMissingInMap)
 
 TEST_F(TestSdpaBwdOperationFromNode, GetTensorDescriptorsRequiredOnly)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 9u);
@@ -425,18 +427,18 @@ TEST_F(TestSdpaBwdOperationFromNode, GetTensorDescriptorsRequiredOnly)
 
 TEST_F(TestSdpaBwdOperationFromNode, GetTensorDescriptorsAllOptionals)
 {
-    auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createAllNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto tensors = desc->getTensorDescriptors();
+    const auto tensors = desc->getTensorDescriptors();
     // 9 required + 10 optional = 19
     ASSERT_EQ(tensors.size(), 19u);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createAllNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createAllNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -478,8 +480,8 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestSdpaBwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -495,8 +497,8 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
 
 TEST_F(TestSdpaBwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -536,7 +538,7 @@ TEST_F(TestSdpaBwdOperationFromNode, NamePreservedFromNode)
     auto node = createRequiredOnlyNode();
     node.name = "test_sdpa_bwd_1";
 
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -551,8 +553,8 @@ TEST_F(TestSdpaBwdOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestSdpaBwdOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createRequiredOnlyNode();
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createRequiredOnlyNode();
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -564,7 +566,7 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodePreservesName)
     auto node = createRequiredOnlyNode();
     node.name = "test_build_name";
 
-    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

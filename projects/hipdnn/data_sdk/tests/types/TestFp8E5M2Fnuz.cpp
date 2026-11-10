@@ -285,7 +285,7 @@ TEST(TestFp8E5M2Fnuz, NoNegativeZero)
 TEST(TestFp8E5M2Fnuz, NegateZeroProducesNaN)
 {
     // FNUZ has no -0; negating zero flips the sign bit: 0x00 -> 0x80 = NaN
-    auto val = -fp8_e5m2_fnuz(0.0f);
+    const auto val = -fp8_e5m2_fnuz(0.0f);
     EXPECT_TRUE(isnan(val));
     EXPECT_EQ(val.data, static_cast<uint8_t>(0x80));
 }
@@ -293,7 +293,7 @@ TEST(TestFp8E5M2Fnuz, NegateZeroProducesNaN)
 TEST(TestFp8E5M2Fnuz, NegateNaNProducesZero)
 {
     // NaN (0x80) negated flips the sign bit: 0x80 -> 0x00 = zero
-    auto val = -fp8_e5m2_fnuz::from_bits(0x80);
+    const auto val = -fp8_e5m2_fnuz::from_bits(0x80);
     EXPECT_EQ(static_cast<float>(val), 0.0f);
     EXPECT_EQ(val.data, static_cast<uint8_t>(0x00));
 }
@@ -301,12 +301,12 @@ TEST(TestFp8E5M2Fnuz, NegateNaNProducesZero)
 TEST(TestFp8E5M2Fnuz, SingleNanEncoding)
 {
     // Float NaN must map to 0x80
-    auto v = fp8_e5m2_fnuz(std::numeric_limits<float>::quiet_NaN());
+    const auto v = fp8_e5m2_fnuz(std::numeric_limits<float>::quiet_NaN());
     EXPECT_EQ(v.data, static_cast<uint8_t>(0x80));
     EXPECT_TRUE(isnan(v));
 
     // signaling NaN also maps to 0x80
-    auto vs = fp8_e5m2_fnuz(std::numeric_limits<float>::signaling_NaN());
+    const auto vs = fp8_e5m2_fnuz(std::numeric_limits<float>::signaling_NaN());
     EXPECT_EQ(vs.data, static_cast<uint8_t>(0x80));
     EXPECT_TRUE(isnan(vs));
 

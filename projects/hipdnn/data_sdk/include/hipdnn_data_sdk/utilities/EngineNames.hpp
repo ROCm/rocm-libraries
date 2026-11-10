@@ -203,11 +203,11 @@ struct EngineRegistrar
 {
     EngineRegistrar(std::string_view name)
     {
-        auto id = engineNameToId(name);
+        const auto id = engineNameToId(name);
 
         // Check for duplicate registration or hash collision BEFORE inserting
         auto& idToNameMap = detail::getMutableEngineIdToNameMap();
-        auto it = idToNameMap.find(id);
+        const auto it = idToNameMap.find(id);
         if(it != idToNameMap.end())
         {
             if(it->second == name)

@@ -200,11 +200,11 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                        const hipDeviceProp_t& deviceProperties)
 {
     // Determine data type configuration
-    auto xDataType = _trainingParams.x()->data_type();
-    auto yDataType = _trainingParams.optActivation().has_value()
-                         ? _trainingParams.activationOut()->data_type()
-                         : _trainingParams.y()->data_type();
-    auto scaleDataType = _trainingParams.scale()->data_type();
+    auto const xDataType = _trainingParams.x()->data_type();
+    auto const yDataType = _trainingParams.optActivation().has_value()
+                               ? _trainingParams.activationOut()->data_type()
+                               : _trainingParams.y()->data_type();
+    auto const scaleDataType = _trainingParams.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
@@ -244,8 +244,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         batches = static_cast<size_t>(xDims->Get(0));
         channels = static_cast<size_t>(xDims->Get(1));
-        auto height = static_cast<size_t>(xDims->Get(2));
-        auto width = static_cast<size_t>(xDims->Get(3));
+        auto const height = static_cast<size_t>(xDims->Get(2));
+        auto const width = static_cast<size_t>(xDims->Get(3));
         // For 4D, combine H*W into spatial dimension
         spatialSize = height * width;
     }
@@ -253,9 +253,9 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         batches = static_cast<size_t>(xDims->Get(0));
         channels = static_cast<size_t>(xDims->Get(1));
-        auto depth = static_cast<size_t>(xDims->Get(2));
-        auto height = static_cast<size_t>(xDims->Get(3));
-        auto width = static_cast<size_t>(xDims->Get(4));
+        auto const depth = static_cast<size_t>(xDims->Get(2));
+        auto const height = static_cast<size_t>(xDims->Get(3));
+        auto const width = static_cast<size_t>(xDims->Get(4));
         // For 5D, combine D*H*W into spatial dimension
         spatialSize = depth * height * width;
     }
@@ -266,7 +266,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(spatialSize);
+    auto const inCstride = static_cast<unsigned int>(spatialSize);
 
     // Detect layout
     const bool isLayoutChannelLast = isChannelLastLayout(_trainingParams.x());

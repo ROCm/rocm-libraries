@@ -158,11 +158,11 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowQTensor
+        const auto shallowQTensor
             = createShallowTensor<QDataType>(_params.qTensor, variantPack.at(_params.qTensor.uid));
-        auto shallowKTensor
+        const auto shallowKTensor
             = createShallowTensor<KDataType>(_params.kTensor, variantPack.at(_params.kTensor.uid));
-        auto shallowVTensor
+        const auto shallowVTensor
             = createShallowTensor<VDataType>(_params.vTensor, variantPack.at(_params.vTensor.uid));
         auto shallowOTensor
             = createShallowTensor<ODataType>(_params.oTensor, variantPack.at(_params.oTensor.uid));
@@ -179,17 +179,17 @@ public:
                        ? createShallowTensor<float>(*stats, variantPack.at(stats->uid))
                        : std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>>{};
         };
-        auto shallowLseTensor = bindStats(_params.lseTensor);
-        auto shallowMaxTensor = bindStats(_params.maxTensor);
-        auto shallowSumExpTensor = bindStats(_params.sumExpTensor);
+        const auto shallowLseTensor = bindStats(_params.lseTensor);
+        const auto shallowMaxTensor = bindStats(_params.maxTensor);
+        const auto shallowSumExpTensor = bindStats(_params.sumExpTensor);
 
         // FP8 descale tensors (float32). Absent for non-fp8 graphs. A pass-by-value (baked or
         // runtime) descale is staged in a one-element tensor.
-        auto shallowDescaleQ
+        const auto shallowDescaleQ
             = bindOptionalHostFloatOperand(_params.descaleQTensor, variantPack, "SDPA descale");
-        auto shallowDescaleK
+        const auto shallowDescaleK
             = bindOptionalHostFloatOperand(_params.descaleKTensor, variantPack, "SDPA descale");
-        auto shallowDescaleV
+        const auto shallowDescaleV
             = bindOptionalHostFloatOperand(_params.descaleVTensor, variantPack, "SDPA descale");
 
         // Padding lengths (INT32, one per batch). Applicability guarantees both or neither.
@@ -209,14 +209,14 @@ public:
         std::optional<hipdnn_data_sdk::utilities::Tensor<VDataType>> denseV;
         if(_params.pageTableKTensor.has_value())
         {
-            auto table = createShallowTensor<int32_t>(
+            const auto table = createShallowTensor<int32_t>(
                 *_params.pageTableKTensor, variantPack.at(_params.pageTableKTensor->uid));
             denseK.emplace(utilities::CpuFpReferenceSdpa::gatherPagedKv(
                 *shallowKTensor, *table, *shallowSeqLenKv, _params.pagedMaxSeqKv));
         }
         if(_params.pageTableVTensor.has_value())
         {
-            auto table = createShallowTensor<int32_t>(
+            const auto table = createShallowTensor<int32_t>(
                 *_params.pageTableVTensor, variantPack.at(_params.pageTableVTensor->uid));
             denseV.emplace(utilities::CpuFpReferenceSdpa::gatherPagedKv(
                 *shallowVTensor, *table, *shallowSeqLenKv, _params.pagedMaxSeqKv));
@@ -264,8 +264,8 @@ public:
             shallowBlockMask = createShallowTensor<uint8_t>(
                 *_params.blockMaskTensor, variantPack.at(_params.blockMaskTensor->uid));
         }
-        auto shallowAmaxS = bindStats(_params.amaxSTensor);
-        auto shallowAmaxO = bindStats(_params.amaxOTensor);
+        const auto shallowAmaxS = bindStats(_params.amaxSTensor);
+        const auto shallowAmaxO = bindStats(_params.amaxOTensor);
 
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).

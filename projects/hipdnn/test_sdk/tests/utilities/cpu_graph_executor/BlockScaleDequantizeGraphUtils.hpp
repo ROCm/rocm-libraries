@@ -56,7 +56,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 {
     using namespace hipdnn_tests::constants;
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BlockScaleDequantizeTest");
     graph->set_compute_data_type(
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
@@ -64,26 +64,27 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(xDataType), tensorBundle.xTensor);
     xAttr.set_uid(K_BSD_TENSOR_X_UID);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale",
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleDataType),
         tensorBundle.scaleTensor);
     scaleAttr.set_uid(K_BSD_TENSOR_SCALE_UID);
-    auto scaleTensorAttr
+    const auto scaleTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     hipdnn_frontend::graph::BlockScaleDequantizeAttributes bsdAttrs;
     bsdAttrs.set_name("block_scale_dequantize");
     bsdAttrs.set_block_size(blockSize);
 
-    auto yTensorAttr = graph->block_scale_dequantize(xTensorAttr, scaleTensorAttr, bsdAttrs);
+    const auto yTensorAttr = graph->block_scale_dequantize(xTensorAttr, scaleTensorAttr, bsdAttrs);
 
     yTensorAttr->set_uid(K_BSD_TENSOR_Y_UID);
     yTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(yDataType));
 
-    auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *scaleTensorAttr);
+    const auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *scaleTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }

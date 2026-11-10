@@ -360,8 +360,8 @@ private:
     {
         using hipdnn_data_sdk::utilities::TensorLayout;
 
-        auto inputDims = inputTensorProps.dims;
-        auto inputStrides = inputTensorProps.strides;
+        const auto inputDims = inputTensorProps.dims;
+        const auto inputStrides = inputTensorProps.strides;
         const auto nDims = inputDims.size();
         const auto inputStrideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(inputStrides);
 

@@ -44,7 +44,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                          const std::string& name = "")
 {
     auto wrapper = createDescriptor<MoeGroupedMatmulBwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<MoeGroupedMatmulBwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<MoeGroupedMatmulBwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -89,7 +89,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -142,27 +142,30 @@ protected:
 
 TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, BuildFromSingleOperation)
 {
-    auto doutputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
-                                           HIPDNN_DATA_FLOAT);
-    auto firstTokenOffsetDesc
+    const auto doutputDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto tokenDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES),
                                 HIPDNN_DATA_INT32);
-    auto dweightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(
+    const auto dweightDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(
         doutputDesc.get(), tokenDesc.get(), firstTokenOffsetDesc.get(), dweightDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -173,7 +176,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -227,30 +230,33 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, ComputeDataTypePreserved)
 {
-    auto doutputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
-                                           HIPDNN_DATA_FLOAT);
-    auto firstTokenOffsetDesc
+    const auto doutputDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto tokenDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES),
                                 HIPDNN_DATA_INT32);
-    auto dweightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
-                                                       tokenDesc.get(),
-                                                       firstTokenOffsetDesc.get(),
-                                                       dweightDesc.get(),
-                                                       HIPDNN_DATA_HALF);
+    const auto dweightDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
+                                                             tokenDesc.get(),
+                                                             firstTokenOffsetDesc.get(),
+                                                             dweightDesc.get(),
+                                                             HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -260,7 +266,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -269,31 +275,34 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNamePreservedInSerialization)
 {
-    auto doutputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
-                                           HIPDNN_DATA_FLOAT);
-    auto firstTokenOffsetDesc
+    const auto doutputDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto tokenDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES),
                                 HIPDNN_DATA_INT32);
-    auto dweightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
-                                                       tokenDesc.get(),
-                                                       firstTokenOffsetDesc.get(),
-                                                       dweightDesc.get(),
-                                                       HIPDNN_DATA_FLOAT,
-                                                       "test_moegroupedmatmulbwd_name");
+    const auto dweightDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
+                                                             tokenDesc.get(),
+                                                             firstTokenOffsetDesc.get(),
+                                                             dweightDesc.get(),
+                                                             HIPDNN_DATA_FLOAT,
+                                                             "test_moegroupedmatmulbwd_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -303,7 +312,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNamePreservedInSerializa
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -312,31 +321,34 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNamePreservedInSerializa
 
 TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNameRoundTripThroughLifting)
 {
-    auto doutputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
-                                           HIPDNN_DATA_FLOAT);
-    auto firstTokenOffsetDesc
+    const auto doutputDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto tokenDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
                                 toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES),
                                 HIPDNN_DATA_INT32);
-    auto dweightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
-                                             toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
-                                             HIPDNN_DATA_FLOAT);
-    auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
-                                                       tokenDesc.get(),
-                                                       firstTokenOffsetDesc.get(),
-                                                       dweightDesc.get(),
-                                                       HIPDNN_DATA_FLOAT,
-                                                       "test_moegroupedmatmulbwd_lifting");
+    const auto dweightDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+    const auto opDesc = createFinalizedMoeGroupedMatmulBwdOp(doutputDesc.get(),
+                                                             tokenDesc.get(),
+                                                             firstTokenOffsetDesc.get(),
+                                                             dweightDesc.get(),
+                                                             HIPDNN_DATA_FLOAT,
+                                                             "test_moegroupedmatmulbwd_lifting");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -347,13 +359,13 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNameRoundTripThroughLift
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -364,7 +376,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNameRoundTripThroughLift
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

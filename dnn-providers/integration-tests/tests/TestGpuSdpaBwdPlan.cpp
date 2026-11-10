@@ -168,14 +168,14 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(const RawBwdSpec& spec)
         add(17, "Scale", spec.scaleType, scaleStrides, scaleDims);
     }
 
-    auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "SdpaBwdGraph", spec.io, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
@@ -186,7 +186,7 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(const RawBwdSpec& spec)
 template <typename SignatureKey>
 bool applicable(const RawBwdSpec& spec)
 {
-    auto graph = makeRawSdpaBwdGraph(spec);
+    const auto graph = makeRawSdpaBwdGraph(spec);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
         graph.GetBufferPointer(), graph.GetSize());
     const auto& node = wrapper.getNode(0);
@@ -373,7 +373,7 @@ TEST_P(TestGpuSdpaBwdPlanExecutor, MatchesCpuExecutor)
     SKIP_IF_NO_DEVICES();
     const RawBwdSpec& spec = GetParam().spec;
     const unsigned int seed = GetParam().seedBase;
-    auto graph = makeRawSdpaBwdGraph(spec);
+    const auto graph = makeRawSdpaBwdGraph(spec);
 
     constexpr int64_t HEAD_DIM = 8;
     const std::vector<int64_t> qDims = {1, spec.heads, spec.seqQ, HEAD_DIM};

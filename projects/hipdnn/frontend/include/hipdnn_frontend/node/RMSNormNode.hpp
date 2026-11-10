@@ -61,10 +61,10 @@ public:
                                "RMSNormNode missing epsilon for pre-validation");
 
         // Get tensor references
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
-        auto epsilon = attributes.get_epsilon();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
+        const auto epsilon = attributes.get_epsilon();
 
         // SECTION 2: Validate Required Parameter Dimensions
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
@@ -82,7 +82,7 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateScaleNormalizedShape(scale, x, "Scale tensor"));
 
         // Bias must have the same shape as scale (scale already validated above).
-        auto bias = attributes.get_bias();
+        const auto bias = attributes.get_bias();
         if(bias)
         {
             HIPDNN_CHECK_ERROR(
@@ -108,9 +108,9 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
 
         if(!x)
         {
@@ -145,7 +145,8 @@ public:
         {
             if(!x->get_stride().empty() && x->get_stride().size() == scale->get_dim().size())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                const auto strideOrder
+                    = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                 scale->set_stride(
                     hipdnn_data_sdk::utilities::generateStrides(scale->get_dim(), strideOrder));
             }
@@ -157,7 +158,7 @@ public:
 
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
-            auto invRms = attributes.get_inv_rms();
+            const auto invRms = attributes.get_inv_rms();
             if(invRms)
             {
                 // Derive inv_rms dims from input and scale:
@@ -181,7 +182,7 @@ public:
                 {
                     if(!x->get_stride().empty())
                     {
-                        auto strideOrder
+                        const auto strideOrder
                             = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                         invRms->set_stride(hipdnn_data_sdk::utilities::generateStrides(
                             invRms->get_dim(), strideOrder));
@@ -196,7 +197,7 @@ public:
         }
 
         // Bias inherits scale's shape and stride layout (validator enforces dim match).
-        auto bias = attributes.get_bias();
+        const auto bias = attributes.get_bias();
         if(bias)
         {
             if(bias->get_dim().empty())

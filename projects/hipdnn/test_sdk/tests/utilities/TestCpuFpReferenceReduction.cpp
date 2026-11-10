@@ -80,7 +80,7 @@ class TestCpuFpReferenceReduction : public ::testing::Test
 
 TEST_F(TestCpuFpReferenceReduction, ValidateRankMismatch)
 {
-    auto x = createTensor<float>({2, 3, 4});
+    const auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 3});
 
     EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
@@ -89,7 +89,7 @@ TEST_F(TestCpuFpReferenceReduction, ValidateRankMismatch)
 
 TEST_F(TestCpuFpReferenceReduction, ValidateInvalidYDim)
 {
-    auto x = createTensor<float>({2, 3, 4});
+    const auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 2, 4}); // dim 1: 2 != 3 and != 1
 
     EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),
@@ -98,7 +98,7 @@ TEST_F(TestCpuFpReferenceReduction, ValidateInvalidYDim)
 
 TEST_F(TestCpuFpReferenceReduction, ValidateNoReducedDim)
 {
-    auto x = createTensor<float>({2, 3, 4});
+    const auto x = createTensor<float>({2, 3, 4});
     auto y = createTensor<float>({2, 3, 4}); // no dim reduced
 
     EXPECT_THROW((CpuFpReferenceReduction::reduce<float, float, float>(x, y, ReductionMode::ADD)),

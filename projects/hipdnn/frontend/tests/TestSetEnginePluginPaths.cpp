@@ -84,7 +84,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAbsoluteSuccess)
                                         HIPDNN_PLUGIN_LOADING_ABSOLUTE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
+    const auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     EXPECT_TRUE(error.is_good());
 }
 
@@ -107,7 +107,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveSuccess)
                                         HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    const auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_good());
 }
 
@@ -123,7 +123,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveBackendFailure)
                                         HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    const auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -135,7 +135,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveEmptyPaths)
     EXPECT_CALL(*_mockBackend, setEnginePluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    const auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_good());
 }
 
@@ -144,9 +144,9 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsInvalidMode)
     const std::vector<std::filesystem::path> paths = {"/path/to/plugin"};
 
     // Cast an invalid integer to PluginLoadingMode to simulate an unrecognized value
-    auto invalidMode = static_cast<PluginLoadingMode>(99);
+    const auto invalidMode = static_cast<PluginLoadingMode>(99);
 
-    auto error = setEnginePluginPaths(paths, invalidMode);
+    const auto error = setEnginePluginPaths(paths, invalidMode);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
@@ -169,7 +169,7 @@ TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsAbsoluteSuccess)
                                            HIPDNN_PLUGIN_LOADING_ABSOLUTE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
+    const auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     EXPECT_TRUE(error.is_good());
 }
 
@@ -184,7 +184,7 @@ TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsBackendFailure)
                                            HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
-    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    const auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -197,16 +197,16 @@ TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsEmptyPaths)
                 setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    const auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_good());
 }
 
 TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsInvalidMode)
 {
     const std::vector<std::filesystem::path> paths = {"/path/to/heuristic"};
-    auto invalidMode = static_cast<PluginLoadingMode>(99);
+    const auto invalidMode = static_cast<PluginLoadingMode>(99);
 
-    auto error = setHeuristicPluginPaths(paths, invalidMode);
+    const auto error = setHeuristicPluginPaths(paths, invalidMode);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
@@ -245,7 +245,7 @@ TEST_F(TestSetEnginePluginPaths, GetLoadedEnginePluginPathsSuccess)
         }));
 
     std::vector<std::filesystem::path> resultPaths;
-    auto error = getLoadedEnginePluginPaths(handle, resultPaths);
+    const auto error = getLoadedEnginePluginPaths(handle, resultPaths);
     EXPECT_TRUE(error.is_good());
     ASSERT_EQ(resultPaths.size(), numPlugins);
     for(size_t i = 0; i < numPlugins; ++i)
@@ -263,7 +263,7 @@ TEST_F(TestSetEnginePluginPaths, GetLoadedEnginePluginPathsBackendFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<std::filesystem::path> resultPaths;
-    auto error = getLoadedEnginePluginPaths(handle, resultPaths);
+    const auto error = getLoadedEnginePluginPaths(handle, resultPaths);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -279,7 +279,7 @@ TEST_F(TestSetEnginePluginPaths, GetLoadedEnginePluginPathsEmptyPlugins)
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     std::vector<std::filesystem::path> resultPaths;
-    auto error = getLoadedEnginePluginPaths(handle, resultPaths);
+    const auto error = getLoadedEnginePluginPaths(handle, resultPaths);
     EXPECT_TRUE(error.is_good());
     EXPECT_TRUE(resultPaths.empty());
 }

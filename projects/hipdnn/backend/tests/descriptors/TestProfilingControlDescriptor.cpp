@@ -47,7 +47,7 @@ protected:
 
 TEST_F(TestProfilingControlDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
@@ -65,7 +65,7 @@ TEST_F(TestProfilingControlDescriptor, CreateDescriptor)
 
 TEST_F(TestProfilingControlDescriptor, SetStartBeforeHandleThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_START_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -74,7 +74,7 @@ TEST_F(TestProfilingControlDescriptor, SetStartBeforeHandleThrows)
 
 TEST_F(TestProfilingControlDescriptor, SetStopBeforeHandleThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -83,7 +83,7 @@ TEST_F(TestProfilingControlDescriptor, SetStopBeforeHandleThrows)
 
 TEST_F(TestProfilingControlDescriptor, SetAttributeWrongElementCountThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     // elementCount=2 fails the count guard (after the type check passes).
     ASSERT_THROW_HIPDNN_STATUS(
@@ -96,7 +96,7 @@ TEST_F(TestProfilingControlDescriptor, SetAttributeWrongElementCountThrows)
 
 TEST_F(TestProfilingControlDescriptor, SetAttributeTypeMismatchThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     // Wrong value type fails checkSetArgs (the first guard) for a boolean attr.
     ASSERT_THROW_HIPDNN_STATUS(
@@ -106,7 +106,7 @@ TEST_F(TestProfilingControlDescriptor, SetAttributeTypeMismatchThrows)
 
 TEST_F(TestProfilingControlDescriptor, SetAttributeUnsupportedNameThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -117,7 +117,7 @@ TEST_F(TestProfilingControlDescriptor, SetAttributeUnsupportedNameThrows)
 // so a set attempt falls to the same unsupported-name guard as any other unknown name.
 TEST_F(TestProfilingControlDescriptor, SetStallUsedThrowsNotSupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -126,7 +126,7 @@ TEST_F(TestProfilingControlDescriptor, SetStallUsedThrowsNotSupported)
 
 TEST_F(TestProfilingControlDescriptor, GetAttributeBeforeFinalizeThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     float elapsed = 0.0f;
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -137,7 +137,7 @@ TEST_F(TestProfilingControlDescriptor, GetAttributeBeforeFinalizeThrows)
 
 TEST_F(TestProfilingControlDescriptor, GetStallUsedBeforeFinalizeThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool stallUsed = true;
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT,
@@ -150,7 +150,7 @@ TEST_F(TestProfilingControlDescriptor, GetStallUsedBeforeFinalizeThrows)
 
 TEST_F(TestProfilingControlDescriptor, FinalizeBeforeHandleThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     // Fresh descriptor: not finalized, but no handle/events created.
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -289,7 +289,7 @@ protected:
 
 TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -309,7 +309,7 @@ TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
 
 TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -341,7 +341,7 @@ TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
 
 TEST_F(TestGpuProfilingControlDescriptor, StartRecordedTwiceThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(recordStart(desc));
     bool value = true;
@@ -352,7 +352,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StartRecordedTwiceThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, StopBeforeStartThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -362,7 +362,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StopBeforeStartThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, StopRecordedTwiceThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(recordStart(desc));
     ASSERT_NO_THROW(recordStop(desc));
@@ -374,7 +374,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StopRecordedTwiceThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, SetAttributeAfterFinalizeThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -389,7 +389,7 @@ TEST_F(TestGpuProfilingControlDescriptor, SetAttributeAfterFinalizeThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, FinalizeAlreadyFinalizedThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -401,7 +401,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeAlreadyFinalizedThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, FinalizeWithoutStopRecordedThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(recordStart(desc));
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -409,7 +409,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeWithoutStopRecordedThrows)
 
 TEST_F(TestGpuProfilingControlDescriptor, DeviceSyncSucceeds)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value));
@@ -417,7 +417,7 @@ TEST_F(TestGpuProfilingControlDescriptor, DeviceSyncSucceeds)
 
 TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -702,7 +702,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateDeclinesStreamOnAnotherDevice
 // caller can discard the sample instead of averaging a timeout into its results.
 TEST_F(TestGpuProfilingControlDescriptor, TimedOutAttributeIsFalseForAHealthyMeasurement)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
@@ -734,7 +734,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
@@ -770,7 +770,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesArmedStallBeforePrecon
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(armStall(desc));
     // Start deliberately not recorded: finalize() must throw on that precondition, but
@@ -801,7 +801,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesArmedStallBeforePrecon
 // conditionally need not track whether the arm took effect.
 TEST_F(TestGpuProfilingControlDescriptor, StallReleaseWithoutArmSucceeds)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(releaseStall(desc));
 }
 
@@ -809,7 +809,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallReleaseWithoutArmSucceeds)
 // rather than stalling a null stream.
 TEST_F(TestGpuProfilingControlDescriptor, StallArmBeforeHandleThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -823,7 +823,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallArmTwiceThrows)
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(armStall(desc));
     bool value = true;
@@ -838,7 +838,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallArmTwiceThrows)
 // arm is a lifecycle error rather than a silently-partial stall.
 TEST_F(TestGpuProfilingControlDescriptor, StallArmAfterStartThrows)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(recordStart(desc));
     bool value = true;
@@ -857,7 +857,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueWhenArmSucceeds)
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
@@ -879,7 +879,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueWhenArmSucceeds)
 // lifecycle a caller gets by simply never setting the attribute.
 TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWithoutArm)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
@@ -909,7 +909,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
     // The descriptor's stall gate uses the default (2 s) watchdog timeout, so tripping it
     // for real costs a couple of seconds.
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
@@ -942,7 +942,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
 // stream, events, and gate.
 TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsReuse)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(resetContext(desc));
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
@@ -979,7 +979,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterTimeoutThenUnstalledThenStal
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
@@ -1054,7 +1054,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterPartialMeasurementReleasesTh
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
     hipEvent_t retired = nullptr;
     ASSERT_EQ(hipEventCreate(&retired), hipSuccess);

@@ -66,7 +66,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<SdpaBwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaBwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<SdpaBwdOperationDescriptor>();
 
     // Required input tensors
     setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, qDesc);
@@ -193,7 +193,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -205,7 +205,7 @@ public:
     std::unique_ptr<GraphT>
         finalizeGraphAndUnpack(std::unique_ptr<HipdnnBackendDescriptor>& opWrapper) const
     {
-        auto graphDesc = getDescriptor();
+        const auto graphDesc = getDescriptor();
         setHandle();
 
         auto* opDescPtr = opWrapper.get();
@@ -215,7 +215,7 @@ public:
                                 static_cast<const void*>(&opDescPtr));
         graphDesc->finalize();
 
-        auto serialized = graphDesc->getSerializedGraph();
+        const auto serialized = graphDesc->getSerializedGraph();
         return UnPackGraph(serialized.ptr);
     }
 
@@ -287,39 +287,39 @@ protected:
 
 TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
 {
-    auto t = createRequiredTensors();
-    auto scaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SCALE_UID);
-    auto attnMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
-    auto seqLenQDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID);
-    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID);
-    auto seedDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEED_UID);
-    auto offsetDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_OFFSET_UID);
-    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID);
-    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
-    auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
-    auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
+    const auto t = createRequiredTensors();
+    const auto scaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SCALE_UID);
+    const auto attnMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
+    const auto seqLenQDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID);
+    const auto seqLenKvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID);
+    const auto seedDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEED_UID);
+    const auto offsetDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_OFFSET_UID);
+    const auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID);
+    const auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
+    const auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
+    const auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
 
-    auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
-                                              t.k.get(),
-                                              t.v.get(),
-                                              t.o.get(),
-                                              t.dO.get(),
-                                              t.stats.get(),
-                                              t.dq.get(),
-                                              t.dk.get(),
-                                              t.dv.get(),
-                                              scaleDesc.get(),
-                                              attnMaskDesc.get(),
-                                              seqLenQDesc.get(),
-                                              seqLenKvDesc.get(),
-                                              seedDesc.get(),
-                                              offsetDesc.get(),
-                                              dropoutMaskDesc.get(),
-                                              dropoutScaleDesc.get(),
-                                              dropoutScaleInvDesc.get(),
-                                              dbiasDesc.get());
+    const auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
+                                                    t.k.get(),
+                                                    t.v.get(),
+                                                    t.o.get(),
+                                                    t.dO.get(),
+                                                    t.stats.get(),
+                                                    t.dq.get(),
+                                                    t.dk.get(),
+                                                    t.dv.get(),
+                                                    scaleDesc.get(),
+                                                    attnMaskDesc.get(),
+                                                    seqLenQDesc.get(),
+                                                    seqLenKvDesc.get(),
+                                                    seedDesc.get(),
+                                                    offsetDesc.get(),
+                                                    dropoutMaskDesc.get(),
+                                                    dropoutScaleDesc.get(),
+                                                    dropoutScaleInvDesc.get(),
+                                                    dbiasDesc.get());
 
-    auto graphDesc = getDescriptor();
+    const auto graphDesc = getDescriptor();
     setHandle();
 
     auto* opDescPtr = opWrapper.get();
@@ -331,7 +331,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
     ASSERT_NO_THROW(graphDesc->finalize());
     ASSERT_TRUE(graphDesc->isFinalized());
 
-    auto serialized = graphDesc->getSerializedGraph();
+    const auto serialized = graphDesc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -415,19 +415,19 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorSdpaBwd, BuildFromRequiredOnlyOperation)
 {
-    auto t = createRequiredTensors();
+    const auto t = createRequiredTensors();
 
-    auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
-                                              t.k.get(),
-                                              t.v.get(),
-                                              t.o.get(),
-                                              t.dO.get(),
-                                              t.stats.get(),
-                                              t.dq.get(),
-                                              t.dk.get(),
-                                              t.dv.get());
+    const auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
+                                                    t.k.get(),
+                                                    t.v.get(),
+                                                    t.o.get(),
+                                                    t.dO.get(),
+                                                    t.stats.get(),
+                                                    t.dq.get(),
+                                                    t.dk.get(),
+                                                    t.dv.get());
 
-    auto graphDesc = getDescriptor();
+    const auto graphDesc = getDescriptor();
     setHandle();
 
     auto* opDescPtr = opWrapper.get();
@@ -439,7 +439,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromRequiredOnlyOperation)
     ASSERT_NO_THROW(graphDesc->finalize());
     ASSERT_TRUE(graphDesc->isFinalized());
 
-    auto serialized = graphDesc->getSerializedGraph();
+    const auto serialized = graphDesc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -531,7 +531,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromRequiredOnlyOperation)
 
 TEST_F(TestGraphDescriptorSdpaBwd, ComputeDataTypePreserved)
 {
-    auto t = createRequiredTensors();
+    const auto t = createRequiredTensors();
 
     auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
                                               t.k.get(),
@@ -566,10 +566,10 @@ TEST_F(TestGraphDescriptorSdpaBwd, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
 {
-    auto t = createRequiredTensors();
+    const auto t = createRequiredTensors();
 
     auto wrapper = createDescriptor<SdpaBwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaBwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<SdpaBwdOperationDescriptor>();
 
     setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT, t.q.get());
     setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_K_EXT, t.k.get());
@@ -650,17 +650,17 @@ TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
 
 TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorList)
 {
-    auto t = createRequiredTensors();
-    auto scaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SCALE_UID);
-    auto attnMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
-    auto seqLenQDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID);
-    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID);
-    auto seedDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEED_UID);
-    auto offsetDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_OFFSET_UID);
-    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID);
-    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
-    auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
-    auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
+    const auto t = createRequiredTensors();
+    const auto scaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SCALE_UID);
+    const auto attnMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
+    const auto seqLenQDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID);
+    const auto seqLenKvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID);
+    const auto seedDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SEED_UID);
+    const auto offsetDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_OFFSET_UID);
+    const auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID);
+    const auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
+    const auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
+    const auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
 
     auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
                                               t.k.get(),
@@ -722,7 +722,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorLi
 
 TEST_F(TestGraphDescriptorSdpaBwd, RequiredOnlyNoOptionalTensorsInList)
 {
-    auto t = createRequiredTensors();
+    const auto t = createRequiredTensors();
 
     auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
                                               t.k.get(),
