@@ -51,6 +51,13 @@ class TileProcessingStrategy(Component):
     def skipPhantomTileStore(self, writer, kernel):
         return Module("No phantom tiles")
 
+    def usesArrivalFixup(self, writer, kernel):
+        """True when the last arriving part fixes split tiles up
+        (StreamK.emitArrival). The partials path then re-enters the
+        store, so registers checked out before storeBranches stay live across
+        writePartials."""
+        return False
+
     @abc.abstractmethod
     def __call__(self):
         pass

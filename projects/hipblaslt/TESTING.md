@@ -260,7 +260,6 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
-| `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
@@ -354,7 +353,9 @@ Before allocating, every `hipblaslt-test` matmul case estimates the device and h
 needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
 when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
 allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
-them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
+them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
+memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
+large-memory lane:
 
 - `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
   that every case ran.
@@ -896,7 +897,7 @@ the set of architectures the library supports or builds for.
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
-| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
+| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
 ### Scoping test cases to architectures
 
