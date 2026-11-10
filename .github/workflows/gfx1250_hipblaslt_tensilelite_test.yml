@@ -161,7 +161,7 @@ jobs:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
-      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.3.0a20261105' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
@@ -417,12 +417,15 @@ jobs:
             return "$hit"
           }
           # Each log is scrubbed as it runs (hardware info and timing), so no unscrubbed
-          # output reaches disk. The subshell makes wait return the test's status
-          # (pipefail), not awk's.
+          # output reaches disk, and streams to the job log tagged with its name: a job
+          # stopped mid-step (a runner shutdown skips the upload) still shows, with GitHub's
+          # line timestamps, which test each process was running. The subshell makes wait
+          # return the test's status (pipefail), not awk's.
           run_tests() {  # log name, then hipblaslt-test arguments
             local log="$1"; shift
-            ( "$BIN" "$@" 2>&1 | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
-                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/$log" )
+            ( "$BIN" "$@" 2>&1 | sed -uE 's/ \([0-9]+ ms( total)?\)//g' \
+                | awk -F, -v OFS=, "$HW_SCRUB" | tee "$OUT/$log" \
+                | sed -u "s/^/[${log%.log}] /" )
           }
           OUT="$GITHUB_WORKSPACE/test_results"
           mkdir -p "$OUT"
@@ -481,11 +484,6 @@ jobs:
           for f in "$OUT"/hipblaslt_test_shard_large*.log; do
             [ -f "$f" ] && grep -q '^\[==========\] Running 0 tests' "$f" \
               && { echo "::error::$(basename "$f") ran no tests"; rc=1; }
-          done
-          for f in "$OUT"/hipblaslt_test_shard*.log; do
-            echo "::group::hipBLASLt $(basename "$f" .log)"
-            cat "$f"
-            echo "::endgroup::"
           done
           grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
           grep -hE '^\[  FAILED  \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log | sed -E 's/, where GetParam.*//' | sort -u || true
