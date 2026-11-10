@@ -634,10 +634,17 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
         {
             SCOPED_TRACE(kernel.name);
             const int bytes = kernel.getStringMetadata("dtype") == "FLOAT" ? 4 : 2;
+            // Backward data runs stride phases: ceil(R / stride) taps at unit stride.
+            const int stride = static_cast<int>(kernel.getIntMetadata("stride"));
+            const bool forward = direction == ConvDirection::FORWARD;
+            const auto taps = [&](const char* field) {
+                const int extent = static_cast<int>(kernel.getIntMetadata(field));
+                return forward ? extent : (extent + stride - 1) / stride;
+            };
             EXPECT_LE(conv_group::groupLdsBytes(bytes,
-                                                static_cast<int>(kernel.getIntMetadata("r")),
-                                                static_cast<int>(kernel.getIntMetadata("s")),
-                                                static_cast<int>(kernel.getIntMetadata("stride")),
+                                                taps("r"),
+                                                taps("s"),
+                                                forward ? stride : 1,
                                                 static_cast<int>(kernel.getIntMetadata("th")),
                                                 static_cast<int>(kernel.getIntMetadata("wp")),
                                                 static_cast<int>(kernel.getIntMetadata("cb"))),
