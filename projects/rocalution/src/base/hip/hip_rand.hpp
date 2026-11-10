@@ -37,7 +37,7 @@ namespace rocalution
     {
 
     protected:
-        inline CRTP_HIPRand(){};
+        inline CRTP_HIPRand() {};
         using traits_t = CRTP_HIPRand_Traits<IMPL>;
 
     public:

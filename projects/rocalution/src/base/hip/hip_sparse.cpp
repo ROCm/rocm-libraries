@@ -34,9 +34,8 @@
 namespace rocalution
 {
     template <typename ValueType>
-    HIPSpMV<ValueType>::HIPSpMV(const char* name)
-        : name_(name)
-        , alg_(rocsparse_spmv_alg_default)
+    HIPSpMV<ValueType>::HIPSpMV(void)
+        : alg_(rocsparse_spmv_alg_default)
         , descr_(NULL)
         , buffer_size_(0)
         , buffer_(NULL)
@@ -176,9 +175,8 @@ namespace rocalution
         if(this->descr_ == NULL)
         {
             LOG_VERBOSE_INFO(2,
-                             "*** warning: " << this->name_
-                                             << " performs the SpMV analysis lazily, call "
-                                                "ApplyAnalyse() beforehand to avoid this");
+                             "*** warning: the SpMV analysis is performed lazily, call "
+                             "ApplyAnalyse() beforehand to avoid this");
 
             this->Analyse_(handle, mat, alpha, x, beta, y);
         }

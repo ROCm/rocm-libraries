@@ -60,7 +60,7 @@ namespace rocalution
             : m_a(a)
             , m_b(b)
             , m_engine(seed)
-            , m_backend(backend){};
+            , m_backend(backend) {};
 
         inline void Generate(T* data, size_t size)
         {

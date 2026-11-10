@@ -49,8 +49,6 @@ namespace rocalution
 
     template <typename ValueType>
     HIPAcceleratorMatrixHYB<ValueType>::HIPAcceleratorMatrixHYB()
-        : ell_spmv_("HIPAcceleratorMatrixHYB, ELL part")
-        , coo_spmv_("HIPAcceleratorMatrixHYB, COO part")
     {
         // no default constructors
         LOG_INFO("no default constructor");
@@ -60,8 +58,6 @@ namespace rocalution
     template <typename ValueType>
     HIPAcceleratorMatrixHYB<ValueType>::HIPAcceleratorMatrixHYB(
         const Rocalution_Backend_Descriptor& local_backend)
-        : ell_spmv_("HIPAcceleratorMatrixHYB, ELL part")
-        , coo_spmv_("HIPAcceleratorMatrixHYB, COO part")
     {
         log_debug(this,
                   "HIPAcceleratorMatrixHYB::HIPAcceleratorMatrixHYB()",

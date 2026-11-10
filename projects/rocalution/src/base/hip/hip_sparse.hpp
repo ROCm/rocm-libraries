@@ -96,8 +96,7 @@ namespace rocalution
     class HIPSpMV
     {
     public:
-        // name is the matrix in the warning of a lazy analysis
-        explicit HIPSpMV(const char* name);
+        HIPSpMV(void);
         ~HIPSpMV(void);
 
         HIPSpMV(const HIPSpMV&)            = delete;
@@ -125,7 +124,6 @@ namespace rocalution
                       ValueType                   beta,
                       rocsparse_dnvec_descr       y);
 
-        const char*          name_;
         rocsparse_spmv_alg   alg_;
         rocsparse_spmv_descr descr_;
         size_t               buffer_size_;

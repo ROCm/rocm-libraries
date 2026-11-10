@@ -53,7 +53,7 @@ namespace rocalution
     public:
         inline HIPRandNormal_rocRAND(unsigned long long seed, value_type mean, value_type var)
             : m_engine(seed)
-            , m_distribution(mean, var){};
+            , m_distribution(mean, var) {};
 
         inline void Generate(T* data, size_t size)
         {

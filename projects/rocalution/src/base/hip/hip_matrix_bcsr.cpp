@@ -43,7 +43,6 @@ namespace rocalution
 
     template <typename ValueType>
     HIPAcceleratorMatrixBCSR<ValueType>::HIPAcceleratorMatrixBCSR()
-        : spmv_("HIPAcceleratorMatrixBCSR")
     {
         // no default constructors
         LOG_INFO("no default constructor");
@@ -53,7 +52,6 @@ namespace rocalution
     template <typename ValueType>
     HIPAcceleratorMatrixBCSR<ValueType>::HIPAcceleratorMatrixBCSR(
         const Rocalution_Backend_Descriptor& local_backend, int blockdim)
-        : spmv_("HIPAcceleratorMatrixBCSR")
     {
         log_debug(this,
                   "HIPAcceleratorMatrixBCSR::HIPAcceleratorMatrixBCSR()",

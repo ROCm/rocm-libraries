@@ -47,7 +47,6 @@ namespace rocalution
 
     template <typename ValueType>
     HIPAcceleratorMatrixCOO<ValueType>::HIPAcceleratorMatrixCOO()
-        : spmv_("HIPAcceleratorMatrixCOO")
     {
         // no default constructors
         LOG_INFO("no default constructor");
@@ -57,7 +56,6 @@ namespace rocalution
     template <typename ValueType>
     HIPAcceleratorMatrixCOO<ValueType>::HIPAcceleratorMatrixCOO(
         const Rocalution_Backend_Descriptor& local_backend)
-        : spmv_("HIPAcceleratorMatrixCOO")
     {
         log_debug(this,
                   "HIPAcceleratorMatrixCOO::HIPAcceleratorMatrixCOO()",
