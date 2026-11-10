@@ -546,6 +546,25 @@ def build_moe_grouped_matmul_graph():
     return graph, token, weight, first_token_offset, token_index, token_ks, output
 
 
+def build_rope_graph():
+    """Build a Qwen-style partial RoPE graph (x [2, 4, 16, 8], freqs [1, 1, 16, 4], rope_dim 4,
+    leading segment).
+
+    Returns (graph, x, freqs, y).
+    """
+    graph = create_float_graph()
+    x = hipdnn.Tensor.create([2, 4, 16, 8], hipdnn.DataType.FLOAT)
+    x.set_name("x")
+    freqs = hipdnn.Tensor.create([1, 1, 16, 4], hipdnn.DataType.FLOAT)
+    freqs.set_name("freqs")
+
+    y = graph.rope(x, freqs, hipdnn.RopeAttributes().set_rope_dim(4).set_rope_offset(0))
+    y.set_name("y")
+    y.set_output(True)
+
+    return graph, x, freqs, y
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

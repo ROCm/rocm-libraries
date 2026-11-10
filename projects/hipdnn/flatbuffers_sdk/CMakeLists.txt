@@ -172,6 +172,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/linear_attention_common.fbs
         schemas/gdn_attributes.fbs
         schemas/kda_attributes.fbs
+        schemas/rope_attributes.fbs
     )
     hipdnn_generate_flatbuffer_headers(
         TARGET hipdnn_flatbuffers_sdk

@@ -134,8 +134,6 @@ HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Instancenorm_backward_attributes);
 /// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Rng_attributes);
 /// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_attributes);
-/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_backward_attributes);
 /// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Softmax_attributes);

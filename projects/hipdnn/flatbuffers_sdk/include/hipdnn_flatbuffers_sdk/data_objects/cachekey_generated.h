@@ -185,6 +185,8 @@ inline void hashAppend(Hasher& hasher, const ResampleBwdAttributes* value, const
 inline bool logicallyEqual(const ResampleBwdAttributes* a, const ResampleBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const ResampleFwdAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const ResampleFwdAttributes* a, const ResampleFwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
+inline void hashAppend(Hasher& hasher, const RopeAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const RopeAttributes* a, const RopeAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, const UidCanon& canon);
@@ -276,6 +278,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::KdaAttributes:
         hashAppend(hasher, static_cast<const KdaAttributes*>(value), canon);
         break;
+    case NodeAttributes::RopeAttributes:
+        hashAppend(hasher, static_cast<const RopeAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -339,6 +344,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const GdnAttributes*>(a), static_cast<const GdnAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::KdaAttributes:
         return logicallyEqual(static_cast<const KdaAttributes*>(a), static_cast<const KdaAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::RopeAttributes:
+        return logicallyEqual(static_cast<const RopeAttributes*>(a), static_cast<const RopeAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -3571,6 +3578,70 @@ inline bool logicallyEqual(const ResampleFwdAttributes* a, const ResampleFwdAttr
         return false;
     }
     if(a->generate_index() != b->generate_index())
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const RopeAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->freqs_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
+    hasher.raw(value->output_scale());
+    hasher.raw(value->rope_dim());
+    {
+        const auto optional = value->rope_offset_ext();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
+}
+
+inline bool logicallyEqual(const RopeAttributes* a, const RopeAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->x_tensor_uid()) != bCanon(b->x_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->freqs_tensor_uid()) != bCanon(b->freqs_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->y_tensor_uid()) != bCanon(b->y_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aValue = a->output_scale();
+        const auto bValue = b->output_scale();
+        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)
+        {
+            return false;
+        }
+    }
+    if(a->rope_dim() != b->rope_dim())
+    {
+        return false;
+    }
+    if(a->rope_offset_ext() != b->rope_offset_ext())
     {
         return false;
     }

@@ -1,0 +1,28 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Rotary position embedding (RoPE) forward. Mirrors cudnn-frontend RoPE_attributes
+// (CUDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR). Rotate-half (non-interleaved) rotation of the
+// segment x[..., o : o + r] of the last dim D, with r = rope_dim and h = r / 2. freqs holds raw
+// angles (FP32); its dims broadcast to x's except the last, which is r. For 0 <= i < h:
+//   y[o + i]     = s * (x[o + i] cos f[i]         - x[o + i + h] sin f[i])
+//   y[o + i + h] = s * (x[o + i + h] cos f[i + h] + x[o + i] sin f[i + h])
+// and y[j] = s * x[j] outside the segment, where s = output_scale.
+//
+// rope_offset_ext has no cuDNN equivalent: cuDNN always rotates the trailing r dims
+// (o = D - r), while Llama/Qwen-style partial rotary rotates the leading ones (o = 0).
+// Multimodal RoPE (M-RoPE) is expressed by the caller building per-token freqs.
+table RopeAttributes {
+    x_tensor_uid:     long (cache_uid);
+    freqs_tensor_uid: long (cache_uid);
+    y_tensor_uid:     long (cache_uid);
+
+    output_scale:    float = 1.0;
+    rope_dim:        long = 0;     // 0: r = D (full rotation)
+    rope_offset_ext: long = null;  // absent: D - r (cuDNN, trailing segment)
+}

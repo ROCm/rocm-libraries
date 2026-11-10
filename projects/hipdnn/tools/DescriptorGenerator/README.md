@@ -192,6 +192,7 @@ operation:
 | `resample_bwd.yaml` | Resample backward |
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication (checked-in `finalize()` is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
+| `rope.yaml` | Rotary position embedding (RoPE) forward |
 | `sdpa.yaml` | Scaled dot-product attention forward (packer/unpacker only; Attributes class is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 
 ## Third-Party Libraries

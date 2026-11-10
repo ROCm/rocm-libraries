@@ -32,6 +32,7 @@
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -65,5 +66,6 @@ using hipdnn_frontend::graph::Reduction_attributes;
 using hipdnn_frontend::graph::Resample_attributes;
 using hipdnn_frontend::graph::Rmsnorm_attributes;
 using hipdnn_frontend::graph::Rmsnorm_backward_attributes;
+using hipdnn_frontend::graph::RoPE_attributes;
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph

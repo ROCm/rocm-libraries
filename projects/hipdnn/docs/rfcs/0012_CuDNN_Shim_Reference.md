@@ -227,7 +227,7 @@ materialize the inner hipDNN attribute object on calls into hipDNN.
 | `Reshape_attributes` | 1579 | (none) |
 | `Transpose_attributes` | 1636 | (none) |
 | `Rmsnorm_attributes` | 1673 | `RMSNormAttributes` |
-| `RoPE_attributes` | 1706 | (none) |
+| `RoPE_attributes` | 1706 | `RopeAttributes` (adds the `rope_offset` extension) |
 | `RoPE_backward_attributes` | 1742 | (none) |
 | `Rmsnorm_backward_attributes` | 1780 | `RMSNormBackwardAttributes` |
 | `SDPA_attributes` | 1922 | `SdpaAttributes` (gated by `HIPDNN_ENABLE_SDPA`) |

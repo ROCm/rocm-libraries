@@ -28,6 +28,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RopeSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
@@ -60,6 +61,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               MatmulSignatureKey,
                                               MoeGroupedMatmulSignatureKey,
                                               MoeGroupedMatmulBwdSignatureKey,
+                                              RopeSignatureKey,
                                               PointwiseSignatureKey,
                                               RMSNormFwdSignatureKey,
                                               RMSNormBwdSignatureKey,

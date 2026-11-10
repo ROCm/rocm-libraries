@@ -30,6 +30,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/ReductionAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ResampleBwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ResampleFwdAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/RopeAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
@@ -60,6 +61,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::CustomOpAttributes, "CustomOpAttributes"},
      {NodeAttributes::ReductionAttributes, "ReductionAttributes"},
      {NodeAttributes::ResampleFwdAttributes, "ResampleFwdAttributes"},
+     {NodeAttributes::RopeAttributes, "RopeAttributes"},
      {NodeAttributes::ResampleBwdAttributes, "ResampleBwdAttributes"},
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
@@ -138,6 +140,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::ResampleFwdAttributes:
         nodeJson = *node.attributes_as_ResampleFwdAttributes();
+        break;
+    case data_objects::NodeAttributes::RopeAttributes:
+        nodeJson = *node.attributes_as_RopeAttributes();
         break;
     case data_objects::NodeAttributes::ResampleBwdAttributes:
         nodeJson = *node.attributes_as_ResampleBwdAttributes();
@@ -244,6 +249,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ReductionAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::ResampleFwdAttributes:
             return to<data_objects::ResampleFwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::RopeAttributes:
+            return to<data_objects::RopeAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::ResampleBwdAttributes:
             return to<data_objects::ResampleBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:

@@ -85,6 +85,9 @@ add_executable(
     TestMoeGroupedMatmulBwdAttributes.cpp
     TestMoeGroupedMatmulBwdNode.cpp
     TestGraphMoeGroupedMatmulBwd.cpp
+    TestRopeAttributes.cpp
+    TestRopeNode.cpp
+    TestGraphRope.cpp
     TestNode.cpp
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp

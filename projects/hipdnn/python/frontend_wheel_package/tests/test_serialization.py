@@ -37,6 +37,7 @@ from .graph_builders import (
     build_resample_fwd_graph,
     build_rmsnorm_backward_graph,
     build_rmsnorm_graph,
+    build_rope_graph,
     build_sdpa_backward_graph,
     build_sdpa_graph,
 )
@@ -99,6 +100,7 @@ _OPERATION_CASES = (
         lambda: build_moe_grouped_matmul_graph()[0],
         "MoeGroupedMatmulAttributes",
     ),
+    ("rope", lambda: build_rope_graph()[0], "RopeAttributes"),
     ("custom_op", lambda: build_custom_op_graph()[0], "CustomOpAttributes"),
     ("resample_fwd", lambda: build_resample_fwd_graph()[0], "ResampleFwdAttributes"),
     ("resample_bwd", lambda: build_resample_bwd_graph()[0], "ResampleBwdAttributes"),

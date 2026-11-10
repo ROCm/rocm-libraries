@@ -522,6 +522,29 @@ TEST(TestCudnnShimGraphNodes, MoeGroupedMatmulBwdValidGraphValidates)
     EXPECT_EQ(dweight->get_dim(), expectedDweightDims);
 }
 
+// cuDNN-style RoPE (trailing segment, rope_dim < D) forwards to the native node; y's dims are
+// left unset so validate() infers them.
+TEST(TestCudnnShimGraphNodes, RopeValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {2, 4, 16, 8}, {512, 128, 8, 1}, 1);
+    auto freqs = hipdnn_shim_test::makeTensor(graph, {1, 1, 16, 4}, {64, 64, 4, 1}, 2);
+
+    auto y = graph.rope(
+        x,
+        freqs,
+        fe::graph::RoPE_attributes{}.set_name("RopeNode").set_output_scale(0.5f).set_rope_dim(4));
+    ASSERT_NE(y, nullptr);
+    EXPECT_EQ(y->get_name(), "RopeNode::Y");
+
+    EXPECT_TRUE(graph.validate().is_good());
+
+    const std::vector<int64_t> expectedYDims{2, 4, 16, 8};
+    EXPECT_EQ(y->get_dim(), expectedYDims);
+}
+
 // --- (a2) Unhappy path: Tier-1 nodes still enforce constraints --------------
 //
 // The wrapper forwards to the real hipDNN engines, so a malformed Tier-1 graph
@@ -650,13 +673,6 @@ TEST(TestCudnnShimGraphNodes, InstancenormRecordsGraphNotSupported)
 {
     fe::graph::Graph graph;
     graph.instancenorm(nullptr, nullptr, nullptr, fe::graph::Instancenorm_attributes{});
-    expectGraphNotSupported(graph);
-}
-
-TEST(TestCudnnShimGraphNodes, RopeRecordsGraphNotSupported)
-{
-    fe::graph::Graph graph;
-    graph.rope(nullptr, nullptr, fe::graph::RoPE_attributes{});
     expectGraphNotSupported(graph);
 }
 
@@ -873,6 +889,7 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
     expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_bwd_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Pointwise_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Reduction_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Resample_attributes>();
@@ -896,7 +913,6 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
     expectConstructsAndExposesUniversalSurface<fe::graph::Rng_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Reshape_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Transpose_attributes>();
-    expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_backward_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_fp8_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_fp8_backward_attributes>();

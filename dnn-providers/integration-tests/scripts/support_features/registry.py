@@ -38,6 +38,7 @@ from support_features import (
     resample_fwd,
     rmsnorm,
     rmsnorm_backward,
+    rope,
     sdpa,
     sdpa_backward,
 )
@@ -72,6 +73,7 @@ OPS: dict[str, ModuleType] = {
         resample_fwd,
         rmsnorm,
         rmsnorm_backward,
+        rope,
         sdpa,
         sdpa_backward,
     )
