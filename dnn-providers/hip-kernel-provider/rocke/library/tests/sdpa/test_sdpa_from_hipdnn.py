@@ -646,7 +646,7 @@ def test_cumulative_sequence_lengths_are_declined_not_dropped(key):
         inputs={key: 10},
         tensors=[_tensor(10, (B, 1, 1, 1), "int32")],
     )
-    with pytest.raises(ValueError, match="cu_seq_len"):
+    with pytest.raises(NotImplementedError, match="cu_seq_len"):
         from_hipdnn_graph(graph, "gfx950")
 
 

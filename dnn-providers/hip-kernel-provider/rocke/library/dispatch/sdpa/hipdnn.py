@@ -217,7 +217,9 @@ def from_hipdnn(
     ``tensors_json`` is the graph's ``tensors`` list, or a mapping from uid to
     tensor entry. Raises ``ValueError`` for anything the hipDNN frontend or
     mask resolver would also reject, and for any key hipDNN does not write.
-    An absent key reads as hipDNN's null.
+    Raises ``NotImplementedError`` for a field hipDNN writes that
+    :class:`SdpaRequest` cannot represent yet (``cu_seq_len_q_tensor_uid`` /
+    ``cu_seq_len_kv_tensor_uid``). An absent key reads as hipDNN's null.
     """
     node_type = node_json.get("type", "SdpaAttributes")
     if node_type != "SdpaAttributes":
@@ -299,7 +301,9 @@ def from_hipdnn(
     # full-length attention, so a graph that carries one is declined.
     for key in ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"):
         if inputs.get(key) is not None:
-            raise ValueError(f"{key} (cumulative sequence lengths) is not supported")
+            raise NotImplementedError(
+                f"{key} (cumulative sequence lengths) is not supported"
+            )
 
     dropout = {
         "seed": tensor(inputs, "seed_tensor_uid"),
