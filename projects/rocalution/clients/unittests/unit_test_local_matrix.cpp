@@ -3520,6 +3520,38 @@ TEST(local_matrix_preconditions, host_ll_solve_of_a_row_without_a_diagonal_ends_
     }
 }
 
+// rocSPARSE rejects a matrix with more entries than nrow * ncol, which only duplicate
+// entries allow. The host applies such a matrix, the accelerator ends the program.
+TEST(local_matrix_preconditions,
+     more_entries_than_nrow_times_ncol_end_the_program_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    Csr<double> ref(2);
+    for(int k = 0; k < 3; ++k)
+    {
+        ref.add(0, 1.0);
+    }
+    ref.end_row();
+    ref.add(0, 1.0);
+    ref.add(1, 1.0);
+    ref.end_row();
+
+    for(Format f : {Format{CSR, 1}, Format{COO, 1}})
+    {
+        SCOPED_TRACE(format_name(f));
+        auto A = make_local_matrix(Backend::Host, ref, f);
+        auto y = make_local_vector(Backend::Host, std::vector<double>(2, 0.0));
+        A->Apply(*make_local_vector(Backend::Host, std::vector<double>(2, 1.0)), y.get());
+        EXPECT_EQ(values_of(*y), (std::vector<double>{3.0, 2.0}));
+
+        const std::string file = f.id == CSR ? "hip_matrix_csr\\.cpp" : "hip_matrix_coo\\.cpp";
+        EXPECT_LOGGED_EXIT(A->MoveToAccelerator(),
+                           "has 5 entries, more than nrow \\* ncol = 4, so it has duplicate "
+                           "entries.*Fatal error - the program will be terminated.*File: [^;]*"
+                               + file + ";");
+    }
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 

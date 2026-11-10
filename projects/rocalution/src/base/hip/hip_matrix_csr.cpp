@@ -104,6 +104,8 @@ namespace rocalution
     {
         this->DestroySpMatDescr_();
 
+        CHECK_SPMAT_NNZ(this->nnz_, this->nrow_, this->ncol_, __FILE__, __LINE__);
+
         rocsparse_status status
             = rocsparse_create_csr_descr(&this->spmat_descr_,
                                          this->nrow_,

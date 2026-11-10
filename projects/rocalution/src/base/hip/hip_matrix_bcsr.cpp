@@ -97,6 +97,8 @@ namespace rocalution
     {
         this->DestroySpMatDescr_();
 
+        CHECK_SPMAT_NNZ(this->mat_.nnzb, this->mat_.nrowb, this->mat_.ncolb, __FILE__, __LINE__);
+
         // Determine whether we are using row or column major for the blocks
         rocsparse_direction dir
             = BCSR_IND_BASE ? rocsparse_direction_row : rocsparse_direction_column;

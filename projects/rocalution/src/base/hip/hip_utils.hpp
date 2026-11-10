@@ -125,6 +125,21 @@
         }                                                     \
     }
 
+// rocSPARSE rejects a sparse matrix descriptor with more entries than rows * cols.
+// Only a matrix with duplicate entries has that many, and rocALUTION does not support
+// duplicate entries (see LocalMatrix::Check()).
+#define CHECK_SPMAT_NNZ(nnz, nrow, ncol, file, line)                                      \
+    {                                                                                     \
+        if(static_cast<int64_t>(nnz) > static_cast<int64_t>(nrow) * (ncol))               \
+        {                                                                                 \
+            LOG_INFO("The matrix has " << (nnz) << " entries, more than nrow * ncol = "   \
+                                       << static_cast<int64_t>(nrow) * (ncol)             \
+                                       << ", so it has duplicate entries, which are not " \
+                                          "supported on the accelerator");                \
+            FATAL_ERROR(file, line);                                                      \
+        }                                                                                 \
+    }
+
 namespace rocalution
 {
     static __device__ __forceinline__ float hip_nontemporal_load(const float* ptr)

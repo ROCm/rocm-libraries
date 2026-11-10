@@ -113,6 +113,8 @@ namespace rocalution
 
         if(this->coo_nnz_ > 0)
         {
+            CHECK_SPMAT_NNZ(this->coo_nnz_, this->nrow_, this->ncol_, __FILE__, __LINE__);
+
             status = rocsparse_create_coo_descr(&this->coo_spmat_descr_,
                                                 this->nrow_,
                                                 this->ncol_,
