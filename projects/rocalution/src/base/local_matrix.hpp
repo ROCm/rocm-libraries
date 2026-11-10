@@ -831,11 +831,18 @@ namespace rocalution
         /** \brief Copy matrix from another LocalMatrix
       * \details
       * \p CopyFrom copies values and structure from another local matrix. Source and
-      * destination matrix should be in the same format.
+      * destination matrix should be in the same format. Unless the destination is
+      * empty, both need the same sizes and number of non-zeros.
       *
       * \note
       * This function allows cross platform copying. One of the objects could be
       * allocated on the accelerator backend.
+      *
+      * \note
+      * The copy discards the matrix-vector multiplication analysis of the destination
+      * (see ApplyAnalyse()), but keeps its triangular analyses from LUAnalyse(),
+      * LLAnalyse(), LAnalyse(), UAnalyse(), ItLUAnalyse(), ItLLAnalyse(), ItLAnalyse()
+      * and ItUAnalyse(). Run those again if the structure of \p src differs.
       *
       * @param[in]
       * src Local matrix where values and structure should be copied from.
@@ -861,7 +868,9 @@ namespace rocalution
         ROCALUTION_EXPORT
         void CopyFrom(const LocalMatrix<ValueType>& src);
 
-        /** \brief Async copy matrix (values and structure) from another LocalMatrix */
+        /** \brief Async copy matrix (values and structure) from another LocalMatrix, see
+      * CopyFrom()
+      */
         ROCALUTION_EXPORT
         void CopyFromAsync(const LocalMatrix<ValueType>& src);
 
@@ -890,7 +899,12 @@ namespace rocalution
         ROCALUTION_EXPORT
         void CloneFrom(const LocalMatrix<ValueType>& src);
 
-        /** \brief Update CSR matrix entries only, structure will remain the same */
+        /** \brief Update CSR matrix entries only, structure will remain the same
+      * \details
+      * On the accelerator, the update moves the matrix to the host and back, which
+      * discards its matrix-vector multiplication and triangular analyses (see
+      * ApplyAnalyse()).
+      */
         ROCALUTION_EXPORT
         void UpdateValuesCSR(ValueType* val);
 
@@ -992,12 +1006,16 @@ namespace rocalution
         /** \brief Analyse the matrix for subsequent matrix-vector multiplications
       * \details
       * Optional. Performs the analysis of the matrix-vector multiplication up front,
-      * instead of during the first call to Apply() or ApplyAdd(). The analysis remains
-      * valid as long as only the values of the matrix change. It is discarded when
-      * the structure of the matrix changes, the matrix is converted to another
-      * format, or it is moved to another backend. Without a prior call, the first
-      * Apply() or ApplyAdd() modifies the internal state of the matrix, so concurrent
-      * calls on the same matrix are not safe.
+      * instead of during the first call to Apply() or ApplyAdd(). The analysis is
+      * kept by the operations that change the values in place, such as Scale(),
+      * ScaleDiagonal(), ScaleOffDiagonal(), AddScalar(), AddScalarDiagonal() and
+      * AddScalarOffDiagonal(). It is discarded by CopyFrom(), CopyFromAsync() and the
+      * other functions that copy into the matrix, even if the structure is the same,
+      * by UpdateValuesCSR(), by any operation that changes the structure of the
+      * matrix, by a conversion to another format and by a move to another backend.
+      * CloneFrom() does not copy the analysis of the source. Without a prior call, the
+      * first Apply() or ApplyAdd() modifies the internal state of the matrix, so
+      * concurrent calls on the same matrix are not safe.
       * \par Example
       * \code{.cpp}
       * LocalMatrix<T> A;
