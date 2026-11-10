@@ -755,9 +755,6 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
-    if archRenames:
-        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
-
     if data.get("Library", {}).get("distance") == "MeshBased" and srcFile:
         companion = _companionCsvXzPath(srcFile)
         if data.get("Library", {}).get("table"):
