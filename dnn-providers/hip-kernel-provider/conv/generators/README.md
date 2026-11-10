@@ -20,6 +20,7 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_depthwise_valu_wrw.py` | `depthwise_valu_wrw` | `CONV_DEPTHWISE_VALU_WRW` |
 | `gen_depthwise_rows.py` | `depthwise_rows` | `CONV_DEPTHWISE_ROWS_FWD`, `CONV_DEPTHWISE_ROWS_BWD` |
 | `gen_depthwise_mfma.py` | `depthwise_mfma` | `CONV_DEPTHWISE_MFMA_FWD`, `CONV_DEPTHWISE_MFMA_BWD` |
+| `gen_group.py` | `group` | `CONV_GROUP_FWD`, `CONV_GROUP_BWD` |
 
 The naive engines (`descriptors/conv/naive`, 9 configs) are maintained by hand.
 
