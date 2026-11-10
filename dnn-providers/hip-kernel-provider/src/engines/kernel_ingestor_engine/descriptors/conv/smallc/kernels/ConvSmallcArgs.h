@@ -25,7 +25,7 @@ struct SmallcArgs
     long long ys[5]; ///< y element strides: n, k, d, h, w
 };
 
-/// The weight pre-pass: wf[n][kp] for kp < kpl (filter rows rho = (c, t, r) of sp taps each,
+/// The weight pre-pass: wf[n][kp] (or by k within blocks of bn columns, see bn) for kp < kpl (filter rows rho = (c, t, r) of sp taps each,
 /// rows padded to whole MMA steps), read from the graph's filter through its element strides
 /// (k, c, t, r, s); zero past C, the filter or K. flip reflects the taps (true convolution).
 struct SmallcFormatArgs
@@ -36,5 +36,5 @@ struct SmallcFormatArgs
     int k, c, kd, r, s;
     int sp, kpl, kpad;
     int flip;
-    int padding0;
+    int bn; ///< 0: wf[n][kp] (MMA); else wf[n / bn][kp][n % bn] (FMA: a block's rows by k)
 };

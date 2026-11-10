@@ -658,6 +658,7 @@ public:
         fmt.kpl = config.kpl();
         fmt.kpad = run.plan.args.kpad;
         fmt.flip = a.flipFilter != 0 ? 1 : 0;
+        fmt.bn = config.fma ? config.blockColumns() : 0;
         dispatch.format(stream).launch(stream, fmt);
 
         SmallcArgs args = run.plan.args;

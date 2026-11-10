@@ -41,8 +41,19 @@ __device__ void smallcFormatWeights(const SmallcFormatArgs& f)
     for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
         i += static_cast<long long>(gridDim.x) * blockDim.x)
     {
-        const int kp = static_cast<int>(i % f.kpl);
-        const int n = static_cast<int>(i / f.kpl);
+        int kp, n;
+        if(f.bn == 0)
+        {
+            kp = static_cast<int>(i % f.kpl);
+            n = static_cast<int>(i / f.kpl);
+        }
+        else
+        {
+            const int nl = static_cast<int>(i % f.bn);
+            const long long rest = i / f.bn;
+            kp = static_cast<int>(rest % f.kpl);
+            n = static_cast<int>(rest / f.kpl) * f.bn + nl;
+        }
         const int s = kp % f.sp;
         int rho = kp / f.sp;
         const int r = rho % f.r;
@@ -406,11 +417,25 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
                 ++line;
             }
         }
+        // The pre-pass wrote this block's rows by k ([kp][BN]): copy them as they lie.
         const T* wf = static_cast<const T*>(a.w) + static_cast<long long>(nb) * KP;
-        for(int e = tid; e < BN * KP; e += THREADS)
+        if constexpr(sizeof(T) == 4)
         {
-            const int n = e / KP, kp = e % KP;
-            wl[kp * BNS + n] = K1Elem<T>::load(wf[e]);
+            typedef typename K1Raw<16>::type Raw16;
+            for(int e = tid; e < BN * KP / 4; e += THREADS)
+            {
+                const int kp = e / (BN / 4), n = (e % (BN / 4)) * 4;
+                *reinterpret_cast<Raw16*>(wl + kp * BNS + n)
+                    = reinterpret_cast<const Raw16*>(wf)[e];
+            }
+        }
+        else
+        {
+            for(int e = tid; e < BN * KP; e += THREADS)
+            {
+                const int kp = e / BN, n = e % BN;
+                wl[kp * BNS + n] = K1Elem<T>::load(wf[e]);
+            }
         }
     }
     __syncthreads();
@@ -458,18 +483,59 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
     const int oh = oh0 + prow;
     if(oh >= a.ho)
         return;
+    const int k0 = nb + g * FN, ow0t = ow0 + pcol;
+    TO* yr = y + oh * a.ys[3];
+    // Vector stores where the layout makes a thread's outputs adjacent: its FN channels of one
+    // pixel (channels fastest) or its FM pixels of one channel (columns fastest).
+    if(a.ys[1] == 1 && k0 + FN <= a.k && (a.k % FN) == 0 && ((a.ys[4] % FN) == 0))
+    {
+        typedef TO VF __attribute__((ext_vector_type(FN)));
+#pragma unroll
+        for(int p = 0; p < FM; ++p)
+        {
+            const int ow = ow0t + p;
+            if(ow < a.wo)
+            {
+                VF v;
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    v[j] = K1Elem<TO>::store(acc[p][j]);
+                *reinterpret_cast<VF*>(yr + ow * a.ys[4] + k0) = v;
+            }
+        }
+        return;
+    }
+    if(a.ys[4] == 1 && ow0t + FM <= a.wo && ((a.ys[3] % FM) == 0) && ((a.ys[1] % FM) == 0)
+       && ((ow0t % FM) == 0))
+    {
+        typedef TO VM __attribute__((ext_vector_type(FM)));
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+        {
+            const int kk = k0 + j;
+            if(kk < a.k)
+            {
+                VM v;
+#pragma unroll
+                for(int p = 0; p < FM; ++p)
+                    v[p] = K1Elem<TO>::store(acc[p][j]);
+                *reinterpret_cast<VM*>(yr + kk * a.ys[1] + ow0t) = v;
+            }
+        }
+        return;
+    }
 #pragma unroll
     for(int j = 0; j < FN; ++j)
     {
-        const int kk = nb + g * FN + j;
+        const int kk = k0 + j;
         if(kk >= a.k)
             continue;
 #pragma unroll
         for(int p = 0; p < FM; ++p)
         {
-            const int ow = ow0 + pcol + p;
+            const int ow = ow0t + p;
             if(ow < a.wo)
-                y[kk * a.ys[1] + oh * a.ys[3] + ow * a.ys[4]] = K1Elem<TO>::store(acc[p][j]);
+                yr[kk * a.ys[1] + ow * a.ys[4]] = K1Elem<TO>::store(acc[p][j]);
         }
     }
 }

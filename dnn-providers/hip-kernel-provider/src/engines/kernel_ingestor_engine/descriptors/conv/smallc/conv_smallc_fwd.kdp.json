@@ -18596,6 +18596,76 @@
     },
     {
       "version": "1.0",
+      "id": "23a8a476-a67d-5459-8fe8-8357eeb4e4d7",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x7x7.s1x2x2.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 7,
+        "s": 7,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 469
+    },
+    {
+      "version": "1.0",
+      "id": "81418b4e-4a31-5739-a359-bd38e810bd13",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x7x7.s1x2x2.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 7,
+        "s": 7,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 468
+    },
+    {
+      "version": "1.0",
       "id": "5632ccc3-8a93-55b7-8109-6adc6da05f61",
       "name": "conv_smallc.fwd.f32.fma.c3.1x7x7.s1x2x2.d1x1x1.m4n8.w4x2x4",
       "kernel_source": {
@@ -18627,7 +18697,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 469
+      "priority": 467
     },
     {
       "version": "1.0",
@@ -18662,7 +18732,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 468
+      "priority": 466
     },
     {
       "version": "1.0",
@@ -18697,7 +18767,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 467
+      "priority": 465
     },
     {
       "version": "1.0",
@@ -18732,7 +18802,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 466
+      "priority": 464
     },
     {
       "version": "1.0",
@@ -18767,7 +18837,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 465
+      "priority": 463
+    },
+    {
+      "version": "1.0",
+      "id": "f3a38bf3-2dc2-58d3-8cb1-2b6e67774076",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x3x3.s1x2x2.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 462
+    },
+    {
+      "version": "1.0",
+      "id": "fb4de561-8d17-5010-b8a2-38fa974edf66",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x3x3.s1x2x2.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 461
     },
     {
       "version": "1.0",
@@ -18802,7 +18942,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 464
+      "priority": 460
     },
     {
       "version": "1.0",
@@ -18837,7 +18977,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 463
+      "priority": 459
     },
     {
       "version": "1.0",
@@ -18872,7 +19012,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 462
+      "priority": 458
+    },
+    {
+      "version": "1.0",
+      "id": "aef2bb80-3de5-5abd-86c9-643a3c410370",
+      "name": "conv_smallc.fwd.f32.fma.c4.1x3x3.s1x2x2.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 457
+    },
+    {
+      "version": "1.0",
+      "id": "c9566ad0-fa3d-5823-84b2-21846ab9ad32",
+      "name": "conv_smallc.fwd.f32.fma.c4.1x3x3.s1x2x2.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 456
     },
     {
       "version": "1.0",
@@ -18907,7 +19117,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 461
+      "priority": 455
     },
     {
       "version": "1.0",
@@ -18942,7 +19152,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 460
+      "priority": 454
     },
     {
       "version": "1.0",
@@ -18977,7 +19187,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 459
+      "priority": 453
+    },
+    {
+      "version": "1.0",
+      "id": "70948bb2-8813-558a-8c5e-89b3b50e7ff2",
+      "name": "conv_smallc.fwd.f32.fma.c1.1x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 452
+    },
+    {
+      "version": "1.0",
+      "id": "bbfd0543-51fc-5cab-bada-af05adf6de4c",
+      "name": "conv_smallc.fwd.f32.fma.c1.1x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 451
     },
     {
       "version": "1.0",
@@ -19012,7 +19292,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 458
+      "priority": 450
     },
     {
       "version": "1.0",
@@ -19047,7 +19327,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 457
+      "priority": 449
     },
     {
       "version": "1.0",
@@ -19082,7 +19362,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 456
+      "priority": 448
+    },
+    {
+      "version": "1.0",
+      "id": "471e094b-a03f-50df-bf14-757023d9ed4c",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 447
+    },
+    {
+      "version": "1.0",
+      "id": "0ba0cc0a-365f-5e3a-87d2-d043346e0ba6",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 446
     },
     {
       "version": "1.0",
@@ -19117,7 +19467,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 455
+      "priority": 445
     },
     {
       "version": "1.0",
@@ -19152,7 +19502,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 454
+      "priority": 444
     },
     {
       "version": "1.0",
@@ -19187,7 +19537,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 453
+      "priority": 443
+    },
+    {
+      "version": "1.0",
+      "id": "a04fa344-9f47-538b-bf16-4f323bd6f660",
+      "name": "conv_smallc.fwd.f32.fma.c4.1x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 442
+    },
+    {
+      "version": "1.0",
+      "id": "fc9eabb1-1bf5-5901-94a8-e262ecd83de4",
+      "name": "conv_smallc.fwd.f32.fma.c4.1x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 441
     },
     {
       "version": "1.0",
@@ -19222,7 +19642,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 452
+      "priority": 440
     },
     {
       "version": "1.0",
@@ -19257,7 +19677,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 451
+      "priority": 439
     },
     {
       "version": "1.0",
@@ -19292,7 +19712,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 450
+      "priority": 438
+    },
+    {
+      "version": "1.0",
+      "id": "e815b9d9-aefa-5808-916e-ce9af1dcb10e",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x4x4.s1x4x4.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 4,
+        "s": 4,
+        "sd": 1,
+        "sh": 4,
+        "sw": 4,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 437
+    },
+    {
+      "version": "1.0",
+      "id": "76fb4190-bed6-556a-aedb-1ebfc16ca1ef",
+      "name": "conv_smallc.fwd.f32.fma.c3.1x4x4.s1x4x4.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 1,
+        "r": 4,
+        "s": 4,
+        "sd": 1,
+        "sh": 4,
+        "sw": 4,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 436
     },
     {
       "version": "1.0",
@@ -19327,7 +19817,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 449
+      "priority": 435
     },
     {
       "version": "1.0",
@@ -19362,7 +19852,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 448
+      "priority": 434
     },
     {
       "version": "1.0",
@@ -19397,7 +19887,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 447
+      "priority": 433
     },
     {
       "version": "1.0",
@@ -19432,7 +19922,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 446
+      "priority": 432
     },
     {
       "version": "1.0",
@@ -19467,7 +19957,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 445
+      "priority": 431
     },
     {
       "version": "1.0",
@@ -19502,7 +19992,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 444
+      "priority": 430
     },
     {
       "version": "1.0",
@@ -19537,7 +20027,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 443
+      "priority": 429
+    },
+    {
+      "version": "1.0",
+      "id": "b85c09ac-49e9-5e1d-81cc-157de1b59edf",
+      "name": "conv_smallc.fwd.f32.fma.c1.3x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 428
+    },
+    {
+      "version": "1.0",
+      "id": "d42ccda0-23ba-5927-9073-d870c7234b82",
+      "name": "conv_smallc.fwd.f32.fma.c1.3x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 427
     },
     {
       "version": "1.0",
@@ -19572,7 +20132,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 442
+      "priority": 426
     },
     {
       "version": "1.0",
@@ -19607,7 +20167,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 441
+      "priority": 425
     },
     {
       "version": "1.0",
@@ -19642,7 +20202,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 440
+      "priority": 424
+    },
+    {
+      "version": "1.0",
+      "id": "c3de62bc-501e-5a37-90b9-623d9f9c5c0d",
+      "name": "conv_smallc.fwd.f32.fma.c3.3x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 423
+    },
+    {
+      "version": "1.0",
+      "id": "cb9f520e-023d-5a0d-accc-0eca0f896e80",
+      "name": "conv_smallc.fwd.f32.fma.c3.3x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 3,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 422
     },
     {
       "version": "1.0",
@@ -19677,7 +20307,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 439
+      "priority": 421
     },
     {
       "version": "1.0",
@@ -19712,7 +20342,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 438
+      "priority": 420
     },
     {
       "version": "1.0",
@@ -19747,7 +20377,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 437
+      "priority": 419
+    },
+    {
+      "version": "1.0",
+      "id": "c8fab4d4-6dd4-584a-ac22-f0bf926f6287",
+      "name": "conv_smallc.fwd.f32.fma.c4.3x3x3.s1x1x1.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 418
+    },
+    {
+      "version": "1.0",
+      "id": "6261b1e7-5e25-5067-84ae-b855045ce2cc",
+      "name": "conv_smallc.fwd.f32.fma.c4.3x3x3.s1x1x1.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 4,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 1,
+        "sh": 1,
+        "sw": 1,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 417
     },
     {
       "version": "1.0",
@@ -19782,7 +20482,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 436
+      "priority": 416
     },
     {
       "version": "1.0",
@@ -19817,7 +20517,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 435
+      "priority": 415
     },
     {
       "version": "1.0",
@@ -19852,7 +20552,77 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 434
+      "priority": 414
+    },
+    {
+      "version": "1.0",
+      "id": "c7fded46-545e-5115-a5eb-8f3a12fe5bac",
+      "name": "conv_smallc.fwd.f32.fma.c1.3x3x3.s2x2x2.d1x1x1.m8n8.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 2,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 8,
+        "fn": 8,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 413
+    },
+    {
+      "version": "1.0",
+      "id": "ffbf883b-7115-55b1-89e9-5e0700b770c9",
+      "name": "conv_smallc.fwd.f32.fma.c1.3x3x3.s2x2x2.d1x1x1.m4n16.w8x2x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvSmallc.cpp",
+        "entry_point": "ConvSmallc"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "archs": "any",
+        "atom_id": 0,
+        "wave": 0,
+        "ka": 1,
+        "cmax": 1,
+        "kd": 3,
+        "r": 3,
+        "s": 3,
+        "sd": 2,
+        "sh": 2,
+        "sw": 2,
+        "dd": 1,
+        "dh": 1,
+        "dw": 1,
+        "fm": 4,
+        "fn": 16,
+        "wm": 8,
+        "wq": 2,
+        "wn": 4
+      },
+      "priority": 412
     },
     {
       "version": "1.0",
@@ -19887,7 +20657,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 433
+      "priority": 411
     },
     {
       "version": "1.0",
@@ -19922,7 +20692,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 432
+      "priority": 410
     },
     {
       "version": "1.0",
@@ -19957,7 +20727,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 431
+      "priority": 409
     },
     {
       "version": "1.0",
@@ -19992,7 +20762,7 @@
         "wq": 2,
         "wn": 4
       },
-      "priority": 430
+      "priority": 408
     },
     {
       "version": "1.0",
@@ -20027,7 +20797,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 429
+      "priority": 407
     },
     {
       "version": "1.0",
@@ -20062,7 +20832,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 428
+      "priority": 406
     },
     {
       "version": "1.0",
@@ -20097,7 +20867,7 @@
         "wq": 2,
         "wn": 2
       },
-      "priority": 427
+      "priority": 405
     },
     {
       "version": "1.0",
@@ -20132,7 +20902,7 @@
         "wq": 1,
         "wn": 1
       },
-      "priority": 426
+      "priority": 404
     }
   ]
 }
