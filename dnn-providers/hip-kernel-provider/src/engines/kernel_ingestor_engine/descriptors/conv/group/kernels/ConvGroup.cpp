@@ -12,6 +12,7 @@
 //   CONV_GROUP_TH, _WP, _CB   output rows, 16-column fragments (matrix core) and 16-channel
 //                             blocks a workgroup
 //   CONV_GROUP_CF       1: packed channels-first activations read and written in place
+//   CONV_GROUP_PF       1: phase-fused backward data at stride 2 (k4ConvMmaPhased)
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
 
 #ifndef K1_BUFFER
@@ -33,6 +34,19 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
               CONV_GROUP_PX,
               CONV_GROUP_CB,
               CONV_GROUP_CF>(a);
+}
+#elif defined(CONV_GROUP_PF) && CONV_GROUP_PF
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
+{
+    k4ConvMmaPhased<CONV_GROUP_T,
+                    CONV_GROUP_ATOM,
+                    CONV_GROUP_FT,
+                    CONV_GROUP_R,
+                    CONV_GROUP_S,
+                    CONV_GROUP_TH,
+                    CONV_GROUP_WP,
+                    CONV_GROUP_CB,
+                    CONV_GROUP_CF>(a);
 }
 #else
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)

@@ -49,6 +49,24 @@ std::optional<GroupProblem>
     parseGroupProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                       conv_naive::ConvDirection direction);
 
+/// One launch of the K4 kernel: its arguments (pointers filled at launch) and the phase whose
+/// expanded filter it reads (phase-fused launches read that phase's and the next three).
+struct GroupLaunch
+{
+    K4Args args{};
+    size_t phase = 0;
+};
+
+/// The launches @p problem runs: one per phase, or (@p phased: backward data at row and column
+/// stride 2, the phase-fused kernel) one per depth phase, each running its four row and column
+/// phases with their paddings and filter stride in the arguments. nullopt where the phased form
+/// does not apply (not stride 2 on rows and columns, or a depth phase without all four).
+std::optional<std::vector<GroupLaunch>> groupLaunches(const GroupProblem& problem, bool phased);
+
+/// LDS bytes of the phase-fused kernel: the halo (one row and column wider than a phase's) and
+/// the 2 th x 2 tw output tile.
+long long groupPhasedLdsBytes(int elementBytes, int r, int s, int th, int tw, int cb, bool cf);
+
 /// @p problem with its activations read and written in place by the channels-first (cf) kernels:
 /// nullopt unless x and y are both packed channels-first (both staged by transposes).
 std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem);

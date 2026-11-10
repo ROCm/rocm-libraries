@@ -311,6 +311,57 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     return problem;
 }
 
+std::optional<std::vector<GroupLaunch>> groupLaunches(const GroupProblem& problem, bool phased)
+{
+    std::vector<GroupLaunch> launches;
+    const auto& phases = problem.phases;
+    if(!phased)
+    {
+        for(size_t i = 0; i < phases.size(); ++i)
+        {
+            launches.push_back({phases[i].args, i});
+        }
+        return launches;
+    }
+    if(problem.igemm.direction != ConvDirection::BACKWARD_DATA || problem.stride != 2
+       || phases.size() % 4 != 0 || phases.size() < 4)
+    {
+        return std::nullopt;
+    }
+    const size_t elementBytes = static_cast<size_t>(problem.igemm.elementBytes);
+    for(size_t i = 0; i < phases.size(); i += 4)
+    {
+        // Phases run depth, row, column: the four of a depth phase are (0,0) (0,1) (1,0) (1,1).
+        for(size_t q = 0; q < 4; ++q)
+        {
+            const auto& p = phases[i + q].args;
+            if(p.ooh != static_cast<int>(q / 2) || p.oow != static_cast<int>(q % 2)
+               || p.ood != phases[i].args.ood)
+            {
+                return std::nullopt;
+            }
+        }
+        GroupLaunch launch{phases[i].args, i};
+        launch.args.fph[0] = phases[i].args.ph;
+        launch.args.fph[1] = phases[i + 2].args.ph;
+        launch.args.fpw[0] = phases[i].args.pw;
+        launch.args.fpw[1] = phases[i + 1].args.pw;
+        launch.args.wps = static_cast<long long>(
+            (phases[i + 1].expandOffset - phases[i].expandOffset) / elementBytes);
+        launches.push_back(launch);
+    }
+    return launches;
+}
+
+long long groupPhasedLdsBytes(int elementBytes, int r, int s, int th, int tw, int cb, bool cf)
+{
+    const long long vec = 16 / elementBytes;
+    const long long pitch = 16LL * cb + vec;
+    const long long halo = static_cast<long long>(th + r) * (tw + s) * pitch;
+    const long long tile = cf ? 2LL * th * 16 * cb * (2 * tw + 1) : 4LL * th * tw * pitch;
+    return (halo + tile) * elementBytes;
+}
+
 std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem)
 {
     const auto& igemm = problem.igemm;
@@ -409,6 +460,7 @@ struct Tile
     conv_igemm::AtomInfo info;
     int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0, cf = 0;
     int64_t cg = 0, oc = 0, px = 0;
+    int64_t pf = 0; ///< phase-fused backward data at stride 2
     bool fma = false;
     int64_t tw = 0; ///< output columns a workgroup
 };
@@ -437,8 +489,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.cg = kernel.getIntMetadata("cg");
     tile.oc = kernel.getIntMetadata("oc");
     tile.px = kernel.getIntMetadata("px");
+    tile.pf = kernel.getIntMetadata("pf");
     if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.cb < 1
-       || tile.cb > 16 || (tile.cf != 0 && tile.cf != 1))
+       || tile.cb > 16 || (tile.cf != 0 && tile.cf != 1) || (tile.pf != 0 && tile.pf != 1))
     {
         return std::nullopt;
     }
@@ -455,7 +508,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     // FMA: oc output channels of whole groups (or whole groups of them), a chunk's pixels a
     // whole number of waves (64 lanes) and of rows.
     const auto divides16 = [](int64_t v) { return v >= 1 && v <= 16 && 16 % v == 0; };
-    if(tile.wp != 0 || !divides16(tile.cg) || tile.cg < 2 || !divides16(tile.oc)
+    if(tile.pf != 0 || tile.wp != 0 || !divides16(tile.cg) || tile.cg < 2 || !divides16(tile.oc)
        || (tile.cg % tile.oc != 0 && tile.oc % tile.cg != 0) || tile.px < 1)
     {
         return std::nullopt;
@@ -485,7 +538,8 @@ std::optional<GroupProblem>
 /// Kernel-scoped applicability: the config's atom runs on this device and multiplies the graph's
 /// element type (the 16x16 atoms whose k-step divides 16), its compile-time filter (depth, rows,
 /// columns) and stride are the graph's, its channel tile divides the channels, its halo fits the
-/// LDS, and a channels-first (cf) config's graph has both activations packed channels-first.
+/// LDS, a channels-first (cf) config's graph has both activations packed channels-first, and a
+/// phase-fused (pf) config's graph is backward data at row and column stride 2.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -518,25 +572,30 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // The halo the kernel stages: its compile-time filter and gather stride (backward data's
-    // stride phases gather at unit stride over the taps a phase reaches).
-    if(conv_group::groupLdsBytes(problem->igemm.elementBytes,
-                                 problem->kernelR,
-                                 problem->kernelS,
-                                 problem->kernelStride,
-                                 static_cast<int>(tile->th),
-                                 static_cast<int>(tile->tw),
-                                 static_cast<int>(tile->cb))
-       > LDS_LIMIT)
+    // A phase-fused config: backward data at row and column stride 2 with all four phases.
+    const auto launches = conv_group::groupLaunches(*problem, tile->pf != 0);
+    if(!launches.has_value())
     {
         return false;
     }
-    return std::all_of(problem->phases.begin(), problem->phases.end(), [&](const auto& phase) {
-        return conv_group::phaseBlocks(phase.args,
-                                       static_cast<int>(tile->th),
-                                       static_cast<int>(tile->tw),
-                                       static_cast<int>(tile->cb))
-            .has_value();
+    // The LDS the kernel takes: its compile-time filter and gather stride (backward data's
+    // stride phases gather at unit stride over the taps a phase reaches); the phase-fused kernel
+    // adds its output tile.
+    const int bytes = problem->igemm.elementBytes;
+    const auto th = static_cast<int>(tile->th), tw = static_cast<int>(tile->tw);
+    const auto cb = static_cast<int>(tile->cb);
+    const long long lds
+        = tile->pf != 0
+              ? conv_group::groupPhasedLdsBytes(
+                    bytes, problem->kernelR, problem->kernelS, th, tw, cb, tile->cf != 0)
+              : conv_group::groupLdsBytes(
+                    bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
+    if(lds > LDS_LIMIT)
+    {
+        return false;
+    }
+    return std::all_of(launches->begin(), launches->end(), [&](const auto& launch) {
+        return conv_group::phaseBlocks(launch.args, th, tw, cb).has_value();
     });
 }
 
@@ -571,16 +630,23 @@ public:
                       IngestorKernelCode expand,
                       std::array<std::optional<IngestorKernelCode>, 2> copies,
                       GroupProblem problem,
+                      std::vector<conv_group::GroupLaunch> launches,
                       std::vector<unsigned int> blocks)
         : _conv(std::move(conv))
         , _expand(std::move(expand))
         , _copies(std::move(copies))
         , _problem(std::move(problem))
+        , _launches(std::move(launches))
         , _blocks(std::move(blocks))
     {
     }
 
-    /// Each phase's workgroups.
+    /// The kernel's launches and each one's workgroups.
+    const std::vector<conv_group::GroupLaunch>& launches() const
+    {
+        return _launches;
+    }
+
     const std::vector<unsigned int>& blocks() const
     {
         return _blocks;
@@ -617,6 +683,7 @@ private:
     IngestorKernelCode _expand;
     std::array<std::optional<IngestorKernelCode>, 2> _copies;
     GroupProblem _problem;
+    std::vector<conv_group::GroupLaunch> _launches;
     std::vector<unsigned int> _blocks;
 };
 
@@ -667,10 +734,17 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "conv_group dispatch was given a graph its matcher did not admit");
         }
-        std::vector<unsigned int> blocks;
-        for(const auto& phase : problem->phases)
+        const auto launches = conv_group::groupLaunches(*problem, tile->pf != 0);
+        if(!launches.has_value())
         {
-            const auto phaseGrid = conv_group::phaseBlocks(phase.args,
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "conv_group dispatch was given a config its kernel match declines");
+        }
+        std::vector<unsigned int> blocks;
+        for(const auto& launch : *launches)
+        {
+            const auto phaseGrid = conv_group::phaseBlocks(launch.args,
                                                            static_cast<int>(tile->th),
                                                            static_cast<int>(tile->tw),
                                                            static_cast<int>(tile->cb));
@@ -695,6 +769,7 @@ public:
         else
         {
             options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
+            options.add("CONV_GROUP_PF", std::to_string(tile->pf));
             options.add("CONV_GROUP_WP", std::to_string(tile->wp));
         }
         options.add("CONV_GROUP_FT", std::to_string(problem->kernelT));
@@ -770,8 +845,12 @@ public:
             copy.setGridSize(static_cast<unsigned int>(grid), 1, 1);
             copies[i].emplace(std::move(copy));
         }
-        return std::make_unique<PreparedConvGroup>(
-            std::move(conv), std::move(expand), std::move(copies), *problem, std::move(blocks));
+        return std::make_unique<PreparedConvGroup>(std::move(conv),
+                                                   std::move(expand),
+                                                   std::move(copies),
+                                                   *problem,
+                                                   *launches,
+                                                   std::move(blocks));
     }
 
     void launch(const Handle& handle,
@@ -832,18 +911,21 @@ public:
                 }
             }
         }
-        // Each phase: its filter expansion, then its gather.
-        for(size_t i = 0; i < problem.phases.size(); ++i)
+        // Every phase's filter expansion, then the gathers (one a phase, or one a depth phase for
+        // the phase-fused kernel, reading its four phases' filters from the first one's).
+        for(const auto& phase : problem.phases)
         {
-            const auto& phase = problem.phases[i];
-            void* expanded = base + phase.expandOffset;
             K4ExpandArgs expand = phase.expand;
             expand.src = w;
-            expand.dst = expanded;
+            expand.dst = base + phase.expandOffset;
             dispatch.expandForStream(stream).launch(stream, expand);
-            K4Args args = phase.args;
+        }
+        for(size_t i = 0; i < dispatch.launches().size(); ++i)
+        {
+            const auto& launch = dispatch.launches()[i];
+            K4Args args = launch.args;
             args.in = forward ? operand[0] : operand[1];
-            args.w = expanded;
+            args.w = base + problem.phases[launch.phase].expandOffset;
             args.out = forward ? operand[1] : operand[0];
             auto& conv = dispatch.convForStream(stream);
             conv.setGridSize(dispatch.blocks()[i], 1, 1);

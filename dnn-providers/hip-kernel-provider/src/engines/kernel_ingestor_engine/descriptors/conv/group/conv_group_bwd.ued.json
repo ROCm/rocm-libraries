@@ -18,7 +18,8 @@
     "cf",
     "cg",
     "oc",
-    "px"
+    "px",
+    "pf"
   ],
   "behavior_notes": [
     "runtime_compilation"

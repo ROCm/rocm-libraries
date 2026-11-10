@@ -31,6 +31,12 @@ struct K4Args
     int osd, osh, osw; // out plane, row and column step
     int ood, ooh, oow; // out plane, row and column offset
     int cg; // channels a group
+    // Phase-fused backward data at stride 2 (k4ConvMmaPhased): the row and column phases' gather
+    // paddings, and the element stride between the four phases' expanded filters (phase
+    // 2 row phase + column phase).
+    int fph[2];
+    int fpw[2];
+    long long wps;
 };
 
 /// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the

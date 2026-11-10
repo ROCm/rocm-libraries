@@ -291,6 +291,11 @@ std::vector<DeviceCase> deviceCases()
     strided.groups = 16;
     strided.stride = {2, 2};
     cases.push_back({"NhwcGroups4Stride2", strided});
+    // A dx one row high: no second row phase (the phase-fused configs decline).
+    auto thin = dense(32, 32, {1, 21}, {3, 3}, {1, 1}, true);
+    thin.groups = 8;
+    thin.stride = {2, 2};
+    cases.push_back({"NhwcGroups4Stride2OneRow", thin});
     auto stridedFirst = dense(32, 32, {12, 19}, {3, 3}, {0, 1}, false);
     stridedFirst.groups = 4;
     stridedFirst.stride = {2, 2};
@@ -595,6 +600,50 @@ TEST(TestConvGroupProblem, ChannelsFirstInPlaceNeedsBothActivationsPackedChannel
     }
 }
 
+TEST(TestConvGroupProblem, PhaseFusedLaunchesOneADepthPhase)
+{
+    auto strided = resnext();
+    strided.stride = {2, 2};
+    strided.prePadding = {1, 0};
+    const auto backward = parsed(strided, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(backward.has_value());
+    ASSERT_EQ(backward->phases.size(), 4u);
+    const auto launches = conv_group::groupLaunches(*backward, true);
+    ASSERT_TRUE(launches.has_value());
+    ASSERT_EQ(launches->size(), 1u);
+    const auto& args = launches->front().args;
+    EXPECT_EQ(launches->front().phase, 0u);
+    EXPECT_EQ(args.fph[0], backward->phases[0].args.ph);
+    EXPECT_EQ(args.fph[1], backward->phases[2].args.ph);
+    EXPECT_EQ(args.fpw[0], backward->phases[0].args.pw);
+    EXPECT_EQ(args.fpw[1], backward->phases[1].args.pw);
+    EXPECT_EQ(static_cast<size_t>(args.wps) * 2,
+              backward->phases[1].expandOffset - backward->phases[0].expandOffset);
+    // Unfused: a launch a phase.
+    EXPECT_EQ(conv_group::groupLaunches(*backward, false)->size(), 4u);
+    // 3-D at stride 2 everywhere: one launch a depth phase.
+    auto deep = dense(64, 64, {5, 12, 13}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.groups = 16;
+    deep.stride = {2, 2, 2};
+    const auto deepBackward = parsed(deep, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(deepBackward.has_value());
+    const auto deepLaunches = conv_group::groupLaunches(*deepBackward, true);
+    ASSERT_TRUE(deepLaunches.has_value());
+    EXPECT_EQ(deepLaunches->size(), 2u);
+    EXPECT_EQ(deepLaunches->back().args.ood, 1);
+    // Not for stride 1, forward, or a dx one row high (no second row phase).
+    EXPECT_FALSE(conv_group::groupLaunches(*parsed(resnext(), ConvDirection::BACKWARD_DATA), true)
+                     .has_value());
+    EXPECT_FALSE(
+        conv_group::groupLaunches(*parsed(strided, ConvDirection::FORWARD), true).has_value());
+    auto flat = dense(64, 64, {1, 13}, {3, 3}, {1, 1}, true);
+    flat.groups = 16;
+    flat.stride = {2, 2};
+    const auto flatBackward = parsed(flat, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(flatBackward.has_value());
+    EXPECT_FALSE(conv_group::groupLaunches(*flatBackward, true).has_value());
+}
+
 TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -695,6 +744,9 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         // Channels-first in place: not for channels-last activations, and only 0 or 1.
         EXPECT_TRUE(declines("cf", int64_t{1}));
         EXPECT_TRUE(declines("cf", int64_t{2}));
+        // Phase-fused: only backward data at stride 2 (this graph is stride 1); 0 or 1.
+        EXPECT_TRUE(declines("pf", int64_t{1}));
+        EXPECT_TRUE(declines("pf", int64_t{2}));
         // Packed channels-first activations: the cf twin is admitted, with a smaller workspace
         // (nothing staged), and the staged config still is.
         auto first = resnext();
@@ -749,6 +801,7 @@ TEST(TestConvGroupCatalog, FmaKernelGatesGroupWidthChunkAndTile)
         EXPECT_TRUE(declines("wp", int64_t{1}));
         EXPECT_TRUE(declines("px", int64_t{64})); // a halo past 64 KB
         EXPECT_TRUE(declines("dtype", std::string("HALF")));
+        EXPECT_TRUE(declines("pf", int64_t{1})); // no phase-fused FMA form
         // A matrix-core config carries no FMA knobs.
         const auto mma = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
             return kernel.getStringMetadata("atom") == "mfma16_f32";
@@ -762,8 +815,8 @@ TEST(TestConvGroupCatalog, FmaKernelGatesGroupWidthChunkAndTile)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 12> KNOBS{
-        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf", "cg", "oc", "px"};
+    static constexpr std::array<const char*, 13> KNOBS{
+        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf", "cg", "oc", "px", "pf"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -786,9 +839,22 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
             const int tw = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (16 * cb) / th
                                                   * kernel.getIntMetadata("px"))
                                : static_cast<int>(16 * kernel.getIntMetadata("wp"));
-            EXPECT_LE(conv_group::groupLdsBytes(
-                          bytes, taps("r"), taps("s"), forward ? stride : 1, th, tw, cb),
-                      64 * 1024);
+            if(kernel.getIntMetadata("pf") != 0)
+            {
+                // Phase-fused: backward data at stride 2 only, its output tile in LDS too.
+                EXPECT_FALSE(forward);
+                EXPECT_EQ(stride, 2);
+                EXPECT_LE(
+                    conv_group::groupPhasedLdsBytes(
+                        bytes, taps("r"), taps("s"), th, tw, cb, kernel.getIntMetadata("cf") != 0),
+                    64 * 1024);
+            }
+            else
+            {
+                EXPECT_LE(conv_group::groupLdsBytes(
+                              bytes, taps("r"), taps("s"), forward ? stride : 1, th, tw, cb),
+                          64 * 1024);
+            }
             if(fma)
             {
                 EXPECT_EQ(kernel.getStringMetadata("dtype"), "FLOAT");

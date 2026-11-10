@@ -308,6 +308,166 @@ __device__ void k4ConvMma(const K4Args& a)
     }
 }
 
+// Phase-fused backward data at stride 2 (rows and columns): one launch writes every dx pixel of a
+// depth phase. A workgroup owns 2 TH dx rows x 2 TW dx columns (TW = 16 WP) x CB channel blocks:
+// TH x TW positions j of each of the four (row, column) phases, dx[2 j + p]. It stages the dy halo
+// once (unit gather stride; R x S are the compact taps a phase reaches, the halo one row and one
+// column wider for the phases' differing paddings), runs the four phases one after another
+// against their expanded filters (w + phase a.wps), parks each phase's results in an LDS output
+// tile, and writes the tile out whole: whole pixels (channels-last) or whole rows of columns
+// (channels-first), every dx line written once by one workgroup. Same grid as k4ConvMma over the
+// phase-0 positions (a.ho x a.wo).
+template <class T, class Atom, int FT, int R, int S, int TH, int WP, int CB, int CF = 0>
+__device__ void k4ConvMmaPhased(const K4Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = 4 * WAVE;
+    constexpr int TW = 16 * WP;
+    constexpr int CH = 16 * CB;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = TH + R, HC = TW + S; // one more row and column than a phase needs
+    constexpr int TAPS = FT * R * S;
+    constexpr int KC = 16 / Atom::KA;
+    constexpr int ITEMS = TH * CB / 4;
+    // The output tile: channels-last [row][column][channel] (pixels padded like the halo),
+    // channels-first [row][channel][column] (rows padded by one).
+    constexpr int OUT = CF != 0 ? 2 * TH * CH * (2 * TW + 1) : 2 * TH * 2 * TW * PITCH;
+    static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
+    static_assert(TH * CB % 4 == 0, "whole items a wave");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ __attribute__((aligned(16))) T halo[HR * HC * PITCH];
+    __shared__ __attribute__((aligned(16))) T tile[OUT];
+
+    const int blocks = a.c / CH;
+    long long b = blockIdx.x;
+    const int cbt = static_cast<int>(b % blocks);
+    b /= blocks;
+    const int tws = (a.wo + TW - 1) / TW;
+    const int twi = static_cast<int>(b % tws);
+    b /= tws;
+    const int ths = (a.ho + TH - 1) / TH;
+    const int thi = static_cast<int>(b % ths);
+    b /= ths;
+    const int od = static_cast<int>(b % a.dout);
+    const long long img = b / a.dout;
+    const int j0 = thi * TH, k0 = twi * TW; // the tile's first phase row and column
+    const int padH = a.fph[0] > a.fph[1] ? a.fph[0] : a.fph[1];
+    const int padW = a.fpw[0] > a.fpw[1] ? a.fpw[0] : a.fpw[1];
+    const int ih0 = j0 - padH, iw0 = k0 - padW;
+    const T* in = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.w);
+    T* out = static_cast<T*>(a.out);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int row = lane % 16;
+    const int kb = Atom::template kBase<Atom::KPL>(lane);
+
+    for(int ph = 0; ph < 4; ++ph)
+    {
+        const int pr = ph / 2, pc = ph % 2;
+        const int ro = padH - a.fph[pr], co = padW - a.fpw[pc]; // the phase's halo offsets
+        const T* wp = w + ph * a.wps;
+        typename Atom::acc acc[ITEMS][WP];
+#pragma unroll
+        for(int it = 0; it < ITEMS; ++it)
+#pragma unroll
+            for(int p = 0; p < WP; ++p)
+                acc[it][p] = typename Atom::acc{};
+        for(int ft = 0; ft < FT; ++ft)
+        {
+            const int id = od - a.pd + ft;
+            if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+                continue;
+            // Restage only when the plane changes (2-D and the first phase stage once).
+            if(FT > 1 || ph == 0)
+            {
+                __syncthreads();
+                k4StageHalo<T, CF, HR, HC, CH, PITCH, THREADS>(
+                    a, in, halo, img, id, cbt, ih0, iw0, tid);
+                __syncthreads();
+            }
+#pragma unroll
+            for(int it = 0; it < ITEMS; ++it)
+            {
+                const int item = wave + 4 * it;
+                const int r = item / CB, cbi = item % CB;
+                const int cb = cbt * CB + cbi;
+#pragma unroll
+                for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+                    for(int fs = 0; fs < S; ++fs)
+                    {
+                        const int tap = (ft * R + fr) * S + fs;
+                        typename Atom::frag bf[KC];
+#pragma unroll
+                        for(int q = 0; q < KC; ++q)
+                            bf[q] = k1Frag<Atom>(
+                                wp + ((static_cast<long long>(cb) * TAPS + tap) * 16 + row) * 16
+                                + q * Atom::KA + kb);
+#pragma unroll
+                        for(int p = 0; p < WP; ++p)
+                        {
+                            const int hc = p * 16 + row + fs + co, hr = r + fr + ro;
+                            const T* src = halo + (hr * HC + hc) * PITCH + cbi * 16 + kb;
+#pragma unroll
+                            for(int q = 0; q < KC; ++q)
+                                acc[it][p] = Atom::mma(
+                                    k1Frag<Atom>(src + q * Atom::KA), bf[q], acc[it][p]);
+                        }
+                    }
+            }
+        }
+        // Park the phase's results: tile row 2 r + pr, column 2 (fragment column) + pc.
+#pragma unroll
+        for(int it = 0; it < ITEMS; ++it)
+        {
+            const int item = wave + 4 * it;
+            const int r = item / CB, cbi = item % CB;
+#pragma unroll
+            for(int p = 0; p < WP; ++p)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int r2 = 2 * r + pr, c2 = 2 * (p * 16 + Atom::dRow(lane, e)) + pc;
+                    const int ch = cbi * 16 + lane % 16;
+                    tile[CF != 0 ? (r2 * CH + ch) * (2 * TW + 1) + c2
+                                 : (r2 * 2 * TW + c2) * PITCH + ch]
+                        = K1Elem<T>::store(acc[it][p][e]);
+                }
+        }
+    }
+    __syncthreads();
+    const int x0 = 2 * j0, y0 = 2 * k0; // the tile's first dx row and column
+    if constexpr(CF != 0)
+    {
+        const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
+        T* dst = out + (img * a.c + static_cast<long long>(cbt) * CH) * outPlanes
+                 + static_cast<long long>(od * a.osd + a.ood) * a.outH * a.outW;
+        for(int i = tid; i < 2 * TH * CH * 2 * TW; i += THREADS)
+        {
+            const int c2 = i % (2 * TW), ch = (i / (2 * TW)) % CH, r2 = i / (2 * TW * CH);
+            if(x0 + r2 < a.outH && y0 + c2 < a.outW)
+                dst[ch * outPlanes + static_cast<long long>(x0 + r2) * a.outW + y0 + c2]
+                    = tile[(r2 * CH + ch) * (2 * TW + 1) + c2];
+        }
+    }
+    else
+    {
+        constexpr int VP = CH / VEC;
+        const long long outPlane = img * a.outD + od * a.osd + a.ood;
+        for(int i = tid; i < 2 * TH * 2 * TW * VP; i += THREADS)
+        {
+            const int v = i % VP, px = i / VP, c2 = px % (2 * TW), r2 = px / (2 * TW);
+            if(x0 + r2 < a.outH && y0 + c2 < a.outW)
+                *reinterpret_cast<Raw*>(out
+                                        + ((outPlane * a.outH + x0 + r2) * a.outW + y0 + c2) * a.c
+                                        + static_cast<long long>(cbt) * CH + v * VEC)
+                    = *reinterpret_cast<const Raw*>(tile + px * PITCH + v * VEC);
+        }
+    }
+}
+
 // FMA kernel (no matrix cores: fp32 on RDNA, and any element type anywhere): the same grid,
 // halo and expanded filter as the matrix-core kernel, without the block-diagonal zeros. 256
 // threads own TH output rows x TW columns x CB channel blocks of one output plane. A thread owns
