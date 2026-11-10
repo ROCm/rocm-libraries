@@ -15,11 +15,7 @@ import os
 
 import pytest
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-import Tensile.LibraryIO as LibraryIO
+import tensilelite.LibraryIO as LibraryIO
 
 _DATA = os.path.join(os.path.dirname(__file__), "..", "_codegen", "data")
 
@@ -30,22 +26,6 @@ _BASES = {
     "gfx950_HHS": "gfx950/HHS.yaml",
     "gfx90a_HSS": "gfx90a/HSS.yaml",
 }
-
-
-@pytest.fixture(scope="session")
-def _cxx():
-    return validateToolchain("amdclang++")
-
-
-@pytest.fixture(scope="session")
-def isa_info_map(_cxx):
-    return makeIsaInfoMap(SUPPORTED_ISA, _cxx)
-
-
-@pytest.fixture(scope="session")
-def assembler(_cxx):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(_cxx, bundler, "default").assembler
 
 
 @pytest.fixture(scope="session")

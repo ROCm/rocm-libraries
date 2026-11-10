@@ -3,62 +3,22 @@
 
 // GPU reference resample forward kernel.
 // Compiled via HipRTC with -DX_TYPE=<type> -DY_TYPE=<type> -DCOMPUTE_TYPE=<type>
-// -DINDEX_TYPE=<type> -DHAS_INDEX=<0|1>.
+// -DINDEX_TYPE=<type> -DHAS_INDEX=<0|1> -DSPATIAL_DIMS=<2|3> -DRESAMPLE_MODE=<mode>
+// -DPADDING_MODE=<mode>.
 // Each thread computes one output element by iterating over the resample window in the input tensor
 // and applying the resample operation to produce the output element.
 
 #include "GpuRefTypes.h"
 #include "GpuRefUtils.hpp"
+#include "ResampleCommon.hpp"
 
 using namespace gpu_ref;
-
-constexpr long long spatialDims = static_cast<long long>(SPATIAL_DIMS);
-
-__device__ __forceinline__ long long getInputOffset(
-    long long n, long long c, long long d, long long h, long long w, const long long* xStrides)
-{
-    if constexpr(spatialDims == 2)
-    {
-        return n * xStrides[0] + c * xStrides[1] + h * xStrides[2] + w * xStrides[3];
-    }
-    else
-    {
-        return n * xStrides[0] + c * xStrides[1] + d * xStrides[2] + h * xStrides[3]
-               + w * xStrides[4];
-    }
-}
-
-__device__ __forceinline__ long long getOutputOffset(
-    long long n, long long c, long long d, long long h, long long w, const long long* yStrides)
-{
-    if constexpr(spatialDims == 2)
-    {
-        return n * yStrides[0] + c * yStrides[1] + h * yStrides[2] + w * yStrides[3];
-    }
-    else
-    {
-        return n * yStrides[0] + c * yStrides[1] + d * yStrides[2] + h * yStrides[3]
-               + w * yStrides[4];
-    }
-}
-
-__device__ __forceinline__ INDEX_TYPE
-    flattenSpatialIndex(long long d, long long h, long long w, long long xHeight, long long xWidth)
-{
-    if constexpr(spatialDims == 2)
-    {
-        return static_cast<INDEX_TYPE>(h * xWidth + w);
-    }
-    else
-    {
-        return static_cast<INDEX_TYPE>(d * xHeight * xWidth + h * xWidth + w);
-    }
-}
 
 extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
 {
     const long long tid = static_cast<long long>(blockIdx.x) * static_cast<long long>(blockDim.x)
                           + static_cast<long long>(threadIdx.x);
+    constexpr long long spatialDims = static_cast<long long>(SPATIAL_DIMS);
 
     long long ySpatialSize = 1;
     for(long long i = 0; i < spatialDims; ++i)
@@ -144,9 +104,11 @@ extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
                 // If the input index is valid, read the input value and compute the flattened spatial index
                 if(valid)
                 {
-                    const long long xOffset = getInputOffset(n, c, inD, inH, inW, args.xStrides);
+                    const long long xOffset
+                        = getOffset<spatialDims>(n, c, inD, inH, inW, args.xStrides);
                     candidate = toAccum(x[xOffset]);
-                    candidateIndex = flattenSpatialIndex(inD, inH, inW, xSpatial[1], xSpatial[2]);
+                    candidateIndex = flattenSpatialIndex<INDEX_TYPE, spatialDims>(
+                        inD, inH, inW, xSpatial[1], xSpatial[2]);
                     ++validCount;
                 }
                 else if constexpr(paddingMode == PaddingMode::NEG_INF_PAD
@@ -186,7 +148,7 @@ extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
     }
 
     // Store output value and max-pool index output
-    const long long yOffset = getOutputOffset(n, c, outD, outH, outW, args.yStrides);
+    const long long yOffset = getOffset<spatialDims>(n, c, outD, outH, outW, args.yStrides);
     Y_TYPE* tag = nullptr;
     y[yOffset] = fromAccum(result, tag);
 

@@ -126,7 +126,8 @@ compute_streamk_grid_size, emit_streamk_decode, streamk_num_macro_tiles
 unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8
 dequant_i4_byte_to_fp8_pair, dequant_i4_byte_to_bf8_pair
 # OCP MX E8M0 shared-exponent (helpers/mx_scale.py)
-decode_mx_scale_e8m0, apply_mx_scale, load_and_decode_mx_scale_byte
+decode_mx_scale_e8m0, apply_mx_scale, fma_with_mx_scale_pair, exact_mx_scale_split,
+MxScaleSplit, MxElementFormat, load_and_decode_mx_scale_byte
 # Preshuffled-B layout (helpers/preshuffle.py)
 PreshuffleBSpec, emit_preshuffleb_offset, host_preshuffle_layout
 # FP8 / BF8 MFMA catalog (helpers/atoms.py)
@@ -171,6 +172,8 @@ load_block_count # BlockCount[q_block]
 IOSpecRule, validate_io
 SignatureBuilder, kernel_name_join
 ceil_div_grid, ptr_type_str, sig_param, sig_scalar
+ceil_div, align_up # host integer math (no IR)
+non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
 QDType, QUANT_MAX_ABS
@@ -181,7 +184,7 @@ quant_ir_type, quant_max_abs, ir_to_qdtype
 NUM_XCDS_MI300X, NUM_XCDS_MI325X, NUM_XCDS_MI350X
 SuperTileSwizzleResult
 chiplet_aware_super_tile, chiplet_aware_super_tile_dynamic
-chiplet_transform_chunked, chiplet_transform_chunked_dynamic
+chiplet_transform_chunked, chiplet_transform_chunked_dynamic, chiplet_transform_chunked_runtime
 super_tile_swizzle, super_tile_swizzle_dynamic
 
 # Autotune (helpers/autotune.py)

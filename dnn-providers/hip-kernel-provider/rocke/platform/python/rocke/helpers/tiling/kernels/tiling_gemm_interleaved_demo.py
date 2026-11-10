@@ -6,7 +6,7 @@ rocWMMA `perf_hgemm`. Phases are built up in-place (P1 register-blocked -> P2 LD
 this file currently holds P1.
 
 P1 -- register-blocked, no LDS. A per-CTA wave tile of ``TILE_M x TILE_N`` (default 32x32 = a 2x2
-grid of 16x16x16 MFMA atoms), single wave (wave64), RCC layout (A row-major, B/C col-major),
+grid of 16x16x16 MFMA atoms), single wave (wave64), A and B K-contiguous, C M-contiguous,
 canonical `make_tile_desc` layouts (load layout == MFMA layout, so no cross-lane relayout is needed
 and no LDS is used). The 2x2 grid gives register reuse: each loaded A / B atom feeds two MMAs.
 
@@ -23,7 +23,9 @@ import numpy as np
 from .. import (
     TileMma,
     Tiling,
+    check_gemm_shapes,
     fill_fragment,
+    lds_element_span,
     load_fragment,
     make_fragment,
     make_tensor_desc,
@@ -187,11 +189,11 @@ def _wave_descs(m_sub: int = 1, n_sub: int = 1, k_sub: int = 1):
 def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
     """Block-wide COOPERATIVE load, returned as a (LOAD, STORE) pair per operand.
 
-    LOAD: K-contiguous (KPT contiguous per lane -> coalesced global load, K-stride-1 row-major A/B),
+    LOAD: K-contiguous (KPT contiguous per lane -> coalesced global load, K-contiguous A/B),
     with the free-dim also owning DPT>=2 elements per lane. STORE: the SAME lane ownership re-ordered
     FREE-DIM-contiguous (M/N inner) -- a pure register `reorder` (transpose = axis-significance swap,
-    the free "col-major == transpose of row-major"). The kernel loads with LOAD (fast), re-orders to
-    STORE, and writes free-dim-contiguous LDS so the interleaved wave read is stride-1 (conflict-free).
+    the free transpose: the same elements, the other axis contiguous). The kernel loads with LOAD
+    (fast), re-orders to STORE, and writes free-dim-contiguous LDS so the interleaved wave read is stride-1 (conflict-free).
     One interleaved layout end to end; `wave_dist` splits the free dim across the block's waves.
     """
     coop_m, coop_n = tile_m // n_waves, tile_n // n_waves
@@ -225,7 +227,7 @@ def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
             wave_size=64,
         )
         # STORE = LOAD with the two register axes swapped in significance -> free-dim-contiguous, same
-        # elements/lanes (a `reorder`). This is the free transpose (col-major == row-major^T).
+        # elements/lanes (a `reorder`). This is the free transpose (same elements, the other axis contiguous).
         el = load.layout
         store = TileDesc(
             shape=load.shape,
@@ -246,9 +248,10 @@ def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
 
 
 def _transpose_desc(td):
-    """Swap the two X-dims (M<->K) of a desc -- a free relabel (col-major == row-major^T), register-
-    identity (same values, coords swapped). Used to index the M-innermost LDS memref in (K,M) order so
-    the free-dim (M) store/read is the memref innermost -> WIDE ds_write/ds_read (never scalar).
+    """Swap the two X-dims (M<->K) of a desc -- a free relabel (same elements, the other axis
+    contiguous), register-identity (same values, coords swapped). Used to address the M-innermost LDS buffer, described in
+    (K, M) order, so the free-dim (M) store/read runs along its stride-1 axis -> WIDE ds_write/ds_read
+    (never scalar).
     """
     e = td.layout
     swap = lambda majs: tuple(
@@ -367,7 +370,7 @@ def build_interleaved_gemm(
     m_macro = b.mul(b.block_id_y(), b.const_i32(tile_m))
     n_macro = b.mul(b.block_id_x(), b.const_i32(tile_n))
 
-    lda = lda if lda is not None else K_LEN  # A (M,K) row-major
+    lda = lda if lda is not None else K_LEN  # A (M,K): K contiguous
     ldb = ldb if ldb is not None else K_LEN  # B (N,K): K contiguous
 
     a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)
@@ -380,6 +383,9 @@ def build_interleaved_gemm(
     else:
         ldc = ldc if ldc is not None else M_LEN  # C (N,M): M contiguous
         c_td = make_tensor_desc((N_LEN, M_LEN), (ldc, 1), F16)
+    # The logical (M, N) C the store writes through: the canonical branch spells C (N, M).
+    c_view = c_td if mma_layout == "interleaved" else c_td.permute([1, 0])
+    check_gemm_shapes(a_td, b_td, c_view)
 
     # TWO orthogonal layout knobs for apples-to-apples sweeps:
     #   prefetch -> coop-load staging into LDS + the layout the wave READ produces (a_pf/b_pf);
@@ -396,8 +402,8 @@ def build_interleaved_gemm(
     # Double-buffered LDS as ONE 2x slab; the prefetched NEXT tile goes to the OTHER buffer (disjoint ->
     # the store never waits on the read's lgkmcnt, one barrier/trip). single_buffer halves it so 2 WGs
     # fit per CU (dual occupancy). The PHYSICAL LDS layout is the prefetch knob:
-    #   interleaved -> M-innermost ([K, 2*free], M stride-1): free-dim store+read are the memref innermost
-    #                  -> WIDE; store = K-contiguous load -> free-dim `reorder` -> re-tag (K,M).
+    #   interleaved -> M-innermost ([K, 2*free], M stride-1): free-dim store+read run along the stride-1
+    #                  axis -> WIDE; store = K-contiguous load -> free-dim `reorder` -> re-tag (K,M).
     #   canonical   -> K-innermost ([2*free, K], K stride-1): the K-contiguous coop load stores DIRECTLY
     #                  (identity, no reorder) and the canonical wave read is K-contiguous -> WIDE, no transpose.
     _bufs = 1 if single_buffer else 2
@@ -411,10 +417,15 @@ def build_interleaved_gemm(
         # (M) store/read still address the real M range contiguously (pad is trailing per K-row), so the
         # WIDE access is preserved (keep lds_pad a multiple of 8 f16 = 16 B to hold b128 alignment).
         _pa, _pb = _bufs * tile_m + lds_pad, _bufs * tile_n + lds_pad
-        lds_a = b.smem_alloc(F16, [tile_k, _pa], name_hint="lds_a")
-        lds_b = b.smem_alloc(F16, [tile_k, _pb], name_hint="lds_b")
         lds_a_td = make_tensor_desc((tile_k, _bufs * tile_m), (_pa, 1), F16)
         lds_b_td = make_tensor_desc((tile_k, _bufs * tile_n), (_pb, 1), F16)
+        # Each LDS buffer is flat and sized from its descriptor (and the swizzle's reach).
+        lds_a = b.smem_alloc(
+            lds_a_td.dtype, [lds_element_span(lds_a_td, lds_swizzle)], name_hint="lds_a"
+        )
+        lds_b = b.smem_alloc(
+            lds_b_td.dtype, [lds_element_span(lds_b_td, lds_swizzle)], name_hint="lds_b"
+        )
         a_st_t, b_st_t = _transpose_desc(a_coop_st), _transpose_desc(b_coop_st)
         a_rd_t, b_rd_t = _transpose_desc(a_pf), _transpose_desc(b_pf)
 
@@ -469,10 +480,14 @@ def build_interleaved_gemm(
         # stays (rows, tile_k); the pad is trailing dead space per row. NOTE: an odd-dword pad misaligns
         # the wide read -- interpret the ds_read width alongside the conflict counter.
         _pk = tile_k + lds_pad
-        lds_a = b.smem_alloc(F16, [_bufs * tile_m, _pk], name_hint="lds_a")
-        lds_b = b.smem_alloc(F16, [_bufs * tile_n, _pk], name_hint="lds_b")
         lds_a_td = make_tensor_desc((_bufs * tile_m, tile_k), (_pk, 1), F16)
         lds_b_td = make_tensor_desc((_bufs * tile_n, tile_k), (_pk, 1), F16)
+        lds_a = b.smem_alloc(
+            lds_a_td.dtype, [lds_element_span(lds_a_td, lds_swizzle)], name_hint="lds_a"
+        )
+        lds_b = b.smem_alloc(
+            lds_b_td.dtype, [lds_element_span(lds_b_td, lds_swizzle)], name_hint="lds_b"
+        )
 
         def _store_buf(frags, row_a, row_b):
             store_fragment(
@@ -702,9 +717,6 @@ def build_interleaved_gemm(
         )
         accumulator = transform_fragment(b, accumulator, c_store)
 
-    c_view = (
-        c_td if mma_layout == "interleaved" else c_td.permute([1, 0])
-    )  # both -> (M, N)
     c_win = make_window(
         c_view,
         (
@@ -953,15 +965,19 @@ def build_lds_staged_gemm(
     a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)
     b_td = make_tensor_desc((N_LEN, K_LEN), (ldb, 1), F16)
     c_td = make_tensor_desc((N_LEN, M_LEN), (ldc, 1), F16)
+    # Check the logical (M, N) C the store sees: this kernel spells C (N, M).
+    check_gemm_shapes(a_td, b_td, c_td.permute([1, 0]))
     a_desc, b_desc, c_desc = _wave_descs()  # single-atom (1,1,1)
 
     # LDS buffers for the A (M,K) and B (N,K) tiles, addressed as ordinary tiles: a tensor_desc for
-    # the LDS shape + a window at origin, then the SAME load/store_fragment verbs (they dispatch to
-    # smem ops because the source is an `smem<...>` buffer, not a global ptr).
-    lds_a = b.smem_alloc(F16, [_ATOM, _ATOM], name_hint="lds_a")
-    lds_b = b.smem_alloc(F16, [_ATOM, _ATOM], name_hint="lds_b")
-    lds_a_win = make_window(make_tensor_desc((_ATOM, _ATOM), (_ATOM, 1), F16), (0, 0))
-    lds_b_win = make_window(make_tensor_desc((_ATOM, _ATOM), (_ATOM, 1), F16), (0, 0))
+    # the LDS layout + a window at origin, then the SAME load/store_fragment verbs (they dispatch to
+    # smem ops because the source is an `smem<...>` buffer, not a global ptr). Each buffer is flat
+    # and sized from its descriptor.
+    lds_td = make_tensor_desc((_ATOM, _ATOM), (_ATOM, 1), F16)
+    lds_a = b.smem_alloc(lds_td.dtype, [lds_td.element_span], name_hint="lds_a")
+    lds_b = b.smem_alloc(lds_td.dtype, [lds_td.element_span], name_hint="lds_b")
+    lds_a_win = make_window(lds_td, (0, 0))
+    lds_b_win = make_window(lds_td, (0, 0))
 
     accumulator = make_fragment(c_desc, F32)
     fill_fragment(b, accumulator, 0)

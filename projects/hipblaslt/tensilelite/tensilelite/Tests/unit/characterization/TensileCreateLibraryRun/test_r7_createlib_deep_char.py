@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.TensileCreateLibrary.Run — deep coverage pass.
+"""Characterization tests for tensilelite.create_library.run — deep coverage pass.
 
 Target miss ranges (methodology-A):
   336-348  : writeAssembly (assembly-file writer)
@@ -47,17 +47,17 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from Tensile.Common import IsaInfo, IsaVersion
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Toolchain.Component import Assembler
+from tensilelite.Common import IsaInfo, IsaVersion
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Module under test
 # ---------------------------------------------------------------------------
-M = importlib.import_module("Tensile.TensileCreateLibrary.Run")
-SL = importlib.import_module("Tensile.SolutionLibrary")
+M = importlib.import_module("tensilelite.create_library.run")
+SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 _DATA_DIR = Path(__file__).parent / "data"
 _LOGIC_YAML = _DATA_DIR / "logic_gfx942_HSS_BH_tiny.yaml"
@@ -68,8 +68,8 @@ _LOGIC_YAML = _DATA_DIR / "logic_gfx942_HSS_BH_tiny.yaml"
 # ---------------------------------------------------------------------------
 
 def _make_isa_info_map(arch: str = "gfx942"):
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Common.Architectures import gfxToIsa
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     isa = gfxToIsa(arch)
@@ -79,7 +79,7 @@ def _make_isa_info_map(arch: str = "gfx942"):
 
 
 def _make_assembler():
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.Toolchain.Component import Assembler
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     return Assembler(Path(clang), "4")
@@ -385,7 +385,7 @@ class TestWriteSolutionsAndKernelsTCL:
 
     def test_duplicate_kernels_excluded_from_unique(self, tmp_path):
         """Lines 553: uniqueAsmKernels excludes duplicates; return count reflects unique."""
-        from Tensile.Common.GlobalParameters import assignGlobalParameters
+        from tensilelite.Common.GlobalParameters import assignGlobalParameters
 
         # Create two fake assembly kernels with the same base name => one duplicate
         k1 = MagicMock()
@@ -397,16 +397,18 @@ class TestWriteSolutionsAndKernelsTCL:
         src_tc = MagicMock()
         kwa = MagicMock()
 
-        # Patch getKernelFileBase to return same name for both => k2 is duplicate
-        with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
-            with patch.object(M, "ParallelMap2", return_value=[]):
-                with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
-                    with patch.object(M, "buildSourceCodeObjectFiles"):
-                        with patch.object(M, "writeHelpers"):
-                            n, uq, results = M.writeSolutionsAndKernelsTCL(
-                                tmp_path / "output2",
-                                asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
-                            )
+        # Same compile key and artifact => compile one representative.
+        with patch.object(M, "getKernelCompileKey", return_value="same_key"):
+            with patch.object(M, "getKernelNameMin", return_value="same_kernel"):
+                with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
+                    with patch.object(M, "ParallelMap2", return_value=[]):
+                        with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
+                            with patch.object(M, "buildSourceCodeObjectFiles"):
+                                with patch.object(M, "writeHelpers"):
+                                    n, uq, results = M.writeSolutionsAndKernelsTCL(
+                                        tmp_path / "output2",
+                                        asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
+                                    )
         # n should be count of unique kernels, not total
         assert n == 1
         assert len(uq) == 1
@@ -531,17 +533,17 @@ class TestGenerateLogicDataAndSolutionsExtra:
     def test_empty_architecture_name_skipped(self, base_assembler, base_isa_map):
         """Line 808-809: architectureName=="" causes the library to be skipped.
 
-        parseLibraryLogicFile receives 8 positional args (filename, assembler, splitGSU,
-        printSolutionRejectionReason, printIndexAssignmentInfo, isaInfoMap, lazyLibraryLoading,
-        archRenames).
+        The parse wrapper receives 7 positional args (filename, assembler, splitGSU,
+        printSolutionRejectionReason, printIndexAssignmentInfo, isaInfoMap, lazyLibraryLoading).
+        It is patched rather than parseLibraryLogicFile because workers resolve that by import.
         """
-        from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary as MSL
 
-        def _fake_parse(filename, assembler, splitGSU, psr, piai, isaInfoMap, lazy, archRenames):
+        def _fake_parse(filename, assembler, splitGSU, psr, piai, isaInfoMap, lazy):
             lib = MSL({}, None)
             return (None, "", None, None, None, lib, {})
 
-        with patch.object(M.LibraryIO, "parseLibraryLogicFile", side_effect=_fake_parse):
+        with patch.object(M, "_parseLogicFileForLibrary", side_effect=_fake_parse):
             solutions, masterLibs, mapping = self._run(base_assembler, base_isa_map)
         # No arch key should be added when architectureName==""
         assert masterLibs == {}
@@ -552,7 +554,7 @@ class TestGenerateLogicDataAndSolutionsExtra:
         base_isa_map: dict[IsaVersion, IsaInfo],
     ) -> None:
         """Aggregate type mismatches from parsed logic files raise after merging."""
-        from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary as MSL
 
         mismatch = {
             ("UseBeta", "int", "bool"): {
@@ -578,7 +580,7 @@ class TestGenerateLogicDataAndSolutionsExtra:
         the exact library objects returned and avoid triggering MasterSolutionLibrary.merge
         with an incomplete structure (which requires a non-None library tree node).
         """
-        from Tensile.SolutionLibrary import MasterSolutionLibrary
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary
 
         # Build minimal real MSL objects (empty solutions, no lazy libs).
         # renameFallbacksPerArch requires a deep-copyable object so we use real MSL.
@@ -638,7 +640,6 @@ def _make_run_arguments(logic_path, output_path):
         "DisableAsmComments": False,
         "UseCompression": False,
         "KeepBuildTmp": False,
-        "BuildGfx1250v0": False,
     }
 
 
@@ -678,7 +679,7 @@ class TestRunCLIEntryPoint:
         return d
 
     def _run_with_stubs(self, logic_dir, output_dir, extra_args=None):
-        """Invoke M.run() with all heavy collaborators monkeypatched."""
+        """Invoke M.main() with all heavy collaborators monkeypatched."""
         base_args = _make_run_arguments(logic_dir, output_dir)
         if extra_args:
             base_args.update(extra_args)
@@ -704,7 +705,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write"), \
              patch.object(M.shutil, "rmtree"):
-            M.run()
+            M.main()
 
     def test_run_completes_without_exception(self, logic_dir, output_dir):
         """Lines 881-1086: run() must complete without raising."""
@@ -743,7 +744,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
              patch.object(M.shutil, "rmtree"):
-            M.run()
+            M.main()
 
         # Check the basename to avoid test-dir path components polluting the filter
         lazy_names = [n for n in written_names if "lazy" in Path(n).name.lower()]
@@ -782,7 +783,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
              patch.object(M.shutil, "rmtree"):
-            M.run()
+            M.main()
 
         # non-lazy path: should NOT write a file with "lazy" in the name
         # Check the basename only to avoid test-dir paths containing "lazy"
@@ -822,7 +823,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
              patch.object(M.shutil, "rmtree"):
-            M.run()
+            M.main()
 
         yaml_writes = [c for c in write_calls if c["fmt"] == "yaml"]
         assert yaml_writes, f"Expected a yaml-format write call; got {write_calls}"
@@ -842,7 +843,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
              patch.object(M, "makeSourceToolchain", return_value=MagicMock()):
             with pytest.raises(SystemExit):
-                M.run()
+                M.main()
 
     def test_run_semicolon_arch_is_split(self, logic_dir, output_dir):
         """Lines 899-900: semicolon-separated arch string is split correctly."""
@@ -868,7 +869,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write"), \
              patch.object(M.shutil, "rmtree"):
-            M.run()  # must not raise
+            M.main()  # must not raise
 
     def test_run_keep_build_tmp_suppresses_rmtree(self, logic_dir, output_dir):
         """Lines 1067-1073: KeepBuildTmp=True means shutil.rmtree is not called."""
@@ -901,7 +902,7 @@ class TestRunCLIEntryPoint:
              patch.object(M.LibraryIO, "write"), \
              patch.object(M.shutil, "rmtree",
                           side_effect=lambda p, **kw: rmtree_calls.append(p)):
-            M.run()
+            M.main()
 
         # joblib's memmap reaper may rmtree its own /dev/shm scratch dirs during
         # teardown; those are unrelated to KeepBuildTmp. Only build_tmp removals
@@ -958,7 +959,7 @@ class TestRunCLIEntryPoint:
              patch.object(M, "passPostKernelInfoToLibrary"), \
              patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
              patch.object(M.shutil, "rmtree"):
-            M.run()
+            M.main()
 
         mapping_writes = [n for n in written if "Mapping" in n]
         assert mapping_writes, f"Expected Mapping file write; got: {written}"

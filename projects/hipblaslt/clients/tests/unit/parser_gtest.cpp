@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -220,9 +221,9 @@ TEST(HostUnitInitParser, smoke_KnownStringsMapToExpectedEnum)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
-        EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization(name)),
-                  static_cast<int>(expected))
-            << "string2hipblaslt_initialization(\"" << name << "\")";
+        const auto parsed = string2hipblaslt_initialization(name);
+        ASSERT_TRUE(parsed.has_value()) << "string2hipblaslt_initialization(\"" << name << "\")";
+        EXPECT_EQ(static_cast<int>(*parsed), static_cast<int>(expected)) << name;
     }
 }
 
@@ -230,8 +231,9 @@ TEST(HostUnitInitParser, smoke_RoundTripsThroughInitialization2String)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
-        EXPECT_STREQ(hipblaslt_initialization2string(string2hipblaslt_initialization(name)),
-                     name.c_str());
+        const auto parsed = string2hipblaslt_initialization(name);
+        ASSERT_TRUE(parsed.has_value()) << name;
+        EXPECT_STREQ(hipblaslt_initialization2string(*parsed), name.c_str());
     }
 }
 
@@ -244,16 +246,14 @@ TEST(HostUnitInitParser, smoke_EveryEnumeratorIsRegistered)
         "known_init_modes");
 }
 
-// Current (develop) behavior: an unrecognized init string silently maps to the
-// integer sentinel 0, which is NOT a valid hipblaslt_initialization enumerator
-// (the enum starts at 111). This is exactly the footgun called out in the PR
-// #6514 review, observation #3. AIHPBLAS-3551 replaces this with a
-// std::optional-returning, noexcept parser, at which point this expectation is
-// meant to flip.
-TEST(HostUnitInitParser, smoke_UnknownStringMapsToZeroSentinel_PreAIHPBLAS3551)
+// An unrecognized init string returns std::nullopt (AIHPBLAS-3551) instead of
+// the old silent integer-0 sentinel, forcing callers to handle the bad-input
+// case. This is the safe contract David asked for in PR #6514 review
+// observation #3.
+TEST(HostUnitInitParser, smoke_UnknownStringReturnsNullopt)
 {
-    EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("not_a_real_init_mode")), 0);
-    EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("")), 0);
+    EXPECT_FALSE(string2hipblaslt_initialization("not_a_real_init_mode").has_value());
+    EXPECT_FALSE(string2hipblaslt_initialization("").has_value());
 }
 
 TEST(HostUnitActivationParser, smoke_KnownStringsMapAndRoundTrip)

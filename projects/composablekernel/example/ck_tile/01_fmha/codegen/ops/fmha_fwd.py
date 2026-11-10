@@ -52,6 +52,7 @@ K0_MAX_SUBMAX_MAP = {
     160: 256,
     192: 192,
     256: 256,
+    512: 512,
 }
 
 # TDM stores the head dim at its true length (see tdm_ceil_to_qualified_tile_length
@@ -143,10 +144,7 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
 using fmha_pipeline = {F_pipeline}<
     fmha_pipeline_problem{F_pipeline_extra_args}>;
 
-using fmha_epilogue =
-    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
-                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
-                               {F_spad}, {F_dvpad}>>;
+{F_epilogue}
 
 using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
 
@@ -279,7 +277,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 
 FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>"""
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && ({F_skip_check}) &&(t.has_sink == {F_sink}) &&
         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
@@ -305,6 +303,7 @@ FMHA_FWD_API_KVSCALE_LOOKUP = """    struct row {{ const char* arch; const char*
 
 FMHA_FWD_API_KVSCALE_ROW = """        {{"{F_arch.name}", "{F_dtype_name}", {F_hdim}, {F_hdim_v}, fmha_fwd_kvscale_align_<{F_trait_type}, {F_arch.tag}>()}},
 """
+
 
 @dataclass
 class CppConstraint:
@@ -372,6 +371,7 @@ class FmhaFwdApiTrait:
             "qr_async_trload_v3",
             "qr_tdm",
             "qr_tdm_sched",
+            "qr_tdm_pingpong",
         ]:
             if self.spad == "t":
                 return "true"  # always support
@@ -407,6 +407,14 @@ class FmhaFwdApiTrait:
                 return f"true /*a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+        elif self.pipeline_tag == "qr_tdm_pingpong":
+            # It zero-fills the K/V rows past seqlen_k and masks the last S tile,
+            # so the unpadded instance serves any seqlen_k; an elementwise bias
+            # is vector-loaded and still needs whole tiles.
+            if self.skpad == "t" or self.bias != "bias":
+                return "true"
+            else:
+                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
         elif self.pipeline_tag == "qr_tdm" or (
             self.pipeline_tag == "qr_tdm_sched" and self.hdim == "64"
         ):
@@ -433,9 +441,13 @@ class FmhaFwdApiTrait:
                 return "a.hdim_q % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag == "qr_tdm":
+        elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dpad == "t":
-                return "a.hdim_q % 8 == 0"
+                return (
+                    "true"
+                    if self.pipeline_tag == "qr_tdm" and self.dtype in ("fp16", "bf16")
+                    else "a.hdim_q % 8 == 0"
+                )
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in [
             "qr",
@@ -460,9 +472,13 @@ class FmhaFwdApiTrait:
                 return "a.hdim_v % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag == "qr_tdm":
+        elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dvpad == "t":
-                return "a.hdim_v % 8 == 0"
+                return (
+                    "true"
+                    if self.pipeline_tag == "qr_tdm" and self.dtype in ("fp16", "bf16")
+                    else "a.hdim_v % 8 == 0"
+                )
             return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in [
             "qr",
@@ -572,13 +588,6 @@ class FmhaFwdPipeline:
         else:
             n += "_ntrload"
         if self.tag == "qr_tdm":
-            if (
-                self.F_progressive_ds_load_k == "t"
-                and self.F_use_double_kv_lds_buffer != "t"
-            ):
-                raise ValueError(
-                    "QR-TDM progressive K LDS loading requires K/V LDS prefetch (double buffering)"
-                )
             if self.F_use_double_kv_lds_buffer == "t":
                 n += "_kvlp"
             else:
@@ -610,6 +619,11 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
         F_lse=BOOL_MAP[trait.lse],
         F_dropout=BOOL_MAP[trait.dropout],
         F_skip=BOOL_MAP[trait.skip],
+        F_skip_check=(
+            f"(t.skip_min_seqlen_q && t.is_group_mode) == {BOOL_MAP[trait.skip]}"
+            if arch.name == "gfx125"
+            else f"t.skip_min_seqlen_q == {BOOL_MAP[trait.skip]}"
+        ),
         F_trload=BOOL_MAP[trait.tr_load],
         F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
         F_qscale=QSCALE_MAP[trait.qscale],
@@ -795,6 +809,9 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    # The pipeline tag that owns this tile: an owned tile pairs with that pipeline
+    # only (see check_tile_owner). None: any pipeline without tiles of its own.
+    F_pipeline_tag: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -839,6 +856,29 @@ class FmhaFwdKernel:
         else:
             return "fmha_fwd_create_kargs_and_grids"
 
+    def _get_epilogue_decl(self) -> str:
+        spad = BOOL_MAP[self.F_pipeline.F_spad]
+        dvpad = BOOL_MAP[self.F_pipeline.F_dvpad]
+        if self.F_pipeline.tag == "qr_tdm_pingpong":
+            return (
+                "using fmha_epilogue = ck_tile::LdsShuffle2DEpilogue<\n"
+                "    ck_tile::LdsShuffle2DEpilogueProblem<\n"
+                "        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+                "        typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+                "        fmha_shape::NumWarps,\n"
+                f"        {self.F_tile.F_bm0},\n"
+                f"        {self.F_tile.F_bn1},\n"
+                f"        {spad},\n"
+                f"        {dvpad}>>;"
+            )
+        return (
+            "using fmha_epilogue =\n"
+            "    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<"
+            "typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+            "                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+            f"                               {spad}, {dvpad}>>;"
+        )
+
     def render(self) -> str:
         body = type(self)._get_kernel_header(self.F_pipeline.tag) + type(
             self
@@ -866,7 +906,11 @@ class FmhaFwdKernel:
             F_wn1=self.F_tile.F_wn1,
             F_wk1=self.F_tile.F_wk1,
             F_vlayout=LAYOUT_MAP[self.F_pipeline.F_vlayout],
-            F_use_tdm_ceil=("true" if self.F_pipeline.tag == "qr_tdm" else "false"),
+            F_use_tdm_ceil=(
+                "true"
+                if self.F_pipeline.tag in ("qr_tdm", "qr_tdm_pingpong")
+                else "false"
+            ),
             F_spad=BOOL_MAP[self.F_pipeline.F_spad],
             F_skpad=BOOL_MAP[self.F_pipeline.F_skpad],
             F_dpad=BOOL_MAP[self.F_pipeline.F_dpad],
@@ -903,6 +947,7 @@ class FmhaFwdKernel:
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_epilogue=self._get_epilogue_decl(),
         )
         if emits_kvscale_align(self.F_pipeline.tag, self.F_pipeline.F_qscale):
             body += FMHA_FWD_KVSCALE_ALIGN_TEMPLATE.format(F_arch=self.F_arch)
@@ -1337,7 +1382,12 @@ class KernelComponentFactoryGfx950(
                 ["no", "causal"],
                 ["t", "f"],
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
+                mask_constraint = (
+                    CppConstraint("a.window_size_left < 0 && a.window_size_right == 0")
+                    if mask == "causal"
+                    else CppConstraint()
+                )
+                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f", F_constraint=mask_constraint))  # fmt: skip
 
         elif dtype in cls._DT_MXFP8 or dtype in cls._DT_MXFP4:
             # no need dropout kernels
@@ -1372,41 +1422,97 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
 
     @classmethod
     def get_rules(cls) -> List[CompatibilityRule]:
-        rules = super().get_rules()
+        hdim_rules = {
+            (64, 64): cls.check_d64_tile,
+            (128, 128): cls.check_d128_tile,
+            (256, 256): cls.check_d256_tile,
+        }
 
-        def check_d128_tile_pipeline(
+        def check_hdim_tile(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
             if problem_ctx.dtype not in cls._DT_FP16_BF16:
                 return True
+            rule = hdim_rules.get((problem_ctx.hdim, problem_ctx.hdim_v))
+            return rule is None or rule(kernel_ctx.tile, kernel_ctx.pipeline)
 
-            if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
-                return True
+        return super().get_rules() + [check_hdim_tile]
 
-            # For (128, 128) head dims, partial-fragment support in qr_hpad removes the need
-            # for the previous qr_hpad-specific handling that was added to avoid register spill.
-            # qr_hpad now reuses the regular 128x64 tile choice.
-            # The 64x64 tile remains disabled for qr_hpad because it is consistently slower
-            # in our measurements.
-            if kernel_ctx.tile.F_bm0 == 64 and kernel_ctx.tile.F_bn0 == 64:
-                return kernel_ctx.pipeline.tag != "qr_hpad"
-
+    @staticmethod
+    def check_d64_tile(tile, pipeline) -> bool:
+        # M128/N64 uses PV32 for dropout, elementwise bias, or head padding.
+        if tile.F_bm0 != 128 or tile.F_bn0 != 64:
             return True
+        use_pv32 = (
+            pipeline.F_dropout == "t"
+            or pipeline.F_bias == "bias"
+            or pipeline.F_dpad == "t"
+        )
+        return (tile.F_bk1 == 32) == use_pv32
 
-        rules.append(check_d128_tile_pipeline)
-        return rules
+    @classmethod
+    def check_d128_tile(cls, tile, pipeline) -> bool:
+        # Keep head padding on M128; apply QK selection only to M128/N64.
+        if tile.F_bn0 != 64:
+            return True
+        if tile.F_bm0 == 64:
+            return pipeline.tag != "qr_hpad"
+        if tile.F_bm0 != 128:
+            return True
+        return cls.check_d128_qk(tile, pipeline)
+
+    @staticmethod
+    def check_d128_qk(tile, pipeline) -> bool:
+        # Plain unpadded inputs keep both QK tiles; bias/dropout selects QK32.
+        unpadded = pipeline.F_dpad == "f"
+        dropout = pipeline.F_dropout == "t"
+        if pipeline.F_bias == "no" and unpadded and not dropout:
+            return True
+        use_k32 = (
+            unpadded
+            and pipeline.F_bias != "no"
+            and (pipeline.F_bias == "bias" or dropout)
+        )
+        return (tile.F_bk0 == 32) == use_k32
+
+    @staticmethod
+    def check_d256_tile(tile, pipeline) -> bool:
+        # M128/N64 uses QK32 for unpadded elementwise bias or dropout.
+        if tile.F_bm0 != 128 or tile.F_bn0 != 64:
+            return True
+        use_k32 = pipeline.F_dpad == "f" and (
+            pipeline.F_bias == "bias" or pipeline.F_dropout == "t"
+        )
+        return (tile.F_bk0 == 32) == use_k32
 
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
+            # Use M64 for short Q or too few M128 blocks; otherwise use M128.
+            m64_d64_constraint = (
+                "a.max_seqlen_q < 4096 || get_num_blocks(128) < num_cus"
+            )
+            # Keep the padded PV32 fallback from taking aligned plain inputs.
+            m128_d64_pv32_constraint = (
+                "t.has_dropout || t.bias_type == bias_enum::elementwise_bias || "
+                "a.hdim_q % 64 != 0 || a.hdim_v % 64 != 0"
+            )
+            # Use K32 for bias, dropout, or short Q/K; feature support is checked above.
+            m128_d128_k32_constraint = (
+                "t.has_dropout || t.bias_type == bias_enum::elementwise_bias || "
+                "(a.max_seqlen_q < 1024 && a.seqlen_k < 1024)"
+            )
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q < 4096")),
-                              FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
+                ( 32,  32) : [FmhaFwdTileSize(256,  64,  16,  32,  64,   32,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d64_constraint)),
+                              FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m128_d64_pv32_constraint)),
+                              FmhaFwdTileSize(128,  64,  32,  64,  64,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m128_d128_k32_constraint)),
+                              FmhaFwdTileSize(128,  64,  64, 128,  64,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (256, 256) : [FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]
+                (256, 256) : [FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6),
+                              FmhaFwdTileSize(128,  64, 128, 256,  64,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -1439,12 +1545,48 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
 class KernelComponentFactoryGfx115(KernelComponentFactoryGfx11):
     arch = ArchTrait("gfx115")
 
+    @staticmethod
+    def check_d64_tile(tile, pipeline) -> bool:
+        # Dropout and elementwise bias use M64 at every query length.
+        return tile.F_bm0 == 64 or (
+            pipeline.F_dropout == "f" and pipeline.F_bias != "bias"
+        )
+
+    @staticmethod
+    def check_d128_qk(tile, pipeline) -> bool:
+        # QK32 covers no-bias dropout and unpadded no-bias/elementwise inputs.
+        use_k32 = (pipeline.F_bias == "no" and pipeline.F_dropout == "t") or (
+            pipeline.F_dpad == "f" and pipeline.F_bias in ("no", "bias")
+        )
+        return (tile.F_bk0 == 32) == use_k32
+
+    @staticmethod
+    def check_d256_tile(tile, pipeline) -> bool:
+        # Reserve QK128 for padded elementwise bias without dropout.
+        if tile.F_bm0 != 128 or tile.F_bn0 != 64:
+            return True
+        use_k128 = (
+            pipeline.F_dpad == "t"
+            and pipeline.F_bias == "bias"
+            and pipeline.F_dropout == "f"
+        )
+        return (tile.F_bk0 == 128) == use_k128
+
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         result = super().get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
-            result[(64, 64)] = [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
-            result[(256, 256)] = [FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            # Use M64 for short Q, dropout or elementwise bias to avoid regressions.
+            m64_d64_constraint = (
+                "a.max_seqlen_q <= 8192 || t.has_dropout || "
+                "t.bias_type == bias_enum::elementwise_bias"
+            )
+            result[(32, 32)] = [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            result[(64, 64)] = [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d64_constraint)),
+                               FmhaFwdTileSize(128, 128,  32,  64, 128,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            result[(128, 128)] = [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6),
+                                 FmhaFwdTileSize(128,  64,  64, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]  # fmt: skip
+            result[(256, 256)][0] = FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)  # fmt: skip
         return result
 
 
@@ -1460,15 +1602,104 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
         return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32
 
     @classmethod
+    def get_rules(cls) -> List[CompatibilityRule]:
+        hdim_rules = {
+            (32, 32): cls.check_d32_tile,
+            (64, 64): cls.check_d64_tile,
+            (128, 128): cls.check_d128_tile,
+            (256, 256): cls.check_d256_tile,
+        }
+
+        def check_hdim_tile(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            if problem_ctx.dtype not in cls._DT_FP16_BF16:
+                return True
+            rule = hdim_rules.get((problem_ctx.hdim, problem_ctx.hdim_v))
+            return rule is None or rule(kernel_ctx.tile, kernel_ctx.pipeline)
+
+        return super().get_rules() + [check_hdim_tile]
+
+    @staticmethod
+    def check_d32_tile(tile, pipeline) -> bool:
+        # Use M64 for masking or dropout, and M256 otherwise.
+        small = pipeline.F_dropout == "t" or pipeline.F_mask not in ("no", "s_no")
+        return (tile.F_bm0 == 64) == small
+
+    @staticmethod
+    def check_d64_tile(tile, pipeline) -> bool:
+        # Masked dropout+sink uses PV64 unless elementwise bias adds register pressure.
+        masked = pipeline.F_mask not in ("no", "s_no")
+        dropout = pipeline.F_dropout == "t"
+        if tile.F_bm0 == 64:
+            pv64 = (
+                masked
+                and dropout
+                and pipeline.F_sink == "t"
+                and pipeline.F_bias != "bias"
+            )
+            return tile.F_bk1 == (64 if pv64 else 32)
+        return not dropout and not masked
+
+    @staticmethod
+    def check_d128_tile(tile, pipeline) -> bool:
+        # PV32 avoids no-bias dropout spills; masked bias can also use PV16.
+        masked_bias = pipeline.F_bias == "bias" and pipeline.F_mask not in (
+            "no",
+            "s_no",
+        )
+        dropout = pipeline.F_dropout == "t"
+        if tile.F_bm0 != 64:
+            return not dropout and not masked_bias
+        if dropout:
+            return tile.F_bk1 == (32 if pipeline.F_bias == "no" else 16)
+        return tile.F_bk1 == 32 or masked_bias
+
+    @staticmethod
+    def check_d256_tile(tile, pipeline) -> bool:
+        # Use M64 for masked inputs unless both bias and head padding are present.
+        small = pipeline.F_mask not in ("no", "s_no") and (
+            pipeline.F_bias == "no" or pipeline.F_dpad == pipeline.F_dvpad == "f"
+        )
+        return (tile.F_bm0 == 64) == small
+
+    @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
+            # Use M64 for dropout, masking, or short Q.
+            m64_d64_constraint = (
+                "t.has_dropout || t.mask_type != mask_enum::no_mask || "
+                "a.max_seqlen_q < 1024"
+            )
+            # Use M64 for masked bias, dropout, short Q, or too few M256 blocks.
+            m64_d128_constraint = (
+                "(t.bias_type == bias_enum::elementwise_bias && "
+                "t.mask_type != mask_enum::no_mask) || "
+                "t.has_dropout || a.max_seqlen_q < 1024 || "
+                "get_num_thread_blocks(a.batch, "
+                "a.num_head_q_total > 0 ? a.num_head_q_total : a.nhead_q, "
+                "a.max_seqlen_q, 256) <= "
+                "(t.mask_type == mask_enum::no_mask ? 2 : 4) * num_cus"
+            )
+            # Cap Q's contribution so long sequences with few heads retain PV32.
+            m64_d128_pv16_constraint = (
+                "t.has_dropout || get_num_thread_blocks(a.batch, "
+                "a.num_head_q_total > 0 ? a.num_head_q_total : a.nhead_q, "
+                "a.max_seqlen_q < 4096 ? a.max_seqlen_q : 4096, 64) > 4 * num_cus"
+            )
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
-                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  64,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
+                              FmhaFwdTileSize(256,  64,  16,  32,  64,   32, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,   8)],
+                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  64,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d64_constraint)),
+                              FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d64_constraint)),
+                              FmhaFwdTileSize(128, 128,  32,  64, 128,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  16,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m64_d128_pv16_constraint)),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m64_d128_constraint)),
+                              FmhaFwdTileSize(256,  64,  64, 128,  64,  128, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,   8)],
+                (192, 128) : [FmhaFwdTileSize(128,  64,  64, 128,  64,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
+                (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  16,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
+                              FmhaFwdTileSize(256,  64,  64, 256,  64,  256, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
@@ -1541,6 +1772,19 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
 # divided by batch. Logical member lengths still come from their sequence metadata.
 GFX125_D192_N128_MIN_AVERAGE_K = 512
 
+# d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
+# and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
+# softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
+# a tile ahead. Measured on gfx1250, pingpong wins below 640 rows once there are at
+# least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
+# with fewer, or with longer aligned queries, it loses up to 21%. A block count does
+# not draw that line: 16 x 16 heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1
+# heads of 32 rows (1792 blocks) win 1.5x.
+GFX125_QR_TDM_PINGPONG_RANGE = (
+    "a.max_seqlen_q < 640"
+    " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
+)
+
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
     return CppConstraint(
@@ -1570,6 +1814,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _DT_FP16_BF16 = ("fp16", "bf16")
     _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
     _DT_FP8FP32 = ("fp8fp32",)
+
+    # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
+    _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
     # Define scheduled tile configurations once. Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
@@ -1642,7 +1889,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return (
                     kernel_ctx.pipeline.F_vlayout == "row"
                     and kernel_ctx.pipeline.F_spad == kernel_ctx.pipeline.F_skpad
-                    and (problem_ctx.mode != "group" or kernel_ctx.pipeline.F_spad == "t")
+                    and (
+                        problem_ctx.mode != "group" or kernel_ctx.pipeline.F_spad == "t"
+                    )
                     and kernel_ctx.pipeline.F_dpad == "f"
                     and kernel_ctx.pipeline.F_dvpad == "f"
                 )
@@ -1680,7 +1929,19 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return k0_loops == 1
             return k0_loops >= 2
 
-        rules.extend([check_gemm0_k, check_qr_tdm_sched_codegen_compatibility])
+        def check_tile_owner(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # A tile with an owner pairs with that pipeline only, and a pipeline
+            # that owns tiles runs on its own tiles only.
+            owner = kernel_ctx.tile.F_pipeline_tag
+            if owner is not None:
+                return kernel_ctx.pipeline.tag == owner
+            return kernel_ctx.pipeline.tag not in cls._PIPELINES_WITH_OWN_TILES
+
+        rules.extend(
+            [check_gemm0_k, check_tile_owner, check_qr_tdm_sched_codegen_compatibility]
+        )
         return rules
 
     @classmethod
@@ -1693,7 +1954,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
                 " || (!t.is_group_mode && t.is_v_rowmajor"
                 " && !t.has_logits_soft_cap && !t.has_dropout"
-                " && !t.skip_min_seqlen_q"
                 " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
                 " && a.window_size_left < 0 && a.window_size_right == 0"
                 " && a.seqlen_q == a.seqlen_k && a.seqlen_q % 128 == 0"
@@ -1704,8 +1964,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # Most entries pair a bm0=64 tile guarded by the per-dim crossover
             # constraint (see GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q) with a bm0=128
             # fallback: the dispatcher picks bm0=64 below the crossover max_seqlen_q
-            # and bm0=128 at/above it. (256,256) is the exception -- a single unguarded
-            # bm0=64 tile with no fallback. _validate_qr_tdm_bm0_crossover_pairs enforces
+            # and bm0=128 at/above it. (256,256) and (512,512) are the exceptions --
+            # a single unguarded bm0=64 tile with no fallback, because bm0=128 does
+            # not fit their LDS arena. _validate_qr_tdm_bm0_crossover_pairs enforces
             # that any non-final tile keeps a constraint so a bm0=64 entry can never
             # silently shadow its bm0=128 fallback in dispatch order.
             result = _validate_qr_tdm_bm0_crossover_pairs({
@@ -1716,17 +1977,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                # qr_tdm_pingpong's tiles. Up to 16 rows the 64-row tile would idle 3/4 of
+                # its M rows, so this one spends its four warps on N instead.
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((192, 128))),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
+                (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
             if dtype in cls._DT_FP16_BF16:
                 # D64 matches qr_tdm's M128/N64 geometry and occupancy hint3.
-                result[(64, 64)].extend(copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)]))
+                result[(64, 64)].extend(
+                    copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)])
+                )
                 # Append the qr_tdm_sched tiles. The codegen compatibility rule pairs
                 # these tile variants with the scheduled pipeline: D128 uses N128,
                 # while D192 tries N128 first and then N64. Batch mode passes
@@ -1749,9 +2017,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 result[(128, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)])
                 )
-                d192_n128, d192_n64 = copy.deepcopy(
-                    cls._QR_TDM_SCHED_TILES[(192, 128)]
-                )
+                d192_n128, d192_n64 = copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 result[(192, 128)].extend(
                     [
                         replace(d192_n128, F_constraint=d192_n128_constraint),
@@ -1784,12 +2050,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         pipelines = []
         if dtype in cls._DT_FP16_BF16:
             qscale = "no"
-            # qr_tdm: gfx125 TDM pipeline, preferred for d=128.
-            # Emitted first so runtime dispatcher selects qr_tdm over qr
-            # when both match (dispatch order = list order in generated code).
-            # NOTE: dropout is not yet implemented in qr_tdm - only emit
-            # dropout="f" so dropout workloads fall through to qr.
-            # Logits soft cap is not implemented either, so pin logits="f".
+            # Basic TDM covers gfx125 FP16/BF16 forward feature combinations.
             if (hdim, hdim_v) in {
                 (32, 32),
                 (64, 64),
@@ -1798,18 +2059,30 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (160, 160),
                 (192, 128),
                 (256, 256),
+                (512, 512),
             }:
+                # D256 and D512 keep single-V/double-K LDS buffers: their
+                # double-buffer arenas leave no room for the bank-conflict
+                # padding their row pitch needs, and at D512 one would not fit
+                # in LDS at all. Progressive K reload stays on for both: the
+                # single-buffer path also stages whole K tiles now.
+                tdm_double_kv = (
+                    "f" if (hdim, hdim_v) in ((256, 256), (512, 512)) else "t"
+                )
+                tdm_prog_k = "t"
                 tdm_masks = list(get_mask_map(mask_impl))
                 if mask_impl == "simplified":
                     # Avoid carrying general-window mask state through the
                     # causal main loop. Keep the simplified fallback for windows.
                     tdm_masks.insert(0, "causal")
-                for logits, mask, bias, lse, sink in itertools.product(
-                    ["f"],
+                for logits, mask, bias, lse, sink, dropout, skip in itertools.product(
+                    ["f", "t"],
                     tdm_masks,
                     BIAS_MAP.keys(),
                     ["t", "f"],
                     ["t", "f"],
+                    ["f", "t"],
+                    ["f", "t"],
                 ):
                     mask_constraint = CppConstraint()
                     if mask_impl == "simplified" and mask == "causal":
@@ -1820,19 +2093,38 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         mask_constraint = CppConstraint(
                             "a.window_size_left < 0 && a.window_size_right == 0"
                         )
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                    if (hdim, hdim_v) == (
+                        128,
+                        128,
+                    ) and logits == dropout == skip == "f":
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
+                sched_seqlen_q = "a.max_seqlen_q >= 128"
+                if (hdim, hdim_v) == (128, 128):
+                    sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
                     f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
-                    "a.max_seqlen_q >= 128 && "
+                    f"{sched_seqlen_q} && "
                     f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
                 )
+                if hdim == 128:
+                    # O layouts the async O store (kUseAsyncLdsOStore) cannot address use qr_tdm.
+                    sched_constraint &= CppConstraint(
+                        "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
+                        "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
+                        "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
+                        "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
+                    )
                 for mask, lse in itertools.product(
                     get_mask_map(mask_impl).keys(), ["t", "f"]
                 ):
@@ -1840,19 +2132,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
 
-            # qr: generic pipeline fallback for trait combos not covered by
-            # qr_tdm (e.g., bias, dropout, skip, d!=128).
-            for logits, mask, bias, lse, dropout, skip, sink in itertools.product(
-                ["t", "f"],
-                get_mask_map(mask_impl).keys(),
-                BIAS_MAP.keys(),
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-            ):
-                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
@@ -2012,7 +2291,7 @@ def _parse_tune_config_tiles(
     return result
 
 
-def _make_tune_filter_rule(filters: dict):
+def _make_tune_filter_rule(filters: dict, normalize_batch_skip: bool = False):
     if not filters:
         return None
 
@@ -2050,7 +2329,11 @@ def _make_tune_filter_rule(filters: dict):
             return False
         if allowed_vlayout is not None and p.F_vlayout not in allowed_vlayout:
             return False
-        if allowed_skip is not None and p.F_skip not in allowed_skip:
+        if (
+            allowed_skip is not None
+            and not (normalize_batch_skip and problem_ctx.mode == "batch")
+            and p.F_skip not in allowed_skip
+        ):
             return False
         if allowed_sink is not None and p.F_sink not in allowed_sink:
             return False
@@ -2077,7 +2360,9 @@ def _build_custom_tune_factory(cfg: dict):
 
     tiles_by_dtype = _parse_tune_config_tiles(cfg.get("tiles", {}))
     dtypes_whitelist = tuple(cfg.get("dtypes", ()))
-    extra_rule = _make_tune_filter_rule(cfg.get("filters", {}))
+    extra_rule = _make_tune_filter_rule(
+        cfg.get("filters", {}), normalize_batch_skip=base.arch.name == "gfx125"
+    )
     disable_hdim_rule = bool(
         cfg.get("relax_rules", {}).get("disable_check_hdim_tile", False)
     )
@@ -2190,6 +2475,42 @@ def get_product(receipt: int) -> Product:
             return cond
 
         return Product(name="PyTorch integration", rule=fit)
+    # CK Tile Python API
+    elif receipt == 5:
+
+        def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
+            pipeline = kernel_ctx.pipeline
+            if problem_ctx.dtype == "fp8bf16":
+                return (
+                    problem_ctx.hdim == problem_ctx.hdim_v <= 256
+                    and pipeline.F_vlayout == "row"
+                    and (
+                        pipeline.F_qscale in ["no", "pertensor", "perhead"]
+                        or (
+                            problem_ctx.mode == "batch"
+                            and pipeline.F_qscale == "blockscale"
+                        )
+                    )
+                    and pipeline.F_bias == "no"
+                    and pipeline.F_dropout == "f"
+                    and pipeline.F_logits == "f"
+                    and pipeline.F_skip == "f"
+                    and pipeline.F_sink == "f"
+                )
+            cond = problem_ctx.dtype in ["fp16", "bf16"]
+            cond &= problem_ctx.hdim == problem_ctx.hdim_v <= 256
+            cond &= pipeline.F_vlayout == "row"
+            cond &= pipeline.F_bias in ["no", "alibi"] or (
+                problem_ctx.mode == "batch" and pipeline.F_bias == "bias"
+            )
+            cond &= pipeline.F_lse == "t"
+            cond &= pipeline.F_logits == "f"
+            cond &= pipeline.F_qscale == "no"
+            cond &= pipeline.F_skip == "f"
+            cond &= pipeline.F_sink == "f"
+            return cond
+
+        return Product(name="CK Tile Python API", rule=fit)
     # Aiter(mha_fwd) integration
     elif receipt == 100:
 
@@ -2318,6 +2639,15 @@ def get_fwd_blobs(
                 )
                 rules = factory.get_rules()
                 product = get_product(receipt)
+
+                # Skip changes only group-mode execution. Reuse skip=f in batch
+                # dispatch instead of compiling identical skip=t instances.
+                if (
+                    factory.arch.name == "gfx125"
+                    and mode == "batch"
+                    and pipeline.F_skip == "t"
+                ):
+                    continue
 
                 if not is_compatible(problem_ctx, kernel_ctx, [*rules, product]):
                     continue

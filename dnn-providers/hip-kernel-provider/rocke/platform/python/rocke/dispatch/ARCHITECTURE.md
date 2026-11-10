@@ -439,7 +439,7 @@ class Capability:
     and non-empty, enforced in ``register()``. It fails closed, so a candidate
     that somehow reaches ``check()`` with no arches matches nothing.
     """
-    arches: tuple[str, ...] = ()          # exact gfx targets; the only arch gate
+    arches: tuple[str, ...] = ()          # listed gfx targets; the only arch gate
     dtypes: tuple[str, ...] = ()
     layouts: tuple[str, ...] = ()
     shapes: tuple[ShapeRange, ...] = ()      # per-dimension bounds
@@ -549,7 +549,10 @@ while remaining honest.
 
 **Architecture gating is mandatory, and it is an explicit list of gfx targets.**
 Every candidate names the architectures it was built and tuned for. There is no
-family-level shorthand — see below for why. Enforce it at registration:
+family-level shorthand — see below for why. A listed generic target such as
+`gfx11-generic` is not a shorthand: it is a target with facts of its own, and it
+covers exactly the processors whose `arch_specs.json` row points at it
+(`listed_arch_for`). Enforce the list at registration:
 
 ```python
 def register(self, candidate):
@@ -870,9 +873,9 @@ Hand the same candidate a shape that *does* tile evenly and the predicate alone
 answers:
 
 ```
-universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1151, gfx1201
+universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1201
   _supports(req)   -> (True, 'ok')
-  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1151', 'gfx1201')")
+  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1201')")
   admits(req)      -> (False, "capability: arch 'gfx950' not in (...)")
 ```
 
@@ -1204,7 +1207,7 @@ ABI version. A module per arch mirrors the kernel tree one for one.
 The platform families are the opposite case. Every dispatched conv candidate
 builds through one `build_implicit_gemm_conv`, every GEMM candidate through one
 `build_universal_gemm`, with arch passed as an argument. The only thing that
-varies per architecture is a cohort tuple (`_CDNA_MEM`, `_RDNA_WMMA`,
+varies per architecture is a cohort tuple (`_CDNA_MEM`, `RDNA_WMMA_GEMM_ARCHES`,
 `_GFX1250_WMMA`). Splitting those into per-arch modules would put a tuple in
 each file and separate no code, while scattering a cohort list that currently
 reads at a glance.
@@ -1242,9 +1245,10 @@ library/dispatch/                         # library-owned kernels
     __init__.py        # registry assembly, dispatch / sweep entry points
     common.py          # request, AttentionTuningSpec, shared gates
     generic.py         # multi-arch unified_2d / unified_3d path labels, d256_decode
-    gfx942_dense.py    # attention_dense (persistence and tile are knobs)
+    gfx942_dense.py    # attention_dense: gfx942_dense (persistence and tile are knobs), gfx942_dense_qbminor,
+                       #   gfx942_dense_{persist,btminor,hqswz}_aot (the ingestor's other grids)
     gfx942_unified.py  # dense_pipe, unified tuning catalog
-    gfx950_dense.py    # attention_dense_grid / attention_dense_persist (+ wide DMA)
+    gfx950_dense.py    # attention_dense_grid (+ qbminor) / attention_dense_persist (+ wide DMA)
     gfx950_unified.py  # d256 prefill, unified tuning catalog
     gfx1250.py         # wmma_attention_fwd
     axes.py            # attention knob axes and production stacks (data)
@@ -1259,7 +1263,8 @@ library/dispatch/                         # library-owned kernels
 platform/python/rocke/dispatch/           # platform-owned kernels
   core.py              # request / candidate / registry / result / identity
   tuning/              # shared machinery for tuned candidates (section 14)
-    axes.py  walk.py  identity.py  space.py  candidate.py  spec.py  testing.py
+    axes.py  walk.py  identity.py  space.py  waves.py  candidate.py  spec.py
+    testing.py
   families/
     moe.py  norm.py                       # cohort-parameterized, no lane earned
   gemm/
@@ -1322,7 +1327,9 @@ dependence.
 Steps 1–6 touch no existing file except the one-line `__init__` addition. That is
 the open/closed property, and section 10 makes it an executable invariant. Step 7
 is the deliberate exception: because there is no family wildcard, a new target
-inherits a generic kernel only when someone opts it in.
+inherits a generic kernel only when someone opts it in. A processor whose
+`arch_specs.json` row points at a generic target is not a new target in this
+sense: a list that names the generic already covers it (`listed_arch_for`).
 
 ---
 
@@ -1508,30 +1515,36 @@ computes wrong output. The LDS model is the pool the LLVM lowering packs
 applies it while walking, so the LDS-saving enabler axes that lead the axis
 order can still make a large tile legal.
 
-`WavesPerEuSpace` (`attention/waves.py`) is a thin `KnobSpace` subclass both
-attention spaces derive from. It is where `waves_per_eu` meets the generic
-outer-knob hooks: it sets `outer_knob = "waves_per_eu"` and the
-`{variant_id}_wpe{N}` stem and its prefix, so `rocke.dispatch.tuning` itself
-names no kernel field. Each space still supplies its own `outer_values`: the
-unified tables in `waves.py`, or values derived from the dense base spec's WPE.
+`WavesPerEuSpace` (`rocke.dispatch.tuning.waves`) is a thin `KnobSpace`
+subclass that both attention spaces (and GDN decode's) derive from. It is where
+`waves_per_eu` meets the generic outer-knob hooks: it sets
+`outer_knob = "waves_per_eu"` and the `{variant_id}_wpe{N}` stem and its
+prefix, so every family spells that stored identifier the same way and
+`KnobSpace` itself names no kernel field. Each space still supplies its own
+`outer_values`: the unified tables in `attention/waves.py`, or values derived
+from the dense base spec's WPE.
 
 The dense candidates are the same shape with `DenseSpace` (whose `base` is the
 candidate's default kernel spec for the request) and `make_dense_candidate`; it
-derives from `WavesPerEuSpace` too. A dense candidate fixes only what selects
-its kernel body: on gfx950 the grid and persistent bodies are separate
+derives from `WavesPerEuSpace` too. A dense candidate fixes what selects its
+kernel body and, on the qbminor and gfx942 `*_aot` variants, the grid kind the
+hipDNN kernel ingestor launches: on gfx950 the grid and persistent bodies are separate
 algorithms (`attention_dense_grid`, `attention_dense_persist`) with wide DMA a
-second persistent candidate, and the tile is a knob; gfx942 has one
-`attention_dense` candidate with persistence as a knob. `DenseSpace` adds two
-hooks over `KnobSpace`: `derived` recomputes problem fields that follow a knob
-(gfx950 `ragged` follows the tile), and `production` repeats the
-one-knob-at-a-time pass at each `block_m`.
+second persistent candidate and qbminor a second grid candidate at the `qb_minor`
+order, and the tile is a knob; gfx942 has five `attention_dense` candidates,
+`gfx942_dense` with persistence as a knob, `gfx942_dense_qbminor` with the hipDNN
+ingestor's grid (non-persistent, `qb_minor`, one KV segment) fixed, and three
+`*_aot` candidates fixing its other grids (persistent at 304 CTAs, `bt_hkv_minor`,
+`hq_minor_swz`). `DenseSpace` adds two hooks over `KnobSpace`: `derived` recomputes
+problem fields that follow a knob (gfx950 `ragged` follows the tile), and `production`
+repeats the one-knob-at-a-time pass at each `block_m`.
 
 ### 9.3 Attention coverage today
 
 | Candidate | Arch | dtype | Path / kernel | Priority | Registries |
 | --- | --- | --- | --- | --- | --- |
-| `attention_gfx942_dense` | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs (opt-in) | 3 | route, execution |
-| `attention_gfx950_dense_{grid,persist,persist_widedma}` (3) | gfx950 | bf16/fp16 | grid body, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
+| `attention_gfx942_dense`, `attention_gfx942_dense_qbminor`, `attention_gfx942_dense_{persist,btminor,hqswz}_aot` (5) | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs, or one of the ingestor's grids fixed (qb_minor, D128 persistent at 304 CTAs, bt_hkv_minor, hq_minor_swz) (opt-in) | 3 | route, execution |
+| `attention_gfx950_dense_{grid,qbminor,persist,persist_widedma}` (4) | gfx950 | bf16/fp16 | grid body, grid body at the qb_minor order, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
 | `attention_gfx942_dense_pipe` | gfx942 | fp16 | transposed-x8 ring flash, 2D path | 5 | route |
 | `attention_gfx950_d256` | gfx950 | bf16 | D256 2D prefill | 5 | route |
 | `attention_d256_decode` | gfx942, gfx950 | bf16 | D256 3D split-KV decode | 5 | route |
@@ -1555,14 +1568,14 @@ the unified paths.
 
 Seven invariants, one test module per family.
 
-**Arch gate.** Every candidate rejects every architecture it does not declare.
-Parametrize over `known_arches()` and the registry — this catches a missing gate
-on a kernel added years later.
+**Arch gate.** Every candidate rejects every architecture it does not declare,
+directly or through a declared generic target. Parametrize over `known_arches()`
+and the registry — this catches a missing gate on a kernel added years later.
 
 ```python
 for cand in registry.candidates():
     for arch in known_arches():
-        if arch in cand.capability.arches:
+        if listed_arch_for(arch, cand.capability.arches) is not None:
             continue
         ok, why = cand.admits(request_for(arch))
         assert not ok, f"{cand.name} wrongly admits {arch}"
@@ -1709,7 +1722,7 @@ its field-complete kernel cache key (addressing width included), not
 A tuned attention spec (dense or unified) is one registered variant plus a
 **canonical knob dict**: the kernel fields set away from the variant's default
 spec, `waves_per_eu` included. `waves_per_eu` is the attention spaces' outer
-knob and shows in the stem (`library/dispatch/attention/waves.py`); the
+knob and shows in the stem (`rocke.dispatch.tuning.WavesPerEuSpace`); the
 generic form is `{stem}@{config_key}` (section 14).
 
 ```text
@@ -2093,7 +2106,7 @@ signature of every family, so it waits for a family that needs it.
 
 **Build through the C++ builder from dispatch.** The `build` hook in section 5.2
 calls the Python builder. The C++ engine has builders of its own for most
-families — `rocke_build_wmma_fmha_fwd`, `rocke_build_gemm_multi_d`,
+families — `rocke_build_wmma_fmha_fwd_v2`, `rocke_build_gemm_multi_d`,
 `rocke_build_deep_fused_conv_pool`, and the rest of the `rocke_build_*` surface —
 and they emit byte-identical IR from the same spec. Dispatch should be able to
 drive either engine through a binding it owns, rather than through the
@@ -2157,6 +2170,7 @@ behavior of section 11.1 without writing it:
 | `tuning.identity` | `config_key`, `tuning_id`, `TUNING_ID_VERSION` |
 | `tuning.space` | `KnobSpace`: canonicalize, default, stream, sample, find |
 | `tuning.candidate` | `make_tuned_candidate`, `resolve_pinned`, `explicitly_pinned` |
+| `tuning.waves` | `WavesPerEuSpace`: `waves_per_eu` as the outer knob and its `_wpe{N}` id stem |
 | `tuning.spec` | the `TunedSpec` and `TunableRequest` protocols |
 | `tuning.testing` | `assert_tuning_contract`, the conformance kit |
 
@@ -2194,7 +2208,8 @@ needs:
 | `defaults(base, kernel)` | `{}` | always, in practice: the problem-independent defaults the knobs are a delta against (fingerprinted into `config_key`) |
 | `known_knobs(base)` | the in-scope axes | axes are scoped per problem; out-of-scope knobs are then dropped instead of refused |
 | `recorded(base)` | none | `base` resolves a field per problem (work size, dtype) |
-| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (attention: `waves_per_eu`, in `attention/waves.py`) |
+| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (`waves_per_eu`: subclass `tuning.waves.WavesPerEuSpace`) |
+| `outer_dependent_knobs` | none | whether a knob is dropped depends on the outer knob's value (GDN decode: `row_loads` restates auto's order at some `waves_per_eu` values only) |
 | `stem(kernel)`, `stem_prefix()` | `variant_id` / `"{variant_id}@"` | the id should show more than the variant (attention: `_wpe{N}`) |
 | `production(base, axes, is_valid)` | every knob on its own | curated stacks |
 | `is_valid(base, knobs)` | canonical and valid | the walk should prune differently |
@@ -2203,8 +2218,14 @@ needs:
 **Rules the hooks encode.** A knob that compiles to the default is *dropped*;
 one that is illegal is *refused* with a reason. Never refuse an inert knob --
 a pin that travels across shapes would then fail where the knob happens to be
-inert. `inert` and `base_value` must not read the `outer_knob`: streams check
-a knob set once and only rebuild it per outer value. Knob values are coerced
+inert. `inert` and `base_value` must not read the `outer_knob` except for the
+knobs named in `outer_dependent_knobs`: a stream checks a knob set at the
+base's outer value and only rebuilds it per outer value, unless the set holds
+one of those knobs; then it canonicalizes the set again at every outer value,
+drop rules included, and the default `is_valid` keeps a prefix that drops
+only those knobs at the base's value but is canonical at another. Where a
+value drops the knob, the set lists as its twin without it (deduped by id). A
+knob set refused at the base's outer value is not listed at any other. Knob values are coerced
 to the type their axis declares (the outer knob to the type of its values),
 so `True` and `1` name one configuration. A field the base resolves per
 problem must be `recorded`, or its `config_key` stops being portable.
@@ -2222,16 +2243,33 @@ request's hash/equality-visible fields: it is memoized once and shared by
 resolution, sweeping and sampling. Normalize device or process state into the
 request first; do not probe it from `base`. Attention's explicit tuning
 candidates therefore use `_tuning_problem`, while production path routing uses
-the live-CU-aware `_problem`.
+the live-CU-aware `_problem`. The candidate is opt-in by default. A family
+whose `auto` is itself one configuration of a registered variant passes
+`route_auto(req)` instead: the candidate is then not opt-in, resolves an
+`auto` request as if it pinned the candidate's `algorithm` and `spec_id`, and
+`route_auto` says whether it takes a request whose `spec_id` is `auto`. Its
+`auto` runs the space's default unless the family also passes
+`auto_knobs(req)`: the knobs `auto` runs on that candidate, resolved as a
+`tuning_knobs` pin is (a knob the request cannot read drops). An empty mapping
+runs the default; knobs that do not resolve on a request whose default does
+raise `RuntimeError` with the reason, never a quiet fallback; `auto_knobs`
+without `route_auto` is a construction error. An `auto` request that carries
+its own tuning pin (a `tuning_id` other than `auto`, or `tuning_knobs`)
+resolves that pin; the hook never replaces it. GDN decode uses both: `auto` is
+the case's knob stack on the case's tile (`library/dispatch/gdn/axes.py`,
+`AUTO_DEFAULTS`), and a fallback tile's default where the case's tile is
+illegal.
 
 **The test.** Call `assert_tuning_contract(candidate, requests,
 other_requests=..., default_knobs=..., refused_knobs=...)` for a
 representative set of candidates (`representative(candidates, prefixes)`
-picks them by name). It checks that `auto` is the first production spec, ids
+picks them by name). It checks that a pinned `auto` (the candidate's
+`spec_id`, no knobs: the space's default) is the first production spec, ids
 are unique, `(id, knobs)`, knobs alone, a bare id, and the stored dispatch
 request all reselect the spec, mismatched knobs are refused, default-valued
 knobs canonicalize to the default, and `config_key` survives a change of
-problem.
+problem. It does not exercise a production `auto` with `auto_knobs`; the
+family's own dispatch tests cover that.
 
 Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every

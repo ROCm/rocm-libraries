@@ -142,10 +142,12 @@ class TestWgradGroupMergeGate(unittest.TestCase):
         )
 
         scalar = lower_kernel_to_llvm(
-            build_implicit_gemm_conv_wgrad(self._spec(), arch="gfx950")
+            build_implicit_gemm_conv_wgrad(self._spec(), arch="gfx950"),
+            arch="gfx950",
         )
         merged = lower_kernel_to_llvm(
-            build_implicit_gemm_conv_wgrad(self._spec(group_merge=8), arch="gfx950")
+            build_implicit_gemm_conv_wgrad(self._spec(group_merge=8), arch="gfx950"),
+            arch="gfx950",
         )
         self.assertEqual(
             _count_vector_buffer_loads(scalar),

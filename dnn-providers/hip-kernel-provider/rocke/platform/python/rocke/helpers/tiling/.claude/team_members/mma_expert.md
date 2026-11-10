@@ -40,9 +40,11 @@ ranks candidates; `recommend` picks — transforms DISCOVERED per context, never
 
 ### Read the majors off the STRIDES, per tensor (never off a "row/col" word)
 
-Logical layout is fixed: **A=(M×K), B=(K×N), C=(M×N)**. The **contiguous axis = the stride-1 axis, decided
-independently PER TENSOR** — read it straight off the given strides, don't translate through "row/col-major"
-(which points at a different physical axis for each of A/B/C). The user's strides are **immutable facts** —
+Logical layout is fixed: **A=(M, K), B=(N, K), C=(M, N)**, batch axes first (the one axis convention,
+`docs/tiling_api_surface.md` sec 3; a B handed over as `(K, N)` is re-described `(N, K)` with its strides, never
+read as is). The **contiguous axis = the stride-1 axis, decided independently PER TENSOR** -- read it straight
+off the given strides and name it K-, N- or M-contiguous; don't translate through "row/col-major" (which points
+at a different physical axis for each of A/B/C). The user's strides are **immutable facts** —
 never re-define them to match a familiar kernel. Keep the **global-load coalescing axis** (stride-1) DISTINCT
 from the **MMA-ready K-vector axis** — orthogonal, bridged by a transpose; don't conflate (e.g. don't report a
 free-dim-contiguous load as "K-contiguous"). No strides given → say so, offer a major sweep, never assume.
@@ -100,7 +102,7 @@ never by counting atoms.
 **Two independent validity gates** — (1) sound MAC (above) AND (2) **tile-vectorization** (`§2b`): a physical
 `VW>1` is one contiguous access, valid ONLY on a physically **stride-1** axis; a strided vector axis forces
 `VW=1` (CORRECTNESS, not cost). Vectorize on the stride-1 axis, then shuffle. ✗ never vectorize wide on a
-strided axis. (e.g. A row-major K-stride-1: vectorize K → `VW=4` reads `[M0K0..M0K3]` ✓; vectorize M → a `VW=4`
+strided axis. (e.g. a K-contiguous A: vectorize K → `VW=4` reads `[M0K0..M0K3]` ✓; vectorize M → a `VW=4`
 read grabs contiguous `0,1,2,3` = wrong elements → forced `VW=1`.)
 
 **Pipeline regimes (joint, not per-stage).** MACRO (LDS, double-buffered) ⊃ WAVE (registers, MMA) ⊃ THREAD
@@ -203,7 +205,7 @@ transition? + bit-exact.
 - **C-store coalescing = the lane-major axis** (`§7`). A store fuses only along the axis carried by consecutive
   lanes; the other major is per-lane-wide but unfused → same footprint, ~`lanes_major/lanes_minor`× more
   transactions. It's a transaction count, subordinate to the binding stage (often hidden in the MFMA shadow) —
-  measure, don't assume a TFLOPS hit. Flip a col-major C via the crossed A↔B + `c_transpose` (source-swap →
+  measure, don't assume a TFLOPS hit. Flip an M-contiguous C via the crossed A↔B + `c_transpose` (source-swap →
   emit Cᵀ, reposition back). To SHOW it: `/layout-viz` coalescing view.
 - **The objective has a zero point** — when global-contiguous, LDS-bank, and MMA-K axes align (directly or via
   a free symmetry), transform cost AND conflict → ~0 and that chain wins outright. Recognize it and stop.

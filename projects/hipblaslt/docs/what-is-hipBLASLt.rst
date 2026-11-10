@@ -112,12 +112,19 @@ In BLAS, a matrix is described by its dimensions plus a *leading dimension*, the
 between consecutive columns. That lets a matrix be a window into a larger array. A hipBLASLt layout
 keeps that idea and adds three more:
 
-* A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default, and
-  ``HIPBLASLT_ORDER_ROW`` is also supported. Some architectures additionally accept **swizzled**
-  orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
+* A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default.
+  ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted only by ``hipblasLtMatrixTransform``; matmul returns
+  ``HIPBLAS_STATUS_NOT_SUPPORTED`` for it. To multiply row-major data, keep column-major layouts and
+  use the identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`: swap A and B, swap M and N, and
+  describe each matrix as its column-major transpose. The column-major result is
+  (A * B)\ :sup:`T`, which is A * B in row-major order, so the output needs no transpose. Anything
+  applied per row of D, such as a bias or an alpha vector, then applies per column of A * B, and
+  the scale for A becomes the scale for the second operand. Some architectures additionally accept
+  **swizzled** orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
   and architecture combinations, which the :doc:`API reference <./reference/api-reference>` lists.
+  Swizzled orders apply to A and B only; C and D must be ``HIPBLASLT_ORDER_COL``.
   ``hipblaslt-bench`` exposes it as ``--swizzleA`` and ``--swizzleB``.
 * An **offset** (``HIPBLASLT_MATRIX_LAYOUT_OFFSET``), measured in elements, so a layout can point at
   a sub-matrix inside a larger allocation. :doc:`Use general batched GEMM

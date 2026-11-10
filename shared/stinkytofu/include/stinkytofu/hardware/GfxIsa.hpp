@@ -187,6 +187,8 @@ enum class FieldType : uint8_t {
     // Register types
     vgpr,
     sreg,
+    /// SGPR, M0 or null, with no inline constant (e.g. the buffer soffset). The emitter
+    /// writes a zero here as null, so type a field that can encode constants differently.
     sreg_m0,
     // Scalar ALU types
     sdst,
@@ -197,7 +199,7 @@ enum class FieldType : uint8_t {
     sleep,
     // Scalar memory types
     smem_offset,
-    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL).
+    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL). Zero is written null.
     smem_offset_nok,
     // Immediate / control-flow types
     label,

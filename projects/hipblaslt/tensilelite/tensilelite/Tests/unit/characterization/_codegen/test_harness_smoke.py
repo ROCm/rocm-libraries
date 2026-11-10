@@ -29,8 +29,8 @@ from config_harness import (
     emit_kernels_from_config,
     golden_digest,
 )
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 

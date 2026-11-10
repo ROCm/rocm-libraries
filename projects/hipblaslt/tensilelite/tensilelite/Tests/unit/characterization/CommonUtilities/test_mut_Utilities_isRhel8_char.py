@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.isRhel8``.
+``tensilelite.Common.Utilities.isRhel8``.
 
 ``isRhel8`` reads ``/etc/os-release`` and returns True iff the contents match a
 RHEL-8 NAME/VERSION_ID pattern, emitting a warning in that case.
@@ -19,7 +19,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

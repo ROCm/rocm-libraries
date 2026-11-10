@@ -11,7 +11,8 @@ could never take effect for a VGPR overflow. The guard now only warns, and the
 overflow is reported through the normal path instead:
 
     vgprAllocationImplClassic  warns, keeps the real totalVgprs
-      -> checkResources        sets overflowedResources = 1 ("too many vgprs")
+      -> judgeRegisterBudget   reaches verdict 1 ("too many vgprs"), which
+                               checkResources records in overflowedResources
       -> _getKernelSource      raises, unless ForceGenerateKernel=1
 
 so an oversized kernel is still rejected by default and is only allowed
@@ -31,7 +32,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.KernelWriter import KernelWriter
 
 pytestmark = pytest.mark.unit
 
@@ -175,32 +176,38 @@ class TestBlastRadius:
 # ---------------------------------------------------------------------------
 
 class TestOverflowStillRejectsTheKernel:
-    def _checkResourcesGuard(self) -> ast.If:
-        fn = _funcDef(_KERNEL_WRITER_ASM_PY, "checkResources")
-        guards = [n for n in _ifs(fn)
-                  if _mentionsAttr(n.test, "vgprPool") and _mentionsConst(n.test, "MaxVgpr")]
-        assert len(guards) == 1, "expected exactly one VGPR check in checkResources"
+    """The budget check checkResources runs, now in its own judgeRegisterBudget."""
+
+    def _budgetGuard(self) -> ast.If:
+        fn = _funcDef(_KERNEL_WRITER_ASM_PY, "judgeRegisterBudget")
+        guards = [n for n in _ifs(fn) if _mentionsConst(n.test, "MaxVgpr")]
+        assert len(guards) == 1, "expected exactly one VGPR check in judgeRegisterBudget"
         return guards[0]
 
-    def _resourceWriter(self, vgprs, maxVgpr=256):
-        return SimpleNamespace(
-            vgprPool=SimpleNamespace(size=lambda: vgprs),
-            sgprPool=SimpleNamespace(size=lambda: 0),
-            states=SimpleNamespace(overflowedResources=0,
-                                   regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}),
-        )
+    def _verdict(self, vgprs, maxVgpr=256):
+        writer = SimpleNamespace(
+            # The guard now sits alongside the PLSIN fused store check; off here,
+            # as for any non-MXF4 kernel.
+            states=SimpleNamespace(postLoopStoreInNll=False,
+                                   regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}))
+        namespace = {"self": writer, "totalVgprs": vgprs, "totalSgprs": 0, "verdict": 0}
+        return _exec(self._budgetGuard(), namespace)["verdict"]
 
-    def test_checkResources_flags_the_overflow(self):
+    def test_budget_judgement_flags_the_overflow(self):
         # This is the rejection the removed raise used to pre-empt: error code
         # 1 == "too many vgprs".
-        writer = self._resourceWriter(vgprs=300)
-        _exec(self._checkResourcesGuard(), {"self": writer})
-        assert writer.states.overflowedResources == 1
+        assert self._verdict(vgprs=300) == 1
 
-    def test_checkResources_passes_a_fitting_kernel(self):
-        writer = self._resourceWriter(vgprs=200)
-        _exec(self._checkResourcesGuard(), {"self": writer})
-        assert writer.states.overflowedResources == 0
+    def test_budget_judgement_passes_a_fitting_kernel(self):
+        assert self._verdict(vgprs=200) == 0
+
+    def test_checkResources_still_runs_the_judgement(self):
+        # The guard only rejects a kernel because checkResources is what calls it.
+        fn = _funcDef(_KERNEL_WRITER_ASM_PY, "checkResources")
+        assert any(isinstance(n, ast.Attribute) and n.attr == "judgeRegisterBudget"
+                   for n in ast.walk(fn)), (
+            "checkResources must still judge the register budget"
+        )
 
 
 class TestForceGenerateKernel:
@@ -244,7 +251,7 @@ class TestForceGenerateKernel:
     def test_force_generate_kernel_keeps_the_source(self, monkeypatch):
         # The behaviour the early raise made unreachable.
         warnings = []
-        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        monkeypatch.setattr("tensilelite.KernelWriter.printWarning", warnings.append)
         source = KernelWriter._getKernelSource(self._writer(error=1, forceGenerateKernel=True),
                                                self._kernel())
         assert "s_endpgm" in source
@@ -254,7 +261,7 @@ class TestForceGenerateKernel:
 
     def test_clean_kernel_is_unaffected(self, monkeypatch):
         warnings = []
-        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        monkeypatch.setattr("tensilelite.KernelWriter.printWarning", warnings.append)
         source = KernelWriter._getKernelSource(self._writer(error=0, forceGenerateKernel=False),
                                                self._kernel())
         assert "s_endpgm" in source

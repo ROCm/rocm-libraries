@@ -17,6 +17,11 @@ static inline int rocke_tf32_mma_count(const char* id)
         return 16;
     return 0;
 }
+/* Mirrors tf32_mma_target_error: for a TF32 MMA `op_id` that the MMA catalog of
+ * target `gfx` does not list, writes the error into `out` and returns true. Any
+ * other op_id, and a TF32 op_id the catalog lists, returns false. Defined in
+ * cpp/core/tf32.cpp, the one TU that needs the arch catalog for it. */
+bool rocke_tf32_mma_target_error(const char* op_id, const char* gfx, char* out, size_t cap);
 /* The operand contract of a TF32 atom the hardware does not encode (mirrors
  * core/tf32.py::_emulated_tf32_mma_error). Same ABI as the native atoms -- logical
  * TF32 A/B carried as I32, FP32 accumulator -- with fragment lengths from the
@@ -75,6 +80,21 @@ static inline const char* rocke_tf32_mma_error(const char* id, rocke_value_t* co
 static inline const char* rocke_tf32_op_error(const rocke_op_t* op)
 {
     const char* id = rocke_attr_get_str(&op->attrs, "op_id");
+    if(strncmp(op->name, "tile.mfma", 9) == 0)
+    {
+        const char* concrete_id = op->name + 5;
+        if(rocke_attr_get(&op->attrs, "op_id") && (!id || strcmp(id, concrete_id) != 0))
+        {
+            static thread_local char message[ROCKE_ERR_MSG_CAP];
+            snprintf(message,
+                     sizeof(message),
+                     "concrete MFMA %s has conflicting op_id %s",
+                     op->name,
+                     id ? id : "None");
+            return message;
+        }
+        id = concrete_id;
+    }
     if(!id && strncmp(op->name, "tile.", 5) == 0)
         id = op->name + 5;
     const int is_mma = strcmp(op->name, "tile.mma") == 0 || strncmp(op->name, "tile.mfma", 9) == 0

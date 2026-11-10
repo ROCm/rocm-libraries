@@ -144,8 +144,16 @@ class TestGfx1250Cluster(unittest.TestCase):
 
     def test_each_op_is_gated(self):
         bad = (
-            ("gfx950", "llvm22", "requires gfx1250"),
-            ("gfx1201", "llvm23", "requires gfx1250"),
+            (
+                "gfx950",
+                "llvm22",
+                "requires a target with memory.has_cluster_launch, got gfx950",
+            ),
+            (
+                "gfx1201",
+                "llvm23",
+                "requires a target with memory.has_cluster_launch, got gfx1201",
+            ),
             ("gfx1250", "llvm22", "requires LLVM flavor llvm23"),
         )
         for name, emit in _GATED.items():
@@ -305,8 +313,16 @@ class TestGfx1250ClusterDims(unittest.TestCase):
 
     def test_gated(self):
         for arch, flavor, why in (
-            ("gfx950", "llvm22", "requires gfx1250, got gfx950"),
-            ("gfx1201", "llvm23", "requires gfx1250, got gfx1201"),
+            (
+                "gfx950",
+                "llvm22",
+                "requires a target with memory.has_cluster_launch, got gfx950",
+            ),
+            (
+                "gfx1201",
+                "llvm23",
+                "requires a target with memory.has_cluster_launch, got gfx1201",
+            ),
             ("gfx1250", "llvm22", "requires LLVM flavor llvm23, got llvm22"),
         ):
             b = IRBuilder("k")

@@ -269,7 +269,9 @@ def test_graph_churn_bounds_resources_and_waits_before_eviction(
             args["k"] = object()  # equivalent fresh view identity misses
             au._run_3d_tiled(**args, execution=owner)
             assert len(resident) <= (1 if owned else 2)
-            assert all(len(e.refs) == 13 for e in resident.values())
+            # 3 graph-private workspace tensors + 11 held arguments (incl. the
+            # additive_bias slot, held even when it is None).
+            assert all(len(e.refs) == 14 for e in resident.values())
     assert any(op[0] == "wait" and op[1] == 17 for op in operations)
     assert all(e.stream == 17 for e in resident.values())
     if owned:
