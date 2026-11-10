@@ -7157,15 +7157,34 @@ class TestKeepValuBehindLeader:
             [self._xor(9, "V")]))
         assert gaps[2] == ["V"]
 
-    def test_valu_crosses_a_barrier_and_vmcnt_behind_the_drain(self):
+    def test_drain_gap_takes_no_valu(self):
         from rocisa.instruction import SBarrier, SWaitCnt
         gaps = self._run(self._body(
             [SWaitCnt(dscnt=0, comment="drain")],
             [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
             self._request(), [], [self._xor(20, "V2"), self._xor(22, "V4")]))
-        assert gaps[0] == ["drain", "V2", "V4"]
-        assert gaps[1] == ["vmcnt", "barrier"]
+        assert gaps[0] == ["drain"]
+        assert gaps[4] == ["V2", "V4"]
+
+    def test_read_pointer_swap_crosses_the_drain_behind_its_read(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [self._read(20, "R")], [],
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            [self._xor(20, "V")]))
+        assert gaps[0] == ["R", "V"]
+        assert gaps[2] == ["drain"]
         assert gaps[4] == []
+
+    def test_swap_of_a_returned_register_stays_behind_the_drain(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SWaitCnt
+        read = DSLoadB32(dst=vgpr(20), src=vgpr(20), ds=DSModifiers(offset=0),
+                         comment="R")
+        gaps = self._run(self._body(
+            [read], [SWaitCnt(dscnt=0, comment="drain"), self._xor(20, "V")]))
+        assert gaps[1] == ["drain", "V"]
 
     def test_vmcnt_stays_a_fence_when_a_load_writes_vgprs(self):
         from rocisa.instruction import SBarrier, SWaitCnt
@@ -7464,14 +7483,12 @@ class TestHalfDisjointClumping:
                 if any(not gaps[j] for j in half)
                 for i in half if clump(self._kinds(gaps[i]))]
 
-    @pytest.mark.xfail(strict=True, reason="stage 4: VALU placed behind the pre-barrier drain")
     def test_no_valu_issues_behind_a_wait_or_barrier(self):
         for i, gap in enumerate(self._gaps(self._body())):
             kinds = self._kinds(gap)
             for j, k in enumerate(kinds):
                 assert k != "V" or not any(x in "WB" for x in kinds[:j]), (i, kinds)
 
-    @pytest.mark.xfail(strict=True, reason="stage 4: VALU placed behind the pre-barrier drain")
     def test_every_valu_issues_inside_its_mfma_interval(self):
         from tensilelite.Components.Subtile import InstructionScheduler as IS
         for i, gap in enumerate(self._gaps(self._body())):
@@ -7498,7 +7515,6 @@ class TestHalfDisjointClumping:
         assert not self._clumped(
             gaps, lambda k: k.count("S") + k.count("m") >= 3), [self._kinds(g) for g in gaps]
 
-    @pytest.mark.xfail(strict=True, reason="stage 4: the drain gap takes VALUs")
     def test_no_half_with_an_empty_gap_has_a_clumped_gap(self):
         from tensilelite.Components.Subtile import InstructionScheduler as IS
         gaps = self._gaps(self._body())

@@ -2833,74 +2833,143 @@ def _isVmemOnlyWait(inst) -> bool:
             and inst.vscnt < 0)
 
 
-def _pullBackValus(leaves, gaps, gapIndex, run, maxInstructions) -> bool:
-    """Move VALUs to the end of the nearest earlier gap that starts with
-    another instruction, has room, and holds no direct-to-LDS request and
-    no fence but a wait.
+def _isLgkmOnlyWait(inst) -> bool:
+    return (_isWaitCnt(inst) and not getattr(inst, "waitAll", False)
+            and inst.vlcnt < 0 and inst.vscnt < 0
+            and (inst.dscnt >= 0 or inst.kmcnt >= 0))
 
-    A barrier orders LDS only. A VALU crosses it, and crosses a vmcnt
-    when every VMEM op of the body loads into LDS.
+
+def _swapsCrossLocalReadWaits(leaves, run) -> bool:
+    """Whether the VALUs of run may issue ahead of a local-read wait.
+
+    A ds_read takes its address VGPR when it issues; the gfx950 wait-state
+    tables list no hazard on a DS address. So a read-pointer swap needs
+    no wait for the reads ahead of it, only that it touch nothing they
+    return. That holds for a VALU writing only ds_read address VGPRs that
+    no ds_read of the body returns into, in a body without LDS writes or
+    scalar loads, whatever copy of the loop issued the reads.
+    """
+    addresses, returned = set(), set()
+    for _container, inst in leaves:
+        if isinstance(inst, (LocalWriteInstruction, SMemLoadInstruction)):
+            return False
+        if _isDsRead(inst):
+            dst, addr = _dsReadDstAddr(inst)
+            returned.update(_vgprIndices(dst))
+            addresses.update(_vgprIndices(addr))
+    for index in run:
+        inst = leaves[index][1]
+        written = set(_vgprIndices(getattr(inst, "dst", None)))
+        if not written or not written <= addresses or _instructionVgprs(inst) & returned:
+            return False
+    return True
+
+
+def _pullBackValus(leaves, gaps, mfmaAt, gapIndex, run, maxInstructions,
+                   mayOpen=False) -> bool:
+    """Move VALUs to the end of the earlier gap where they cost least.
+
+    A target gap has room and holds no direct-to-LDS request, barrier or
+    branch. It is the gap where the VALUs add the least issue past the
+    gap budget, then one that starts with another instruction, then the
+    nearest. With mayOpen the VALUs may also open a gap the budget still
+    covers; otherwise they need a leader. A gap with a wait, where they
+    would issue only once it clears, is taken only when no other gap is
+    in reach and the move still lowers the estimated issue.
+
+    A barrier orders LDS only. A VALU crosses it, crosses a vmcnt when
+    every VMEM op of the body loads into LDS, and crosses a local-read
+    wait when _swapsCrossLocalReadWaits allows.
     """
     if not all(_operandsVisible(leaves[i][1]) for i in run):
         return False
     gap = gaps[gapIndex]
     ldsOnly = _onlyDirectToLdsVmem(leaves)
+    swaps = _swapsCrossLocalReadWaits(leaves, run)
+    moving = [leaves[i][1] for i in run]
 
     def crossable(index):
         inst = leaves[index][1]
-        if _isBarrier(inst) or (ldsOnly and _isVmemOnlyWait(inst)):
+        if _isBarrier(inst) or (ldsOnly and _isVmemOnlyWait(inst)) or (
+                swaps and _isLgkmOnlyWait(inst)):
             return True
         return not _isOrderFence(inst) and all(
             _mayReorder(inst, leaves[i][1]) for i in run)
 
     if not all(crossable(i) for i in _code(leaves, gap) if i < run[0]):
         return False
-    cursor = gap[0] - 1
+    source = [leaves[i][1] for i in _code(leaves, gap)]
+    saved = _issueExcess([source]) - _issueExcess(
+        [[x for x in source if not any(x is m for m in moving)]])
+    best = None
     for target in range(gapIndex - 1, -1, -1):
-        if not crossable(cursor):
-            return False
+        if not crossable(mfmaAt[target + 1]):
+            break
         earlier = _code(leaves, gaps[target])
-        if (earlier and not _isVALU(leaves[earlier[0]][1])
-                and len(earlier) + len(run) <= maxInstructions
-                and not any(_isDtlRequest(leaves[i][1]) or (
-                    _isOrderFence(leaves[i][1]) and not _isWaitCnt(leaves[i][1]))
-                            for i in earlier)):
-            moved = [i for r in run for i in _withComments(leaves, gap, r)]
-            _moveLeaves(leaves, moved, gaps[target][-1], before=False)
-            return True
+        insts = [leaves[i][1] for i in earlier]
+        led = bool(insts) and not _isVALU(insts[0])
+        behindWait = any(_isWaitCnt(x) for x in insts)
+        if ((led or mayOpen) and len(insts) + len(run) <= maxInstructions
+                and not any(_isDtlRequest(x) or (
+                    _isOrderFence(x) and not _isWaitCnt(x)) for x in insts)):
+            added = _issueExcess([insts + moving]) - _issueExcess([insts])
+            # Behind a wait only when nothing else is in reach and it pays.
+            if (led or added == 0) and (not behindWait or added < saved):
+                key = (behindWait, added, not led, gapIndex - target)
+                if best is None or key < best[0]:
+                    best = (key, target)
         if not all(crossable(i) for i in earlier):
-            return False
-        cursor = (gaps[target][0] if gaps[target] else cursor) - 1
-    return False
+            break
+    if best is None:
+        return False
+    target = best[1]
+    moved = [i for r in run for i in _withComments(leaves, gap, r)]
+    anchor = gaps[target][-1] if gaps[target] else mfmaAt[target]
+    _moveLeaves(leaves, moved, anchor, before=False)
+    return True
 
 
 def keepValuBehindLeader(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
-    """Keep every VALU of a half-disjoint body behind another instruction
-    and out of direct-to-LDS gaps.
+    """Keep every VALU of a half-disjoint body inside its MFMA interval:
+    behind another instruction, out of direct-to-LDS gaps, and not behind
+    a wait or a barrier unless a body too dense for anything else runs
+    faster that way.
 
-    A VALU first after an MFMA waits out the MFMA's issue. The cells
-    prefer a slot behind a leader, but a cell cannot see its neighbours,
-    a path placed early often finds none, and a request that finds no
-    legal interval falls back to one with a VALU. Once the body is
-    complete, a later independent instruction of the same gap moves
-    ahead of a leading VALU; otherwise the VALUs move back to the nearest
-    earlier gap that has a leader, room, and no request. They never cross
-    an instruction they depend on, a local-read wait, or a branch. What
-    cannot move stays.
+    A VALU first after an MFMA waits out the MFMA's issue, and one behind
+    a wait or barrier issues only once that clears. The cells prefer a
+    slot behind a leader, but a cell cannot see its neighbours, a path
+    placed early often finds none, a request that finds no legal interval
+    falls back to one with a VALU, and a later half's read-pointer swaps
+    follow its barrier. Once the body is complete, a later independent
+    instruction of the same gap moves ahead of a leading VALU; otherwise
+    the VALUs move back to the earlier gap where they cost least
+    (_pullBackValus), together or, when no gap takes them all, one at a
+    time. They never cross an instruction they depend on or a branch.
+    What cannot move stays.
     """
     unmovable = set()
     while True:
         leaves = _bodyLeaves(module)
         gaps = _mfmaGaps(leaves)
+        mfmaAt = [i for i, (_c, inst) in enumerate(leaves) if _isMfma(inst)]
         for gapIndex, gap in enumerate(gaps):
             code = _code(leaves, gap)
             valus = [i for i in code if _isVALU(leaves[i][1])
                      and id(leaves[i][1]) not in unmovable]
             if not valus:
                 continue
-            if valus[0] == code[0] and _leadWithinGap(leaves, gap):
+            fence = next((p for p, i in enumerate(code)
+                          if _isWaitCnt(leaves[i][1]) or _isBarrier(leaves[i][1])), None)
+            behind = [i for i in valus if fence is not None and code.index(i) > fence]
+            if behind:
+                run = []
+                for index in code[code.index(behind[0]):]:
+                    if not _isVALU(leaves[index][1]) or id(leaves[index][1]) in unmovable:
+                        break
+                    run.append(index)
+            elif valus[0] == code[0] and _leadWithinGap(leaves, gap):
                 break
-            if any(_isDtlRequest(leaves[i][1]) for i in code):
+            elif any(_isDtlRequest(leaves[i][1]) for i in code):
                 run = valus[:1]
             elif valus[0] == code[0]:
                 run = []
@@ -2910,7 +2979,10 @@ def keepValuBehindLeader(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
                     run.append(index)
             else:
                 continue
-            if _pullBackValus(leaves, gaps, gapIndex, run, maxInstructions):
+            mayOpen = bool(behind) or any(_isDtlRequest(leaves[i][1]) for i in code)
+            if any(_pullBackValus(leaves, gaps, mfmaAt, gapIndex, part, maxInstructions,
+                                  mayOpen)
+                   for part in ([run, run[:1]] if len(run) > 1 else [run])):
                 break
             unmovable.update(id(leaves[i][1]) for i in run)
         else:
