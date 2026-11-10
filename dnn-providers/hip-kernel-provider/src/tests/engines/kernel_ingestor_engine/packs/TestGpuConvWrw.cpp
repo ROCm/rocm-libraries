@@ -98,9 +98,14 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        // One pack per dtype, all in the first root that has any.
-        const std::array<std::string, 3> files{
-            "conv_wrw_f32.kdp.json", "conv_wrw_f16.kdp.json", "conv_wrw_bf16.kdp.json"};
+        // Packs per dtype and kernel family (conv_wrw_<dtype>_<family>.kdp.json), all in the
+        // first root that has any.
+        const auto isPack = [](const std::string& name) {
+            const std::string prefix = "conv_wrw_", suffix = ".kdp.json";
+            return name.size() > prefix.size() + suffix.size()
+                   && name.compare(0, prefix.size(), prefix) == 0
+                   && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
         std::vector<std::filesystem::path> found;
         for(const auto& root : roots)
         {
@@ -109,8 +114,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
                 !error && it != std::filesystem::recursive_directory_iterator();
                 it.increment(error))
             {
-                if(std::find(files.begin(), files.end(), it->path().filename().string())
-                   != files.end())
+                if(isPack(it->path().filename().string()))
                 {
                     found.push_back(it->path());
                 }
@@ -120,10 +124,17 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
                 break;
             }
         }
-        if(found.size() != files.size())
+        std::sort(found.begin(), found.end());
+        // Every dtype ships packs; each dtype's prefix must be present.
+        for(const char* dtype : {"conv_wrw_f32_", "conv_wrw_f16_", "conv_wrw_bf16_"})
         {
-            throw std::runtime_error("not every conv_wrw_*.kdp.json beside the provider or this "
-                                     "test binary");
+            if(std::none_of(found.begin(), found.end(), [&](const std::filesystem::path& path) {
+                   return path.filename().string().rfind(dtype, 0) == 0;
+               }))
+            {
+                throw std::runtime_error(std::string("no ") + dtype
+                                         + "*.kdp.json beside the provider or this test binary");
+            }
         }
         std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
         for(const auto& path : found)
