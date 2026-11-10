@@ -24,7 +24,7 @@ jobs:
     uses: ./.github/workflows/fortran-bindings.yml
     with:
       project: hipfft
-      libs: hipfft hipfftw
+      libs: hipfft hipfftw hipfftxt
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
