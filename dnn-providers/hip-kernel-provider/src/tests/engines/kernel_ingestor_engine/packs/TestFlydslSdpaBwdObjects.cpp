@@ -316,7 +316,7 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
 BwdCase nanBiasCase(DataType dtype)
 {
     BwdCase c = biasCase(dtype);
-    c.nanBiasAt = std::pair<int64_t, int64_t>{5, 7};
+    c.nanBiasAt = NAN_BIAS_AT;
     return c;
 }
 
@@ -367,7 +367,7 @@ BwdCase f32BiasCase(DataType dtype, bool dbias, BwdBiasFill fill = BwdBiasFill::
 BwdCase f32NanBiasCase(DataType dtype)
 {
     BwdCase c = f32BiasCase(dtype, true);
-    c.nanBiasAt = std::pair<int64_t, int64_t>{5, 7};
+    c.nanBiasAt = NAN_BIAS_AT;
     return c;
 }
 

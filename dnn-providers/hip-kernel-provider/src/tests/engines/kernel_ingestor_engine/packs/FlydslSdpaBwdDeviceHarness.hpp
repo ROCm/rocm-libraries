@@ -181,6 +181,9 @@ enum class BwdPoison
     K_AND_V
 };
 
+/// The (query row, key) of the NaN a NaN-bias launch puts in the bias (BwdCase::nanBiasAt).
+inline constexpr std::pair<int64_t, int64_t> NAN_BIAS_AT{5, 7};
+
 /// What a graph computes: its shape and the features it turns on.
 struct BwdCase
 {

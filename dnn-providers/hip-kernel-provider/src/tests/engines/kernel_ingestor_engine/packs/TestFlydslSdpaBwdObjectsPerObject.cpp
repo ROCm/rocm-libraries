@@ -444,9 +444,6 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
     return pin;
 }
 
-/// The (query row, key) of the NaN a NaN-bias launch puts in the bias, as `nanBiasCase` does.
-constexpr std::pair<int64_t, int64_t> NAN_BIAS_AT{5, 7};
-
 /// Whether an object with these metadata values is a biased dkdv or merged object whose spec pins
 /// `mfma_rows = 16`, the 16-row MFMA family that carries its own copy of the biased exponent
 /// clamp, without dropout. An object whose geometry the policy picks records `mfma_rows = -1`,
@@ -464,10 +461,26 @@ bool isPinnedMfmaRows16BiasObject(const KernelDefinition& kernel)
                                   intField(kernel, "has_dropout"));
 }
 
+/// Reports that the build selects no object of the biased `mfma_rows = 16` family for a NaN-bias
+/// case, and the caller returns. The shipped gfx950 set has such objects, so there it is a
+/// failure; any other arch ships none and the case skips.
+void reportNoPinnedMfmaRows16Objects(const std::string& what)
+{
+    const auto arch = packedArchDeviceProperties().gcnArchName;
+    if(arch.rfind("gfx950", 0) == 0)
+    {
+        ADD_FAILURE() << "this gfx950 build selects no " << what
+                      << " objects that pin mfma_rows = 16";
+        return;
+    }
+    GTEST_SKIP() << "this build selects no " << what << " objects that pin mfma_rows = 16 for "
+                 << arch;
+}
+
 /// Launches each selected staged object of @p slot on each of its shapes. With @p nanBias, only
 /// the biased objects that pin `mfma_rows = 16` run, each with a NaN in its bias: the objects the shared
-/// `nanBiasCase` cases do not select. A device whose build stages no such object (the gfx11
-/// family pins no `mfma_rows`) skips.
+/// `nanBiasCase` cases do not select. A device whose build stages no such object skips, unless it is a gfx950
+/// (reportNoPinnedMfmaRows16Objects).
 void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool nanBias = false)
 {
     const auto& traits = traitsOfSlot(slot);
@@ -490,8 +503,8 @@ void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool n
                      staged.end());
         if(staged.empty())
         {
-            GTEST_SKIP() << "this build stages no biased `mfma_rows = 16`-pinned " << traits.label
-                         << " objects for this device";
+            reportNoPinnedMfmaRows16Objects(std::string("biased ") + traits.label);
+            return;
         }
     }
 
@@ -905,7 +918,8 @@ TEST_P(TestGpuFlydslSdpaBwdMergedNanBiasObject, PropagatesToDkAndDv)
     const auto& name = GetParam();
     if(name == NO_MERGED_OBJECTS)
     {
-        GTEST_SKIP() << "this build lists no biased merged object that pins mfma_rows = 16";
+        reportNoPinnedMfmaRows16Objects("biased merged");
+        return;
     }
     withStagedMergedObject(name, [&](const auto& kernel, const auto& handler) {
         const auto cells = mergedObjectCells(kernel);
