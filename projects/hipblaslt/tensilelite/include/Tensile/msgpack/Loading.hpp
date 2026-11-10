@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,6 +43,7 @@ namespace TensileLite
                                                 msgpack::object_handle& result);
 
     std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename);
+    std::map<uint64_t, int> MessagePackLoadUidMapping(std::string const& filename);
 
     template <typename MyProblem, typename MySolution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>

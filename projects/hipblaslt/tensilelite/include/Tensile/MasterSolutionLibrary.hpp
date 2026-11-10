@@ -30,9 +30,11 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
@@ -149,9 +151,22 @@ namespace TensileLite
                     type(), " (", count, " solutions, next level: ", library->type(), ")");
         }
 
+        /// NotPresent: no UID map file, as in an older or UID-free library.
+        /// Failed: the file exists but could not be read or decoded.
+        enum class UidMappingStatus
+        {
+            NotPresent,
+            Loaded,
+            Failed
+        };
+
         std::string                   libraryDirectory;
         std::string                   suffix;
         std::map<int, std::string>    libraryMapping;
+        std::string                     uidMappingPath;
+        mutable std::once_flag          uidMappingLoad;
+        mutable std::map<uint64_t, int> uidIndexMapping;
+        mutable UidMappingStatus        uidMappingState = UidMappingStatus::NotPresent;
         mutable std::set<std::string> loadedFiles;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>
@@ -219,7 +234,42 @@ namespace TensileLite
                 std::cout << "No library mapping found at " << path.string() << std::endl;
                 return false;
             }
+
+            fs::path uidPath = fs::path(libraryDirectory)
+                               / ("TensileLiteLibrary_lazy_" + arch + "_UidMapping.dat");
+            uidMappingPath = uidPath.string();
             return true;
+        }
+
+        /// Only UID lookups use this map, and it has one entry per solution, so
+        /// it is read on the first lookup instead of during library setup.
+        std::map<uint64_t, int> const& uidMapping() const
+        {
+            std::call_once(uidMappingLoad, [this] {
+                std::error_code ec;
+                if(uidMappingPath.empty()
+                   || (!fs::exists(uidMappingPath, ec)
+                       && !fs::exists(uidMappingPath + ".zlib", ec)))
+                    return;
+                // TensileCreateLibrary writes no file rather than an empty map.
+                uidIndexMapping = LoadUidMapping(uidMappingPath);
+                if(uidIndexMapping.empty())
+                {
+                    uidMappingState = UidMappingStatus::Failed;
+                    std::cerr << "Failed to load SolutionUID mapping from " << uidMappingPath
+                              << std::endl;
+                }
+                else
+                    uidMappingState = UidMappingStatus::Loaded;
+            });
+            return uidIndexMapping;
+        }
+
+        /// Loads the UID map on first use, like uidMapping().
+        UidMappingStatus uidMappingStatus() const
+        {
+            uidMapping();
+            return uidMappingState;
         }
 
         void loadLibrary(const int index) const
@@ -485,6 +535,27 @@ namespace TensileLite
                 solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             }
             return solution;
+        }
+
+        std::shared_ptr<MySolution> getSolutionByUid(MyProblem const& problem,
+                                                     Hardware const&  hardware,
+                                                     uint64_t         uid) const
+        {
+            auto const& mapping = uidMapping();
+            auto        it      = mapping.find(uid);
+            if(it == mapping.end())
+                return {};
+            return getSolutionByIndex(problem, hardware, it->second);
+        }
+
+        std::shared_ptr<MySolution> getSolutionByUid(Hardware const& hardware,
+                                                     uint64_t        uid) const
+        {
+            auto const& mapping = uidMapping();
+            auto        it      = mapping.find(uid);
+            if(it == mapping.end())
+                return {};
+            return getSolutionByIndex(hardware, it->second);
         }
 
         virtual std::shared_ptr<MySolution> findBestSolution(MyProblem const& problem,

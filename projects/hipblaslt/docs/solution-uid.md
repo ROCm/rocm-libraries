@@ -70,7 +70,5 @@ zero, malformed, or colliding UID on every solution it contains, including
 solutions copied from the base file. A unique non-zero base UID is kept.
 Uniqueness across the shipped logic tree is checked by
 `test_solution_uid_uniqueness.py` in the logic-corpus lane
-(`tox -e logic-corpus`).
-
-Mandatory uniqueness in library generation is introduced by a later migration
-step.
+(`tox -e logic-corpus`), and `TensileCreateLibrary` fails when one
+architecture's assembled library maps a UID to two solution indices.
