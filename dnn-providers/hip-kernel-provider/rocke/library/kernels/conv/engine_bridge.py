@@ -133,12 +133,15 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     # The ConvDataSpec: the storage dtypes and the MMA input type (mma_dtype,
     # None unless TF32 compute, which the binding leaves at the engine's None).
     # They live on ``spec.data``, not the spec; dropped, the engine would build
-    # its fp16 default under the spec's name.
-    data = getattr(spec, "data", None)
-    for f in ("dtype_a", "dtype_b", "dtype_d", "dtype_acc", "mma_dtype"):
-        v = getattr(data, f, None)
-        if v is not None:
-            d[f] = v
+    # its fp16 default under the spec's name. Read directly: every conv spec
+    # carries a ConvDataSpec, so a spec without one is malformed, not fp16.
+    data = spec.data
+    d["dtype_a"] = data.dtype_a
+    d["dtype_b"] = data.dtype_b
+    d["dtype_d"] = data.dtype_d
+    d["dtype_acc"] = data.dtype_acc
+    if data.mma_dtype is not None:
+        d["mma_dtype"] = data.mma_dtype
     # The vector-size/optional knobs are forwarded only when the spec sets
     # them (not None), so the binding falls back to the engine default
     # otherwise.

@@ -928,6 +928,32 @@ class TestSplitKSpecDict(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 conv_implicit_gemm_spec_to_dict(bad)
 
+    def test_a_spec_without_its_data_is_rejected(self):
+        # A missing ConvDataSpec (or dtype on it) must not be read as the
+        # engine's fp16 default under the spec's name.
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        spec = _spec()
+
+        def _without(obj, field, **override):
+            class _Without:
+                def __getattr__(self, name):
+                    if name == field:
+                        raise AttributeError(name)
+                    if name in override:
+                        return override[name]
+                    return getattr(obj, name)
+
+            return _Without()
+
+        with self.subTest(missing="data"):
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(_without(spec, "data"))
+        with self.subTest(missing="data.dtype_d"):
+            bad = _without(spec, None, data=_without(spec.data, "dtype_d"))
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(bad)
+
     def test_a_malformed_acc_epilogue_is_rejected(self):
         # relu is a bool and the bounds real numbers: a truthy non-bool or a
         # non-numeric field is rejected, not coerced by the bridge.
