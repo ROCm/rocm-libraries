@@ -96,8 +96,7 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // Known HOST reds (kernel defects): PKD3 k3 diverges at the row edge, and PLN PartialRoi k5
-    // reads neighbours from outside the ROI.
+    // Known HOST red (kernel defect): PLN PartialRoi k5 reads neighbours from outside the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kGaussianFilterTolerance(cfg.dtype)));
 }
