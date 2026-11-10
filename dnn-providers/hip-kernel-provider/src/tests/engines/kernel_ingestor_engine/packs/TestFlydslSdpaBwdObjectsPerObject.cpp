@@ -444,18 +444,39 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
     return pin;
 }
 
-/// Launches each selected staged object of @p slot on each of its shapes.
-void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection)
+/// The (query row, key) of the NaN a NaN-bias launch puts in the bias, as `nanBiasCase` does.
+constexpr std::pair<int64_t, int64_t> NAN_BIAS_AT{5, 7};
+
+/// Whether @p kernel is a biased dkdv or merged object of the 16-row MFMA family, the one that
+/// carries its own copy of the biased exponent clamp, without dropout.
+bool isMfmaRows16BiasObject(const KernelDefinition& kernel)
+{
+    return intField(kernel, "has_bias") == 1 && intField(kernel, "mfma_rows") == 16
+           && intField(kernel, "has_dropout") != 1;
+}
+
+/// Launches each selected staged object of @p slot on each of its shapes. With @p nanBias, only
+/// the biased 16-row objects run, each with a NaN in its bias: the objects the shared
+/// `nanBiasCase` cases do not select.
+void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool nanBias = false)
 {
     const auto& traits = traitsOfSlot(slot);
     const std::string engineSlot = slotName(traits.engineSlot);
     const auto slotKernels = stagedSlotKernels(SPLIT_ENGINE_NAME, engineSlot);
-    const auto staged = objectsOf(slot, slotKernels);
+    auto staged = objectsOf(slot, slotKernels);
+    if(nanBias)
+    {
+        staged.erase(
+            std::remove_if(staged.begin(),
+                           staged.end(),
+                           [](const auto& kernel) { return !isMfmaRows16BiasObject(kernel); }),
+            staged.end());
+    }
     if(staged.empty())
     {
         reportUnstaged(traits.op,
-                       std::string("this build staged no ") + traits.label
-                           + " objects for this device");
+                       std::string("this build staged no ") + (nanBias ? "biased 16-row " : "")
+                           + traits.label + " objects for this device");
         return;
     }
 
@@ -465,8 +486,12 @@ void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection)
     int launches = 0;
     for(const auto& kernel : kernels)
     {
-        for(const auto& c : objectCases(slot, kernel, selection))
+        for(auto c : objectCases(slot, kernel, selection))
         {
+            if(nanBias)
+            {
+                c.nanBiasAt = NAN_BIAS_AT;
+            }
             SCOPED_TRACE(kernel.name + ": " + describe(c));
             if(!objectAdmits(slot, c, kernel, device))
             {
@@ -609,6 +634,14 @@ TEST_P(TestGpuFlydslSdpaBwdObjects, DbiasReduceObjectsMatchTheReference)
     expectStagedObjectsMatch(ObjectSlot::DBIAS_REDUCE, GetParam());
 }
 
+/// The biased 16-row dkdv objects, each with a NaN in the bias: a NaN reaches dK and dV at its
+/// key, where the reference is NaN. The `*NanBias*` cases select the 32-row dkdv object only.
+TEST(TestGpuFlydslSdpaBwdDkdvNanBias, Mr16ObjectsPropagateToDkAndDv)
+{
+    SKIP_IF_NO_DEVICES();
+    expectStagedObjectsMatch(ObjectSlot::DKDV, ObjectSelection::EVERY, true);
+}
+
 std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
 {
     return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
@@ -669,6 +702,22 @@ std::vector<std::string> listedMergedObjects()
     names.erase(std::string());
     return names.empty() ? std::vector<std::string>{NO_MERGED_OBJECTS}
                          : std::vector<std::string>(names.begin(), names.end());
+}
+
+/// The listed merged objects that are biased and of the 16-row MFMA family (the names carry
+/// `bias1` and `mr16`), without dropout; NO_MERGED_OBJECTS when none is listed.
+std::vector<std::string> listedMergedMr16BiasObjects()
+{
+    std::vector<std::string> names;
+    for(auto& name : listedMergedObjects())
+    {
+        if(name.find("_bias1_") != std::string::npos && name.find("_mr16_") != std::string::npos
+           && name.find("_dropout1_") == std::string::npos)
+        {
+            names.push_back(std::move(name));
+        }
+    }
+    return names.empty() ? std::vector<std::string>{NO_MERGED_OBJECTS} : names;
 }
 
 /// The staged merged object @p name, or nullptr.
@@ -825,6 +874,46 @@ TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
         expectObjectCase(*kernel, handler, cell.graph);
     }
 }
+
+/// A NaN in the bias, on the bias cell of each biased 16-row merged object: it reaches dK and dV
+/// at its key, where the reference is NaN. The `*NanBias*` cases select the merged d64 32-row
+/// object only.
+class TestGpuFlydslSdpaBwdMergedNanBiasObject : public TestGpuFlydslSdpaBwdMergedObject
+{
+};
+
+TEST_P(TestGpuFlydslSdpaBwdMergedNanBiasObject, PropagatesToDkAndDv)
+{
+    const auto& name = GetParam();
+    if(name == NO_MERGED_OBJECTS)
+    {
+        GTEST_SKIP() << "this build lists no biased 16-row merged object";
+    }
+    const auto* kernel = stagedMergedObject(name);
+    if(kernel == nullptr)
+    {
+        ADD_FAILURE() << name << " is listed by the build's descriptors but not staged for "
+                      << packedArchDeviceProperties().gcnArchName;
+        return;
+    }
+    const auto& handler = dispatchHandler(
+        kernel->sources.find(REDUCE_LAUNCH_NAME) == kernel->sources.end() ? MERGED_DISPATCH
+                                                                          : MERGED_REDUCE_DISPATCH);
+    const auto cells = mergedObjectCells(*kernel);
+    ASSERT_FALSE(cells.empty());
+    auto graph = cells.front().graph;
+    graph.nanBiasAt = NAN_BIAS_AT;
+    graph.repeatLaunches = 1;
+    SCOPED_TRACE(name + ": " + describe(graph));
+    expectObjectCase(*kernel, handler, graph);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuFlydslSdpaBwdMergedNanBiasObject,
+                         ::testing::ValuesIn(listedMergedMr16BiasObjects()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuFlydslSdpaBwdMergedObject,

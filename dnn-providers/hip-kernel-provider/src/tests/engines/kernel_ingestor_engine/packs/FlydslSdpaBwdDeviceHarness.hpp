@@ -222,7 +222,10 @@ struct BwdCase
     /// covers, on the device and in the backward reference, while the forward's output and
     /// log-sum-exp come from the clean bias (they are finite, as a forward over finite scores
     /// leaves them). P, dS and so dK and dV at that key, and dQ in that row, are NaN in the
-    /// reference; the comparison holds the device to that pattern.
+    /// reference. The comparison holds dK and dV to that pattern: NaN where the reference is
+    /// NaN, finite and matching elsewhere. dQ and dBias are compared on the elements the
+    /// reference leaves finite only, so a NaN in dQ's row or in dBias's element is neither
+    /// required nor refused: no kernel contract says whether those paths propagate it.
     std::optional<std::pair<int64_t, int64_t>> nanBiasAt;
     BwdData data = BwdData::NOISE;
     /// What the padding of O's rows holds. The reference never reads it.

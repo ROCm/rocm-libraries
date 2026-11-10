@@ -308,7 +308,9 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
 /// A NaN in the bias at query row 5, key 7 of every batch and head, over finite scores everywhere
 /// else, with a log-sum-exp and output that come from the clean bias. The NaN must reach P: a
 /// dK/dV exponent clamp that turns a NaN exponent into 0 gives P = 1 there and finite dK and dV
-/// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient).
+/// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient);
+/// it selects the 32-row dK/dV object, and TestFlydslSdpaBwdObjectsPerObject.cpp runs the NaN on the
+/// biased 16-row dkdv and merged objects, which carry their own copy of the clamp.
 BwdCase nanBiasCase(DataType dtype)
 {
     BwdCase c = biasCase(dtype);
