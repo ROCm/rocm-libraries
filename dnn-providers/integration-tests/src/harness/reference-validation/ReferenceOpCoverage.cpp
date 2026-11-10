@@ -33,6 +33,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::PointwiseAttributes,
         NodeAttributes::SdpaAttributes,
         NodeAttributes::SdpaBackwardAttributes,
+        NodeAttributes::RopeAttributes,
     };
     return s_ops;
 }

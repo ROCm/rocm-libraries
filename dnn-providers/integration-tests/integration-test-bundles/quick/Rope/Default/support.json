@@ -1,0 +1,26 @@
+{
+  "claims": {
+    "hipkernel:flydsl_rope": [
+      {
+        "cases": [
+          "2_4_16_128_full_bf16_bhsd",
+          "2_4_16_128_full_freqsfull_fp32_bhsd",
+          "2_4_16_64_r32_trailing_scaled_bf16_bshd",
+          "2_4_16_64_r32_trailing_scaled_fp32_bshd"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

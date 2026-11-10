@@ -10,9 +10,9 @@ angles in ``freqs`` and every element is scaled by ``output_scale``. ``r`` is
 ``rope_attributes.fbs``. The serializer
 (``utilities/json/RopeAttributes.hpp``) writes the ports under ``inputs`` and
 ``outputs`` and ``output_scale``, ``rope_dim`` and ``rope_offset_ext`` at the
-top level. No provider implements the op, so the dtypes are those the CPU
-reference executor registers (``RopeSignatureKey``): ``x`` and ``y`` of one
-float dtype, ``freqs`` fp32. By group:
+top level. The dtypes are those the CPU reference executor registers
+(``RopeSignatureKey``), which ``hipkernel:flydsl_rope`` also builds: ``x`` and
+``y`` of one float dtype, ``freqs`` fp32. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x``, which ``y`` shares.
 - ``rotation`` (exclusive): ``full`` (``r = D``), ``partial_leading``

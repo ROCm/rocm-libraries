@@ -1337,4 +1337,45 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
+// RoPE freqs are raw angles, position * inv_freq, drawn over thousands of radians rather than
+// the [-1, 1] float default, so sin/cos range reduction is exercised.
+TEST(TestFillInputs, RopeFreqsSpanThousandsOfRadians)
+{
+    GraphResult gr;
+    auto& b = gr.builder;
+    const std::vector<int64_t> xDims = {1, 2, 64, 8};
+    const std::vector<int64_t> xStrides = {1024, 8, 16, 1};
+    const std::vector<int64_t> freqsDims = {1, 1, 64, 4};
+    const std::vector<int64_t> freqsStrides = {256, 256, 4, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "freqs", DataType::FLOAT, &freqsStrides, &freqsDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "y", DataType::FLOAT, &xStrides, &xDims));
+
+    auto rope = CreateRopeAttributes(b, 1, 2, 3, /*output_scale=*/1.0f, /*rope_dim=*/4, 0);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(
+        CreateNodeDirect(b, "rope", DataType::FLOAT, NodeAttributes::RopeAttributes, rope.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    gr.graph = GetGraph(b.GetBufferPointer());
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(0.0f, 4096.0f));
+
+    auto& freqs = *inputs.at(2);
+    const auto* values = static_cast<const float*>(freqs.rawHostData());
+    const auto [lo, hi] = std::minmax_element(values, values + freqs.elementCount());
+    EXPECT_GE(*lo, 0.0f);
+    EXPECT_LE(*hi, 4096.0f);
+    EXPECT_GT(*hi, 1024.0f);
+}
+
 // NOLINTEND(readability-identifier-naming)

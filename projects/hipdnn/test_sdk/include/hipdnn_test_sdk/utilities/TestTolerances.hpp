@@ -462,4 +462,36 @@ constexpr float getTolerance()
 
 } // namespace resample
 
+namespace rope
+{
+
+// Tolerance for y, computed in f32 on both sides from the same f32 angles: each rotated
+// element is two products and one sum, plus the scale, so engine and reference differ only
+// in sin/cos rounding (a few f32 ulp, with full range reduction at angles of thousands of
+// radians) and in contraction, a few 1e-7 relative to |x| at most. A half or bfloat16 y is
+// that f32 value rounded once on each side, so the two may land one output ulp apart:
+// 2^-10 relative for half, 2^-7 for bfloat16, under the bounds below.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 2e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace rope
+
 } // namespace hipdnn_test_sdk::utilities

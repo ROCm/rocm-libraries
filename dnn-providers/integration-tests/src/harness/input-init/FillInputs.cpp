@@ -252,6 +252,23 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
 
+// ── RoPE ─────────────────────────────────────────────────────────────────────
+
+void setRopeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                         InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_RopeAttributes();
+    if(a == nullptr)
+    {
+        return;
+    }
+
+    // freqs holds raw angles, position * inv_freq: up to a few thousand radians at long
+    // context, not the [-1, 1] default, so a kernel whose sin/cos lacks full range
+    // reduction (or reads the angles as precomputed cos/sin) diverges visibly.
+    recipes.setDefault(a->freqs_tensor_uid(), FillRecipe::free(0.0f, 4096.0f));
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -293,6 +310,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         return true;
     case NA::SdpaBackwardAttributes:
         setSdpaBackwardInitDefaults(node, recipes);
+        return true;
+    case NA::RopeAttributes:
+        setRopeInitDefaults(node, recipes);
         return true;
     // Ops whose inputs need no special init; they get defaultFillFor(dtype).
     case NA::PointwiseAttributes:

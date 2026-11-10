@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_4_16_64_r32_trailing_scaled_bf16_bshd",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              16,
+              64
+            ],
+            "strides": [
+              4096,
+              64,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              16,
+              64
+            ],
+            "strides": [
+              4096,
+              64,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "output_scale": 0.08838834764831845,
+          "rope_dim": 32
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "RoPE cuDNN trailing partial, scaled",
+        "seed": 1,
+        "notes": "cuDNN default: trailing rope_dim 32 of D 64 (rope_offset_ext absent), output_scale 1/sqrt(128); x [B,H,S,D] with BSHD strides, freqs [1,1,S,r]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceRope); Qwen3.8 shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "2_4_16_64_r32_trailing_scaled_fp32_bshd",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              16,
+              64
+            ],
+            "strides": [
+              4096,
+              64,
+              256,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              16,
+              64
+            ],
+            "strides": [
+              4096,
+              64,
+              256,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "output_scale": 0.08838834764831845,
+          "rope_dim": 32
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "RoPE cuDNN trailing partial, scaled",
+        "seed": 1,
+        "notes": "cuDNN default: trailing rope_dim 32 of D 64 (rope_offset_ext absent), output_scale 1/sqrt(128); x [B,H,S,D] with BSHD strides, freqs [1,1,S,r]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceRope); Qwen3.8 shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "2_4_16_128_full_bf16_bhsd",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              16,
+              128
+            ],
+            "strides": [
+              8192,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              16,
+              128
+            ],
+            "strides": [
+              8192,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              1,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "output_scale": 1.0,
+          "rope_dim": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "RoPE full rotation",
+        "seed": 1,
+        "notes": "full rotation (rope_dim 0: r = D 128); x packed BHSD, per-batch freqs [B,1,S,D] broadcast over heads",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceRope); Qwen3.8 shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "2_4_16_128_full_freqsfull_fp32_bhsd",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              16,
+              128
+            ],
+            "strides": [
+              8192,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              16,
+              128
+            ],
+            "strides": [
+              8192,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              4,
+              16,
+              128
+            ],
+            "strides": [
+              8192,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "output_scale": 1.0,
+          "rope_dim": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "RoPE full rotation",
+        "seed": 1,
+        "notes": "full rotation (rope_dim 0: r = D 128); x packed BHSD, freqs of every x dim [B,H,S,D] (no broadcast)",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceRope); Qwen3.8 shapes from the Qwen3.8 layer graph"
+      }
+    }
+  ]
+}

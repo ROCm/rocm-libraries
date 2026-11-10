@@ -1,0 +1,61 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "RopeQwen38PartialTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "freqs_tensor_uid": 2,
+        "x_tensor_uid": 1
+      },
+      "name": "Rope_0",
+      "output_scale": "${case.attributes.output_scale}",
+      "outputs": {
+        "y_tensor_uid": 0
+      },
+      "rope_dim": "${case.attributes.rope_dim}",
+      "type": "RopeAttributes",
+      "rope_offset_ext": 0
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Rope_0::Y",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "freqs",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    }
+  ]
+}
