@@ -172,7 +172,7 @@ template <template <typename...> class PipelineType>
 void expect_cshuffle_split_k_follows_declaration()
 {
     constexpr bool declared = declares_tdm_split_k<PipelineType>();
-    const auto supports = supports_split_k<2, PipelineType, ck_tile::CShuffleEpilogue>;
+    const auto supports     = supports_split_k<2, PipelineType, ck_tile::CShuffleEpilogue>;
     if constexpr(!declared)
     {
         EXPECT_FALSE(supports(2));

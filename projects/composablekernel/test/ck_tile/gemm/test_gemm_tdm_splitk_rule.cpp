@@ -38,23 +38,23 @@ constexpr ck_tile::index_t kTileM = 128;
 constexpr ck_tile::index_t kTileN = 128;
 constexpr ck_tile::index_t kTileK = 64;
 
-using Shape       = ck_tile::TileGemmShape<ck_tile::sequence<kTileM, kTileN, kTileK>,
-                                           ck_tile::sequence<2, 2, 1>,
-                                           ck_tile::sequence<16, 16, 32>>;
-using Partitioner = ck_tile::GemmTile1DPartitioner<Shape>;
-using Traits      = ck_tile::TileGemmUniversalTraits<false, // PadM
-                                                     false, // PadN
-                                                     false, // PadK
-                                                     true,  // DoubleSmemBuffer
-                                                     Row,
-                                                     Col,
-                                                     Row>;
-using Problem     = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                          BDataType,
-                                                          AccDataType,
-                                                          Shape,
-                                                          Traits,
-                                                          ck_tile::GemmPipelineScheduler::Intrawave>;
+using Shape           = ck_tile::TileGemmShape<ck_tile::sequence<kTileM, kTileN, kTileK>,
+                                               ck_tile::sequence<2, 2, 1>,
+                                               ck_tile::sequence<16, 16, 32>>;
+using Partitioner     = ck_tile::GemmTile1DPartitioner<Shape>;
+using Traits          = ck_tile::TileGemmUniversalTraits<false, // PadM
+                                                         false, // PadN
+                                                         false, // PadK
+                                                         true,  // DoubleSmemBuffer
+                                                         Row,
+                                                         Col,
+                                                         Row>;
+using Problem         = ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                              BDataType,
+                                                              AccDataType,
+                                                              Shape,
+                                                              Traits,
+                                                              ck_tile::GemmPipelineScheduler::Intrawave>;
 using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                          BDataType,
                                                          ck_tile::tuple<>,
@@ -120,10 +120,11 @@ class TdmSplitKRule : public ::testing::Test
 
 // Every pipeline UniversalGemmKernel treats as TDM (kIsTdmPipeline: it exposes
 // skipCheckValidLaunchParams). A new TDM pipeline belongs in this list.
-using TdmPipelines = ::testing::Types<TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV1>,
-                                      TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV2>,
-                                      TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV3>,
-                                      TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer>>;
+using TdmPipelines =
+    ::testing::Types<TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV1>,
+                     TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV2>,
+                     TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMV3>,
+                     TdmPipeline<ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer>>;
 TYPED_TEST_SUITE(TdmSplitKRule, TdmPipelines);
 
 TYPED_TEST(TdmSplitKRule, IsATdmPipeline)
@@ -148,8 +149,7 @@ TYPED_TEST(TdmSplitKRule, TdmEpilogueRejectsSplitK)
 // declares kSupportsTdmSplitK.
 TYPED_TEST(TdmSplitKRule, CShuffleSplitKFollowsTheDeclaration)
 {
-    constexpr bool declared =
-        declares_tdm_split_k<typename TypeParam::template type<Problem>>();
+    constexpr bool declared = declares_tdm_split_k<typename TypeParam::template type<Problem>>();
     if constexpr(!declared)
     {
         EXPECT_FALSE((supports_split_k<TypeParam::template type, ck_tile::CShuffleEpilogue>(2)));
@@ -159,8 +159,7 @@ TYPED_TEST(TdmSplitKRule, CShuffleSplitKFollowsTheDeclaration)
         GTEST_SKIP() << "accepting a TDM argument requires a gfx125 device";
     }
     EXPECT_TRUE((supports_split_k<TypeParam::template type, ck_tile::CShuffleEpilogue>(1)));
-    EXPECT_EQ((supports_split_k<TypeParam::template type, ck_tile::CShuffleEpilogue>(2)),
-              declared);
+    EXPECT_EQ((supports_split_k<TypeParam::template type, ck_tile::CShuffleEpilogue>(2)), declared);
 }
 
 // Keeps the suite from passing vacuously: if no pipeline declared the trait, the accepting side
