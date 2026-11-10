@@ -22,14 +22,14 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_IGEMM_NCHW_BWD` (K7) | NCHW bwd-data in place: strided pointwise, patchify, 1-D/vocoder ConvTranspose, dilated rows, 3-D stride 2. Weak on large compute-bound GEMMs (K1 wins there). | bwd-data | MFMA, WMMA, FMA | 1839 |
 | `CONV_DIRECT_FWD/BWD` (K2) | Stride-1 halo-tile direct conv, 3x3 / 5x5 / 7x7 / 1x7 / 3x3x3. The `rows` kind is the gfx950 dense 3x3 path (hipconv-class). | fwd, bwd-data (stride 1) | MFMA, WMMA, FMA | 442 |
 | `CONV_WINOGRAD_FWD/BWD` (K5) | 3x3 stride 1 (stride 2 by phases). `coop` is the cooperative WMMA/MFMA F(2,3); the fused VALU and register variants target gfx906 and grouped. | fwd, bwd-data | all | 266 |
-| `CONV_WRW` (K3) | Backward weights. Several loops: row ring, output rows (any stride), height-stride phased ring, gfx950 direct (hipconv `direct_wgrad` class), small-C rows for stems, and FMA rows for exact fp32 on RDNA. | wrw | MFMA, WMMA, FMA | 2434 |
-| `CONV_GROUP_FWD/BWD` (K4) | Small-group grouped conv (2 ≤ C/g ≤ 16, ResNeXt and RegNet): one 16x16 MMA serves 16/(C/g) groups through a block-diagonal filter. K1's `fuse` knob is its implicit-GEMM alternative. | fwd (s1, s2), bwd-data (s1; s2 by phases) | MFMA, WMMA (fp32 on CDNA only) | 149 |
-| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 2708 |
+| `CONV_WRW` (K3) | Backward weights. Several loops: row ring, output rows (any stride), height-stride phased ring, gfx950 direct (hipconv `direct_wgrad` class), small-C rows for stems, and FMA rows for exact fp32 on RDNA. At one split, configs with `dws` 1 write dw directly with no reduce. | wrw | MFMA, WMMA, FMA | 3913 |
+| `CONV_GROUP_FWD/BWD` (K4) | Small-group grouped conv (2 ≤ C/g ≤ 16, ResNeXt and RegNet): one 16x16 MMA serves 16/(C/g) groups through a block-diagonal filter. Wide groups (17 ≤ C/g ≤ 64) pad each group to 16-channel blocks. K1's `fuse` knob is its implicit-GEMM alternative. | fwd (s1, s2), bwd-data (s1; s2 by phases) | MFMA, WMMA; fp32 by FMA on RDNA | 2042 |
+| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 3186 |
 | `CONV_SMALLC_FWD` | Forward stems with C ≤ 4 | fwd | MFMA, WMMA, FMA | 597 |
 | `CONV_DEPTHWISE_MFMA_FWD/BWD` | Depthwise on matrix cores (gfx950 hipconv class), NHWC and NCHW | fwd, bwd-data (s1); fwd (s2) | gfx908-gfx950 | 640 |
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
 | `CONV_DEPTHWISE_VALU_FWD/BWD` | General VALU depthwise, plus the strided bwd `phase` variant | fwd, bwd-data | all | 168 |
-| `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights | wrw | all | 42 |
+| `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights (register strips; NHWC and NCHW) | wrw | all | 42 |
 | `CONV_NAIVE_FWD/BWD/WRW` | Correctness floor: serves every graph | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 
@@ -54,6 +54,7 @@ Every config is a set of integer knobs, listed in each engine's `*.kdp.json` und
 | `fuse` | F small groups run as one block-diagonal group |
 | `halo` | Extra dy/x window beyond the tile (dilation and filter reach) |
 | `bpu` / `split` | Split of the reduction over blocks: fp32 partials, then a fixed-order reduce. Deterministic, no atomics. |
+| `dws` (K3) | At one split, write dw directly (no workspace, no reduce) |
 | `loop` (K3), `kind` (K2), `variant` (K5, depthwise) | Which kernel body runs |
 
 Engine-specific knobs (`taps`, `stride`, `flat`, `ring`, `phase`, `fold`, ...) are documented in the engine's `*Problem.hpp`.
@@ -76,8 +77,8 @@ Ask the conv owners for the graph sets and the latest results; they are not in t
 
 ## Things that bite
 
-- **First-run cost.** With autotune, every admitted config compiles through HIPRTC on first use. Measured cold compiles are about 0.5-8 s per config, and no surveyed config is over 10 s. On a graph that admits 30-50 configs, that is a large first-run cost. Good OOTB selection means picking well without compiling the whole candidate list. The HIPRTC disk cache lives under `<cache>/hip-kernel-provider/hiprtc/<key>.co`. The key is a sha256 over the HIPRTC version, the source, every embedded include and every option (architecture included). A pre-populated cache directory is how commonly needed instances can ship pre-compiled.
-- **Catalogs are still moving.** K5 `coop`, K1 core (`swz`, `dma`, `fuse`, `cf`), the depthwise engines, and a small-group grouped engine in progress all change week to week. Models trained now will need retraining.
+- **First-run cost.** With autotune, every admitted config compiles through HIPRTC on first use. Measured median cold compiles are 0.3-0.8 s per config on CDNA and 0.4-1.5 s on RDNA. The only configs over 10 s are K7's fp32 FMA stride-8 configs (10-20 s). Summed over its admitted configs, a graph's median first-run cost is about 30 s. The worst measured graph is a ResNeXt-50 grouped NCHW bwd-data graph, where K1 alone admits 91-131 configs: 134 s on gfx942 and 224 s on gfx950. Good OOTB selection means picking well without compiling the whole candidate list. The HIPRTC disk cache lives under `<cache>/hip-kernel-provider/hiprtc/<key>.co`. The key is a sha256 over the HIPRTC version, the source, every embedded include and every option (architecture included). A pre-populated cache directory is how commonly needed instances can ship pre-compiled.
+- **Catalogs are still moving.** K5 `coop`, K1 core (`swz`, `dma`, `fuse`, `cf`), K3, K4 and the depthwise engines all change week to week. Models trained now will need retraining.
 - **Timing noise.** Jobs sharing a node can inflate times unevenly between engines; one shape read 0.85 sharing a node and 1.29 alone. Kernels under ~50 µs are noisy per shape. Measure isolated, and weigh by absolute time.
 - **Configs that spill registers still win in places.** Some RDNA K3 ring tiles spill and are still the fastest. Don't prune on spills.
 - **TF32.** Three-bf16 configs register only under `HIP_KERNEL_PROVIDER_CONV_TF32`. Leave it unset for normal fp32 selection.
