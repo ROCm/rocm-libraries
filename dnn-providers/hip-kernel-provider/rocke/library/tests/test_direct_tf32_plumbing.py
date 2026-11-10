@@ -569,9 +569,45 @@ def test_tf32_jobs_carry_the_tf32_triple(tf32_jobs):
             assert job.spec_kwargs["fold_k32"]
 
 
+_PLAN_SHAPES = [
+    ("fwd", dict(groups=64, cpg=1, kpg=1)),
+    ("fwd", dict(groups=1, cpg=64, kpg=64)),
+    ("fwd", dict(groups=8, cpg=32, kpg=32)),
+    ("dgrad", dict(groups=64, cpg=1, kpg=1)),
+    ("dgrad", dict()),
+    ("dgrad", dict(groups=1, cpg=48, kpg=192)),
+    ("wgrad", dict()),
+]
+_PLAN_DTYPES = ("fp16", "tf32")
+
+
+def _serves_a_planned_problem(identity) -> bool:
+    """Would ``cache.compatible`` offer ``identity`` to any planned problem?
+
+    Helper kernels (weight transforms, split reductions) are looked up by
+    identity when a plan is made, so every one is kept.
+    """
+    if identity.direction.endswith("_helper"):
+        return True
+    return any(
+        identity.direction == f"direct_{direction}"
+        and KernelCache.supports_problem(identity, _problem(dtype=dtype, **shape))[0]
+        for direction, shape in _PLAN_SHAPES
+        for dtype in _PLAN_DTYPES
+    )
+
+
 @pytest.fixture(scope="module")
 def mixed_cache(tmp_path_factory, tf32_jobs):
-    """fp16 and tf32 binaries side by side, placeholder bytes."""
+    """fp16 and tf32 binaries side by side, placeholder bytes.
+
+    The cache holds every enumerated binary that ``cache.compatible`` would
+    offer to a planned problem, of both dtypes, plus every helper; the plans
+    are the ones the whole grid's cache gives. The rest of the grid (about
+    three quarters of it, no planned problem's) is not written: one file per
+    entry made this fixture the slowest step of the installed TF32 entry on
+    slow-filesystem CI runners.
+    """
     c = KernelCache(tmp_path_factory.mktemp("direct_tf32_cache"), _ARCH)
     fp16_jobs = dks.enumerate_direct_jobs(
         arch=_ARCH,
@@ -580,24 +616,26 @@ def mixed_cache(tmp_path_factory, tf32_jobs):
         dtype="fp16",
         jobs=4,
     )
-    for job in list(fp16_jobs) + list(tf32_jobs):
+    kept = [
+        job
+        for job in list(fp16_jobs) + list(tf32_jobs)
+        if _serves_a_planned_problem(job.identity)
+    ]
+    # Both dtypes stay in the cache side by side for every planned shape.
+    for dtype in _PLAN_DTYPES:
+        for direction in dks.DIRECT_DIRECTIONS:
+            assert any(
+                j.identity.dtype_a == dtype
+                and j.identity.direction == f"direct_{direction}"
+                for j in kept
+            ), (dtype, direction)
+    for job in kept:
         c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
     return c
 
 
-@pytest.mark.parametrize(
-    "direction, shape",
-    [
-        ("fwd", dict(groups=64, cpg=1, kpg=1)),
-        ("fwd", dict(groups=1, cpg=64, kpg=64)),
-        ("fwd", dict(groups=8, cpg=32, kpg=32)),
-        ("dgrad", dict(groups=64, cpg=1, kpg=1)),
-        ("dgrad", dict()),
-        ("dgrad", dict(groups=1, cpg=48, kpg=192)),
-        ("wgrad", dict()),
-    ],
-)
-@pytest.mark.parametrize("dtype", ["fp16", "tf32"])
+@pytest.mark.parametrize("direction, shape", _PLAN_SHAPES)
+@pytest.mark.parametrize("dtype", _PLAN_DTYPES)
 def test_plans_serve_only_their_dtype(mixed_cache, direction, shape, dtype):
     p = _problem(dtype=dtype, **shape)
     plans, _ = dks.direct_plans(mixed_cache, p, direction, _ARCH)

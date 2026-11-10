@@ -251,6 +251,26 @@ def test_review_preload_candidate_is_counted_at_fp32_width():
             assert spec is None and "would spill" in why
 
 
+@functools.cache
+def _dgrad_jobs(arch, dtype):
+    """The direct dgrad cache's jobs for ``dtype`` on ``arch``.
+
+    Enumerated once per (arch, dtype) for the whole module: both tests below
+    read the fp32 and tf32 grids, and each enumeration walks the whole grid.
+    """
+    from benchmarks.common import direct_kernel_sweep as dks
+    from rocke.core.arch import ArchTarget
+
+    return tuple(
+        dks.enumerate_direct_jobs(
+            arch=arch,
+            target=ArchTarget.from_gfx(arch),
+            directions=("dgrad",),
+            dtype=dtype,
+        )
+    )
+
+
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("dtype", ["fp32", "tf32"])
 def test_no_fp32_storage_preload_job_is_over_budget(arch, dtype):
@@ -261,17 +281,10 @@ def test_no_fp32_storage_preload_job_is_over_budget(arch, dtype):
         DIRECT_MFMA_DGRAD,
         direct_mfma_knobs_reason,
     )
-    from rocke.core.arch import ArchTarget
 
-    jobs = dks.enumerate_direct_jobs(
-        arch=arch,
-        target=ArchTarget.from_gfx(arch),
-        directions=("dgrad",),
-        dtype=dtype,
-    )
     preloading = [
         j
-        for j in jobs
+        for j in _dgrad_jobs(arch, dtype)
         if j.identity.algorithm in DIRECT_MFMA_DGRAD and j.spec_kwargs["waves_k"] > 1
     ]
     assert preloading
@@ -309,23 +322,13 @@ _CUT_KNOBS = dict(
 )
 
 
-@functools.cache
 def _builds_cut_job(arch, dtype):
     """Does the direct dgrad cache of ``dtype`` on ``arch`` build the job?"""
-    from benchmarks.common import direct_kernel_sweep as dks
-    from rocke.core.arch import ArchTarget
-
-    jobs = dks.enumerate_direct_jobs(
-        arch=arch,
-        target=ArchTarget.from_gfx(arch),
-        directions=("dgrad",),
-        dtype=dtype,
-    )
     return any(
         j.identity.algorithm == _CUT_VARIANT
         and {k: j.caps[k] for k in _CUT_CAPS} == _CUT_CAPS
         and j.spec_kwargs == _CUT_KNOBS
-        for j in jobs
+        for j in _dgrad_jobs(arch, dtype)
     )
 
 
