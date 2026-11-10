@@ -256,6 +256,16 @@ namespace rocalution
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->LAnalyseClear();
+        this->UAnalyseClear();
+        this->LUAnalyseClear();
+        this->LLAnalyseClear();
+
+        this->ItLAnalyseClear();
+        this->ItUAnalyseClear();
+        this->ItLUAnalyseClear();
+        this->ItLLAnalyseClear();
     }
 
     template <typename ValueType>
