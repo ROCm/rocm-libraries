@@ -763,6 +763,21 @@ static int make_cfg_mfma_gate(int idx, rocke_implicit_gemm_conv_spec_t* spec, co
     }
 }
 
+/* TF32 compute under the MFMA split: the output is fp32 and Stage 2 casts to
+ * fp16 / bf16 only, so both engines reject it. Keep in lockstep with
+ * _tf32_split_k_spec() in conv_implicit_gemm_emit.py.
+ *   82: config 54 (gfx950 16x16x32, mem/cshuffle) with split_k=2
+ *   83: config 56 (gfx942 16x16x8, compv3/cshuffle) with split_k=2 */
+static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    if(idx != 82 && idx != 83)
+        return -1;
+    if(make_cfg_tf32(idx == 82 ? 54 : 56, spec, arch) != 0)
+        return -1;
+    spec->split_k = 2;
+    return 0;
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -788,6 +803,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 74 && idx <= 81)
     {
         if(make_cfg_mfma_gate(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 82 && idx <= 83)
+    {
+        if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

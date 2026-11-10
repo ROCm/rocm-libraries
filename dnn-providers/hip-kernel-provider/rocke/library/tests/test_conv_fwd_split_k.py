@@ -66,6 +66,22 @@ def _mfma_spec(problem=_PROBE, data=_BF16, **kw):
     return ImplicitGemmConvSpec(problem=problem, data=data, **cfg)
 
 
+def _tf32_spec(**kw):
+    """A gfx950 TF32-compute (fp32 storage, BF16x3 16x16x32 atom) spec."""
+    cfg = dict(
+        data=ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32"),
+        tile_k=32,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        vector_size_a=None,
+        vector_size_b=None,
+        vector_size_c=None,
+    )
+    cfg.update(kw)
+    return _mfma_spec(**cfg)
+
+
 def _spec(problem=_PROBE, data=_BF16, **kw):
     cfg = dict(
         _WMMA,
@@ -101,6 +117,15 @@ class TestSplitKGate(unittest.TestCase):
         ok, why = is_valid_spec(_mfma_spec(split_k=2, async_dma=True), "gfx950")
         self.assertFalse(ok)
         self.assertIn("async_dma", why)
+
+    def test_mfma_fp32_output_is_rejected(self):
+        # Stage 2 casts to fp16 / bf16 only, so TF32 compute (fp32 output)
+        # stays unsplit; the unsplit kernel is unaffected.
+        ok, why = is_valid_spec(_tf32_spec(), "gfx950")
+        self.assertTrue(ok, why)
+        ok, why = is_valid_spec(_tf32_spec(split_k=2), "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("fp16 / bf16 output only", why)
 
     def test_no_pipeline_or_epilogue_is_rejected_split_or_not(self):
         for field in ("pipeline", "epilogue"):
@@ -541,6 +566,12 @@ class TestSplitKResolver(unittest.TestCase):
                 spec = _mfma_spec(problem=p, split_k=-1, pipeline=pipeline)
                 self.assertGreater(resolve_fwd_split_k_spec(spec, "gfx950").split_k, 1)
 
+    def test_auto_does_not_split_tf32(self):
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        spec = _tf32_spec(problem=TestSplitKDegrees._SMALL, split_k=-1)
+        self.assertEqual(resolve_fwd_split_k_spec(spec, "gfx950").split_k, 1)
+
     def test_no_split_where_the_kernel_is_not_built(self):
         p = TestSplitKDegrees._SMALL
         for arch in ("gfx942", "gfx1201"):
@@ -899,6 +930,20 @@ class TestEngineAgreement(unittest.TestCase):
             with self.subTest(backend=backend):
                 with self.assertRaisesRegex(Exception, "plain K loop only"):
                     lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
+
+    def test_tf32_split_is_rejected_by_both(self):
+        _engine_or_skip(self)
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        for arch, kw in (
+            ("gfx950", {}),
+            ("gfx942", dict(warp_tile_k=8, pipeline="compv3")),
+        ):
+            spec = _tf32_spec(split_k=2, **kw)
+            for backend in ("python", "cpp"):
+                with self.subTest(arch=arch, backend=backend):
+                    with self.assertRaisesRegex(Exception, "fp16 / bf16 output only"):
+                        lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
 
     def test_no_pipeline_or_epilogue_is_rejected_by_both(self):
         # pipeline / epilogue = None is malformed, not a request for the

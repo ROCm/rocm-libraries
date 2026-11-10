@@ -608,6 +608,8 @@ def _spec_raw(idx: int):
         return _mfma_split_k_spec(idx)
     if 74 <= idx <= 81:
         return _mfma_gate_spec(idx)
+    if 82 <= idx <= 83:
+        return _tf32_split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -895,6 +897,18 @@ def _mfma_gate_spec(idx: int):
         81: dict(tile_m=256, tile_n=128),
     }[idx]
     return replace(spec, **kw), arch
+
+
+# TF32 compute under the MFMA split: the output is fp32 and Stage 2 casts to
+# fp16 / bf16 only, so both engines reject it. Keep in lockstep with
+# make_cfg_tf32_split_k() in conv_implicit_gemm_emit.c.
+#   82: config 54 (gfx950 16x16x32, mem/cshuffle) with split_k=2
+#   83: config 56 (gfx942 16x16x8, compv3/cshuffle) with split_k=2
+
+
+def _tf32_split_k_spec(idx: int):
+    spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
+    return replace(spec, split_k=2), arch
 
 
 def main() -> int:

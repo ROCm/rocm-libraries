@@ -585,6 +585,15 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                             pl != NULL ? pl : "None");
         }
     }
+    /* fp32 output, plain or under mma_dtype "tf32": the Stage 2 fold casts the
+     * slabs to fp16 / bf16 only (Python: the MFMA dtype_d == "fp32" gate). */
+    if((family == NULL || strcmp(family, "wmma") != 0) && s->dtype_d != NULL
+       && strcmp(s->dtype_d, "fp32") == 0)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "split-K forward on MFMA reduces into fp16 / bf16 output only (got fp32)");
+    }
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
     {
         ROCKE_SPEC_FAIL(reason,
