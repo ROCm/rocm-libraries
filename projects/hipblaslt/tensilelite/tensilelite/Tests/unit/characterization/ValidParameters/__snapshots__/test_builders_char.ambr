@@ -1367,6 +1367,7 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaValue',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
     'AssertSizeEqual',
@@ -1616,6 +1617,13 @@
     'AssertAILessThanEqual': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'AssertAlphaValue': dict({
+      'head': list([
+        1,
+      ]),
+      'len': 1,
+      'type': 'list',
     }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
@@ -2175,7 +2183,7 @@
         'NoSwizzle',
         'HostPreSwizzle',
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'MacroTile': dict({
