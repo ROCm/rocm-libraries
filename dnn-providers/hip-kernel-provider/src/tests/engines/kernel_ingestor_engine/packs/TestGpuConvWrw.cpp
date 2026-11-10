@@ -342,6 +342,8 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
         {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
+        {"OneD1x4Stride2", conv(16, 32, {90}, {4}, {1}, {1}, {2}, {1})},
+        {"OneD1x16Stride8", conv(32, 64, {203}, {16}, {4}, {4}, {8}, {1})},
         {"ThreeD2x2x2Stride2",
          conv(8, 16, {6, 8, 10}, {2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1})},
         {"Deeplab3x3Dilation36",
@@ -355,6 +357,11 @@ std::vector<DeviceCase> deviceCases()
         {"Stride2", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1})},
         {"Stride2Nhwc", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, true)},
         {"Stride2Pad0OddChannels", conv(5, 7, {9, 10}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
+        {"Stem7x7Stride2", conv(3, 16, {23, 30}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1})},
+        {"Stem7x7Stride2K64", conv(3, 72, {37, 70}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1})},
+        {"Stem3x3Stride1C5", conv(5, 40, {21, 77}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
+        {"Stem3x3Stride2ThreeD",
+         conv(3, 24, {5, 13, 21}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1})},
         {"Stride2Pointwise1x1Nhwc",
          conv(16, 32, {9, 11}, {1, 1}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
         {"Pointwise1x1Nhwc", conv(64, 136, {6, 9}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true)},
@@ -641,7 +648,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6}));
 }
 
 } // namespace

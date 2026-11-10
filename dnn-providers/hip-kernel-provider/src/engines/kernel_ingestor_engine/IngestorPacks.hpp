@@ -58,6 +58,8 @@ void registerConvDepthwiseValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScop
 void resetConvDepthwiseValuWrwModuleCache();
 void registerConvDepthwiseRowsSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvDepthwiseRowsModuleCache();
+void registerConvDepthwiseMfmaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseMfmaModuleCache();
 void registerConvSmallcSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvSmallcModuleCache();
 void registerConvIgemmSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
@@ -66,6 +68,9 @@ void registerConvIgemmNchwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handl
 void resetConvIgemmNchwModuleCache();
 void registerConvWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvWrwModuleCache();
+/// @see packs/ConvStemBwdNative.cpp
+void registerConvStemBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvStemBwdModuleCache();
 void registerConvWinogradSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvWinogradModuleCache();
 void registerConvDirectSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

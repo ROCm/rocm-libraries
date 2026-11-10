@@ -9,6 +9,7 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -323,7 +324,8 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
     const int64_t threads = waves * wave;
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const int64_t kv = config.layout == LAYOUT_CHANNELS_LAST ? 4 / elementBytes : 1;
-    const int64_t rows = config.loop == LOOP_ROWS ? config.fr : 1;
+    const int64_t rows
+        = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_SMALLC ? config.fr : 1;
     const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
     const int64_t nbv = divUp(win + (config.align != 0 ? vec - 1 : 0), vec);
     const int64_t phRaw = cf ? nbv * vec / config.sw : divUp(win, config.sw);
@@ -351,8 +353,26 @@ int64_t splitsWanted(int64_t blocksXY,
                 std::max<int64_t>(blocksXY, 1));
     wanted = std::min({wanted, std::max<int64_t>(1, steps / 4), MAX_GRID_YZ});
     const int64_t splitBytes = std::max<int64_t>(partialElems, 1) * int64_t{sizeof(float)};
-    wanted = std::min(wanted, std::max<int64_t>(1, MAX_WORKSPACE_BYTES / splitBytes));
-    return std::max<int64_t>(wanted, 1);
+    wanted = std::max<int64_t>(1, std::min(wanted, MAX_WORKSPACE_BYTES / splitBytes));
+    // Whole rounds of blocks over the units: of wanted / 2 .. wanted splits, the one whose
+    // grid leaves the least of its last round idle (the most splits on a tie). 10 splits of 64
+    // blocks on 304 units run 3 rounds for 2.1 rounds of work; 9 run 2 for 1.9.
+    const int64_t units = std::max<int64_t>(dispatchUnits, 1);
+    const int64_t blocks = std::max<int64_t>(blocksXY, 1);
+    int64_t best = wanted;
+    double bestUse = -1;
+    for(int64_t s = wanted; s >= std::max({int64_t{1}, wanted / 2, wanted - 64}); --s)
+    {
+        const double work = static_cast<double>(blocks) * static_cast<double>(s);
+        const double rounds = std::ceil(work / static_cast<double>(units));
+        const double use = work / (rounds * static_cast<double>(units));
+        if(use > bestUse + 1e-9)
+        {
+            best = s;
+            bestUse = use;
+        }
+    }
+    return best;
 }
 
 DirectPlan directPlanFor(int64_t tiles,
@@ -433,7 +453,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
     const bool direct = config.loop == LOOP_DIRECT;
-    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA;
+    const bool smallc = config.loop == LOOP_ROWS_SMALLC;
+    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -453,7 +474,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_DIRECT)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_SMALLC)
     {
         return std::nullopt;
     }
@@ -492,7 +513,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         {
             return std::nullopt;
         }
-        if(config.bk % (config.wk * shape.dim) != 0 || config.bc % (config.wc * shape.dim) != 0
+        // Small-C rows: the N axis is bc x s (channel, tap) pairs, the waves split k only.
+        if(config.bk % (config.wk * shape.dim) != 0
+           || (smallc ? config.wc != 1 : config.bc % (config.wc * shape.dim) != 0)
            || config.bq % shape.ka != 0)
         {
             return std::nullopt;
@@ -527,8 +550,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    // The row rings: height stride 1, the whole filter height per block.
-    if(!rows && (a.stride[1] != 1 || config.fr != a.filter[1]))
+    // Small-C rows: channels-first, for at most 16 input channels per group (stems); a tile of
+    // at most 16 of them.
+    if(smallc && (!cf || cg > 16 || config.bc > 16))
+    {
+        return std::nullopt;
+    }
+    // The row rings: height stride 1, the whole filter height per block; or (the matrix ring,
+    // loop 1) height stride sh > 1 at unit height dilation, phases of ceil(fr / sh) rows.
+    const bool phased = config.loop == LOOP_RING && a.stride[1] > 1 && a.dilation[1] == 1
+                        && config.fr == divUp(a.filter[1], a.stride[1]);
+    if(!rows && !phased && (a.stride[1] != 1 || config.fr != a.filter[1]))
     {
         return std::nullopt;
     }
@@ -665,9 +697,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
         const int64_t frows = a.filter[0] * a.filter[1];
-        gridY = a.groups * (rows ? divUp(frows, config.fr) : a.filter[0]);
+        // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
+        gridY = a.groups
+                * (rows ? divUp(frows, config.fr) : a.filter[0] * (phased ? a.stride[1] : 1));
         chunks = divUp(a.outSpatial[2], config.bq);
-        trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
+        trackLen = phased ? a.outSpatial[1] + config.fr - 1
+                          : divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
         steps = rows
                     ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
                     : pack_features::checkedProduct(

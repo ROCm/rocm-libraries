@@ -73,11 +73,12 @@ AtomShape atomShapeOf(std::string_view atom);
 
 /// The kernel's loops (CONV_K3_LOOP).
 inline constexpr int64_t LOOP_ROWS = 0; ///< output rows, any stride
-inline constexpr int64_t LOOP_RING = 1; ///< row ring, height stride 1
+inline constexpr int64_t LOOP_RING = 1; ///< row ring (height strides > 1 as phases)
 inline constexpr int64_t LOOP_RING_DMA = 2; ///< row ring with LDS DMA (gfx950)
 inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
 inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
 inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persistent grid)
+inline constexpr int64_t LOOP_ROWS_SMALLC = 6; ///< output rows, (channel, tap) N axis (stems)
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -191,7 +192,8 @@ inline constexpr int64_t MAX_WORKSPACE_BYTES = int64_t{1} << 30;
 /// @p blocksPerUnit blocks per dispatch unit of a device of @p dispatchUnits, for @p steps
 /// reduction steps and @p partialElems partials per split: ceil(units x blocksPerUnit /
 /// blocksXY), at most steps / 4, 65535, and as many as keep the workspace within
-/// MAX_WORKSPACE_BYTES; at least 1.
+/// MAX_WORKSPACE_BYTES; at least 1. Then, of that count down to half of it (64 counts at most),
+/// the one whose grid best fills its last round of dispatchUnits blocks (the most on a tie).
 int64_t splitsWanted(int64_t blocksXY,
                      int64_t blocksPerUnit,
                      int64_t steps,
@@ -240,7 +242,9 @@ DirectPlan directPlanFor(int64_t tiles,
  *
  * Reads and gates every field of @p config: the atom (known, its atom_id, running on the
  * device, taking the graph's element type; "fma" exactly for loop 3, on fp32 graphs); the loop
- * (0 any stride; 1 to 3 height stride 1 with fr the filter height; 2 gfx950 and width stride 1;
+ * (0 any stride; 1 to 3 height stride 1 with fr the filter height, or 1 at height stride sh > 1
+ * and unit height dilation with fr = ceil(filter height / sh), one grid row per height phase;
+ * 2 gfx950 and width stride 1;
  * 3 width stride 1, rows of x and dy whole vectors); the layout, one the graph's x and dy are
  * packed in (channels-last: channels per group whole vectors; 2: gfx950, 16-bit, an atom whose
  * lanes hold 8 positions, not loop 3; loop 2 takes 0 or 2); the tile against the atom (bk, bc
@@ -261,6 +265,10 @@ DirectPlan directPlanFor(int64_t tiles,
  * height dilation (or a one-row filter), bc and bk powers of two from 32 to 512 whose rows have a
  * conflict-free rotation (ConvWrwGeom.h), bpu 1; its grid follows directPlanFor. Every other
  * loop takes wq 0.
+ *
+ * Loop 6 (small-C rows): loop 0 on a matrix atom with the N axis the (input channel, filter-width
+ * tap) pairs: channels-first, at most 16 input channels per group, bc at most 16, wc 1, bk whole
+ * fragments per wave, bq whole atom steps.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,

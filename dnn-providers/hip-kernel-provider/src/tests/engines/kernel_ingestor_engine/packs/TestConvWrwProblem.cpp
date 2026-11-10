@@ -670,6 +670,30 @@ ConfigFields channelsLastFields()
     return f;
 }
 
+/// A stem: 3 input channels, channels-first.
+ConvShape stemShape()
+{
+    auto shape = baseShape();
+    shape.c = 3;
+    return shape;
+}
+
+/// Small-C rows (loop 6) on gfx942's 16 x 16 fp16 atom: 64 output channels on 4 waves, 4 input
+/// channels by 3 taps on the N axis, 64 positions a step.
+ConfigFields smallcFields()
+{
+    ConfigFields f;
+    f.atom = "mfma16_f16";
+    f.atomId = 0;
+    f.loop = 6;
+    f.bk = 64;
+    f.wk = 4;
+    f.bc = 4;
+    f.wc = 1;
+    f.bq = 64;
+    return f;
+}
+
 /// Channels-last with 3 output channels (a VAE's output layer): not whole vectors of 8.
 ConvShape unalignedKShape()
 {
@@ -747,7 +771,9 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 6; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 7; }},
+        {"SmallCWcTwo", [](ConfigFields& f) { f.wc = 2; }, smallcFields, "gfx942", stemShape},
+        {"SmallCBc32", [](ConfigFields& f) { f.bc = 32; }, smallcFields, "gfx942", stemShape},
         {"WqOffTheDirectLoop", [](ConfigFields& f) { f.wq = 1; }},
         {"LoopNegative", [](ConfigFields& f) { f.loop = -1; }},
         {"LayoutNotTheGraphs", [](ConfigFields& f) { f.layout = 1; }},
@@ -1053,6 +1079,62 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(trFields(), "gfx950", channelsLastShape()));
     EXPECT_TRUE(admits(fmaFields(), "gfx1100", floatShape()));
     EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
+}
+
+TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
+{
+    // Three input channels, channels-first: served; 24 (past 16) and channels-last are not.
+    EXPECT_TRUE(admits(smallcFields(), "gfx942", stemShape()));
+    EXPECT_FALSE(admits(smallcFields(), "gfx942", baseShape()));
+    auto many = stemShape();
+    many.c = 17;
+    EXPECT_FALSE(admits(smallcFields(), "gfx942", many));
+    many.c = 16;
+    EXPECT_TRUE(admits(smallcFields(), "gfx942", many));
+    auto cl = stemShape();
+    cl.c = 8;
+    cl.channelsLast = true;
+    auto f = smallcFields();
+    f.layout = 1;
+    EXPECT_FALSE(admits(f, "gfx942", cl));
+    // Any stride: the rows loop's grid, filter rows per block.
+    auto s2 = stemShape();
+    s2.stride = {2, 2};
+    f = smallcFields();
+    f.sw = 2;
+    EXPECT_TRUE(admits(f, "gfx942", s2));
+    const auto launch = launchOf(f, s2, "gfx942", 304);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->block, 256u);
+    EXPECT_EQ(launch->gridY, 1u); // 3 filter rows, fr 3
+}
+
+TEST(TestConvWrwKernelMatch, TheRingRunsHeightStridesAsPhases)
+{
+    // 3x3 at height stride 2: the matrix ring with ceil(3 / 2) = 2 filter rows per phase.
+    auto f = ConfigFields{};
+    f.fr = 2;
+    EXPECT_TRUE(admits(f, "gfx942", heightStride2Shape()));
+    for(const int64_t fr : {1, 3})
+    {
+        f.fr = fr;
+        EXPECT_FALSE(admits(f, "gfx942", heightStride2Shape())) << fr;
+    }
+    // Not with a height dilation, and not on the DMA ring.
+    f.fr = 2;
+    auto dilated = heightStride2Shape();
+    dilated.dilation = {2, 1};
+    dilated.prePadding = {2, 1};
+    dilated.postPadding = {2, 1};
+    EXPECT_FALSE(admits(f, "gfx942", dilated));
+    auto dma = dmaFields();
+    dma.fr = 2;
+    EXPECT_FALSE(admits(dma, "gfx950", heightStride2Shape()));
+    // One grid row per phase; tracks walk the dy rows plus the ring's warm-up.
+    const auto launch = launchOf(f, heightStride2Shape(), "gfx942", 304);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->gridY, 2u);
+    EXPECT_EQ(launch->args.trackLen, launch->args.ho + 1);
 }
 
 TEST(TestConvWrwKernelMatch, UnalignedDyUnitsOnlyWhereOutputChannelsAreNotVectors)
@@ -1692,6 +1774,14 @@ TEST(TestConvWrwLaunch, TheSplitPlannerFillsTheDeviceWithinItsCaps)
     EXPECT_EQ(conv_wrw::splitsWanted(1, 2, 1 << 20, int64_t{1} << 29, 304), 1);
     // A grid that fills the device alone is not split.
     EXPECT_EQ(conv_wrw::splitsWanted(10000, 2, 1 << 20, 1000, 304), 1);
+    // Whole rounds: 64 blocks at 2 per unit want 10 splits, 640 blocks, 3 rounds of 304 for
+    // 2.1 of work; 9 splits run 576 blocks in 2.
+    EXPECT_EQ(conv_wrw::splitsWanted(64, 2, 1 << 20, 1000, 304), 9);
+    // At 4 per unit: 19 splits, 1216 blocks, exactly 4 rounds.
+    EXPECT_EQ(conv_wrw::splitsWanted(64, 4, 1 << 20, 1000, 304), 19);
+    // An even fill keeps the wanted count: 3 blocks on 6 units at 2 per unit want 4 splits,
+    // 12 blocks in 2 whole rounds.
+    EXPECT_EQ(conv_wrw::splitsWanted(3, 2, 1 << 20, 1000, 6), 4);
 }
 
 TEST(TestConvWrwLaunch, TheConfigsBpuSetsTheSplits)

@@ -239,11 +239,15 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuWrwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWrwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWrwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDirectNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvSmallcNative.cpp
@@ -261,6 +265,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_rows/kernels/ConvDepthwiseRows.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_rows/kernels/ConvDepthwiseRowsCores.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfma.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfmaArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroup.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroupArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroupCore.h"
@@ -275,6 +281,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwDirect.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwd.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwdArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwdCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinograd.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradCore.h"
@@ -282,6 +291,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmma.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmmaReg.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradSreg.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmmaCoop.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirect.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectCore.h"
@@ -300,6 +310,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvDepthwiseValuWrwArgs.h
         kernels/ConvDepthwiseRows.cpp
         ConvDepthwiseRowsCores.h
+        kernels/ConvDepthwiseMfma.cpp
+        ConvDepthwiseMfmaArgs.h
         kernels/ConvGroup.cpp
         ConvGroupArgs.h
         ConvGroupCore.h
@@ -314,6 +326,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvWrwCore.h
         ConvWrwDirect.h
         ConvWrwGeom.h
+        kernels/ConvStemBwd.cpp
+        ConvStemBwdArgs.h
+        ConvStemBwdCore.h
         kernels/ConvWinograd.cpp
         ConvWinogradArgs.h
         ConvWinogradCore.h
@@ -321,6 +336,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvWinogradWmma.h
         ConvWinogradWmmaReg.h
         ConvWinogradSreg.h
+        ConvWinogradWmmaCoop.h
         kernels/ConvDirect.cpp
         ConvDirectArgs.h
         ConvDirectCore.h

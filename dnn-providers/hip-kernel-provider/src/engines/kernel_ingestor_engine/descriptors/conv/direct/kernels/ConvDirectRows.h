@@ -59,6 +59,33 @@ __device__ inline void k2rBarrier()
     __builtin_amdgcn_sched_barrier(0);
 }
 
+/// Four fp32 accumulators as four TO. gfx950 rounds bf16 pairs in hardware (v_cvt_pk_bf16_f32):
+/// bit-identical to k1FloatToBf for every non-NaN input (checked exhaustively), and NaNs stay
+/// quiet NaNs; one instruction per pair instead of the software round's six or so per value.
+template <class TO, class V>
+__device__ __attribute__((always_inline)) inline TO __attribute__((ext_vector_type(4)))
+k2rPack4(const V& v)
+{
+    typedef TO v4 __attribute__((ext_vector_type(4)));
+#if defined(__gfx950__)
+    if constexpr(__is_same(TO, k1_bf16))
+    {
+        typedef float f2 __attribute__((ext_vector_type(2)));
+        typedef __bf16 b2 __attribute__((ext_vector_type(2)));
+        typedef unsigned u2 __attribute__((ext_vector_type(2)));
+        const b2 lo = __builtin_convertvector((f2){v[0], v[1]}, b2);
+        const b2 hi = __builtin_convertvector((f2){v[2], v[3]}, b2);
+        return __builtin_bit_cast(
+            v4, (u2){__builtin_bit_cast(unsigned, lo), __builtin_bit_cast(unsigned, hi)});
+    }
+#endif
+    v4 o;
+#pragma unroll
+    for(int i = 0; i < 4; ++i)
+        o[i] = K1Elem<TO>::store(v[i]);
+    return o;
+}
+
 /// Weight pre-pass of the rows kernel. 16 x KA fragments are stored lane-major for the 16x16 MFMA
 /// lane map (lane l: column l % 16, slice offset (l / 16) KPL), ordered so one wave's step (FN
 /// column tiles x R filter rows of one filter column s and one KA slice kc) is one contiguous run:
@@ -297,9 +324,11 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // compiler does not hoist dozens of per-step invariants into live registers.
     auto olane = [&]() __attribute__((always_inline))
     {
-        int l = tid;
+        // Unsigned and masked: the compiler then knows the lane is in [0, WAVE) and keeps the
+        // divisions and remainders below as shifts and masks (a signed remainder is six VALU).
+        unsigned l = static_cast<unsigned>(tid);
         asm volatile("" : "+v"(l));
-        return l % WAVE;
+        return static_cast<int>(l & (WAVE - 1));
     };
 
     // Tile walk: XCD x of K1_XCDS holds blocks b = x mod X (dispatch is round-robin) and owns a
@@ -492,11 +521,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 if(vec && n + 3 < a.k)
                 {
                     typedef TO v4 __attribute__((ext_vector_type(4)));
-                    v4 o;
-#pragma unroll
-                    for(int i = 0; i < 4; ++i)
-                        o[i] = K1Elem<TO>::store(acc[p][j][i]);
-                    *reinterpret_cast<v4*>(yp + n) = o;
+                    *reinterpret_cast<v4*>(yp + n) = k2rPack4<TO>(acc[p][j]);
                 }
                 else
                 {
@@ -510,13 +535,18 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     };
 
     // Staged epilogue (EPI 1): each wave transposes its tile through a private slot of the stage
-    // the last chunk consumed; granule gi of pixel x sits at gi ^ (x & (GP - 1)). A barrier
+    // the last chunk consumed. A write instruction's 16-lane pass (one 4-channel group, pixels
+    // x = 0..15) must hit 16 distinct 8-byte slots of a 128-byte bank row: granule gi of pixel x
+    // sits at gi ^ key(x), key(x) = (x / XR) mod GP with XR = 8 / GP pixels per bank row, and the
+    // pixels x >= 8 swap the two 8-byte halves of each granule (the reader swaps them back).
+    // Granule-only keying left 8 slots for 16 lanes: a two-way conflict on every write. A barrier
     // after it keeps the next tile's DMA out of the slots.
     constexpr int GP = FN * DIM * static_cast<int>(sizeof(TO)) / 16; // granules per pixel
     constexpr bool STAGED = EPI == 1 && sizeof(TO) == 2 && PP == 0 && (GP & (GP - 1)) == 0
                             && GP <= 8 && WAVE / GP <= DIM && DIM * GP * NW <= NG;
     auto storeStaged = [&](Raw16 * slotBase, const Tile& tc, int nb) __attribute__((always_inline))
     {
+        constexpr int XR = GP < 8 ? 8 / GP : 1;
         Raw16* slot = slotBase + wave * DIM * GP;
         TO* y = static_cast<TO*>(a.y);
         const int l = olane();
@@ -531,21 +561,20 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             for(int j = 0; j < FN; ++j)
             {
                 typedef TO v4 __attribute__((ext_vector_type(4)));
-                v4 o;
-#pragma unroll
-                for(int i = 0; i < 4; ++i)
-                    o[i] = K1Elem<TO>::store(acc[p][j][i]);
+                const v4 o = k2rPack4<TO>(acc[p][j]);
                 const int gi = (j * DIM + g * 4) * static_cast<int>(sizeof(TO)) / 16;
-                const int half = (g * 4 * static_cast<int>(sizeof(TO))) % 16;
+                const int half = ((g * 4 * static_cast<int>(sizeof(TO))) % 16) ^ ((x >> 3) * 8);
                 *reinterpret_cast<v4*>(
-                    reinterpret_cast<char*>(slot + x * GP + (gi ^ (x & (GP - 1)))) + half)
+                    reinterpret_cast<char*>(slot + x * GP + (gi ^ ((x / XR) & (GP - 1)))) + half)
                     = o;
             }
 #pragma unroll
             for(int k = 0; k < DIM / PPI; ++k)
             {
                 const int xx = px + k * PPI;
-                const Raw16 v = slot[xx * GP + (c8 ^ (xx & (GP - 1)))];
+                Raw16 v = slot[xx * GP + (c8 ^ ((xx / XR) & (GP - 1)))];
+                if((xx >> 3) & 1)
+                    v = __builtin_shufflevector(v, v, 2, 3, 0, 1);
                 const int ow = tc.ow0 + wq * DIM + xx;
                 const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
                 if(oh < a.ho && ow < a.wo && n < a.k)
