@@ -1051,9 +1051,13 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
-                   || kernel.getIntMetadata("fuse") != 0)
+                   || kernel.getIntMetadata("fuse") != 0
+                   || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
+                                                    kernel.getIntMetadata("bn"),
+                                                    0,
+                                                    "gfx942:sramecc+:xnack-"))
                 {
-                    continue;
+                    continue; // (the plain-order 256 x 256 tile is for single-die devices)
                 }
                 SCOPED_TRACE(kernel.name + (channelsLast ? " channels-last" : " channels-first"));
                 const bool cf = kernel.getIntMetadata("cf") != 0;
@@ -1108,6 +1112,12 @@ TEST(TestConvIgemmCatalog, XcdOrderServesOnlyMultiXcdDevices)
     EXPECT_TRUE(conv_igemm::hasXcds("gfx950"));
     EXPECT_FALSE(conv_igemm::hasXcds("gfx90a:sramecc+:xnack-"));
     EXPECT_FALSE(conv_igemm::hasXcds("gfx1201"));
+    // The 256 x 256 tile: XCD order on multi-XCD devices, plain order on single-die ones.
+    EXPECT_TRUE(conv_igemm::blockOrderServes(256, 256, 1, "gfx950"));
+    EXPECT_FALSE(conv_igemm::blockOrderServes(256, 256, 0, "gfx942:sramecc+:xnack-"));
+    EXPECT_TRUE(conv_igemm::blockOrderServes(256, 256, 0, "gfx90a:sramecc+:xnack-"));
+    EXPECT_FALSE(conv_igemm::blockOrderServes(256, 256, 1, "gfx908"));
+    EXPECT_TRUE(conv_igemm::blockOrderServes(128, 128, 0, "gfx950"));
 }
 
 /// A 2-D problem as the halo check reads it: n 2, square input, square filter.

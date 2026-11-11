@@ -194,11 +194,14 @@ def mfma(dt, atoms32, atoms16, wide32=None, wide16=None):
             C(atoms32, 128, 128, 32, vec=v, xcd=1),
             C(atoms32, 64, 128, 64, vec=v, xcd=1),
         ]
-    # Larger XCD-ordered tiles for compute-bound dense layers (L2 reuse; 256x256 with 2x4 waves).
+    # Larger XCD-ordered tiles for compute-bound dense layers (L2 reuse; 256x256 with 2x4 waves),
+    # and the 256x256 tile in plain order for the archs without XCDs (gfx908, gfx90a: 12-14% over
+    # the 128-wide tiles on deeplab's dilated c2048 / c512 3x3).
     if atoms32:
         cfgs += [
             C(atoms32, 256, 128, 32, vec=v, xcd=1),
             C(atoms32, 256, 256, 32, 2, 4, vec=v, xcd=1),
+            C(atoms32, 256, 256, 32, 2, 4, vec=v),
         ]
     if wide32:
         cfgs += [

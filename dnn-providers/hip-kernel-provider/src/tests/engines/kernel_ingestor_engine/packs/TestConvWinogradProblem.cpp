@@ -563,6 +563,11 @@ TEST(TestConvWinogradKernelMatch, FusedRunsEverywhereAndStagesNhwc)
     channelsLast.channelsLast = true;
     EXPECT_TRUE(admits(fused(), "gfx906"));
     EXPECT_TRUE(admits(fused(), "gfx1201", channelsLast, "HALF"));
+    // Prefetch depth 2 (pf 1).
+    auto prefetch = fused();
+    prefetch.pf = 1;
+    EXPECT_TRUE(admits(prefetch, "gfx1201"));
+    EXPECT_TRUE(admits(prefetch, "gfx906"));
 }
 
 TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
@@ -858,9 +863,15 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.pf = 2;
              return f;
          }},
-        {"FusedPrefetch",
+        {"FusedPrefetchTwo",
          [] {
              auto f = fused();
+             f.pf = 2;
+             return f;
+         }},
+        {"SregPrefetch",
+         [] {
+             auto f = sreg(0);
              f.pf = 1;
              return f;
          }},
