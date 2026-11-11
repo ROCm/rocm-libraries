@@ -213,7 +213,18 @@ predicate therefore carries a `RocRollerCaptures` term, which only an `AMDGPU`
 whose `rocRollerCaptures` flag is set satisfies; hipBLASLt sets the flag only
 when built without rocRoller, and the TensileLite client always sets it.
 
-The GridBased logic files that register them are
+A name with `_SK_WGT_` is a Stream-K kernel: its `CustomKernel` block declares
+`grid: [RocRollerStreamK, One, One]` and `workspaceType: RocRollerStreamK`, and
+the launch sizes the grid from its `occupancy` and allocates the partials and
+flags workspace. These kernels take no workgroup-mapping kernarg and do not
+declare uniform summation order; a build without rocRoller serves them under
+the default setting anyway, as the rocRoller JIT path does. rocRoller's
+Stream-K loop is only correct when no workgroup runs a data-parallel tile, so
+every launch and selection path refuses a problem with at least twice as many
+tiles as the grid has workgroups. `Tests/unit/test_rocroller_streamk_corpus.py`
+pins these properties.
+
+The GridBased logic files that register the `RR_GEMM_*` kernels are
 `library/.../Logic/asm_full/gfx950/gfx950/GridBased/*_MXAE8B32_MXBE8B32_BH_UserArgs.yaml`.
 They declare `DeviceNames: [Device 75a3, Device 75a2, Device 75a0]`, the list
 `LibraryLogic` gives a generated gfx950 library: 75a3 and 75a2 match it
