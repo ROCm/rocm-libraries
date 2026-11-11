@@ -192,10 +192,15 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
     target = ArchTarget.from_gfx(arch)
     if target.wave_size != 64 or spec.wave_size != 64:
         return "dgrad_pp_mfma is a wave64 MFMA kernel"
-    if arch != "gfx950":
-        return "dgrad_pp_mfma needs the 16-byte LDS DMA of gfx950"
+    if not target.memory.has_ds_read_tr:
+        return f"dgrad_pp_mfma needs ds_read_b64_tr_b16 (absent on {arch})"
+    if target.async_lds_max_dwords < 4:
+        return f"dgrad_pp_mfma needs the 16-byte LDS DMA (absent on {arch})"
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
+    ab = "bf16" if p.dtype == "bf16" else "f16"
+    if not target.mma.has_shape(a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32):
+        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     why = problem_dims_reason(p)
     if why is not None:
         return why

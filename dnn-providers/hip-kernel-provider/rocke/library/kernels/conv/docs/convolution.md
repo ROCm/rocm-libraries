@@ -1326,9 +1326,11 @@ covers every knob; the byte-identity gate is
 builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`).
 A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
 `mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
-(`dgrad_pp_mfma_problem`: dY in, dX out, padding `KH - 1 - PAD`). The spec's
-problem is that forward pass: its `cpg` is the dgrad's K and its `kpg` the
-dgrad's C.
+(`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
+per axis). The spec's problem is that forward pass: its `cpg` is the dgrad's
+K and its `kpg` the dgrad's C. The arch gate reads `ArchTarget` capabilities
+(wave64, `ds_read_b64_tr_b16`, 16-byte `buffer_load ... lds`,
+`mfma_f32_16x16x32`), which of the known targets only gfx950 has.
 
 A workgroup of 8 waves owns a 16x16 dX pixel tile and `block_k` (128 or 256)
 dX channels, and walks the dY channels in chunks of 64:

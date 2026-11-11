@@ -23,7 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx */
+#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx, rocke_mma_catalog_has_shape */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_{async_lds_max_dwords,mma} */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
@@ -229,18 +230,33 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
     long lds = rocke_dgrad_pp_mfma_lds_bytes(s);
+    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     const char* why = NULL;
     if(target->wave_size != 64 || s->wave_size != 64)
     {
         why = "dgrad_pp_mfma is a wave64 MFMA kernel";
     }
-    else if(strcmp(arch, "gfx950") != 0)
+    else if(!target->memory.has_ds_read_tr)
     {
-        why = "dgrad_pp_mfma needs the 16-byte LDS DMA of gfx950";
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "dgrad_pp_mfma needs ds_read_b64_tr_b16 (absent on %s)", arch);
+        why = msg;
+    }
+    else if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "dgrad_pp_mfma needs the 16-byte LDS DMA (absent on %s)", arch);
+        why = msg;
     }
     else if(!problem_dtype_ok(p))
     {
         why = "fp16/bf16 only";
+    }
+    else if(!rocke_mma_catalog_has_shape(
+                rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
+    {
+        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
+        why = msg;
     }
     else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))
     {

@@ -90,6 +90,19 @@ def test_transposed_problem_flips_explicit_column_padding():
     assert dgrad_pp_mfma_problem(_dgrad()).pad_w == -1
 
 
+def test_arch_gate_is_capability_based():
+    """The arch gate reads ArchTarget capabilities (wave64, ds_read_b64_tr_b16,
+    16-byte LDS DMA, mfma_f32_16x16x32), not an arch name; of the known
+    arches only gfx950 has them all, so the AOT set stays gfx950-only."""
+    from rocke.core.arch.target import known_arches
+
+    ok = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
+    for dtype in ("fp16", "bf16"):
+        spec = replace(ok, problem=replace(ok.problem, dtype=dtype))
+        passing = [a for a in known_arches() if dgrad_pp_mfma_reason(spec, a) is None]
+        assert passing == ["gfx950"], (dtype, passing)
+
+
 def test_transposed_problem_flips_dilated_padding():
     """The flipped padding is dil*(K-1)-PAD per axis, so the transposed
     problem maps a dilated dgrad's dY back to its dX extents (the validators
@@ -144,7 +157,10 @@ def test_reasons():
     assert why(H=1 << 30, W=1 << 30, cpg=1 << 30, kpg=8) == f"input image {limit}"
     assert "workgroups exceed the i32 block id" in why(N=1 << 25, H=256, W=256)
     assert "fp16/bf16" in why(dtype="fp32")
-    assert "gfx950" in dgrad_pp_mfma_reason(ok, arch="gfx942")
+    for arch in ("gfx942", "gfx90a"):
+        assert dgrad_pp_mfma_reason(ok, arch=arch) == (
+            f"dgrad_pp_mfma needs ds_read_b64_tr_b16 (absent on {arch})"
+        )
     wave64 = "dgrad_pp_mfma is a wave64 MFMA kernel"
     assert dgrad_pp_mfma_reason(ok, arch="gfx1250") == wave64
     assert dgrad_pp_mfma_reason(replace(ok, wave_size=32)) == wave64

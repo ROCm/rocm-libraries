@@ -8,7 +8,7 @@
  * the cross-engine describe test (library/tests/test_direct_dgrad_pp_mfma.py)
  * needs the rocke_library_engine extension, which CI does not build. So the
  * refusals of rocke_dgrad_pp_mfma_is_valid_spec are pinned here to the texts of
- * Python's dgrad_pp_mfma_reason: the wave64 and gfx950 gates, the dtype, the
+ * Python's dgrad_pp_mfma_reason: the wave64 gate and the ds_read_b64_tr_b16 capability gate, the dtype, the
  * extents, groups, stride, dilation on either axis, the square odd filter of
  * at least 3x3, the "same" padding on both axes, the channel granules, the
  * block_k set, the LDS budget and the i32 limits of the buffer descriptors
@@ -93,7 +93,10 @@ static void test_arch_and_dtype_refusals(void)
     const char* wave64 = "dgrad_pp_mfma is a wave64 MFMA kernel";
     rocke_dgrad_pp_mfma_spec_t s = base_spec();
     expect_refused("gfx1250", &s, "gfx1250", wave64);
-    expect_refused("gfx942", &s, "gfx942", "dgrad_pp_mfma needs the 16-byte LDS DMA of gfx950");
+    expect_refused(
+        "gfx942", &s, "gfx942", "dgrad_pp_mfma needs ds_read_b64_tr_b16 (absent on gfx942)");
+    expect_refused(
+        "gfx90a", &s, "gfx90a", "dgrad_pp_mfma needs ds_read_b64_tr_b16 (absent on gfx90a)");
     s.wave_size = 32;
     expect_refused("wave_size 32", &s, "gfx950", wave64);
     s = base_spec();
