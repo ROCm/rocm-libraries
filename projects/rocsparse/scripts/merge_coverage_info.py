@@ -66,6 +66,7 @@ class FileRecord:
         self.function_hits = {}  # name -> execution count
         self.lines = {}  # line number -> (count, checksum or None)
         self.branches = {}  # (line, block, branch) -> taken count or None
+        self.dropped_branch_lines = set()  # lines whose BRDA ids disagreed
         self.extra = []  # unrecognized records, passed through
 
 
@@ -264,20 +265,22 @@ def _merge_record(
         destination[source_path] = incoming
         return
     mismatched = _warn_branch_sets(source_path, current, incoming, warnings)
+    current.dropped_branch_lines.update(mismatched)
+    current.dropped_branch_lines.update(incoming.dropped_branch_lines)
     for name, start_line in incoming.functions.items():
         _merge_function(current, name, start_line, warnings, source_path)
     for name, count in incoming.function_hits.items():
         current.function_hits[name] = max(current.function_hits.get(name, 0), count)
     for line_number, (count, checksum) in incoming.lines.items():
         _merge_line(current, line_number, count, checksum)
-    if mismatched:
+    if current.dropped_branch_lines:
         current.branches = {
             key: taken
             for key, taken in current.branches.items()
-            if key[0] not in mismatched
+            if key[0] not in current.dropped_branch_lines
         }
     for key, taken in incoming.branches.items():
-        if key[0] in mismatched:
+        if key[0] in current.dropped_branch_lines:
             continue
         _merge_branch(current, key, taken)
     for item in incoming.extra:

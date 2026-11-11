@@ -181,6 +181,17 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertNotIn("BRDA:", produced)
         self.assertIn("DA:4,1\n", produced)
 
+    def test_dropped_branch_line_stays_dropped_for_a_later_input(self):
+        first = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,1\nBRDA:4,0,1,-")
+        second = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,3")
+        third = _section(SOURCE, "DA:4,2\nBRDA:4,0,0,1\nBRDA:4,0,1,4")
+        code, produced, stderr = self.run_merge(first, second, third)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("dropped these BRDA records", stderr)
+        self.assertNotIn("BRDA:", produced)
+        self.assertNotIn("BRF:", produced)
+        self.assertIn("DA:4,2\n", produced)
+
     def test_anchor_is_the_last_matching_component(self):
         nested = "/work/projects/rocsparse/checkout/" + SOURCE
         code, produced, stderr = self.run_merge(_section(nested, "DA:1,1"))
