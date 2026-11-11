@@ -4,7 +4,7 @@
 
 Every configuration is the cartesian product of the ``--tile``,
 ``--wave-group``, ``--cluster``, ``--a-dtype`` / ``--b-dtype`` (``fp4``,
-``fp8``, ``bf8``) and tuning options (each takes a comma list). For each
+``fp6``, ``fp8``, ``bf8``) and tuning options (each takes a comma list). For each
 one: compile, report code-object resources (VGPR, SGPR, spills, scratch,
 LDS) and the WMMA count, require bit-exact output at ``beta = 0`` and
 ``beta = 0.5`` on two input sets (``--check-data``: 0 / +1 over all of K,
@@ -107,9 +107,11 @@ _WMMA_K = 128
 CHECK_DATA = ("exact", "sparse")
 # 128-K steps that hold data in the sparse check. FP4 products are multiples
 # of 2^-6 (E2M1 0.5, E8M0 2^-2) up to 144 (6 * 6 * 2 * 2); 8-bit ones are
-# multiples of 2^-10 (2^-4 values, E8M0 2^-1) up to 3.52 (1.875^2). Every
-# FP32 partial sum is exact while SPARSE_STEPS * 128 * max / multiple < 2^24
-# (FP4 12 * 128 * 144 * 2^6, 8-bit 12 * 128 * 3.52 * 2^10).
+# multiples of 2^-10 (2^-4 values, E8M0 2^-1) up to 3.52 (1.875^2); FP6 ones
+# (all 64 E2M3 codes, A scales 2^-1 or 2^0, B scales 2^0) multiples of 2^-7
+# (1/8 * 1/8 * 2^-1) up to 56.25 (7.5^2). Every FP32 partial sum is exact
+# while SPARSE_STEPS * 128 * max / multiple < 2^24 (FP4 12 * 128 * 144 * 2^6,
+# 8-bit 12 * 128 * 3.52 * 2^10, FP6 12 * 128 * 56.25 * 2^7).
 SPARSE_STEPS = 12
 SPARSE_ALPHA = 2.0**-6
 
@@ -143,28 +145,62 @@ def _out_numpy_dtype(out_dtype: str):
     }[out_dtype]
 
 
-def _fp8_type(dtype: str):
+def _ml_dtype(dtype: str):
+    """The ml_dtypes type of an FP6 or 8-bit A/B type; FP6 holds one code
+    per byte, in its low six bits."""
     import ml_dtypes
 
-    return {"fp8": ml_dtypes.float8_e4m3fn, "bf8": ml_dtypes.float8_e5m2}[dtype]
+    return {
+        "fp6": ml_dtypes.float6_e2m3fn,
+        "fp8": ml_dtypes.float8_e4m3fn,
+        "bf8": ml_dtypes.float8_e5m2,
+    }[dtype]
 
 
 @functools.cache
 def decode_table(dtype: str) -> np.ndarray:
-    """FP32 value of every A/B code of ``dtype`` (``fp4``, ``fp8``, ``bf8``)."""
+    """FP32 value of every A/B code of ``dtype`` (``fp4``, ``fp6``, ``fp8``,
+    ``bf8``)."""
     if dtype == "fp4":
         return _E2M1
-    return np.arange(256, dtype=np.uint8).view(_fp8_type(dtype)).astype(np.float32)
+    count = 64 if dtype == "fp6" else 256
+    return np.arange(count, dtype=np.uint8).view(_ml_dtype(dtype)).astype(np.float32)
 
 
-def _fp8_codes(values: np.ndarray, dtype: str) -> np.ndarray:
+def _ml_codes(values: np.ndarray, dtype: str) -> np.ndarray:
     """Codes of exactly representable ``values``."""
-    return values.astype(_fp8_type(dtype)).view(np.uint8)
+    return values.astype(_ml_dtype(dtype)).view(np.uint8)
+
+
+_PACK_ROWS = 1024
+
+
+def pack_fp6_rows(codes: np.ndarray) -> np.ndarray:
+    """Row-major ``[rows][K]`` six-bit codes as ``[rows][3K/4]`` bytes: code
+    ``k`` at bit ``6k`` of its row, least significant bits first (four codes
+    in three bytes). ``pack_fp6_codes``' layout, vectorized and in blocks of
+    rows to bound the temporaries."""
+    rows, k = codes.shape
+    if codes.dtype != np.uint8 or k % 4 or (codes > 63).any():
+        raise ValueError("FP6 codes must be uint8 below 64, K a multiple of 4")
+    out = np.empty((rows, k // 4, 3), dtype=np.uint8)
+    for first in range(0, rows, _PACK_ROWS):
+        part = codes[first : first + _PACK_ROWS].reshape(-1, k // 4, 4)
+        word = part[..., 0].astype(np.uint32)
+        for i in (1, 2, 3):
+            word |= part[..., i].astype(np.uint32) << (6 * i)
+        for byte in range(3):
+            out[first : first + _PACK_ROWS, :, byte] = word >> (8 * byte)
+    return out.reshape(rows, k // 4 * 3)
 
 
 def _device_operand(codes: np.ndarray, dtype: str) -> np.ndarray:
     """Row-major ``[rows][K]`` codes as the kernel reads them."""
-    return pack_fp4_codes(codes) if dtype == "fp4" else np.ascontiguousarray(codes)
+    if dtype == "fp4":
+        return pack_fp4_codes(codes)
+    if dtype == "fp6":
+        return pack_fp6_rows(codes)
+    return np.ascontiguousarray(codes)
 
 
 def check_inputs(spec: MxGemmSpec, *, signed: bool = False):
@@ -174,8 +210,9 @@ def check_inputs(spec: MxGemmSpec, *, signed: bool = False):
     inputs[4] = inputs[4].astype(np.float32).astype(_out_numpy_dtype(spec.out_dtype))
     for index, dtype in enumerate((spec.a_dtype, spec.b_dtype)):
         if dtype != "fp4":
-            codes = _fp8_codes(_E2M1[inputs[5 + index]], dtype)
-            inputs[index], inputs[5 + index] = codes, codes
+            codes = _ml_codes(_E2M1[inputs[5 + index]], dtype)
+            inputs[index] = _device_operand(codes, dtype)
+            inputs[5 + index] = codes
     return tuple(inputs)
 
 
@@ -195,23 +232,26 @@ def sparse_steps(spec: MxGemmSpec) -> np.ndarray:
 
 
 def _sparse_codes(rng, shape, dtype: str) -> np.ndarray:
-    """FP4: all 16 E2M1 codes. 8-bit: +-(1 + m / 2^mantissa_bits) * 2^e
-    with e in {-1, 0}, every mantissa: multiples of 2^-4 up to 1.875."""
+    """FP4: all 16 E2M1 codes. FP6: all 64 E2M3 codes. 8-bit: +-(1 + m /
+    2^mantissa_bits) * 2^e with e in {-1, 0}, every mantissa: multiples of
+    2^-4 up to 1.875."""
     if dtype == "fp4":
         return rng.integers(0, 16, shape, dtype=np.uint8)
+    if dtype == "fp6":
+        return rng.integers(0, 64, shape, dtype=np.uint8)
     bits = _MANTISSA_BITS[dtype]
     mantissa = rng.integers(0, 1 << bits, shape).astype(np.float32)
     values = (1 + mantissa / (1 << bits)) * np.exp2(rng.integers(-1, 1, shape))
     values *= rng.choice(np.array([-1.0, 1.0], dtype=np.float32), shape)
-    return _fp8_codes(values.astype(np.float32), dtype)
+    return _ml_codes(values.astype(np.float32), dtype)
 
 
 def sparse_inputs(spec: MxGemmSpec):
     """Random codes (``_sparse_codes``) and E8M0 scales (FP4 2^-2..2^1,
-    8-bit 2^-1..2^0) in the ``sparse_steps`` K-steps, zero elsewhere; C
-    uniform in [-2, 2]. The FP32 sums are exact in any order, so the check
-    stays bit-exact at any K. ``make_inputs``' layout: A and B as the kernel
-    reads them, scales, C, then the codes."""
+    8-bit 2^-1..2^0, FP6 A 2^-1..2^0 and B 2^0) in the ``sparse_steps``
+    K-steps, zero elsewhere; C uniform in [-2, 2]. The FP32 sums are exact in
+    any order, so the check stays bit-exact at any K. ``make_inputs``'
+    layout: A and B as the kernel reads them, scales, C, then the codes."""
     rng = np.random.default_rng(0x5BA6)
     k_index = np.concatenate(
         [
@@ -227,6 +267,8 @@ def sparse_inputs(spec: MxGemmSpec):
     groups = spec.K // spec.block_k
     low, high = (125, 129) if spec.a_dtype == "fp4" else (126, 128)
     a_scale = rng.integers(low, high, (spec.M, groups), dtype=np.uint8)
+    if spec.b_dtype == "fp6":
+        low, high = 127, 128
     b_scale = rng.integers(low, high, (groups, spec.N), dtype=np.uint8)
     c = rng.uniform(-2.0, 2.0, (spec.M, spec.N)).astype(np.float32)
     return (
@@ -241,16 +283,18 @@ def sparse_inputs(spec: MxGemmSpec):
 
 def timed_inputs(spec: MxGemmSpec, seed: int = 0x32F4):
     """A, B and scales of the timed launches: FP4 as the Tensile client's
-    YAML run (``tensile_timing_inputs``); 8-bit random finite codes below 2
-    in magnitude (exponent MSB clear) with E8M0 scales in the same range."""
+    YAML run (``tensile_timing_inputs``); FP6 and 8-bit random codes with
+    the exponent MSB clear (8-bit: finite and below 2 in magnitude; FP6:
+    0 to 1.875) and E8M0 scales 2^-3..2^3."""
     if spec.a_dtype == "fp4":
         return tensile_timing_inputs(spec, seed)
     rng = np.random.default_rng(seed)
+    fp6 = spec.a_dtype == "fp6"
     operands = []
     for rows in (spec.M, spec.N):
-        codes = rng.integers(0, 256, (rows, spec.K), dtype=np.uint8)
-        np.bitwise_and(codes, 0xBF, out=codes)
-        operands.append(codes)
+        codes = rng.integers(0, 64 if fp6 else 256, (rows, spec.K), dtype=np.uint8)
+        np.bitwise_and(codes, 0x2F if fp6 else 0xBF, out=codes)
+        operands.append(pack_fp6_rows(codes) if fp6 else codes)
     groups = spec.K // spec.block_k
     return (
         *operands,
@@ -704,6 +748,7 @@ _AXES = {
     "mma": ("mma", str, "32x16"),
     "a_dtype": ("a_dtype", str, "fp4"),
     "b_dtype": ("b_dtype", str, "fp4"),
+    "k_reads": ("k_reads", str, "chunked"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

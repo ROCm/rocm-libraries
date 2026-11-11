@@ -11,7 +11,11 @@ import unittest
 
 import numpy as np
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.examples.common.scaled_gemm_reference import decode_e8m0
+from rocke.examples.common.scaled_gemm_reference import (
+    decode_e8m0,
+    decode_fp6,
+    pack_fp6_codes,
+)
 from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     _E2M1,
     FIELDS,
@@ -23,6 +27,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     device_inputs,
     loop_scratch_ops,
     main,
+    pack_fp6_rows,
     reference,
     run_case,
     sparse_inputs,
@@ -32,6 +37,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mx_gemm import (
+    K_READS,
     OUT_DTYPES,
     TILE_K,
     TILE_MN,
@@ -71,13 +77,51 @@ def _valid_geometries(mma: str = "32x16", **fields):
 
 # (a_dtype, b_dtype) of the 8-bit types and their WMMA matrix formats.
 _PAIRS_8BIT = (("fp8", "fp8"), ("bf8", "bf8"), ("fp8", "bf8"), ("bf8", "fp8"))
-_FORMATS = {"fp8": 0, "bf8": 1, "fp4": 4}
+_FORMATS = {"fp8": 0, "bf8": 1, "fp6": 2, "fp4": 4}
+# The tiles that also suit FP6: each row of a 384 K tile is 288 B.
+_FP6_TILES = ((256, 256, 256), (256, 256, 384))
+# Two large problems made of whole 256x256 tiles.
+_MAF_MED = ((3072, 4096, 65536), (2048, 2048, 65536))
 
 
 def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
     """An 8-bit spec: the 16x16 atom and tile_k 256 unless given."""
     fields = {"mma": "16x16", "tile_k": 256, **fields}
     return _spec(*problem, a_dtype=a_dtype, b_dtype=b_dtype, **fields)
+
+
+def _spec6(*problem, **fields) -> MxGemmSpec:
+    """An FP6 spec: the 16x16 atom and tile_k 256 unless given."""
+    fields = {"mma": "16x16", "tile_k": 256, **fields}
+    return _spec(*problem, a_dtype="fp6", b_dtype="fp6", **fields)
+
+
+def _lane_k(spec: MxGemmSpec) -> np.ndarray:
+    """``[lane][slot]``: the K index (within a K-step) of the value that the
+    lane's ``lane_reads`` put in fragment slot ``slot``. Each slot's bits are
+    consecutive bits of the row (value ``k`` of a row is at bit ``k * bits``)
+    and every read stays inside the K-step."""
+    bits = spec.elem_bits
+    layout = spec.fragment_layout
+    starts, at = [], 0
+    for offset, words in spec.lane_reads:
+        starts.append((at, offset, 4 * words))
+        at += 4 * words
+    out = np.zeros((32, layout.fragment.count), dtype=np.int64)
+    for lane, slot in itertools.product(range(32), range(layout.fragment.count)):
+        row_bits = []
+        for bit in range(slot * bits, (slot + 1) * bits):
+            frag_byte = bit // 8
+            ((first, offset, size),) = [
+                r for r in starts if r[0] <= frag_byte < r[0] + r[2]
+            ]
+            byte = lane // 16 * spec.lane_half_bytes + offset + frag_byte - first
+            assert byte < spec.step_bytes
+            row_bits.append(byte * 8 + bit % 8)
+        assert row_bits == list(range(row_bits[0], row_bits[0] + bits))
+        assert row_bits[0] % bits == 0
+        out[lane, slot] = row_bits[0] // bits
+    return out
 
 
 def _landing(
@@ -172,10 +216,56 @@ class MxGemmSpecTest(unittest.TestCase):
                 direct = _spec8(local_prefetch=0, half_plr="none", **fields)
                 self.assertGreater(direct.reads_per_step, 63)
                 self.assertIsNone(validate(direct))
-        for a_dtype, b_dtype in (("fp4", "fp8"), ("bf8", "fp4")):
+        for a_dtype, b_dtype in (("fp4", "fp8"), ("bf8", "fp4"), ("fp6", "fp8")):
             reason = validate(_spec8(a_dtype=a_dtype, b_dtype=b_dtype, tile_m=128))
             self.assertIn("same width", reason or "")
-        self.assertIn("a_dtype and b_dtype must be in", validate(_spec(a_dtype="fp6")))
+        self.assertIn("a_dtype and b_dtype must be in", validate(_spec(a_dtype="bf6")))
+
+    def test_fp6_validates_its_atom_tile_k_and_bytes(self):
+        """FP6 takes the 16x16 atom and tile_k 128/256/384/512 (512 only
+        below 256x256: LDS), packs four K values in three bytes, and is the
+        only type with contiguous reads. 256x256x256 and 256x256x384 are
+        valid at two large problems with the 4x4 cluster."""
+        self.assertEqual(
+            len(list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))), 133
+        )
+        spec = _spec6()
+        self.assertEqual((spec.step_bytes, spec.packed_k), (96, 1536))
+        self.assertEqual(spec.k_bytes(384), 288)
+        self.assertEqual(spec.lane_half_bytes, 24)
+        self.assertEqual(
+            spec.lane_reads, ((0, 2), (8, 2), (16, 2), (48, 2), (56, 2), (64, 2))
+        )
+        contiguous = _spec6(k_reads="contiguous")
+        self.assertEqual(contiguous.lane_half_bytes, 48)
+        self.assertEqual(contiguous.lane_reads, ((0, 4), (16, 4), (32, 4)))
+        # 256x256 tile: 2 + 2 scale reads, then 3 per row and fragment (the
+        # chunked 8 B reads in pairs).
+        self.assertEqual((spec.row_reads, contiguous.row_reads), (3, 3))
+        self.assertEqual((spec.reads_per_step, contiguous.reads_per_step), (52, 52))
+        for tile_k in (128, 256, 384, 512):
+            with self.subTest(tile_k=tile_k):
+                self.assertIsNone(validate(_spec6(tile_m=128, tile_k=tile_k)))
+        self.assertIn("LDS", validate(_spec6(tile_k=512)) or "")
+        for shape, (tm, tn, tk) in itertools.product(_MAF_MED, _FP6_TILES):
+            for k_reads in K_READS:
+                fields = {"tile_m": tm, "tile_n": tn, "tile_k": tk, "k_reads": k_reads}
+                with self.subTest(shape=shape, tile=(tm, tn, tk), k_reads=k_reads):
+                    self.assertIsNone(
+                        validate(_spec6(*shape, out_dtype="bf16", **fields))
+                    )
+        bad = {
+            "32x16": ({"mma": "32x16"}, "mma must be one of"),
+            "tile_k 1024": ({"tile_k": 1024}, "tile_k must be in"),
+            "k_reads": ({"k_reads": "strided"}, "k_reads must be one of"),
+        }
+        for label, (extra, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(_spec6(**extra)) or "")
+        for spec in (_spec(k_reads="contiguous"), _spec8(k_reads="contiguous")):
+            self.assertIn("is for FP6", validate(spec) or "")
+        self.assertIn("tile_k must be in", validate(_spec8(tile_k=384)) or "")
+        self.assertIn("tile_k must be in", validate(_spec(tile_k=384)) or "")
 
     def test_kernel_name_carries_the_dtype_tag(self):
         self.assertIn("t_mxfp4_M1024", _spec().kernel_name())
@@ -186,6 +276,9 @@ class MxGemmSpecTest(unittest.TestCase):
             self.assertTrue(name.startswith(f"t_{tag}_M1024"), name)
         self.assertNotIn("hblate", _spec().kernel_name())
         self.assertIn("_hblate", _spec(half_b_order="late").kernel_name())
+        self.assertTrue(_spec6().kernel_name().startswith("t_mxfp6_M1024"))
+        self.assertNotIn("kcont", _spec6().kernel_name())
+        self.assertIn("_kcont", _spec6(k_reads="contiguous").kernel_name())
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -342,6 +435,37 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertEqual(pads["a_scale"], LdsPad())
         self.assertEqual(_spec(*_BENCH).lds_bytes, 282624)
 
+    def test_fp6_rows_take_a_pad_every_bank_cycle_of_rows(self):
+        """FP6 rows (96 B per 128 K) take 16 B after every 8, 4, 8 or 2 rows,
+        the rows after which a row's first bank repeats; the blocks are no
+        power of two, so they are TDM iterate mode. A power-of-two block
+        that cuts a row stays rejected; "no pad" stays valid."""
+        for tile_k, rows in ((128, 8), (256, 4), (384, 8), (512, 2)):
+            spec = _spec6(tile_m=128, tile_n=128, tile_k=tile_k)
+            row_bytes = spec.k_bytes(tile_k)
+            with self.subTest(tile_k=tile_k):
+                pads = derived_lds_pads(spec)
+                self.assertEqual(pads["a"], LdsPad(16, rows * row_bytes))
+                self.assertEqual(pads["b"], pads["a"])
+                for name in ("a", "b"):
+                    op = spec.lds_layout.operand(name)
+                    self.assertEqual(op.iterate_rows, rows)
+                    self.assertEqual(op.iterate_stride, rows * row_bytes + 16)
+                # Row r of a lane half starts at bank (r * row words + pad
+                # words) mod 64: 16 rows, 16 different 16 B bank groups.
+                op = spec.lds_layout.a
+                starts = {
+                    spec.lds_layout.row_offset(IntOps(), "a", r) // 4 % 64
+                    for r in range(16)
+                }
+                self.assertEqual(len(starts), 16)
+                self.assertTrue(all(s % 4 == 0 for s in starts))
+        self.assertIsNone(validate(_spec6(a_lds_pad=LdsPad(), b_lds_pad=LdsPad())))
+        self.assertIsNone(validate(_spec6(a_lds_pad=LdsPad(32, 1536))))
+        for pad in (LdsPad(16, 512), LdsPad(16, 1000), LdsPad(16, 192 * 3)):
+            with self.subTest(pad=pad):
+                self.assertIsNotNone(validate(_spec6(b_lds_pad=pad)))
+
     def test_kernel_name_encodes_non_default_tuning(self):
         base = _spec().kernel_name()
         self.assertTrue(base.endswith("_t256x256x512_c4x4"), base)
@@ -366,7 +490,15 @@ class MxGemmLayoutTest(unittest.TestCase):
                     half_plr="none",
                 )
             )
+            + list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))
+            + list(
+                _valid_geometries(
+                    "16x16", a_dtype="fp6", b_dtype="fp6", k_reads="contiguous"
+                )
+            )
             + [
+                _spec6(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
+                _spec6(tile_k=384, a_lds_pad=LdsPad(32, 1152)),
                 _spec(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
                 _spec(a_lds_pad=LdsPad(32, 2048), b_scale_lds_pad=LdsPad()),
                 _spec(
@@ -448,7 +580,7 @@ class MxGemmLayoutTest(unittest.TestCase):
                 self.assertEqual(spec.chunk_offsets, offsets)
                 self.assertEqual(layout.chunk_bytes, 16)
                 self.assertEqual(spec.step_bytes, 128 * spec.elem_bits // 8)
-                per_byte = spec.k_per_byte
+                per_byte = 8 // spec.elem_bits
                 for lane, slot in itertools.product(
                     range(32), range(layout.fragment.count)
                 ):
@@ -462,6 +594,89 @@ class MxGemmLayoutTest(unittest.TestCase):
                     self.assertEqual(row, lane % 16)
                     self.assertEqual(k_index // per_byte, byte)
                     self.assertLess(byte, spec.step_bytes)
+
+    def test_fp6_lane_reads_hold_the_wmma_k_values(self):
+        """FP6 "chunked" reads put in each fragment slot the K value that
+        ``scaled_matrix_layout`` assigns it; "contiguous" reads put there the
+        value of K group 0, 2, 1, 3 for the WMMA's group 0, 1, 2, 3, the
+        same for A and B. FP4 and FP8 reads match the layout as well."""
+        regroup = np.array([0, 2, 1, 3])
+        for spec in (_spec6(), _spec6(k_reads="contiguous"), _spec(), _spec8()):
+            layout = spec.fragment_layout
+            got = _lane_k(spec)
+            with self.subTest(spec.kernel_name()):
+                for lane, slot in itertools.product(
+                    range(32), range(layout.fragment.count)
+                ):
+                    row, k_index = layout.coord(lane, slot)
+                    self.assertEqual(row, lane % 16)
+                    if spec.contiguous_k:
+                        k_index = regroup[k_index // 32] * 32 + k_index % 32
+                    self.assertEqual(got[lane, slot], k_index)
+
+    def test_contiguous_reads_with_swapped_scales_keep_the_product(self):
+        """One WMMA of random A, B and per-32-K scales, computed as the
+        hardware sees its operands: with "contiguous" reads and each scale
+        word's bytes 1 and 2 swapped it equals the plain product; without the
+        swap it does not."""
+        rng = np.random.default_rng(6)
+        a = rng.integers(-15, 16, (16, 128)).astype(np.float64)
+        b = rng.integers(-15, 16, (16, 128)).astype(np.float64)
+        sa = np.exp2(rng.integers(-3, 4, (16, 4)))
+        sb = np.exp2(rng.integers(-3, 4, (16, 4)))
+        expected = (a * np.repeat(sa, 32, axis=1)) @ (b * np.repeat(sb, 32, axis=1)).T
+        spec = _spec6(k_reads="contiguous")
+        layout = spec.fragment_layout
+        held = _lane_k(spec)
+
+        def wmma(swap):
+            order = [0, 2, 1, 3] if swap else [0, 1, 2, 3]
+            # Operand values by WMMA K position, gathered from the lanes.
+            a_op, b_op = np.zeros_like(a), np.zeros_like(b)
+            for lane, slot in itertools.product(range(32), range(64)):
+                row, k_index = layout.coord(lane, slot)
+                a_op[row, k_index] = a[row, held[lane, slot]]
+                b_op[row, k_index] = b[row, held[lane, slot]]
+            a_scale, b_scale = sa[:, order], sb[:, order]
+            return (a_op * np.repeat(a_scale, 32, axis=1)) @ (
+                b_op * np.repeat(b_scale, 32, axis=1)
+            ).T
+
+        np.testing.assert_array_equal(wmma(swap=True), expected)
+        self.assertFalse(np.array_equal(wmma(swap=False), expected))
+        swap = 0x03010200
+        word = 0x44332211
+        picked = bytes((word >> 8 * ((swap >> 8 * i) & 0xFF)) & 0xFF for i in range(4))
+        self.assertEqual(picked, bytes((0x11, 0x33, 0x22, 0x44)))
+
+    def test_straddling_rows_prefetch_every_line(self):
+        """The GL2 rule for FP6 rows: per tile, the ceil(row / 256) lines
+        ending at the tile's last byte (clamped to the row's end in the K
+        tail). Over a row's tiles every 256 B line is reached and no address
+        leaves the row. A row that starts inside a line may miss that first
+        line: it holds only tile 0, which is loaded, never prefetched."""
+        for tile_k, k_dim, row_start in itertools.product(
+            (128, 256, 384, 512), (2048, 2176, 4096 + 384, 65536), (0, 64, 160)
+        ):
+            spec = _spec6(1024, 1024, k_dim, tile_m=128, tile_n=128, tile_k=tile_k)
+            if validate(spec) is not None:
+                continue
+            row_bytes, packed = spec.k_bytes(tile_k), spec.packed_k
+            lines = -(-row_bytes // 256)
+            reached = set()
+            for tile in range(-(-k_dim // tile_k)):
+                last = min(spec.k_bytes(tile * tile_k) + row_bytes - 1, packed - 1)
+                for j in range(lines):
+                    offset = last - 256 * j
+                    self.assertGreaterEqual(offset, 0)
+                    reached.add((row_start + offset) // 256)
+            every = set(range(row_start // 256, (row_start + packed - 1) // 256 + 1))
+            with self.subTest(tile_k=tile_k, K=k_dim, row_start=row_start):
+                self.assertLessEqual(reached, every)
+                missed = every - reached
+                self.assertLessEqual(
+                    missed, {row_start // 256} if row_start % 256 else set()
+                )
 
 
 class MxGemmIrTest(unittest.TestCase):
@@ -564,6 +779,78 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual(
                     len(re.findall(lds_read, llvm)), groups * spec.reads_per_step
                 )
+
+    def test_fp6_atom_reads_and_scale_swap(self):
+        """FP6 issues the 16x16x128 f8f6f4 WMMA with format 2 on both
+        operands, as many as FP8 of the same geometry. "chunked" reads each
+        row as six 8 B LDS reads (waited for as three pairs), "contiguous" as
+        three 16 B reads plus one byte swap per scale word; the scales are
+        16 B reads either way."""
+        wmma_16 = "@llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
+        read_8, read_16 = (rf"load <{n} x i32>, ptr addrspace\(3\)" for n in (2, 4))
+        geometry = {"tile_m": 128, "tile_n": 128, "tile_k": 256}
+        fp8 = _spec8(**geometry)
+        fp8_llvm = _llvm(fp8)
+        groups, rest = divmod(len(re.findall(read_16, fp8_llvm)), fp8.reads_per_step)
+        self.assertEqual(rest, 0)
+        for k_reads, loads, width in (("chunked", 6, 2), ("contiguous", 3, 4)):
+            spec = _spec6(k_reads=k_reads, **geometry)
+            rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
+            with self.subTest(k_reads=k_reads):
+                self.assertEqual(
+                    spec.atom.op_id,
+                    "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32",
+                )
+                self.assertEqual(spec.reads_per_step, 2 + 3 * (rm + rn))
+                llvm = _llvm(spec)
+                calls = re.findall(_WMMA + r"[^\n]*", llvm)
+                self.assertEqual(len(calls), len(re.findall(_WMMA, fp8_llvm)))
+                for call in calls:
+                    self.assertIn(f"<8 x float> {wmma_16}(i32 2, <16 x i32> %", call)
+                    self.assertIn(", i32 2, <16 x i32> %", call)
+                self.assertIn(f'"s_wait_dscnt {spec.reads_per_step}"', llvm)
+                data_reads = groups * loads * (rm + rn)
+                if width == 2:
+                    self.assertEqual(len(re.findall(read_8, llvm)), data_reads)
+                    self.assertEqual(len(re.findall(read_16, llvm)), groups * 2)
+                    self.assertNotIn("llvm.amdgcn.perm", llvm)
+                else:
+                    self.assertNotRegex(llvm, read_8)
+                    self.assertEqual(
+                        len(re.findall(read_16, llvm)), data_reads + groups * 2
+                    )
+                    swaps = re.findall(
+                        r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)", llvm
+                    )
+                    self.assertEqual(len(swaps), groups * (rm + rn))
+
+    def test_fp6_k_tail_and_edge_tiles_build(self):
+        """FP6 at tile_k 384 always has a K tail at these K: its GL2 line
+        prefetch is clamped to the row's end (smin); without a tail or edge
+        tile there is no clamp. Partial M and N tiles build."""
+        whole = _llvm(_spec6(1024, 1024, 4096, cluster_dim=(1, 1, 1)))
+        self.assertNotIn("@llvm.smin.i32(", whole)
+        for k_dim in (2048, 32768, 65536):
+            spec = _spec6(1024, 1024, k_dim, tile_k=384, cluster_dim=(1, 1, 1))
+            with self.subTest(K=k_dim):
+                self.assertEqual(spec.tail_steps, (k_dim % 384) // 128)
+                llvm = _llvm(spec)
+                self.assertIn("@llvm.smin.i32(", llvm)
+                # The peel and the two-tile loop body, then the tail tile.
+                tiles = k_dim // 384 % 2 + 2
+                per_step = spec.wave_repeat_m * spec.wave_repeat_n
+                self.assertEqual(
+                    len(re.findall(_WMMA, llvm)),
+                    (tiles * spec.k_steps + spec.tail_steps) * per_step,
+                )
+        for problem in ((1000, 1024, 2048), (1024, 1000, 2048), (300, 16, 2048)):
+            fields = {"cluster_dim": (1, 1, 1)}
+            if problem[1] == 16:
+                fields.update(tile_n=16, wave_group=(4, 1), half_plr="none")
+            spec = _spec6(*problem, **fields)
+            with self.subTest(problem=problem):
+                self.assertIsNone(validate(spec))
+                self.assertIn("f8f6f4", _llvm(spec))
 
     def test_partial_n_tile_walks_only_the_rows_left(self):
         """B data is in TDM iterate mode (8 rows a walk). With a partial N
@@ -935,13 +1222,14 @@ class MxGemmSparseCheckTest(unittest.TestCase):
 
     @staticmethod
     def _specs(**fields):
-        """The FP4 spec of these tests and its 8-bit counterparts."""
+        """The FP4 spec of these tests, its 8-bit and its FP6 counterparts."""
         problem = (64, 48, 2048 + 96)
         yield _spec(*problem, tile_m=128, tile_n=128, **fields)
         for a_dtype, b_dtype in _PAIRS_8BIT:
             yield _spec8(
                 *problem, a_dtype=a_dtype, b_dtype=b_dtype, tile_m=128, **fields
             )
+        yield _spec6(*problem, tile_m=128, **fields)
 
     def test_steps_hold_the_k_edges_and_tile_boundaries(self):
         spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
@@ -966,7 +1254,7 @@ class MxGemmSparseCheckTest(unittest.TestCase):
     def test_8bit_inputs_are_narrow_and_zero_elsewhere(self):
         """8-bit sparse values are +-[2^-1, 1.875] in steps of 2^-4 with
         E8M0 2^-1..2^0, and the exact check is FP4's 0 / +1 re-encoded."""
-        for spec in list(self._specs())[1:]:
+        for spec in (s for s in self._specs() if s.elem_bits == 8):
             data = sparse_inputs(spec)
             active = np.zeros(spec.K, dtype=bool)
             for step in sparse_steps(spec):
@@ -995,10 +1283,63 @@ class MxGemmSparseCheckTest(unittest.TestCase):
                     )
                 self.assertTrue(np.array_equal(exact[0], exact[5]))
 
+    def test_fp6_inputs(self):
+        """FP6 sparse data holds all 64 E2M3 codes in the sparse K-steps with
+        A scales 2^-1..2^0 and B scales 2^0; the exact check is FP4's 0 / +1
+        re-encoded; the device operands are the codes packed four in three
+        bytes, as ``pack_fp6_codes`` packs them and ``decode_fp6`` reads them."""
+        spec = list(self._specs())[-1]
+        self.assertEqual(spec.a_dtype, "fp6")
+        data = sparse_inputs(spec)
+        active = np.zeros(spec.K, dtype=bool)
+        for step in sparse_steps(spec):
+            active[step * 128 : (step + 1) * 128] = True
+        for codes, device in ((data[5], data[0]), (data[6], data[1])):
+            self.assertEqual(set(np.unique(codes[:, active])), set(range(64)))
+            self.assertFalse(codes[:, ~active].any())
+            self.assertEqual(device.shape, (codes.shape[0], spec.K * 3 // 4))
+            self.assertTrue(np.array_equal(device, pack_fp6_rows(codes)))
+        self.assertEqual(set(np.unique(data[2])), {126, 127})
+        self.assertEqual(set(np.unique(data[3])), {127})
+        exact = check_inputs(spec)
+        fp4 = check_inputs(_spec(spec.M, spec.N, spec.K))
+        for index in (5, 6):
+            self.assertTrue(
+                np.array_equal(decode_table("fp6")[exact[index]], _E2M1[fp4[index]])
+            )
+            self.assertTrue(
+                np.array_equal(exact[index - 5], pack_fp6_rows(exact[index]))
+            )
+        codes = np.random.default_rng(3).integers(0, 64, (5, 96), dtype=np.uint8)
+        packed = pack_fp6_rows(codes)
+        self.assertTrue(np.array_equal(packed, pack_fp6_codes(codes)))
+        self.assertTrue(np.array_equal(decode_fp6(packed), decode_table("fp6")[codes]))
+
     def test_decode_tables_and_timed_inputs(self):
         fp8, bf8 = decode_table("fp8"), decode_table("bf8")
         self.assertEqual((fp8[0x38], bf8[0x3C], fp8[0xC0], bf8[0xC0]), (1, 1, -2, -2))
         self.assertTrue(np.isnan(fp8[0x7F]) and np.isinf(bf8[0x7C]))
+        fp6 = decode_table("fp6")
+        self.assertEqual(len(fp6), 64)
+        self.assertEqual(
+            (fp6[0x08], fp6[0x28], fp6[0x1F], fp6[0x01], fp6[0x07]),
+            (1, -1, 7.5, 0.125, 0.875),
+        )
+        # FP6 timing data: codes with the exponent MSB clear (0..1.875, both
+        # signs), packed, and E8M0 scales 2^-3..2^3.
+        spec = _spec6(256, 128, 512)
+        a, b, a_scale, b_scale = timed_inputs(spec)
+        self.assertEqual((a.shape, b.shape), ((256, 384), (128, 384)))
+        self.assertEqual((a_scale.shape, b_scale.shape), ((256, 16), (16, 128)))
+        for packed in (a, b):
+            values = decode_fp6(packed)
+            self.assertLessEqual(np.abs(values).max(), 1.875)
+            self.assertTrue((values < 0).any() and (values > 1).any())
+            # 32 codes; +0 and -0 compare equal.
+            self.assertEqual(len(np.unique(values)), 31)
+        self.assertEqual(
+            set(np.unique(a_scale)) | set(np.unique(b_scale)), set(range(124, 131))
+        )
         for a_dtype, b_dtype in _PAIRS_8BIT:
             spec = _spec8(256, 128, 512, a_dtype=a_dtype, b_dtype=b_dtype)
             a, b, a_scale, b_scale = timed_inputs(spec)
@@ -1013,6 +1354,7 @@ class MxGemmSparseCheckTest(unittest.TestCase):
     def test_fp32_sums_are_exact_in_any_order(self):
         self.assertLess(SPARSE_STEPS * 128 * 144 * 2**6, 2**24)
         self.assertLess(SPARSE_STEPS * 128 * 1.875**2 * 2**10, 2**24)
+        self.assertLess(SPARSE_STEPS * 128 * 7.5**2 * 2**7, 2**24)
         for spec in self._specs():
             x, y = self._values(spec, sparse_inputs(spec))
             exact = x @ y.T
@@ -1126,6 +1468,33 @@ class MxGemmHostBuildTest(unittest.TestCase):
             ),
             _spec8(*_BENCH, tile_m=128, a_dtype="bf8", b_dtype="bf8"),
             _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
+            # FP6 at its large tiles, both reads, and an edge tile with a K tail.
+            *(
+                _spec6(*shape, tile_m=tm, tile_n=tn, tile_k=tk, **fields)
+                for shape, (tm, tn, tk) in itertools.product(_MAF_MED, _FP6_TILES)
+                for fields in (
+                    {"local_prefetch": 0, "half_plr": "none"},
+                    {"local_prefetch": 0, "half_plr": "none", "k_reads": "contiguous"},
+                    {
+                        "local_prefetch": 0,
+                        "half_plr": "none",
+                        "k_reads": "contiguous",
+                        "a_lds_pad": LdsPad(),
+                        "b_lds_pad": LdsPad(),
+                    },
+                )
+            ),
+            _spec6(
+                49152,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=16,
+                wave_group=(4, 1),
+                half_plr="none",
+                cluster_dim=(1, 1, 1),
+            ),
+            _spec6(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, tile_k=384),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
@@ -1190,6 +1559,37 @@ class MxGemmDeviceTest(unittest.TestCase):
             + [
                 _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
                 _spec8(tile_m=128, out_dtype="bf16"),
+            ]
+            + list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))
+            + [
+                _spec6(**fields)
+                for fields in (
+                    {"k_reads": "contiguous"},
+                    {"k_reads": "contiguous", "tile_k": 384},
+                    {"k_reads": "contiguous", "half_b_order": "late"},
+                    {"local_prefetch": 0, "half_plr": "none"},
+                    {"a_lds_pad": LdsPad(), "b_lds_pad": LdsPad()},
+                    {"tile_k": 384, "local_prefetch": 0, "half_plr": "none"},
+                    {
+                        "tile_m": 256,
+                        "tile_n": 16,
+                        "wave_group": (4, 1),
+                        "half_plr": "none",
+                        "cluster_dim": (1, 2, 1),
+                    },
+                )
+            ]
+            + [
+                _spec6(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, tile_k=384),
+                _spec6(
+                    1000,
+                    1000,
+                    2048 + 96,
+                    tile_m=128,
+                    tile_n=128,
+                    k_reads="contiguous",
+                    out_dtype="bf16",
+                ),
             ]
         ):
             with self.subTest(spec.kernel_name()):

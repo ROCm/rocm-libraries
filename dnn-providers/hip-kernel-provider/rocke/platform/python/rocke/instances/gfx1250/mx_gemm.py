@@ -11,9 +11,11 @@ epilogue. The tile, wave group, cluster and the scheduling choices below are
 tuning parameters; LDS padding, multicast, convert width, WMMA order, refill
 position and wait counts are derived from them.
 
-A and B are MXFP4 (E2M1), MXFP8 (E4M3) or MXBF8 (E5M2), with E8M0 scales
-per 32 K (``a_dtype`` / ``b_dtype``: ``"fp4"``, ``"fp8"``, ``"bf8"``). Both
-operands have the same width; the 8-bit types use the 16x16x128 WMMA.
+A and B are MXFP4 (E2M1), MXFP6 (E2M3), MXFP8 (E4M3) or MXBF8 (E5M2), with
+E8M0 scales per 32 K (``a_dtype`` / ``b_dtype``: ``"fp4"``, ``"fp6"``,
+``"fp8"``, ``"bf8"``). Both operands have the same width; FP6 and the 8-bit
+types use the 16x16x128 WMMA. FP6 packs four K values in three bytes, so its
+rows are 96 B per 128 K.
 
 Tile-local rows: rocKE A row ``m`` and rocKE B row ``n`` (an N index). The
 WMMA's 32 M and 16 N positions map to tile rows through :class:`RowMaps`.
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field, replace
+from math import gcd
 
 from ...core.arch import ArchTarget
 from ...core.arch.wmma_scale import scaled_matrix_layout
@@ -82,6 +85,7 @@ class _MxType:
 
 _MX_TYPES = {
     "fp4": _MxType(4, "fp4e2m1", ("32x16", "16x16"), (128, 256, 512, 1024)),
+    "fp6": _MxType(6, "fp6e2m3", ("16x16",), (128, 256, 384, 512)),
     "fp8": _MxType(8, "fp8e4m3", ("16x16",), (128, 256)),
     "bf8": _MxType(8, "bf8e5m2", ("16x16",), (128, 256)),
 }
@@ -122,7 +126,8 @@ def _atom(mma: str, a_dtype: str, b_dtype: str) -> _MmaAtom:
 
 
 TILE_MN = (16, 32, 64, 128, 256)
-TILE_K = (128, 256, 512, 1024)
+TILE_K = (128, 256, 384, 512, 1024)
+K_READS = ("chunked", "contiguous")
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -209,6 +214,14 @@ class MxGemmSpec:
     without draining LDS reads; the cluster wait publishes them.
     ``half_b_order`` places the half-B reads of the next K-step (see
     :class:`TileCompute`).
+
+    ``k_reads`` is how a lane reads its FP6 K values of a row and K-step:
+    ``"chunked"`` reads the WMMA's two 24 B K chunks as they are, in 8 B
+    reads (the chunks are only 8 B aligned); ``"contiguous"`` reads the lane
+    half's 48 B as three 16 B reads. A and B are then regrouped alike (K
+    groups 0, 1, 2, 3 of the K-step feed the WMMA's groups 0, 2, 1, 3), which
+    leaves the product unchanged once each scale word's bytes 1 and 2 are
+    swapped. FP4 and the 8-bit types read their 16 B chunks either way.
     """
 
     name: str
@@ -233,6 +246,7 @@ class MxGemmSpec:
     mma: str = "32x16"
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
+    k_reads: str = "chunked"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -244,14 +258,17 @@ class MxGemmSpec:
         """Bits of an A and a B element (``validate`` requires them equal)."""
         return _MX_TYPES[self.a_dtype].bits
 
-    @property
-    def k_per_byte(self) -> int:
-        return 8 // self.elem_bits
+    def k_bytes(self, k, ops=IntOps):
+        """Bytes of ``k`` K values of an A or B row; ``k`` is an int, or an
+        IR value with ``ops``. FP4 packs two values in a byte, FP6 four in
+        three bytes; ``k`` is a multiple of 4 (K is one of 32)."""
+        unit = gcd(self.elem_bits, 8)
+        return ops.mul(ops.div(k, 8 // unit), self.elem_bits // unit)
 
     @property
     def step_bytes(self) -> int:
         """Bytes of one K-step of an A or B row."""
-        return _ATOM_K // self.k_per_byte
+        return self.k_bytes(_ATOM_K)
 
     @property
     def fragment_layout(self) -> MatrixFragmentLayout:
@@ -269,8 +286,39 @@ class MxGemmSpec:
         return tuple(j * stride for j in range(layout.chunks_per_lane))
 
     @property
+    def contiguous_k(self) -> bool:
+        return self.k_reads == "contiguous"
+
+    @property
+    def lane_half_bytes(self) -> int:
+        """Bytes from lane half 0's first K byte of a row and K-step to lane
+        half 1's."""
+        layout = self.fragment_layout
+        if self.contiguous_k:
+            return layout.chunks_per_lane * layout.chunk_bytes
+        return layout.chunk_bytes
+
+    @property
+    def lane_reads(self) -> tuple[tuple[int, int], ...]:
+        """``(byte offset, words)`` of a lane's LDS reads of one A or B row
+        and K-step, from its lane half's first byte, in fragment order: a
+        16 B read per K chunk, FP6's 24 B chunks as three 8 B reads, or the
+        lane half's contiguous 48 B as three 16 B reads (``k_reads``)."""
+        layout = self.fragment_layout
+        if self.contiguous_k:
+            run = layout.chunks_per_lane * layout.chunk_bytes
+            return tuple((offset, 4) for offset in range(0, run, 16))
+        piece = 16 if layout.chunk_bytes % 16 == 0 else 8
+        return tuple(
+            (chunk + offset, piece // 4)
+            for chunk in self.chunk_offsets
+            for offset in range(0, layout.chunk_bytes, piece)
+        )
+
+    @property
     def dtype_tag(self) -> str:
-        """``mxfp4``, ``mxfp8``, ``mxbf8``, or ``mx<a><b>`` for mixed types."""
+        """``mxfp4``, ``mxfp6``, ``mxfp8``, ``mxbf8``, or ``mx<a><b>`` for
+        mixed types."""
         tail = "" if self.b_dtype == self.a_dtype else self.b_dtype
         return f"mx{self.a_dtype}{tail}"
 
@@ -340,7 +388,7 @@ class MxGemmSpec:
     @property
     def packed_k(self) -> int:
         """Bytes of an A or B row."""
-        return self.K // self.k_per_byte
+        return self.k_bytes(self.K)
 
     @property
     def has_cluster(self) -> bool:
@@ -378,14 +426,23 @@ class MxGemmSpec:
         return max(1, self.wave_repeat_n // 4)
 
     @property
+    def row_reads(self) -> int:
+        """LDS read instructions of one A row or B fragment and K-step: one
+        per 16 B read, one per pair of FP6's 8 B reads (LLVM pairs them into
+        ``ds_load_2addr_b64``; unpaired, the waits counted from this are only
+        stricter)."""
+        wide = sum(1 for _, words in self.lane_reads if words == 4)
+        return wide + (len(self.lane_reads) - wide + 1) // 2
+
+    @property
     def reads_per_step(self) -> int:
-        """LDS reads of one K-step: scales, then one per K chunk of each A row
-        and B fragment (two for FP4, four for 8-bit types)."""
-        chunks = self.fragment_layout.chunks_per_lane
+        """LDS reads of one K-step: scales, then ``row_reads`` of each A row
+        and B fragment (two for FP4, four for 8-bit types, three for FP6)."""
         return (
             self.a_scale_reads
             + self.b_scale_reads
-            + chunks * (self.atom.a_rows * self.wave_repeat_m + self.wave_repeat_n)
+            + self.row_reads
+            * (self.atom.a_rows * self.wave_repeat_m + self.wave_repeat_n)
         )
 
     @property
@@ -395,7 +452,7 @@ class MxGemmSpec:
     @property
     def b_half_reads(self) -> int:
         """LDS reads of half of one K-step's B fragments."""
-        return self.fragment_layout.chunks_per_lane * (self.wave_repeat_n // 2)
+        return self.row_reads * (self.wave_repeat_n // 2)
 
     @property
     def head_reads(self) -> int:
@@ -460,6 +517,7 @@ class MxGemmSpec:
                 "hplrnone": self.half_plr == "none",
                 "hblate": self.half_b_late,
                 "mma16": self.mma == "16x16",
+                "kcont": self.contiguous_k,
             },
         )
 
@@ -486,15 +544,32 @@ def _tensile_scale_pad(vector_width: int) -> LdsPad:
     return LdsPad(_MXS_PAD_BYTES, _MXS_BLOCK_BYTES)
 
 
+def _bank_spread_pad(row_bytes: int) -> LdsPad:
+    """16 B after every ``p`` rows of ``row_bytes``, ``p`` the row count after
+    which a row's first bank repeats (64 banks of 4 B). Each pad moves the
+    next ``p`` rows by one 16 B read, so the 16 rows of a lane half start on
+    different banks. FP6 rows (96 B per 128 K) take it: their padded blocks
+    are not a power of two, so TDM writes them in iterate mode."""
+    banks = _BANK_CYCLE_BYTES // 4
+    rows = banks // gcd(row_bytes // 4, banks)
+    return LdsPad(_DATA_PAD_BYTES, rows * row_bytes)
+
+
 def derived_lds_pads(spec: MxGemmSpec) -> dict[str, LdsPad]:
     """TensileLite's padding with its A/B relabeled to rocKE B/A and
     VectorWidth taken as the operand's wave repeat, as in the benchmark
-    solution (MIWaveTile [8, 4], VectorWidthA 8, VectorWidthB 4)."""
-    k_bytes = spec.tile_k // spec.k_per_byte
+    solution (MIWaveTile [8, 4], VectorWidthA 8, VectorWidthB 4). FP6 data
+    takes :func:`_bank_spread_pad` instead."""
+    k_bytes = spec.k_bytes(spec.tile_k)
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
+    if spec.elem_bits == 6:
+        a_pad = b_pad = _bank_spread_pad(k_bytes)
+    else:
+        a_pad = LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rm))
+        b_pad = LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rn))
     return {
-        "a": LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rm)),
-        "b": LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rn)),
+        "a": a_pad,
+        "b": b_pad,
         "a_scale": _tensile_scale_pad(rm),
         "b_scale": _tensile_scale_pad(rn),
     }
@@ -578,9 +653,15 @@ class MxGemmLdsLayout:
         return ops.add(self.component_base(ops, op, ops.div(row, op.rows)), linear)
 
 
+def _pad_period(block_bytes: int) -> bool:
+    """The TDM pad_interval field encodes a pad after every ``block_bytes``:
+    a power of two of 8..1024 B. Other blocks are TDM iterate mode."""
+    return _is_pow2(block_bytes) and 8 <= block_bytes <= _TDM_PAD_PERIOD_MAX
+
+
 def _data_component(rows: int, row_bytes: int, pad: LdsPad) -> tuple[int, int, int]:
     """(component bytes, iterate rows, iterate stride) of one data component."""
-    if pad.on and pad.block_bytes > _TDM_PAD_PERIOD_MAX:
+    if pad.on and not _pad_period(pad.block_bytes):
         iterate_rows = pad.block_bytes // row_bytes
         stride = pad.block_bytes + pad.pad_bytes
         return -(-rows // iterate_rows) * stride, iterate_rows, stride
@@ -592,7 +673,7 @@ def _data_component(rows: int, row_bytes: int, pad: LdsPad) -> tuple[int, int, i
 
 def mx_gemm_lds_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
     pads = resolved_lds_pads(spec)
-    row_bytes = spec.tile_k // spec.k_per_byte
+    row_bytes = spec.k_bytes(spec.tile_k)
     steps = spec.k_steps
     a_rows, b_rows = spec.tile_m // 2, spec.tile_n // 2
     a_comp, a_it, a_it_stride = _data_component(a_rows, row_bytes, pads["a"])
@@ -643,13 +724,14 @@ def _pad_reason(
     if pad.pad_bytes % _LDS_PAD_STEP_BYTES or pad.pad_bytes > _TDM_PAD_MAX_BYTES:
         return f"{name} LDS pad must be a multiple of 8 B up to {_TDM_PAD_MAX_BYTES} B"
     block = pad.block_bytes
-    if block <= _TDM_PAD_PERIOD_MAX:
-        if block < 8 or not _is_pow2(block):
+    if not _pad_period(block):
+        if row_bytes == 0 or block < 8:
             return f"{name} LDS pad block must be a power of two of 8..1024 B"
-    elif row_bytes == 0:
-        return f"{name} LDS pad block must be at most {_TDM_PAD_PERIOD_MAX} B"
-    elif block % row_bytes or rows % (block // row_bytes):
-        return f"{name} LDS pad block above 1024 B must be whole rows dividing the component"
+        if block % row_bytes or rows % (block // row_bytes):
+            return (
+                f"{name} LDS pad block must be a power of two of 8..1024 B, or "
+                "whole rows dividing the component"
+            )
     if block % chunk:
         return f"{name} LDS pad block must be a multiple of {chunk} B (one lane's read)"
     return None
@@ -674,13 +756,17 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return f"a_dtype and b_dtype must be in {MX_DTYPES}"
     mx_type = _MX_TYPES[spec.a_dtype]
     if _MX_TYPES[spec.b_dtype].bits != mx_type.bits:
-        return "a_dtype and b_dtype must have the same width (no FP4 x 8-bit)"
+        return "a_dtype and b_dtype must have the same width (no mixed FP4, FP6, 8-bit)"
     if spec.tile_k not in mx_type.tile_k:
         return f"tile_k must be in {mx_type.tile_k} for {spec.a_dtype}"
     if tuple(spec.wave_group) not in WAVE_GROUPS:
         return f"wave_group must be one of {WAVE_GROUPS} (4 waves)"
     if spec.mma not in mx_type.mma:
         return f"mma must be one of {mx_type.mma} for {spec.a_dtype}"
+    if spec.k_reads not in K_READS:
+        return f"k_reads must be one of {K_READS}"
+    if spec.contiguous_k and mx_type.bits != 6:
+        return "k_reads 'contiguous' is for FP6 (other types read whole 16 B chunks)"
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
@@ -724,7 +810,7 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     ):
         return "gfx1250 reports no cluster launch support"
     pads = resolved_lds_pads(spec)
-    row_bytes = spec.tile_k // spec.k_per_byte
+    row_bytes = spec.k_bytes(spec.tile_k)
     for name, rows, chunk, data in (
         ("a", spec.tile_m // 2, 16, True),
         ("b", spec.tile_n // 2, 16, True),
@@ -740,7 +826,7 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         if (
             data
             and pad.on
-            and pad.block_bytes <= _TDM_PAD_PERIOD_MAX
+            and _pad_period(pad.block_bytes)
             and pad.block_bytes % row_bytes
         ):
             return f"{name} LDS pad block must be whole {row_bytes} B rows"
@@ -1051,7 +1137,7 @@ class TdmLoader:
         """This wave's data and scale loads of the tile at ``k0`` into buffer ``parity``."""
         k = self.k
         b, ops = k.b, k.ops
-        k_byte = ops.div(k0, k.spec.k_per_byte)
+        k_byte = k.spec.k_bytes(k0, ops)
         remaining_k = b.sub(k.packed_k, ops.v(k_byte))
         c16 = b.const_i32(16)
         data = self.data
@@ -1098,7 +1184,11 @@ class Gl2Prefetcher:
     def prefetch(self, k_ahead, ahead_parity: int) -> None:
         """``ahead_parity`` is the parity of the prefetched tile's index: with
         128 B rows one line holds an even tile and the next one, so the data
-        lines are only prefetched for even tiles."""
+        lines are only prefetched for even tiles. Rows that neither hold
+        whole lines nor divide one (FP6: 96 B per 128 K) take, per row, the
+        ``ceil(row / line)`` lines that end at the tile's last byte: the
+        tiles of a row then reach every line, a line two tiles share once
+        for each."""
         k = self.k
         b, ops, spec, p = k.b, k.ops, k.spec, k.params
         if not spec.gl2_prefetch_distance:
@@ -1110,10 +1200,19 @@ class Gl2Prefetcher:
         k_ahead = b.select(
             b.cmp_lt(k_ahead, p["K"]), k_ahead, b.sub(p["K"], k.tile_k_v)
         )
-        k_byte = ops.div(k_ahead, spec.k_per_byte)
-        data_lines = row_bytes // _GL2_LINE_BYTES
-        if not data_lines and ahead_parity == 0:
-            data_lines = 1
+        k_byte = spec.k_bytes(k_ahead, ops)
+        whole_lines = row_bytes % _GL2_LINE_BYTES == 0
+        straddle = not whole_lines and _GL2_LINE_BYTES % row_bytes != 0
+        if straddle:
+            data_lines = -(-row_bytes // _GL2_LINE_BYTES)
+            last_byte = ops.add(k_byte, row_bytes - 1)
+            if spec.tail_steps:
+                # The K tail's tile ends at the row's end.
+                last_byte = b.smin(ops.v(last_byte), b.sub(k.packed_k, k.c1))
+        else:
+            data_lines = row_bytes // _GL2_LINE_BYTES
+            if not data_lines and ahead_parity == 0:
+                data_lines = 1
         if spec.has_cluster:
             cluster_m0 = b.sub(
                 ops.v(k.block_m), ops.v(ops.mul(k.cluster_wy, spec.tile_m))
@@ -1138,9 +1237,13 @@ class Gl2Prefetcher:
             def address(index):
                 row = ops.add(row0, ops.div(index, data_lines))
                 row = last_inside(row, extent, edge)
-                offset = ops.add(
-                    k_byte, ops.mul(ops.mod(index, data_lines), _GL2_LINE_BYTES)
-                )
+                line = ops.mul(ops.mod(index, data_lines), _GL2_LINE_BYTES)
+                if not straddle:
+                    offset = ops.add(k_byte, line)
+                elif isinstance(line, int) and line == 0:
+                    offset = last_byte
+                else:
+                    offset = b.sub(ops.v(last_byte), ops.v(line))
                 if wide:
                     return b.global_ptr_add(
                         base_ptr, k.offset64(row, k.packed_k, offset)
@@ -1237,8 +1340,13 @@ class Gl2Prefetcher:
 
 
 class LdsReader:
-    """LDS to registers: 16 B reads (scales of one K-step, then each A row
-    and B fragment as one read per K chunk: two for FP4, four for 8-bit)."""
+    """LDS to registers: the scales of one K-step in 16 B reads, then each A
+    row and B fragment as its ``lane_reads`` (one 16 B read per K chunk: two
+    for FP4, four for 8-bit; FP6 six 8 B or three 16 B reads)."""
+
+    # v_perm_b32 selector swapping bytes 1 and 2 of a word (``k_reads``
+    # "contiguous": the WMMA's K groups 1 and 2 hold the K-step's groups 2, 1).
+    _SWAP_GROUPS_1_2 = 0x03010200
 
     def __init__(self, k: _Kernel, rows: RowMaps):
         self.k = k
@@ -1251,18 +1359,18 @@ class LdsReader:
 
     def _lane_k(self, step):
         k = self.k
-        chunk_bytes = k.spec.fragment_layout.chunk_bytes
-        return k.ops.add(step * k.spec.step_bytes, k.ops.mul(k.lane_half, chunk_bytes))
+        return k.ops.add(
+            step * k.spec.step_bytes, k.ops.mul(k.lane_half, k.spec.lane_half_bytes)
+        )
 
     def _row_fragment(self, buffer, operand: str, row, lane_k):
         k, ops = self.k, self.k.ops
-        words = k.spec.fragment_layout.chunk_bytes // 4
         base = ops.add(ops.add(buffer, k.layout.row_offset(ops, operand, row)), lane_k)
-        first, *rest = k.spec.chunk_offsets
+        (first, words), *rest = k.spec.lane_reads
         frag = self.load_i32(ops.add(base, first), words)
-        for offset in rest:
+        for offset, words in rest:
             frag = k.b.vec_concat(frag, self.load_i32(ops.add(base, offset), words))
-        padding = k.spec.atom.frag_words - len(k.spec.chunk_offsets) * words
+        padding = k.spec.atom.frag_words - sum(w for _, w in k.spec.lane_reads)
         if padding:
             frag = k.b.vec_concat(frag, k.b.vector_splat(k.b.const_i32(0), padding))
         return frag
@@ -1315,6 +1423,10 @@ class LdsReader:
         else:
             words = self.load_i32(b_base, n=rn_count)
             b_scales = [b.vec_extract(words, i) for i in range(rn_count)]
+        if spec.contiguous_k:
+            swap = b.const_i32(self._SWAP_GROUPS_1_2)
+            a_scales = [b.perm_b32(w, w, swap) for w in a_scales]
+            b_scales = [b.perm_b32(w, w, swap) for w in b_scales]
         return a_scales, b_scales
 
     def head(self, buffer, step):
@@ -2017,7 +2129,7 @@ def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
     k.c0 = b.const_i32(0)
     k.c1 = b.const_i32(1)
     k.tile_k_v = b.const_i32(spec.tile_k)
-    k.packed_k = ops.div(params["K"], spec.k_per_byte)
+    k.packed_k = spec.k_bytes(params["K"], ops)
     # Global-scale group count; unused with TDM scales, kept so the IR
     # matches the Step 6 kernel's.
     ops.div(params["K"], 32)
