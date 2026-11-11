@@ -404,8 +404,19 @@
     "comp_tdm_v3": "comp_async"
   },
   
+  "double_smem_buffer_pipelines": [
+    "compv4",
+    "preshufflev2",
+    "comp_async",
+    "comp_tdm",
+    "comp_tdm_v2",
+    "comp_tdm_pc",
+    "comp_tdm_v3",
+    "preshuffle_tdm"
+  ],
+
   "unsupported_trait_combos": {
-    "_comment": "Only 'mem' pipeline supports interwave scheduler. All compute pipelines only support intrawave.",
+    "_comment": "Unsupported (pipeline, epilogue, scheduler) triples, shared by Python and C++ validation.",
     "combinations": [
       ["compv3", "cshuffle", "interwave"],
       ["compv3", "default", "interwave"],

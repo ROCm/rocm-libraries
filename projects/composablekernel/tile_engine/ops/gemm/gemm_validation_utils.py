@@ -48,7 +48,7 @@ GEMM_PIPELINES_BY_ARCH = {
 # - it is the only pipeline allowed the [4, 4, 1] wave map
 #   (PIPELINE_EXTRA_WARP_COMBINATIONS; the shared table is unchanged);
 # - its wave maps are the two it is tested with, 2x2x1 and 4x4x1; its A/B are
-#   fp8/bf8 (layout rcr only) or fp16/bf16 (any A/B layout) (GFX1250_TDM_V3_*);
+#   fp8/bf8 (layout rcr only) or fp16/bf16 (any A/B layout, row-major C);
 # - it is registered for gemm_universal only.
 # No default or CI config lists it; gemm_universal/configs/
 # gfx1250_fp8_comp_tdm_v3.json and gfx1250_bf16_comp_tdm_v3.json hold its instances.
@@ -61,7 +61,10 @@ GFX1250_TDM_V3_16BIT_DTYPES = ("fp16", "bf16")
 GFX1250_TDM_V3_OPS = ("gemm_universal",)
 # 8-bit A/B: A row-major, B column-major, C row-major, the only layout the
 # pipeline accepts for them (other A/B layouts spill VGPRs in the K loop at the
-# 16-wave tile). 16-bit A/B: any A/B layout.
+# 16-wave tile). 16-bit A/B: any A/B layout with row-major C.
+# Mirrored in dispatcher/codegen/codegen_common.py: the dependency direction
+# described in _base_gfx_arch prevents importing it here. Gate-equivalence
+# tests exercise both implementations, including mixed dtypes and all layouts.
 GFX1250_TDM_V3_8BIT_LAYOUT = "rcr"
 
 
@@ -113,9 +116,11 @@ def gfx1250_tdm_v3_reject_reason(
     if is_8bit and layout and layout != GFX1250_TDM_V3_8BIT_LAYOUT:
         return (
             f"{pipeline} with 8-bit A/B supports layout "
-            f"{GFX1250_TDM_V3_8BIT_LAYOUT!r} only (the pipeline static_asserts it), "
+            f"{GFX1250_TDM_V3_8BIT_LAYOUT!r} only, "
             f"got {layout!r}"
         )
+    if layout[2:3] not in ("", "r"):
+        return "comp_tdm_v3 supports row-major C only"
     return ""
 
 

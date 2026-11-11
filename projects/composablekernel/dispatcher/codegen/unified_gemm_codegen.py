@@ -25,6 +25,7 @@ from dataclasses import dataclass, asdict, replace
 from enum import Enum
 import concurrent.futures
 
+from arch_specs_generated import DOUBLE_SMEM_BUFFER_PIPELINES
 from codegen_common import (
     TileConfig,
     TraitConfigBase,
@@ -83,18 +84,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 log = logging.getLogger(__name__)
 
-
-# Pipelines whose C++ class requires DoubleSmemBuffer == true.
-DOUBLE_SMEM_BUFFER_PIPELINES = (
-    "compv4",
-    "preshufflev2",
-    "comp_async",
-    "comp_tdm",
-    "comp_tdm_v2",
-    "comp_tdm_pc",
-    "comp_tdm_v3",
-    "preshuffle_tdm",
-)
 
 # The gfx1250 pipeline constants (TDM_PIPELINES, GFX1250_ONLY_PIPELINES, the
 # reject reasons) live in codegen_common next to gfx1250_pipeline_reject_reason
@@ -1170,15 +1159,17 @@ using CLayout = {ns_name}::CLayout;
         """Generate launch function for Stream-K GEMM (the dispatcher way).
 
         Stream-K is a single GEMM that splits the K dimension across CUs and
-        reduces partial results through a device workspace. Unlike Tile Engine
-        (which takes an external workspace pointer), the dispatcher allocates the
-        workspace INTERNALLY via DeviceMem inside launch(args, stream).
+        reduces partial results through a device workspace. The internal-workspace
+        launch overload allocates DeviceMem and delegates to the external-workspace
+        overload; both use the same timed reset and launch path.
 
         The reduction strategy is taken from the config (atomic/linear/tree).
         Atomic: partial tiles atomic-add into C, so C is zeroed before every
         kernel invocation. Linear/Tree: partials accumulate through the device
-        workspace, which is zeroed instead. Both are handled by the preprocess
-        callback passed to launch_kernel_time_mask.
+        workspace, where only the reduction flags are zeroed (partials are
+        overwritten before use). The preprocess callback passed to
+        launch_kernel_time_mask includes these resets in the measured time:
+        full C for Atomic, flags only for Linear/Tree.
         """
         reduction_ck = {
             "atomic": "Atomic",
@@ -1188,8 +1179,8 @@ using CLayout = {ns_name}::CLayout;
         # The Atomic strategy zeroes C with a row-major hipMemset2D (pitch =
         # stride_E rows of N elems). A column-major C would be zeroed incorrectly
         # and atomic accumulation would then corrupt results, so fail loudly at
-        # compile time rather than silently. Linear/Tree zero the workspace, not C,
-        # so they carry no such requirement.
+        # compile time rather than silently. Linear/Tree zero the workspace flags,
+        # not C, so their reset imposes no such requirement (the pipeline may).
         c_rowmajor_assert = (
             """
     static_assert(

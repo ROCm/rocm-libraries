@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
@@ -325,7 +326,8 @@ def main():
     parser.add_argument(
         "--budget-pct",
         default="100",
-        help="Comma-list of Stream-K workgroup budgets, in percent of the kernel's "
+        help="Comma-list of distinct integer Stream-K workgroup budgets in 1..100, "
+        "in percent of the kernel's "
         "default (CUs x occupancy, 100); each kernel x problem runs once per value "
         "(e.g. 100,75,50,25)",
     )
@@ -344,11 +346,11 @@ def main():
     )
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
-    args.arch = _resolve_arch(args.arch)
     try:
         budget_pcts = parse_streamk_budgets(args.budget_pct)
-    except ValueError as e:
-        parser.error(str(e))
+    except ValueError as exc:
+        parser.error(str(exc))
+    args.arch = _resolve_arch(args.arch)
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)

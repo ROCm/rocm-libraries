@@ -931,6 +931,60 @@ class TestCompTdmV3(unittest.TestCase):
             )
             self.assertEqual(te.TDM_PIPELINE_EPILOGUE, cc.TDM_PIPELINE_EPILOGUE)
 
+    def test_c_layout_gate_and_sweep(self):
+        from gemm_utils import expand_sweep
+
+        config = (
+            TE_GEMM_DIR / "gemm_universal" / "configs" / "gfx1250_bf16_comp_tdm_v3.json"
+        )
+        for dtype, layout in itertools.product(
+            ("fp16", "bf16"), ("rrr", "rcr", "crr", "ccr", "rrc", "rcc", "crc", "ccc")
+        ):
+            expected = layout.endswith("r")
+            with self.subTest(dtype=dtype, layout=layout):
+                reason = cc.comp_tdm_v3_reject_reason(dtype, dtype, layout=layout)
+                self.assertEqual(not reason, expected)
+                self.assertEqual(
+                    te.gfx1250_tdm_v3_reject_reason(
+                        "comp_tdm_v3", dtype, dtype, 4, 4, 1, layout=layout
+                    ),
+                    reason,
+                )
+                self.assertEqual(
+                    te.is_tile_config_valid(
+                        256,
+                        256,
+                        64,
+                        4,
+                        4,
+                        1,
+                        16,
+                        16,
+                        32,
+                        dtype,
+                        dtype,
+                        dtype,
+                        "comp_tdm_v3",
+                        layout,
+                        "gfx1250",
+                        kernel_name_prefix="gemm_universal",
+                    ),
+                    expected,
+                )
+                for variant in ("standard", "stream_k"):
+                    self.assertEqual(
+                        not self._gate(dtype=dtype, layout=layout, variant=variant),
+                        expected,
+                    )
+                    if variant == "stream_k" and not expected:
+                        with self.assertRaisesRegex(ValueError, "row-major C"):
+                            expand_sweep(str(config), "gfx1250", dtype, layout, variant)
+                    else:
+                        kernels = expand_sweep(
+                            str(config), "gfx1250", dtype, layout, variant
+                        )
+                        self.assertEqual(len(kernels), 2 if expected else 0, variant)
+
     def test_maps_lds_and_flags(self):
         m = CommonTypeMappings
         self.assertEqual(m.PIPELINE_TO_CK["comp_tdm_v3"], "GemmPipelineAgBgCrCompTDMV3")
