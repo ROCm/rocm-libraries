@@ -44,7 +44,7 @@ from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
 from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, SCmpLeU32, SLShiftLeftB64, \
-  SLShiftRightB32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, VMulLOU32, \
+  SLShiftRightB32, SMovB32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, VMulLOU32, \
   VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
@@ -267,8 +267,9 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
 
   Each wave covers MacroTile1/numWaves consecutive columns: tile MT0 x those columns, M-contiguous from
   the LDS address of its first column, global address Srd<tc> + (column*Stride<tc> + wg0*MT0)*bpe, and
-  tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the four tmp SGPRs is left at
-  the first column of the wave. The block assumes one free index per operand, as every GEMM problem
+  tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left at
+  the first column of the wave. The 64-bit global offset is computed in group1 words 6 and 7 before
+  setTensorStride0 sets word 6; word 7 goes back to 0. The block assumes one free index per operand, as every GEMM problem
   type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each.
   """
   assert len(gwb.kernel["PackedC0IndicesX"]) == 1 and len(gwb.kernel["PackedC1IndicesX"]) == 1, \
@@ -281,7 +282,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   stride1 = "Stride%s%s" % (tc, kw.states.indexChars[gwb.kernel["PackedC1IndicesX"][0]])
   sizeI = kw.sizeRef(gwb.kernel["ProblemType"]["Index0"])
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
-  col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
+  col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, g1 + 6, g1 + 7
   module.add(tdm.initOperands(g0, g1))
   module.add(tdm.setDataSize(bpe, g1))
   module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
@@ -300,6 +301,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(tdm.setGlobalAddr(g0, "Srd%s" % tc))
   module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(offLo), comment="global address lo"))
   module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr(offHi), comment="global address hi"))
+  module.add(SMovB32(dst=sgpr(offHi), src=0, comment="group1 word 7 back to 0"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
   module.add(tdm.setTensorDim0(g1, dim, kw))
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
@@ -325,12 +327,15 @@ def emitTDMStoreLoadC(gwb) -> Module:
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipLoad = Label(kw.labels.getNameInc("TDMStoreLoadCSkip"), "no column of this wave is inside C")
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
-  with kw.allocTmpSgpr(12, alignment=8, tag="tdmLoadCDesc") as desc:
-    with kw.allocTmpSgpr(4, alignment=2, tag="tdmLoadCTmp") as tmp:
-      _tdmStoreDescriptor(gwb, module, tdm, desc.idx + 8, desc.idx, tmp, "C")
+  # The descriptor groups are separate operands, each 4-aligned as an SGPR tuple must be, so they fit
+  # where 12 consecutive 8-aligned SGPRs would not.
+  with kw.allocTmpSgpr(8, alignment=4, tag="tdmLoadCDescGroup1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="tdmLoadCDescGroup0") as group0:
+    with kw.allocTmpSgpr(2, alignment=2, tag="tdmLoadCTmp") as tmp:
+      _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "C")
       module.add(SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?"))
       module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
-      module.add(tdm.issueLoad(desc.idx + 8, desc.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel, "C")))
+      module.add(tdm.issueLoad(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel, "C")))
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM load of C " + STINKY_KEEP))
       module.add(skipLoad)
@@ -354,16 +359,16 @@ def emitTDMStoreFlush(gwb) -> Module:
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipStore = Label(kw.labels.getNameInc("TDMStoreSkip"), "no column of this wave is inside D")
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
-  # group1 (8 SGPRs) must be 8-aligned, so it goes first; group0 (4 SGPRs) follows.
-  with kw.allocTmpSgpr(12, alignment=8, tag="tdmStoreDesc") as desc:
-    with kw.allocTmpSgpr(4, alignment=2, tag="tdmStoreTmp") as tmp:
-      _tdmStoreDescriptor(gwb, module, tdm, desc.idx + 8, desc.idx, tmp, "D")
+  with kw.allocTmpSgpr(8, alignment=4, tag="tdmStoreDescGroup1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="tdmStoreDescGroup0") as group0:
+    with kw.allocTmpSgpr(2, alignment=2, tag="tdmStoreTmp") as tmp:
+      _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "D")
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
       module.add(SWaitCnt(dscnt=0, comment="staging stores done " + STINKY_KEEP))
       module.add(kw._syncThreads(gwb.kernel, "every wave has staged its part of the tile"))
       module.add(SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?"))
       module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
-      module.add(tdm.issueStore(desc.idx + 8, desc.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
+      module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
       # Nor this one: after the OptNLL store, nothing re-derives it before s_endpgm.
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store " + STINKY_KEEP))
       module.add(skipStore)
