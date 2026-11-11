@@ -38,8 +38,9 @@ enum class Layout
 /// The KMD `layout` value of @p layout.
 std::string_view layoutName(Layout layout);
 
-/// A convolution over 2 or 3 spatial dimensions. Spatial arrays are (depth, height, width);
-/// a 2-D problem has depth 1 everywhere, so a 3-D kernel runs it unchanged.
+/// A convolution over 1, 2 or 3 spatial dimensions. Spatial arrays are (depth, height,
+/// width), right-aligned: a 2-D problem has depth 1 and a 1-D problem depth and height 1
+/// everywhere, so a 3-D kernel runs either unchanged.
 struct ConvProblem
 {
     int spatialRank = 2;
@@ -90,7 +91,7 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
  * @brief The problem x, w and y describe under @p attributes, or nullopt if these packs
  *        cannot serve it.
  *
- * Requires rank 4 or 5 for all three, real device data, one dtype among FLOAT, HALF and
+ * Requires rank 3, 4 or 5 for all three, real device data, one dtype among FLOAT, HALF and
  * BFLOAT16, one packed layout shared by all three, cross-correlation, every extent in int,
  * C and K divisible by groups = C / w channels, and y exactly the output shape.
  */
