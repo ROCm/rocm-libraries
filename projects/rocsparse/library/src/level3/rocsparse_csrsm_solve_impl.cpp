@@ -123,7 +123,8 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
-        const rocsparse::triangular_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
+        const rocsparse::triangular_info_t* trm_info
+            = csrsm_info->get_triangular_data()->get(trans_A, descr->fill_mode);
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)

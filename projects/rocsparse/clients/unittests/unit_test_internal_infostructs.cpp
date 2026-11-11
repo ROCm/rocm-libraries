@@ -254,7 +254,7 @@ namespace
                 rocsparse_destroy_spmat_descr(mat);
             }
         }
-        SpmatGuard(const SpmatGuard&) = delete;
+        SpmatGuard(const SpmatGuard&)            = delete;
         SpmatGuard& operator=(const SpmatGuard&) = delete;
     };
 
@@ -270,7 +270,7 @@ namespace
                 rocsparse_destroy_dnvec_descr(vec);
             }
         }
-        DnvecGuard(const DnvecGuard&) = delete;
+        DnvecGuard(const DnvecGuard&)            = delete;
         DnvecGuard& operator=(const DnvecGuard&) = delete;
     };
 }
@@ -457,7 +457,7 @@ TEST(internal_infostructs, csrgemm_info_destroy_null_is_success)
 //
 // The C++ member routing of _rocsparse_mat_info (get_boost, get/set_csrmv_info,
 // get_*_info, clear_*_info) is hidden in the library and its definition drags in
-// the whole trm_t / csritsv / bsrmv / sorted_coo2csr dependency graph, so it is
+// the whole triangular info / csritsv / bsrmv / sorted_coo2csr dependency graph, so it is
 // exercised here through the exported create/destroy C API (which runs the real
 // _rocsparse_mat_info constructor and destructor-routing) rather than by
 // compiling in common/rocsparse_mat_info.cpp. See the report / findings note.

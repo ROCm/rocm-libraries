@@ -69,8 +69,8 @@ namespace rocsparse
             batch_index += hipGridDim_y)
         {
             rocsparse::load_pointer(diag, batch_index, diag_stride)[row]
-                = (diag_pos >= 0) ? rocsparse::real(
-                      rocsparse::load_pointer(csr_val, batch_index, csr_val_stride)[diag_pos])
+                = (diag_pos >= 0) ? rocsparse::real(rocsparse::load_pointer(
+                                        csr_val, batch_index, csr_val_stride)[diag_pos])
                                   : static_cast<floating_data_t<T>>(0);
         }
     }
@@ -89,7 +89,8 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = csrildlt0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                   rocsparse_fill_mode_lower);
 
         static constexpr uint32_t BLOCKSIZE = 256;
         const dim3                blocks((A->rows - 1) / BLOCKSIZE + 1,

@@ -196,7 +196,7 @@ namespace rocsparse
             case rocsparse_spsv_stage_preprocess:
             {
                 rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
-                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
+                if(csrsv_info->get_triangular_data()->get(trans, mat->descr->fill_mode) == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
@@ -253,7 +253,7 @@ namespace rocsparse
             case rocsparse_spsv_stage_preprocess:
             {
                 rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
-                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
+                if(csrsv_info->get_triangular_data()->get(trans, mat->descr->fill_mode) == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
@@ -303,7 +303,7 @@ namespace rocsparse
             case rocsparse_spsv_stage_preprocess:
             {
                 rocsparse_ellsv_info ellsv_info = mat->info->get_ellsv_info();
-                if(ellsv_info->get(trans, mat->descr->fill_mode) == nullptr)
+                if(ellsv_info->get_triangular_data()->get(trans, mat->descr->fill_mode) == nullptr)
                 {
                     // rocsparse_spsv does not carry the caller's buffer size past the
                     // buffer_size stage, so there is no size left to validate against.

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,12 +109,13 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
 
     if(csrsm_info == nullptr)
     {
-        csrsm_info      = new _rocsparse_csrsm_info();
+        csrsm_info      = new _rocsparse_csrsm_info(info->get_triangular_data(),
+                                               info->get_singularity_numeric_exact());
         p_csrsm_info[0] = csrsm_info;
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(csrsm_info->recreate(
+    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(
         handle, trans_A, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
 
     return rocsparse_status_success;

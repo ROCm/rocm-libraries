@@ -465,9 +465,9 @@ TEST_F(PrecondTrmInfo, mat_info_trm_slots_of_every_routine)
 }
 
 // The four (operation, fill mode) slots of the data of a triangular routine: the index
-// type of the slots, copies that duplicate every filled slot, and the release of slots
-// that two holders share.
-TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_uncouple)
+// type of the slots, copies that duplicate every filled slot, and slots that alias the
+// same triangular_info_t.
+TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
 {
     rocsparse::triangular_data_t        empty;
     const rocsparse::triangular_data_t& const_empty = empty;
@@ -508,24 +508,31 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_uncouple)
     expect_same_arrays(*trans, *copied_trans);
     copy.copy(nullptr, handle->stream);
 
-    // Uncoupling releases the slots that are shared with the other holder only.
-    rocsparse::triangular_data_t holder_a;
-    rocsparse::triangular_data_t holder_b;
+    // Two slots may alias the same triangular_info_t: releasing one slot keeps it alive for
+    // the other, a copy preserves the aliasing, and the holder frees it once.
+    rocsparse::triangular_data_t holder;
     auto*                        shared = new rocsparse::triangular_info_t();
     auto*                        own    = new rocsparse::triangular_info_t();
     fill_trm_info(*shared, 30);
     fill_trm_info(*own, 40);
-    holder_a.set(rocsparse_operation_none, rocsparse_fill_mode_upper, shared);
-    holder_b.set(rocsparse_operation_none, rocsparse_fill_mode_upper, shared);
-    holder_a.set(rocsparse_operation_transpose, rocsparse_fill_mode_lower, own);
+    holder.set(rocsparse_operation_none, rocsparse_fill_mode_lower, shared);
+    holder.set(rocsparse_operation_transpose, rocsparse_fill_mode_upper, shared);
+    holder.set(rocsparse_operation_none, rocsparse_fill_mode_upper, own);
 
-    holder_a.uncouple(nullptr);
-    holder_a.uncouple(&holder_a);
-    EXPECT_EQ(holder_a.get(rocsparse_operation_none, rocsparse_fill_mode_upper), shared);
-    holder_a.uncouple(&holder_b);
-    EXPECT_EQ(holder_a.get(rocsparse_operation_none, rocsparse_fill_mode_upper), nullptr);
-    EXPECT_EQ(holder_a.get(rocsparse_operation_transpose, rocsparse_fill_mode_lower), own);
-    EXPECT_EQ(holder_b.get(rocsparse_operation_none, rocsparse_fill_mode_upper), shared);
+    rocsparse::triangular_data_t aliased_copy;
+    aliased_copy.copy(&holder, handle->stream);
+    EXPECT_EQ(aliased_copy.get(rocsparse_operation_none, rocsparse_fill_mode_lower),
+              aliased_copy.get(rocsparse_operation_transpose, rocsparse_fill_mode_upper));
+    EXPECT_NE(aliased_copy.get(rocsparse_operation_none, rocsparse_fill_mode_lower), shared);
+
+    holder.set(rocsparse_operation_none, rocsparse_fill_mode_lower, nullptr);
+    EXPECT_EQ(holder.get(rocsparse_operation_transpose, rocsparse_fill_mode_upper), shared);
+    expect_same_arrays(*shared, *shared);
+    EXPECT_EQ(holder.get(rocsparse_operation_none, rocsparse_fill_mode_upper), own);
+
+    holder.clear();
+    for(const auto& s : slots)
+        EXPECT_EQ(holder.get(s.op, s.fill), nullptr);
 }
 
 TEST_F(PrecondTrmInfo, copy_mat_info_with_triangular_analysis)

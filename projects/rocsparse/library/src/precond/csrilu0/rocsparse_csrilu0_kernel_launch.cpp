@@ -57,7 +57,8 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
                        (A->descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    auto trm_info = csrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                             rocsparse_fill_mode_lower);
 
     // Max nnz per row
     const int64_t max_nnz = trm_info->get_max_nnz();

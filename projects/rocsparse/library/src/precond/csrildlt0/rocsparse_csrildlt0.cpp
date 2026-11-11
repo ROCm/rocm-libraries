@@ -53,13 +53,15 @@ rocsparse_status rocsparse::csrildlt0(rocsparse_handle         handle,
             A->batch_count,
             reinterpret_cast<int32_t*>(
                 csrildlt0_info->get_singularity_numeric_near()->get_position()),
-            reinterpret_cast<const int32_t*>(csrildlt0_info->get_pivot_info()->get_position()),
+            reinterpret_cast<const int32_t*>(
+                csrildlt0_info->get_triangular_data()->get_pivot_info()->get_position()),
             handle->stream));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
             A->batch_count,
             reinterpret_cast<int32_t*>(
                 csrildlt0_info->get_singularity_numeric_exact()->get_position()),
-            reinterpret_cast<const int32_t*>(csrildlt0_info->get_pivot_info()->get_position()),
+            reinterpret_cast<const int32_t*>(
+                csrildlt0_info->get_triangular_data()->get_pivot_info()->get_position()),
             handle->stream));
     }
     else
@@ -68,13 +70,15 @@ rocsparse_status rocsparse::csrildlt0(rocsparse_handle         handle,
             A->batch_count,
             reinterpret_cast<int64_t*>(
                 csrildlt0_info->get_singularity_numeric_near()->get_position()),
-            reinterpret_cast<const int64_t*>(csrildlt0_info->get_pivot_info()->get_position()),
+            reinterpret_cast<const int64_t*>(
+                csrildlt0_info->get_triangular_data()->get_pivot_info()->get_position()),
             handle->stream));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
             A->batch_count,
             reinterpret_cast<int64_t*>(
                 csrildlt0_info->get_singularity_numeric_exact()->get_position()),
-            reinterpret_cast<const int64_t*>(csrildlt0_info->get_pivot_info()->get_position()),
+            reinterpret_cast<const int64_t*>(
+                csrildlt0_info->get_triangular_data()->get_pivot_info()->get_position()),
             handle->stream));
     }
 

@@ -37,7 +37,8 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
     const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                         && handle->asic_rev < 2);
 
-    auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    auto trm_info = csric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                            rocsparse_fill_mode_lower);
 
     rocsparse::csric0_kernel_launch_t launch{};
 

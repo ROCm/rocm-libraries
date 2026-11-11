@@ -120,7 +120,7 @@ namespace rocsparse
                 sdata1[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
                           ? rocsparse::load_done_row_data(
-                              &bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)])
+                                &bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)])
                           : static_cast<T>(0);
 
                 // Make sure all writes to shared memory are visible
@@ -193,7 +193,7 @@ namespace rocsparse
                         sdata1[threadIdx.y][threadIdx.x]
                             = (threadIdx.x < block_dim && threadIdx.y < block_dim)
                                   ? rocsparse::load_done_row_data(
-                                      &bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)])
+                                        &bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)])
                                   : static_cast<T>(0);
 
                         // Make sure all writes to shared memory are visible
@@ -453,7 +453,8 @@ namespace rocsparse
                                          : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
-        auto trm_info = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = bsrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;

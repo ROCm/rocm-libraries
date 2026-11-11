@@ -373,7 +373,8 @@ namespace rocsparse
                                          ? reinterpret_cast<const double*>(boost->get_tol())
                                          : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
-        auto trm_info = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto          trm_info = bsrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;

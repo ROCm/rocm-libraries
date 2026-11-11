@@ -499,24 +499,25 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
 
     if(csrsv_info == nullptr)
     {
-        csrsv_info      = new _rocsparse_csrsv_info();
+        csrsv_info      = new _rocsparse_csrsv_info(info->get_triangular_data(),
+                                               info->get_singularity_numeric_exact());
         p_csrsv_info[0] = csrsv_info;
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(csrsv_info->recreate(handle,
-                                                   trans,
-                                                   A->rows,
-                                                   A->nnz,
-                                                   A->descr,
-                                                   A->data_type,
-                                                   A->const_val_data,
-                                                   // csr_val_stride,
-                                                   A->row_type,
-                                                   A->const_row_data,
-                                                   A->col_type,
-                                                   A->const_col_data,
-                                                   temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(handle,
+                                                                    trans,
+                                                                    A->rows,
+                                                                    A->nnz,
+                                                                    A->descr,
+                                                                    A->data_type,
+                                                                    A->const_val_data,
+                                                                    // csr_val_stride,
+                                                                    A->row_type,
+                                                                    A->const_row_data,
+                                                                    A->col_type,
+                                                                    A->const_col_data,
+                                                                    temp_buffer));
 
     return rocsparse_status_success;
 }

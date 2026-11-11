@@ -28,13 +28,43 @@
 void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that,
                                         hipStream_t                         stream)
 {
-    if(that != nullptr)
+    if(that != nullptr && that != this)
     {
         for(int i = 0; i < 4; ++i)
         {
-            if(that->m_data[i] != nullptr)
+            const rocsparse::triangular_info_t* src = that->m_data[i];
+            if(src == nullptr)
             {
-                rocsparse::triangular_info_t::copy(&this->m_data[i], that->m_data[i]);
+                continue;
+            }
+
+            int j = 0;
+            while(j < i && that->m_data[j] != src)
+            {
+                ++j;
+            }
+
+            if(j < i)
+            {
+                // Preserve the source aliasing.
+                if(this->m_data[i] != this->m_data[j])
+                {
+                    this->release(i);
+                    this->m_data[i] = this->m_data[j];
+                }
+            }
+            else
+            {
+                // Do not overwrite a triangular_info_t still referenced by another slot.
+                for(int k = 0; k < 4; ++k)
+                {
+                    if(k != i && this->m_data[k] == this->m_data[i])
+                    {
+                        this->m_data[i] = nullptr;
+                        break;
+                    }
+                }
+                rocsparse::triangular_info_t::copy(&this->m_data[i], src);
             }
         }
 
@@ -43,42 +73,34 @@ void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that
     }
 }
 
-void rocsparse::triangular_data_t::uncouple(const rocsparse::triangular_data_t* that)
+void rocsparse::triangular_data_t::release(int index)
 {
-    if(that != nullptr && that != this)
+    rocsparse::triangular_info_t* trm_info = this->m_data[index];
+    this->m_data[index]                    = nullptr;
+    if(trm_info != nullptr)
     {
         for(int i = 0; i < 4; ++i)
         {
-            auto a = this->m_data[i];
-            if(a != nullptr)
+            if(this->m_data[i] == trm_info)
             {
-                for(int j = 0; j < 4; ++j)
-                {
-                    auto b = that->m_data[j];
-                    if(b == a)
-                    {
-                        this->m_data[i] = nullptr;
-                        break;
-                    }
-                }
+                return;
             }
         }
+        delete trm_info;
+    }
+}
+
+void rocsparse::triangular_data_t::clear()
+{
+    for(int i = 0; i < 4; ++i)
+    {
+        this->release(i);
     }
 }
 
 rocsparse::triangular_data_t::~triangular_data_t()
 {
-    // Clear zero pivot
-    for(int i = 0; i < 4; ++i)
-    {
-        auto trm_info = this->m_data[i];
-        if(trm_info != nullptr)
-        {
-            delete trm_info;
-            this->m_data[i] = nullptr;
-        }
-    }
-
+    this->clear();
     delete this->m_pivot_info;
     this->m_pivot_info = nullptr;
 }
@@ -102,8 +124,12 @@ void rocsparse::triangular_data_t::set(rocsparse_operation           operation,
                                        rocsparse_fill_mode           fill_mode,
                                        rocsparse::triangular_info_t* trm_info)
 {
-    const int idx     = rocsparse::triangular_data_t::storage_index(operation, fill_mode);
-    this->m_data[idx] = trm_info;
+    const int idx = rocsparse::triangular_data_t::storage_index(operation, fill_mode);
+    if(this->m_data[idx] != trm_info)
+    {
+        this->release(idx);
+        this->m_data[idx] = trm_info;
+    }
 }
 
 rocsparse_indextype rocsparse::triangular_data_t::get_indextype_J() const

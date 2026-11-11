@@ -62,7 +62,9 @@ namespace rocsparse
         _rocsparse_spmat_descr mat_csr;
         rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
 
-        return info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode) != nullptr;
+        return info->get_triangular_data()->get(rocsparse::cscsv_operation_to_csr(trans),
+                                                descr_csr.fill_mode)
+               != nullptr;
     }
 
     inline rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,

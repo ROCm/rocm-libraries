@@ -185,15 +185,17 @@ namespace rocsparse
             {
                 if(direction == rocsparse_direction_row)
                 {
-                    local_values[tidy][q] = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                &bsr_val[BSR_IND_R(local_block_diag, tidy, q)])
-                                                               : static_cast<T>(0);
+                    local_values[tidy][q]
+                        = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                                   &bsr_val[BSR_IND_R(local_block_diag, tidy, q)])
+                                             : static_cast<T>(0);
                 }
                 else
                 {
-                    local_values[tidy][q] = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                &bsr_val[BSR_IND_C(local_block_diag, tidy, q)])
-                                                               : static_cast<T>(0);
+                    local_values[tidy][q]
+                        = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                                   &bsr_val[BSR_IND_C(local_block_diag, tidy, q)])
+                                             : static_cast<T>(0);
                 }
             }
 
@@ -217,7 +219,7 @@ namespace rocsparse
                         {
                             T v1 = rocsparse::load_done_row_data(&bsr_val[BSR_IND_R(jl, q, p)]);
                             T v2 = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                       &bsr_val[BSR_IND_R(jk, tidy, p)])
+                                                            &bsr_val[BSR_IND_R(jk, tidy, p)])
                                                       : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
@@ -225,7 +227,7 @@ namespace rocsparse
                         {
                             T v1 = rocsparse::load_done_row_data(&bsr_val[BSR_IND_C(jl, q, p)]);
                             T v2 = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                       &bsr_val[BSR_IND_C(jk, tidy, p)])
+                                                            &bsr_val[BSR_IND_C(jk, tidy, p)])
                                                       : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
@@ -455,7 +457,8 @@ namespace rocsparse
                                                void*                 buffer)
     {
 
-        auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = bsric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
@@ -583,7 +586,8 @@ namespace rocsparse
 rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_9_16_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
-    auto          trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    auto          trm_info = bsric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                            rocsparse_fill_mode_lower);
     const int64_t max_nnzb = trm_info->get_max_nnz();
     if(max_nnzb <= 32)
     {

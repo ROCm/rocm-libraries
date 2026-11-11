@@ -34,7 +34,7 @@ namespace rocsparse
 {
     // ILDLT(0) binary-search based device kernel.
     //
-    // Computes A ≈ L D L^H (Hermitian; L D L^T for real types), L unit lower triangular, D real.
+    // Computes A ? L D L^H (Hermitian; L D L^T for real types), L unit lower triangular, D real.
     // For row i:
     //   D_i    = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k
     //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j   (j < i)
@@ -303,7 +303,8 @@ namespace rocsparse
                                           size_t                   buffer_size,
                                           void*                    buffer)
     {
-        auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = csrildlt0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                   rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
@@ -383,7 +384,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-// clang-format off
+    // clang-format off
 #define INST_ALL_BINSEARCH(WF, T, I, J)                                                          \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<false, 256, WF, T, I, J>(        \
         rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*); \

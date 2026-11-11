@@ -438,7 +438,8 @@ namespace rocsparse
                                                 void*                 buffer)
     {
 
-        auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = bsric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
@@ -567,7 +568,8 @@ rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_17_32_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
 
-    auto          trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    auto          trm_info = bsric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                            rocsparse_fill_mode_lower);
     const int64_t max_nnzb = trm_info->get_max_nnz();
     if(max_nnzb <= 32)
     {

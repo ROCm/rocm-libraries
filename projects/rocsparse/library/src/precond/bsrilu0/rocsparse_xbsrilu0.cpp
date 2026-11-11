@@ -67,7 +67,8 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ARRAY(11, mb, temp_buffer);
 
         auto bsrilu0_info = info->get_bsrilu0_info();
-        auto trm_info     = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info     = bsrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
         ROCSPARSE_CHECKARG(
             9, info, ((mb > 0) && (trm_info == nullptr)), rocsparse_status_invalid_pointer);
 

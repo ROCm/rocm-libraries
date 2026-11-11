@@ -309,7 +309,7 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
     {
     case rocsparse_format_csr:
     {
-        trm = info->get(trans, A->descr->fill_mode);
+        trm = info->get_triangular_data()->get(trans, A->descr->fill_mode);
         break;
     }
     case rocsparse_format_csc:
@@ -317,7 +317,8 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
         _rocsparse_mat_descr   descr_csr;
         _rocsparse_spmat_descr mat_csr;
         rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
-        trm = info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode);
+        trm = info->get_triangular_data()->get(rocsparse::cscsv_operation_to_csr(trans),
+                                               descr_csr.fill_mode);
         break;
     }
     default:
@@ -377,7 +378,7 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 batch_count,
                 (int32_t*)numeric_exact->get_position(),
-                (const int32_t*)info->get_pivot_info()->get_position(),
+                (const int32_t*)info->get_triangular_data()->get_pivot_info()->get_position(),
                 stream));
         }
         else
@@ -385,7 +386,7 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                 batch_count,
                 (int64_t*)numeric_exact->get_position(),
-                (const int64_t*)info->get_pivot_info()->get_position(),
+                (const int64_t*)info->get_triangular_data()->get_pivot_info()->get_position(),
                 stream));
         }
 

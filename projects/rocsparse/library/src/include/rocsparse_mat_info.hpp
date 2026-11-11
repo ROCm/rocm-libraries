@@ -24,15 +24,28 @@
 
 #pragma once
 
+#include "rocsparse_bsric0_info.hpp"
+#include "rocsparse_bsrilu0_info.hpp"
 #include "rocsparse_bsrmv_info.hpp"
+#include "rocsparse_bsrsm_info.hpp"
+#include "rocsparse_bsrsv_info.hpp"
 #include "rocsparse_coomv_info.hpp"
 #include "rocsparse_csrgemm_info.hpp"
+#include "rocsparse_csric0_info.hpp"
+#include "rocsparse_csrildlt0_info.hpp"
+#include "rocsparse_csrilu0_info.hpp"
 #include "rocsparse_csritsv_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_csrsm_info.hpp"
+#include "rocsparse_csrsv_info.hpp"
+#include "rocsparse_ellsv_info.hpp"
 #include "rocsparse_numeric_boost.hpp"
+#include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_sorted_coo2csr_info.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 #include "rocsparse_triangular_info_t.hpp"
-#include "rocsparse_trm_t.hpp"
+
+#include <memory>
 
 /********************************************************************************
  * \brief rocsparse_mat_info is a structure holding the matrix info data that is
@@ -50,11 +63,40 @@ protected:
     rocsparse_coomv_info coomv_info{};
 
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
-    rocsparse::trm_t                  m_trm;
+
+    // Single triangular data instance; the triangular infos only hold a const pointer to it.
+    rocsparse::triangular_data_t m_triangular_data;
+
+    // Exact numeric singularity shared by every triangular info.
+    rocsparse::singular_info_t* m_singularity_numeric_exact{};
+
+    // Near numeric singularity shared by the csrilu0, csric0 and csrildlt0 infos.
+    rocsparse::singular_info_t* m_singularity_numeric_near{};
+
+    std::shared_ptr<_rocsparse_csrsv_info>     m_csrsv_info;
+    std::shared_ptr<_rocsparse_csrsm_info>     m_csrsm_info;
+    std::shared_ptr<_rocsparse_csrilu0_info>   m_csrilu0_info;
+    std::shared_ptr<_rocsparse_csric0_info>    m_csric0_info;
+    std::shared_ptr<_rocsparse_csrildlt0_info> m_csrildlt0_info;
+    std::shared_ptr<_rocsparse_bsrsv_info>     m_bsrsv_info;
+    std::shared_ptr<_rocsparse_bsrsm_info>     m_bsrsm_info;
+    std::shared_ptr<_rocsparse_bsrilu0_info>   m_bsrilu0_info;
+    std::shared_ptr<_rocsparse_bsric0_info>    m_bsric0_info;
+    std::shared_ptr<_rocsparse_ellsv_info>     m_ellsv_info;
+
+    void release_trm_data_if_unused();
 
     rocsparse::numeric_boost m_boost{};
 
 public:
+    // Triangular infos only see the triangular data as const; mutable access goes through here.
+    const rocsparse::triangular_data_t* get_triangular_data() const;
+    rocsparse::triangular_data_t*       get_triangular_data();
+
+    rocsparse::singular_info_t* get_singularity_numeric_exact();
+
+    rocsparse::singular_info_t* get_singularity_numeric_near();
+
     void duplicate_trdata(const rocsparse_mat_info src, hipStream_t stream);
     const rocsparse::numeric_boost*            get_boost() const;
     rocsparse::numeric_boost*                  get_boost();
@@ -152,6 +194,7 @@ public:
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};
 
+    _rocsparse_mat_info();
     ~_rocsparse_mat_info();
 
     void                 set_csrmv_info(rocsparse_csrmv_info value);

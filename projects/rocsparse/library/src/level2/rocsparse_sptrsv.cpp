@@ -291,9 +291,9 @@ try
                                rocsparse_status_invalid_value);
         }
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_info_t* symbolic_pivot{};
+        rocsparse::singular_info_t*    exact_pivot{};
+        rocsparse::singular_info_t*    near_pivot{};
 
         const auto format = sptrsv_descr->get_format();
         switch(format)
@@ -303,7 +303,7 @@ try
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
             if(csrsv_info != nullptr)
             {
-                symbolic_pivot = csrsv_info->get_pivot_info();
+                symbolic_pivot = csrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -313,7 +313,7 @@ try
             auto coosv_info = sptrsv_descr->get_csrsv_info();
             if(coosv_info != nullptr)
             {
-                symbolic_pivot = coosv_info->get_pivot_info();
+                symbolic_pivot = coosv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = coosv_info->get_singularity_numeric_exact();
             }
             break;
@@ -323,7 +323,7 @@ try
             auto bsrsv_info = sptrsv_descr->get_csrsv_info();
             if(bsrsv_info != nullptr)
             {
-                symbolic_pivot = bsrsv_info->get_pivot_info();
+                symbolic_pivot = bsrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = bsrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -334,7 +334,7 @@ try
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
             if(csrsv_info != nullptr)
             {
-                symbolic_pivot = csrsv_info->get_pivot_info();
+                symbolic_pivot = csrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -344,7 +344,7 @@ try
             auto ellsv_info = sptrsv_descr->get_ellsv_info();
             if(ellsv_info != nullptr)
             {
-                symbolic_pivot = ellsv_info->get_pivot_info();
+                symbolic_pivot = ellsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = ellsv_info->get_singularity_numeric_exact();
             }
             break;

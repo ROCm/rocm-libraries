@@ -70,10 +70,14 @@ namespace rocsparse
     protected:
         rocsparse::pivot_info_t*      m_pivot_info{new rocsparse::pivot_info_t()};
         rocsparse::triangular_info_t* m_data[4]{};
+
         static int storage_index(rocsparse_operation operation, rocsparse_fill_mode fill_mode)
         {
             return ((operation != rocsparse_operation_none) ? 1 : 0) * 2 + fill_mode;
         }
+
+        // Slots may alias the same triangular_info_t; delete it only when no other slot refers to it.
+        void release(int index);
 
     public:
         triangular_data_t() = default;
@@ -81,8 +85,8 @@ namespace rocsparse
         triangular_data_t(const triangular_data_t&)            = delete;
         triangular_data_t& operator=(const triangular_data_t&) = delete;
 
-        void uncouple(const triangular_data_t* that);
         void copy(const triangular_data_t* that, hipStream_t stream);
+        void clear();
 
         rocsparse::pivot_info_t* get_pivot_info()
         {
@@ -124,7 +128,6 @@ namespace rocsparse
                                              void*                     temp_buffer)
         {
             rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
-            // Perform analysis
 
             THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
                                                               trans,
@@ -157,7 +160,6 @@ namespace rocsparse
                                              void*                     temp_buffer)
         {
             rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
-            // Perform analysis
 
             THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
                                                               trans,
@@ -243,11 +245,7 @@ namespace rocsparse
             recreate(rocsparse_operation operation, rocsparse_fill_mode fill_mode, ARGS... arg)
         {
             const int index = this->storage_index(operation, fill_mode);
-            if(this->m_data[index] != nullptr)
-            {
-                delete this->m_data[index];
-            }
-            this->m_data[index] = nullptr;
+            this->release(index);
             this->m_data[index] = this->create(arg...);
             return rocsparse_status_success;
         }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,8 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ARRAY(11, mb, temp_buffer);
 
         auto bsric0_info = info->get_bsric0_info();
-        auto trm_info    = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info    = bsric0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                rocsparse_fill_mode_lower);
 
         ROCSPARSE_CHECKARG(
             9, info, ((mb > 0) && (trm_info == nullptr)), rocsparse_status_invalid_pointer);

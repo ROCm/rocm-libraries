@@ -239,13 +239,15 @@ namespace rocsparse
 
                 auto csrsm_info = matA->info->get_csrsm_info();
 
-                const bool has_trm_info = (csrsm_info->get(op_csr, fill_mode_csr) != nullptr);
+                const bool has_trm_info
+                    = (csrsm_info->get_triangular_data()->get(op_csr, fill_mode_csr) != nullptr);
 
                 if(has_trm_info == false)
                 {
 #else
                 auto csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_A, matA->descr->fill_mode)
+                   == nullptr)
                 {
 #endif
                     RETURN_IF_ROCSPARSE_ERROR(
@@ -268,7 +270,8 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_A, matA->descr->fill_mode)
+                   == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         rocsparse::csrsm_analysis(handle,
@@ -290,7 +293,8 @@ namespace rocsparse
             case rocsparse_format_coo:
             {
                 rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_A, matA->descr->fill_mode)
+                   == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         rocsparse::coosm_analysis(handle,

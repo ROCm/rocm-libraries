@@ -473,21 +473,22 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
     rocsparse_ellsv_info ei = p_ellsv_info[0];
     if(ei == nullptr)
     {
-        ei              = new _rocsparse_ellsv_info();
+        ei              = new _rocsparse_ellsv_info(info->get_triangular_data(),
+                                       info->get_singularity_numeric_exact());
         p_ellsv_info[0] = ei;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(ei->recreate(handle,
-                                           trans,
-                                           A->rows,
-                                           A->cols,
-                                           descr,
-                                           A->col_type,
-                                           A->const_col_data,
-                                           A->ell_width,
-                                           A->idx_base,
-                                           buffer_size,
-                                           temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(handle,
+                                                                    trans,
+                                                                    A->rows,
+                                                                    A->cols,
+                                                                    descr,
+                                                                    A->col_type,
+                                                                    A->const_col_data,
+                                                                    A->ell_width,
+                                                                    A->idx_base,
+                                                                    buffer_size,
+                                                                    temp_buffer));
 
     return rocsparse_status_success;
 }
