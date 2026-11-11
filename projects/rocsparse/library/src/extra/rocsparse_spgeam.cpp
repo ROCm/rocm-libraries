@@ -79,7 +79,8 @@ rocsparse_status
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(this->csr_row_ptr_C != nullptr)
+    // A C with no rows may have a null row pointer.
+    if(this->csr_row_ptr_C != nullptr && csr_row_ptr_C != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            m + 1,
