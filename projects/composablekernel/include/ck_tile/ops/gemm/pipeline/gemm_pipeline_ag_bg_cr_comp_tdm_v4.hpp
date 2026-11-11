@@ -324,6 +324,29 @@ struct GemmPipelineAgBgCrCompTDMV4
     using ALdsWindow = decltype(MakeLdsWindow<true>(nullptr));
     using BLdsWindow = decltype(MakeLdsWindow<false>(nullptr));
 
+    /// Whether A's or B's scales are read through a tile window (see
+    /// GemmPipelineAgBgCrCompTDMV4Policy::IsLdsScaleReadLinear); otherwise ScaleWords reads them.
+    static constexpr bool kTileReadAScale = Policy::template IsLdsScaleReadLinear<Problem, true>();
+    static constexpr bool kTileReadBScale = Policy::template IsLdsScaleReadLinear<Problem, false>();
+
+    /// A wave's window on A's or B's scales of K step 0 in buffer 0.
+    template <bool IsA>
+    CK_TILE_DEVICE static auto MakeLdsScaleWindow(CK_TILE_LDS_ADDR uint8_t* smem, index_t wave)
+    {
+        constexpr index_t atom    = IsA ? kAtomM : kAtomN;
+        constexpr index_t repeats = IsA ? kRm : kRn;
+        constexpr index_t lanes   = Policy::template GetScaleLanes<Problem, IsA>();
+        const auto view           = make_tensor_view<address_space_enum::lds>(
+            c_style_pointer_cast<int32_t*>(smem),
+            Policy::template MakeLdsScaleDescriptor<Problem, IsA>());
+        return make_tile_window(view,
+                                make_tuple(number<1>{}, number<lanes>{}, number<repeats>{}),
+                                make_multi_index(0, wave * atom, 0),
+                                Policy::template MakeLdsScaleReadDistribution<Problem, IsA>());
+    }
+    using AScaleWindow = decltype(MakeLdsScaleWindow<true>(nullptr, 0));
+    using BScaleWindow = decltype(MakeLdsScaleWindow<false>(nullptr, 0));
+
     struct Head
     {
         AFrag a[kRm];
@@ -406,6 +429,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         index_t a_scale_stride;
         index_t b_scale_stride;
         BLdsWindow b_window;
+        AScaleWindow as_window;
+        BScaleWindow bs_window;
 
         CK_TILE_DEVICE Run(const mx_tdm_v4::Operands& p_,
                            const mx_tdm_v4::Coords& c_,
@@ -420,7 +445,9 @@ struct GemmPipelineAgBgCrCompTDMV4
                   Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
               a_scale_stride(opaque_scalar(p_.M * 4)),
               b_scale_stride(opaque_scalar(p_.N * 4)),
-              b_window(MakeLdsWindow<false>(smem_))
+              b_window(MakeLdsWindow<false>(smem_)),
+              as_window(MakeLdsScaleWindow<true>(smem_, c_.wave_m)),
+              bs_window(MakeLdsScaleWindow<false>(smem_, c_.wave_n))
         {
             b_mask = Policy::template GetTDMWorkgroupMask<false>(c.cluster_wx, c.cluster_wy);
             a_mask = Policy::template GetTDMWorkgroupMask<true>(c.cluster_wx, c.cluster_wy);
@@ -867,23 +894,57 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
         }
 
+        /// A's or B's per-lane E8M0 words of K step `step` through the scale window.
+        template <bool IsA, index_t Count>
+        CK_TILE_DEVICE void LdsScaleWords(int32_t (&out)[Count], index_t buffer, index_t step) const
+        {
+            constexpr MxTdmV4Operand op = Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr index_t step_words =
+                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(op, 1u, 0u) - op.base) / 4;
+            const auto& window = [&]() -> const auto& {
+                if constexpr(IsA)
+                    return as_window;
+                else
+                    return bs_window;
+            }();
+            const auto tile = window.load_with_offset(
+                buffer / 4 + op.base / 4 + step * step_words, number<-1>{}, bool_constant<false>{});
+            static_for<0, Count, 1>{}([&](auto i) { out[i] = tile.get_thread_buffer()[i]; });
+        }
+
         /// A K step's scales and A rows.
         CK_TILE_DEVICE Head ReadHead(index_t buffer, index_t step) const
         {
-            constexpr MxTdmV4Operand as_lds = Policy::template GetLdsOperand<Problem, true, true>();
-            constexpr MxTdmV4Operand bs_lds =
-                Policy::template GetLdsOperand<Problem, false, true>();
             Head h;
-            const index_t a_lane = kMma32 ? c.lane : c.lane_col;
-            const uint32_t ustep = static_cast<uint32_t>(step);
-            ScaleWords<kRm>(h.as,
-                            buffer +
-                                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                                    as_lds, ustep, static_cast<uint32_t>(MRow(c, 0, a_lane)))));
-            ScaleWords<kRn>(h.bs,
-                            buffer +
-                                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                                    bs_lds, ustep, static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
+            if constexpr(kTileReadAScale)
+            {
+                LdsScaleWords<true>(h.as, buffer, step);
+            }
+            else
+            {
+                constexpr MxTdmV4Operand as_lds =
+                    Policy::template GetLdsOperand<Problem, true, true>();
+                const index_t a_lane = kMma32 ? c.lane : c.lane_col;
+                ScaleWords<kRm>(h.as,
+                                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                                             as_lds,
+                                             static_cast<uint32_t>(step),
+                                             static_cast<uint32_t>(MRow(c, 0, a_lane)))));
+            }
+            if constexpr(kTileReadBScale)
+            {
+                LdsScaleWords<false>(h.bs, buffer, step);
+            }
+            else
+            {
+                constexpr MxTdmV4Operand bs_lds =
+                    Policy::template GetLdsOperand<Problem, false, true>();
+                ScaleWords<kRn>(h.bs,
+                                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                                             bs_lds,
+                                             static_cast<uint32_t>(step),
+                                             static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
+            }
             static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
             return h;
         }

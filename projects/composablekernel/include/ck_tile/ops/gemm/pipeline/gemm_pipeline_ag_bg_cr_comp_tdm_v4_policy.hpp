@@ -524,6 +524,121 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
         return true;
     }
 
+    /// A's or B's E8M0 scales in LDS as words, top dimensions (K step, wave * atom + lane row,
+    /// repeat): step-major runs of a component's rows, padded per block.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleDescriptor()
+    {
+        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
+        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, true>();
+        constexpr index_t warps     = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t comps     = warps * atom * repeats / op.rows;
+        constexpr index_t steps     = GetKSteps<Problem>();
+        constexpr index_t run       = steps * op.rows;
+        constexpr index_t block     = op.pad_bytes > 0 ? op.block_bytes / 4 : run;
+        static_assert(warps * atom * repeats % op.rows == 0 && run % block == 0 &&
+                          op.stride % 4 == 0 && (op.block_bytes + op.pad_bytes) % 4 == 0,
+                      "comp_tdm_v4: the scale layout is not a whole number of padded blocks");
+        constexpr auto naive = make_naive_tensor_descriptor(
+            make_tuple(number<comps>{}, number<run / block>{}, number<block>{}),
+            make_tuple(number<op.stride / 4>{},
+                       number<(op.block_bytes + op.pad_bytes) / 4>{},
+                       number<1>{}),
+            number<4>{},
+            number<1>{});
+        constexpr auto linear = transform_tensor_descriptor(
+            naive,
+            make_tuple(make_pass_through_transform(number<comps>{}),
+                       make_merge_transform(make_tuple(number<run / block>{}, number<block>{}))),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        constexpr auto by_step = transform_tensor_descriptor(
+            linear,
+            make_tuple(make_pass_through_transform(number<comps>{}),
+                       make_unmerge_transform(make_tuple(number<steps>{}, number<op.rows>{}))),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<1>{}, sequence<0, 2>{}));
+        constexpr auto by_row = transform_tensor_descriptor(
+            by_step,
+            make_tuple(make_pass_through_transform(number<steps>{}),
+                       make_merge_transform(make_tuple(number<comps>{}, number<op.rows>{}))),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        return transform_tensor_descriptor(
+            by_row,
+            make_tuple(
+                make_pass_through_transform(number<steps>{}),
+                make_unmerge_transform(make_tuple(number<warps * atom>{}, number<repeats>{}))),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}));
+    }
+
+    /// Lanes reading distinct scale rows: all 32 for A of the 32x16 atom, else 16 (lanes l and
+    /// l + 16 read the same row).
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetScaleLanes()
+    {
+        return IsA && GetSpec<Problem>().atom_m() == 32 ? 32 : 16;
+    }
+
+    /// One wave's read of A's or B's scales of one K step: lane l reads its row's words of all
+    /// repeats.   (K step: 1, rows: lanes, repeats)
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleReadDistribution()
+    {
+        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
+        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        if constexpr(GetScaleLanes<Problem, IsA>() == 32)
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<1>, sequence<32>, sequence<repeats>>,
+                                           tuple<sequence<2>>,
+                                           tuple<sequence<0>>,
+                                           sequence<1, 3>,
+                                           sequence<0, 0>>{});
+        else
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<2>,
+                                           tuple<sequence<1>, sequence<16>, sequence<repeats>>,
+                                           tuple<sequence<0, 2>>,
+                                           tuple<sequence<0, 0>>,
+                                           sequence<1, 3>,
+                                           sequence<0, 0>>{});
+    }
+
+    /// Whether a scale read can take its K step as a constant word offset and its repeats as
+    /// consecutive words, checked against mx_tdm_v4_scale_offset. Also spot-checks
+    /// MakeLdsScaleDescriptor.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr bool IsLdsScaleReadLinear()
+    {
+        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
+        constexpr index_t warps   = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom    = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t steps   = GetKSteps<Problem>();
+        constexpr auto desc       = MakeLdsScaleDescriptor<Problem, IsA>();
+        const auto offset         = [](index_t step, index_t row) {
+            constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, true>();
+            return (mx_tdm_v4_scale_offset<index_t>(op, step, row) - op.base) / 4;
+        };
+        const index_t step_words = offset(1, 0);
+        for(const index_t t : {index_t{1}, atom - 1, atom, warps * atom - 1})
+            for(const index_t step : {index_t{0}, steps - 1})
+                if(desc.calculate_offset(make_multi_index(step, t, repeats - 1)) !=
+                   offset(step, t * repeats + repeats - 1))
+                    return false;
+        for(index_t t = 0; t < warps * atom; ++t)
+            for(index_t step = 0; step < steps; ++step)
+                for(index_t r = 0; r < repeats; ++r)
+                    if(offset(step, t * repeats + r) !=
+                       offset(0, t * repeats) + step * step_words + r)
+                        return false;
+        return true;
+    }
+
     /// The cluster workgroups that share this one's A (same cluster y) or B (same cluster x)
     /// tile and so receive its TDM loads; 0 without a cluster. Grid x walks N tiles and y M
     /// tiles.
