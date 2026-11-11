@@ -1,21 +1,6 @@
-# Harness core: method shared by the StinkyTofu and hipBLASLt harnesses
+# Comparing asm (tier 1)
 
-Read this when you run an A/B, add or retire a harness component, adapt the harness to a new model
-generation, or write run results. The project files (`HARNESS.md`) hold the scope, tiers, rules, and
-the components themselves. This file holds the method they share, so it exists once.
-
-## Components
-
-Each component is one row in the project's `HARNESS.md` table. `assumes` is the limitation of the model
-it covers. A row with no `evidence` is a candidate for removal.
-
-**Adding a component:** add a row with `assumes` and `evidence`, set it to `on-trial`, run the same
-real task with and without it, and keep it only if the outcome is better.
-
-**New model generation:** run a real task on the full harness, then disable one component at a time
-and rerun the same task. Keep a component only if removing it makes the outcome worse. Record the model
-and the result in the last column of the row. Also try adding capabilities the new model may now
-handle. Do not remove several components at once.
+Read this when you run tier 1. The flow is in `ab.md`.
 
 ## What "identical" means (tier 1)
 
@@ -42,7 +27,7 @@ handle. Do not remove several components at once.
   side, and check that they are the worktree's own.
 - build the baseline and the candidate in separate worktrees, each with its own venv, so the two
   rocisa bindings do not shadow each other (see the `worktree-venv` skill in `skills/`). Rebuild the
-  candidate after the last edit (see the "fresh binding" note in the StinkyTofu HARNESS.md).
+  candidate after the last edit (see "Tier 1 needs a fresh binding" in `ab.md`).
 - the labels in the generated asm contain random hashes, so two runs of identical code differ in
   label names. Normalize the labels before comparing: in each file, rename every distinct label to a
   sequential name in order of first appearance. At the time of writing a label is the token
@@ -75,29 +60,3 @@ The inputs are the perf YAMLs under `projects/hipblaslt/tensilelite/tensilelite/
   No sampling: the full set is already the minimum.
 - one tier 1 result per YAML, not one for the whole set
 ```
-
-## State files
-
-| File | Format | Written by |
-| --- | --- | --- |
-| `HARNESS.md`, `PROFILING.md` | Markdown | humans |
-| `results.json` (gitignored) | JSON, one entry per config; agents change only result fields | agents |
-| `progress.md` (gitignored) | Markdown, append-only handoff log | agents |
-| run logs (gitignored) | text, one file per run | scripts |
-
-`results.json` and `progress.md` can contain confidential or private information. Never commit them
-to this repo, and never paste them into a public PR, issue, or comment.
-
-**`progress.md`** is how one session hands over to the next. A new session starts with no memory of the
-last one, so it reads `progress.md` and `git log` to see where the work stands.
-- Append one entry at the end of each step or session. Never rewrite earlier entries.
-- Use this layout:
-  ```text
-  ## <date> <task>
-  done: ...   next: ...   open questions: ...   baseline: <commit hash>
-  ```
-- It records the task in flight, so it is short-lived. What a task taught you that a later task could
-  use goes to the database, after you ask the developer (see `DATABASE.md`).
-
-Print little to the terminal and write full detail to the log file. Format an error as one line,
-`ERROR: <reason>`, so it can be grepped.
