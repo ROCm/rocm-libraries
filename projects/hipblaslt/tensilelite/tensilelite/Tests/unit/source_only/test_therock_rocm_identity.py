@@ -19,7 +19,7 @@ _TENSILELITE_ROOT = Path(__file__).resolve().parents[4]
 _PYTHON_CMAKE = _TENSILELITE_ROOT.parent / "cmake" / "hipblaslt_python.cmake"
 
 
-def _resolve_version(tmp_path, *, therock=True, package_version=None):
+def _run(tmp_path, *, therock=True, package_version=None):
     lines = [f"set(HIPBLASLT_ENABLE_THEROCK {'ON' if therock else 'OFF'})"]
     if package_version is not None:
         lines.append(f'set(THEROCK_PACKAGE_VERSION "{package_version}")')
@@ -30,7 +30,11 @@ def _resolve_version(tmp_path, *, therock=True, package_version=None):
     ]
     script = tmp_path / "resolve.cmake"
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    result = subprocess.run(["cmake", "-P", str(script)], capture_output=True, text=True)
+    return subprocess.run(["cmake", "-P", str(script)], capture_output=True, text=True)
+
+
+def _resolve_version(tmp_path, **kwargs):
+    result = _run(tmp_path, **kwargs)
     assert result.returncode == 0, result.stderr
     assert "WARNING" not in result.stderr
     return result.stdout.split("resolved=[", 1)[1].split("]", 1)[0]
@@ -44,10 +48,18 @@ def test_therock_forwards_its_package_version(tmp_path, package_version):
     assert _resolve_version(tmp_path, package_version=package_version) == package_version
 
 
-@pytest.mark.parametrize("package_version", [None, "", "git"])
-def test_therock_without_a_real_version_is_a_development_build(tmp_path, package_version):
-    """TheRock main passes nothing and local TheRock builds pass "git"."""
-    assert _resolve_version(tmp_path, package_version=package_version) == ""
+def test_therock_git_placeholder_is_a_development_build(tmp_path):
+    """Local TheRock builds pass "git"."""
+    assert _resolve_version(tmp_path, package_version="git") == ""
+
+
+@pytest.mark.parametrize("package_version", [None, ""])
+def test_therock_without_a_package_version_fails(tmp_path, package_version):
+    """Once TheRock always passes a version, a missing one means it was lost."""
+    result = _run(tmp_path, package_version=package_version)
+
+    assert result.returncode != 0
+    assert "requires THEROCK_PACKAGE_VERSION" in " ".join(result.stderr.split())
 
 
 @pytest.mark.parametrize("package_version", [None, "7.12.0"])
