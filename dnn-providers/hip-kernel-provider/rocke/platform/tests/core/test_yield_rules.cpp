@@ -14,20 +14,23 @@
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
- * a branch of one with results holds no other, directly or in an scf.if within
- * it. A yield goes directly in an scf.for body or such a branch; one anywhere
+ * a branch of one with results ends in a yield of one value per result and
+ * holds no other, directly or in an scf.if within it. A yield goes directly in an scf.for body or such a branch; one anywhere
  * else (the kernel body, an scf.if) is an orphan. A result is refused by the
  * packed-only rule (a TypeError) before the LDS rule (a ValueError). The C
  * builder has no point where both branches are done, so it does not check the
  * branches: the verifier and the lowerings do, the LLVM lowering also in the
- * body of an unrolled loop of zero trips, which it does not lower.
+ * body of an unrolled loop of zero trips, which it does not lower, directly in
+ * that body or in an scf.if there.
  * tests/core/test_scf_if_else_results.py and tests/core/test_scf_for_yields.py
  * cover the Python engine and both engines' lowering texts;
  * tests/core/test_packed_only.py covers both builders' result-type order.
  */
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
@@ -134,21 +137,31 @@ struct Kernel
         in_scf_if
     };
 
+    /* Emit what `emit` emits into the current region, or, when `in_scf_if`,
+     * into an scf.if on `lane < 8` within it. */
+    template <typename Emit>
+    void emit_placed(bool in_scf_if, Emit emit)
+    {
+        if(!in_scf_if)
+        {
+            emit();
+            return;
+        }
+        rocke_if_t inner = rocke_b_scf_if(&b, rocke_b_cmp_lt(&b, lane, rocke_b_const_i32(&b, 8)));
+        rocke_b_region_enter(&b, inner.then_region);
+        emit();
+        rocke_b_region_leave(&b);
+    }
+
     /* Emit the extra yield `where` into the current region. */
     void emit_extra_yield(extra_yield where)
     {
         if(where == extra_yield::none)
             return;
-        if(where == extra_yield::in_scf_if)
-        {
-            rocke_if_t inner
-                = rocke_b_scf_if(&b, rocke_b_cmp_lt(&b, lane, rocke_b_const_i32(&b, 8)));
-            rocke_b_region_enter(&b, inner.then_region);
-        }
-        rocke_value_t* one = rocke_b_const_i32(&b, 1);
-        rocke_b_scf_yield(&b, &one, 1);
-        if(where == extra_yield::in_scf_if)
-            rocke_b_region_leave(&b);
+        emit_placed(where == extra_yield::in_scf_if, [this] {
+            rocke_value_t* one = rocke_b_const_i32(&b, 1);
+            rocke_b_scf_yield(&b, &one, 1);
+        });
     }
 
     /* An if/else without results on `lane < bound`; its then branch holds the
@@ -164,22 +177,29 @@ struct Kernel
         return branch;
     }
 
-    /* An if/else with one i32 result whose branches each yield zero; its
-     * then branch first holds the extra yield `early`. */
-    rocke_if_else_t build_if_else_with_a_result(extra_yield early)
+    /* An if/else with one i32 result whose else branch yields zero. Its then
+     * branch first holds the extra yield `early`, then a zero, and ends in a
+     * yield of `then_yield_count` zeros, or, when that is empty, in the zero's
+     * op. */
+    rocke_if_else_t build_if_else_with_a_result(extra_yield early,
+                                                std::optional<int> then_yield_count = 1)
     {
         const rocke_type_t* i32 = rocke_i32();
         rocke_if_else_t branch = rocke_b_scf_if_else_results(
             &b, rocke_b_cmp_lt(&b, lane, rocke_b_const_i32(&b, 8)), &i32, 1);
-        for(rocke_region_t* region : {branch.then_region, branch.else_region})
+        rocke_b_region_enter(&b, branch.then_region);
+        emit_extra_yield(early);
+        rocke_value_t* then_zero = rocke_b_const_i32(&b, 0);
+        if(then_yield_count)
         {
-            rocke_b_region_enter(&b, region);
-            if(region == branch.then_region)
-                emit_extra_yield(early);
-            rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-            rocke_b_scf_yield(&b, &zero, 1);
-            rocke_b_region_leave(&b);
+            std::vector<rocke_value_t*> values(*then_yield_count, then_zero);
+            rocke_b_scf_yield(&b, values.data(), *then_yield_count);
         }
+        rocke_b_region_leave(&b);
+        rocke_b_region_enter(&b, branch.else_region);
+        rocke_value_t* else_zero = rocke_b_const_i32(&b, 0);
+        rocke_b_scf_yield(&b, &else_zero, 1);
+        rocke_b_region_leave(&b);
         return branch;
     }
 
@@ -364,6 +384,36 @@ void a_yield_before_the_end_of_a_branch_is_refused()
     }
 }
 
+/* A branch of an if/else with results ends in a yield of one value per result:
+ * a then branch that ends in another op, and one whose closing yield gives two
+ * values for the one result, are each refused by the rule, the verifier and both
+ * lowerings. */
+void a_branch_that_does_not_end_in_a_yield_of_the_results_is_refused()
+{
+    const struct
+    {
+        const char* what;
+        std::optional<int> then_yield_count;
+        std::string message;
+    } cases[] = {
+        {"then branch ending in another op",
+         std::nullopt,
+         "scf.if_else has 1 results, so its then branch must end in scf.yield of 1 values"},
+        {"then branch yielding 2 values",
+         2,
+         "scf.if_else has 1 results, but its then branch yields 2 values"},
+    };
+    for(const auto& branch_case : cases)
+    {
+        Kernel k("if_else_branch_yield");
+        rocke_if_else_t branch = k.build_if_else_with_a_result(Kernel::extra_yield::none,
+                                                               branch_case.then_yield_count);
+        rocke_b_ret(&k.b);
+        check_rule(branch.op, ROCKE_ERR_VALUE, branch_case.message, branch_case.what);
+        check_refused(k, ROCKE_ERR_VALUE, branch_case.message, branch_case.what);
+    }
+}
+
 /* A yield in the kernel body, in an scf.if there, or in an scf.if in a loop
  * body: nothing takes its values. */
 void an_orphan_yield_is_refused()
@@ -387,15 +437,25 @@ void an_orphan_yield_is_refused()
 }
 
 /* An unrolled loop of zero trips lowers no body, yet the LLVM lowering refuses
- * the body's malformed if/else as the verifier and the HIP lowering do. */
+ * the body's malformed if/else as the verifier and the HIP lowering do, whether
+ * the if/else is directly in the body or in an scf.if within it. */
 void an_unrolled_loop_of_zero_trips_refuses_a_malformed_if_else()
 {
-    Kernel k("zero_trip_stray_yield");
-    k.build_carrying_loop(0, true, [&k](const rocke_for_t& loop) {
-        k.build_if_else_without_results(loop.iv, Kernel::extra_yield::direct);
-    });
-    rocke_b_ret(&k.b);
-    check_refused(k, ROCKE_ERR_VALUE, k_stray_yield_message, "zero-trip loop, stray yield");
+    for(bool in_scf_if : {false, true})
+    {
+        Kernel k("zero_trip_stray_yield");
+        k.build_carrying_loop(0, true, [&k, in_scf_if](const rocke_for_t& loop) {
+            k.emit_placed(in_scf_if, [&k, &loop] {
+                k.build_if_else_without_results(loop.iv, Kernel::extra_yield::direct);
+            });
+        });
+        rocke_b_ret(&k.b);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      k_stray_yield_message,
+                      in_scf_if ? "zero-trip loop, stray yield in an if/else in an scf.if"
+                                : "zero-trip loop, stray yield");
+    }
 }
 
 void an_unrolled_loop_of_zero_trips_accepts_a_well_formed_body()
@@ -1012,6 +1072,7 @@ int main()
     a_yield_in_an_if_else_without_results_is_refused();
     a_yield_in_an_if_else_without_results_in_a_loop_is_refused_as_such();
     a_yield_before_the_end_of_a_branch_is_refused();
+    a_branch_that_does_not_end_in_a_yield_of_the_results_is_refused();
     an_orphan_yield_is_refused();
     an_unrolled_loop_of_zero_trips_refuses_a_malformed_if_else();
     an_unrolled_loop_of_zero_trips_accepts_a_well_formed_body();
