@@ -27,8 +27,8 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
-from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
+from rocisa.container import RegisterContainer, RegName, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
@@ -62,12 +62,14 @@ from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxat
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
+from .SolutionStructs.segment_interleave import wave_tile_span
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -107,6 +109,18 @@ def clusterBarrierSplitWaveLoop(kernel):
   # loop has to stay off or that clone cannot cover the accumulators.
   return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
               and kernel.get("InitCIterWmma", 0) != 1)
+
+
+def duplicateLabels(module):
+  """Names of the labels module defines more than once, in first-seen order."""
+  seen, duplicates = set(), []
+  for item in module.flatitems():
+    if isinstance(item, Label):
+      name = item.getLabelName()
+      if name in seen and name not in duplicates:
+        duplicates.append(name)
+      seen.add(name)
+  return duplicates
 
 
 # Make const values immutable
@@ -323,6 +337,8 @@ class StateValues:
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
+  # Arrival fixup entry from storeBranches (StreamK.emitArrival).
+  skArrivalFixupLabel: Optional[Label]   = None
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
@@ -346,6 +362,7 @@ class StateValues:
   totalSgprs: int                        = 0
   lastValuAB: int                        = 0
   lastValuMXSAB: int                     = 0
+  mxsInterleave: dict                    = None  # MXScaleVgprInterleave layout (None = off)
   lastVgprForReads: int                  = 0
   startVgpr: int                         = 0
   startVgprAddressDbg: int               = -1
@@ -377,6 +394,10 @@ class StateValues:
   # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
   # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
   swPrefetchAbsBaseSgprPendingCheckIn: int = -1
+  # Base pair for the scheduled device-alpha value load. gfx125x XNACK replay
+  # can reread an outstanding scalar load's base SGPRs, so the pair remains
+  # reserved until the shared prologue wait at label_MultiGemmEnd.
+  deviceScalarAlphaPtrSgpr: int          = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -719,6 +740,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.do["OptimizeNumItersPLR0"] = True
     self.do["AutoSplitDsWrite"] = True
     self.do["EmulatedECCBufferLoad"] = False
+    # gfx1250 MX: lay out the MXSA and MXSB scale VGPRs on disjoint VGPR banks so no
+    # v_wmma_scale pays the +1 cycle for reading both scales from one bank (see
+    # _mxsInterleavePlan). Developer switch for A/B comparisons; kernels it cannot
+    # interleave keep the default layout.
+    self.do["MXScaleVgprInterleave"] = True
 
     self.do["executeToInitEnd"] = 0
     self.do["executeToPrefetchEnd"] = 0
@@ -4705,14 +4731,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.codes.gl2PrefetchIncrement = Module()
       self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
         comment="counterL<=PGR+GL2"))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncB"), 0))
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
-      if kernel["enableTDMMetadata"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMetadata"), 0))
+      self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchClearIncrement(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
@@ -5440,12 +5459,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
   def gsuMaskHex(self, kernel):
-    # GSU bit width depends on InternalArgsSupport.version:
+    # GSU bit width depends on InternalArgsSupport.version/capabilities:
     #   v <  3: GSU is bits 0..13 (mask 0x3FFF)
     #   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF) so bits 12/13
     #           can carry NTA / NTB for AdaptiveGemmNTAB.
+    #   UseScaleAlphaVec scalar capability: GSU is further narrowed to bits 0..10
+    #           (mask 0x07FF), reserving bit 11 for scalar/vector selection.
     isp = kernel.get("InternalSupportParams", {})
     version = isp.get("KernArgsVersion", 0) if isp else 0
+    if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+      return hex(0x07FF)
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
@@ -6006,7 +6029,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # These cases loop back and run the prefetch loop again
       # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
       # have finished before we generate the prefetch for the next summation index.
-      if isPersistent(kernel) or self.states.actualSummationLoops>1:
+      # A single-wave TDM kernel has no other wave to order against, so it skips the barrier.
+      if (isPersistent(kernel) or self.states.actualSummationLoops>1) \
+         and not (kernel["NumWaves"] == 1 and (kernel["enableTDMA"] or kernel["enableTDMB"])):
         module.add(SBarrier(comment="For stream-k / persistent loop"))
 
       # local write
@@ -6308,7 +6333,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
 
     if kernel["PrefetchGL2"]:
-      skipGL2Label = Label("Skip_GL2", "")
+      skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
@@ -6363,6 +6388,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                   lc, rapKTileCopies, finalLoop, skipClose=not finalLoop,
                                   nta=nta, ntb=ntb, rapKTile=lc))
           if not finalLoop:
+            if self.states.numItersPLR == 0:
+              # The next section reads the next LDS buffer. Without the local-read
+              # prefetch no read in the body advances the token to it, and a read
+              # token left behind the tensor token lets the scheduler hoist that
+              # section's TDM above the reads of the buffer it overwrites.
+              self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
+              if self.states.dcpTokenGate:
+                self._dcpAdvanceTokens("Read")
             loop.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1,
                              comment="dec counterL (RAP k-tile %u of %u)"%(lc + 1, rapKTileCopies)))
             # Leave for the shared exit once this problem's K is used up, so one
@@ -6433,8 +6466,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # AdaptiveGemmNTAB: dispatch is decided host-side and forwarded via
       # internalArg0 bits 12 (NTA) and 13 (NTB). Host clears those bits when
       # the chosen NT value would be 0, and only sets them after compressing
-      # GSU into bits 0..11. Requires InternalArgsSupport.version >= 3, which
-      # codegen guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
+      # GSU into bits 0..11 (or 0..10 when bit 11 is reserved for device
+      # scalar alpha). Requires InternalArgsSupport.version >= 3, which codegen
+      # guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
@@ -6651,6 +6685,213 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
     return pack
+
+  ##############################################################################
+  # MXScaleVgprInterleave
+  # v_wmma_scale costs one cycle when its two scale VGPRs share a VGPR bank (index % 8).
+  # Every MXSA scale of a buffer meets every MXSB scale of the same buffer, so the
+  # interleaved layout puts a buffer's MXSA and MXSB scales on disjoint banks. Each scale
+  # block is cut into pieces (whole block up to 4 VGPRs, else 4-VGPR pieces or local-read
+  # sized pieces); piece k > 0 of block vgprValuMXS<tc>_X<bi>_I<iui> is addressed through
+  # vgprValuMXS<tc>_X<bi>_I<iui>_P<k> (see remapMXScaleInterleave). Both BASE symbols point at
+  # the start of the shared region, so every block/piece offset is relative to that start.
+  ##############################################################################
+  def _alignMXSB(self, kernel, idx):
+    """Where the MXSB valu block starts when the MXSA part ends at idx."""
+    # TODO: alignment hack, figure out a better solution
+    if(self.states.archCaps["VgprBank"]):
+      residual = (idx % 4)
+      if (residual % 2) == 0:
+        # if 2-aligned bank(bank0 and bank2), move to bank1 or bank3.
+        idx += 1
+      if kernel["ISA"][:2] == (12, 5):
+        idx = ((idx+1)//2)*2
+    else:
+      idx = ((idx+1)//2)*2
+    return idx
+
+  def _mxsInterleaveRegion(self, kernel, tPMXSA, tPMXSB, vgprIdx, papEnabled):
+    """(plan, regionLen, reason): the interleave plan and the length of the region it takes from
+    vgprIdx, or (None, 0, reason) when the kernel keeps the default layout.
+
+    The region is never longer than the default MXSA + MXSB valu span, so the kernel's VGPR
+    count does not grow (kernels already at the 1024 limit would not assemble)."""
+    plan, reason = self._mxsInterleavePlan(kernel, tPMXSA, tPMXSB)
+    if plan is None:
+      return None, 0, reason
+    defaultLen = self._alignMXSB(kernel, vgprIdx + self.states.mxsa.numVgprValu) + self.states.mxsb.numVgprValu - vgprIdx
+    needed = sum(g["span"] for g in plan["groups"])
+    if needed > defaultLen:
+      return None, 0, "the layout needs %u VGPRs, more than the default's %u" % (needed, defaultLen)
+    if (not kernel["PrefetchGlobalRead"]) and not papEnabled:
+      # The default layout overlaps the MXSA G2L with its valu block; the shared region cannot
+      # (it also holds the MXSB scales), which would grow the VGPR count.
+      return None, 0, "the MXSA G2L cannot overlap the shared region"
+    if vgprIdx + defaultLen > 256:
+      return None, 0, "the region would pass v255 (%u VGPRs)" % defaultLen
+    return plan, defaultLen, None
+
+  def _mxsDefaultBlocks(self, kernel, tc):
+    """(bi, iui) -> offset of vgprValuMXS<tc>_X<bi>_I<iui> in the default layout, mirroring
+    the RegSet loops of macroAndSet (aliased buffers share an offset)."""
+    side = self.states.mxsa if tc == "A" else self.states.mxsb
+    numBi = self.states.numVgprBuffer
+    resetPerBuffer = getattr(self.states, "lrvwTileMXS%s" % tc) > 1 and not kernel["UnrollMajorLDS%s" % tc]
+    blocks, ri = {}, 0
+    for bi in range(numBi):
+      for iui in range(kernel["InnerUnroll"]):
+        blocks[(bi, iui)] = ri
+        ri += side.numVgprValuPerBlock
+      if resetPerBuffer:
+        ri = 0
+    return blocks
+
+  def _mxsInterleavePlan(self, kernel, tPMXSA, tPMXSB):
+    """Group-local MXScaleVgprInterleave layout, or (None, reason) when it does not apply.
+
+    The scales a WMMA reads come from the same (bi, iui) block pair, so blocks are grouped by
+    pairing and each group is packed first-fit with its MXSA and MXSB pieces on disjoint banks.
+    The groups are placed in the region later (placeMXScaleInterleave)."""
+    pt = kernel["ProblemType"]
+    mxsa, mxsb = self.states.mxsa, self.states.mxsb
+    if not (pt["MXBlockA"] and pt["MXBlockB"]):
+      return None, "needs MX scales for A and B"
+    if not (mxsa.numVgprValu and mxsb.numVgprValu):
+      return None, "needs scale VGPRs for A and B"
+    if kernel["ReuseAcrossPersistent"]:
+      return None, "ReuseAcrossPersistent keeps MXSA as a resident prefix"
+    if kernel["UseSubtileImpl"]:
+      return None, "UseSubtileImpl allocates and finishes its scale VGPRs separately"
+    if any(kernel["DirectToVgpr%s" % tc] for tc in ("A", "B", "MXSA", "MXSB")):
+      return None, "DirectToVgpr is not supported"
+    blocks = {"A": self._mxsDefaultBlocks(kernel, "A"), "B": self._mxsDefaultBlocks(kernel, "B")}
+    piece = {}
+    for tc, side, tP in (("A", mxsa, tPMXSA), ("B", mxsb, tPMXSB)):
+      n = side.numVgprValuPerBlock
+      lrWidth = max(1, int(ceil(tP["localReadInstruction"].blockWidth)))
+      if n <= 4:
+        piece[tc] = n
+      elif n % 4 == 0:
+        piece[tc] = 4
+      elif lrWidth <= 4 and n % lrWidth == 0:
+        piece[tc] = lrWidth
+      else:
+        return None, "MXS%s block of %u VGPRs cannot be split into local-read pieces" % (tc, n)
+      if lrWidth > piece[tc] or piece[tc] % lrWidth:
+        return None, "MXS%s local read (%u VGPRs) does not fit a %u-VGPR piece" % (tc, lrWidth, piece[tc])
+    numPieces = {"A": mxsa.numVgprValuPerBlock // piece["A"], "B": mxsb.numVgprValuPerBlock // piece["B"]}
+
+    # Pairing components over the distinct blocks (aliased buffers share a block).
+    parent = {}
+    def find(x):
+      while parent.setdefault(x, x) != x:
+        x = parent[x]
+      return x
+    for key in sorted(blocks["A"]):
+      parent[find(("A", blocks["A"][key]))] = find(("B", blocks["B"][key]))
+    groups, groupOf = [], {}
+    for key in sorted(blocks["A"]):
+      root = find(("A", blocks["A"][key]))
+      if root not in groupOf:
+        groupOf[root] = len(groups)
+        groups.append({"A": [], "B": []})
+      grp = groups[groupOf[root]]
+      for tc in ("A", "B"):
+        if blocks[tc][key] not in grp[tc]:
+          grp[tc].append(blocks[tc][key])
+
+    # The B-slot scale of the WMMA (MXSA when SourceSwap swaps the sources) is also kept out
+    # of the low 8 VGPRs of the WMMA's own C/D where the region allows it (placement step).
+    slotTc = "A" if kernel["SourceSwap"] else "B"
+    for grp in groups:
+      lists = {tc: [(tc, off, k) for off in grp[tc] for k in range(numPieces[tc])] for tc in ("A", "B")}
+      order = []
+      for i in range(max(len(lists["A"]), len(lists["B"]))):
+        order += [lst[i] for lst in (lists["A"], lists["B"]) if i < len(lst)]
+      used, banks, cells = set(), {"A": set(), "B": set()}, {}
+      for pc in order:
+        tc = pc[0]
+        size = piece[tc]
+        other = banks["B" if tc == "A" else "A"]
+        step = 2 if size >= 2 else 1
+        p = 0
+        while any(c in used for c in range(p, p + size)) or {c % 8 for c in range(p, p + size)} & other:
+          p += step
+          assert p < 4096, "MXScaleVgprInterleave: no bank-disjoint slot"
+        used.update(range(p, p + size))
+        banks[tc].update(c % 8 for c in range(p, p + size))
+        cells[pc] = p
+      grp["cells"] = cells
+      grp["span"] = (max(used) + 2) // 2 * 2  # groups start on even VGPRs
+      grp["slot"] = sorted(c for pc, p in cells.items() if pc[0] == slotTc for c in range(p, p + piece[slotTc]))
+    return {"piece": piece, "blocks": blocks, "groups": groups}, None
+
+  def placeMXScaleInterleave(self, kernel, plan, regionStart, regionEnd, cStart):
+    """Place the planned groups in [regionStart, regionEnd): each at the first even offset that
+    keeps its B-slot scales clear of every accumulator's low 8 VGPRs (mod 256) without
+    pushing the later groups past regionEnd; where none exists, keep the packed offset."""
+    accStep = max(1, kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"])
+    accBases = {(cStart + accStep * j) % 256 for j in range(max(1, self.states.c.numVgprValu // accStep))}
+    def clear(base, slot):
+      return all(not (d <= (base + r) % 256 <= d + 7) for d in accBases for r in slot)
+    offsets = {}
+    nextBase = regionStart
+    groups = plan["groups"]
+    for gi, grp in enumerate(groups):
+      lastFree = regionEnd - sum(g["span"] for g in groups[gi:])
+      base = next((b for b in range(nextBase, max(nextBase, lastFree) + 1, 2) if clear(b, grp["slot"])), nextBase)
+      for pc, p in grp["cells"].items():
+        offsets[pc] = base + p - regionStart
+      nextBase = base + grp["span"]
+    assert nextBase <= regionEnd, "MXScaleVgprInterleave: region overflow"
+    plan["offsets"] = offsets
+    plan["regionLen"] = regionEnd - regionStart
+    return nextBase
+
+  def mxsInterleaveSets(self, tc):
+    """[(symbol, offset from the shared BASE)] for every MXS<tc> block and piece."""
+    plan = self.states.mxsInterleave
+    out = []
+    for (bi, iui), off in sorted(plan["blocks"][tc].items()):
+      for (ptc, poff, k), rel in sorted(plan["offsets"].items()):
+        if ptc == tc and poff == off:
+          out.append(("vgprValuMXS%s_X%u_I%u%s" % (tc, bi, iui, "_P%u" % k if k else ""), rel))
+    return out
+
+  def remapMXScaleInterleave(self, module):
+    """MXScaleVgprInterleave: point every MXS reference that lands in piece k > 0 of its block
+    at that piece's symbol (vgprValuMXS*_X*_I*_P<k>). A reference must stay inside one piece."""
+    plan = self.states.mxsInterleave
+    names = {}
+    for tc in ("A", "B"):
+      for (bi, iui) in plan["blocks"][tc]:
+        names["ValuMXS%s_X%u_I%u" % (tc, bi, iui)] = plan["piece"][tc]
+    def visit(mod):
+      for item in mod.items():
+        if isinstance(item, Module):
+          visit(item)
+          continue
+        if not isinstance(item, Instruction):
+          continue
+        # MX WMMAs keep their scale operands in mxsa/mxsb, outside getParams().
+        params = list(item.getParams()) + [getattr(item, attr, None) for attr in ("mxsa", "mxsb")]
+        seen = set()
+        for param in params:
+          if not isinstance(param, RegisterContainer) or param.regName is None or id(param) in seen:
+            continue
+          seen.add(id(param))
+          name = param.regName.name
+          size = names.get(name)
+          if size is None:
+            continue
+          offset = sum(param.regName.getOffsets())
+          num = max(1, int(ceil(param.regNum)))
+          k, local = divmod(offset, size)
+          assert local + num <= size, \
+            "MXScaleVgprInterleave: reference crosses a %u-VGPR piece: %s" % (size, str(item))
+          if k:
+            param.regName = RegName("%s_P%u" % (name, k), [local])
+    visit(module)
 
   ##############################################################################
   # Kernel Body
@@ -7397,6 +7638,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
 
+    if self.states.mxsInterleave:
+      self.remapMXScaleInterleave(module)
+
     moduleKernelBody.addBody(module)
     # Judge, defer, act. The middle step is this path's alone: it runs the
     # allocation pipeline below and resolves the deferral.
@@ -7560,6 +7804,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       stinky_module_options.update(kernel.get("_StinkyTofuParameters") or {})
       print2(f"StinkyTofu module options: {stinky_module_options}")
+      # The CFG builder aborts the whole process on a label defined twice, taking
+      # every other kernel of the run, or a test session, down with it. Fail only
+      # this kernel: getSourceFileString reports a RuntimeError and moves on.
+      duplicates = duplicateLabels(moduleKernelBody.body)
+      if duplicates:
+        raise RuntimeError("Kernel defines a label more than once: %s" % ", ".join(duplicates))
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body
@@ -7694,12 +7944,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
-    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0/strict
-    # steppings (gfx1250-strict / gfx1250v0), not the base gfx1250 build. All three
-    # share ISA (12,5,0), so gate on the concrete arch name instead. Persists across
+    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0
+    # stepping (gfx1250-strict), not the base gfx1250 build. Both share ISA
+    # (12,5,0), so gate on the concrete arch name instead. Persists across
     # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
     _stArchName = globalParameters.get("StinkyTofuArchName") or ""
-    ti.setForceScaledWMMA(_stArchName in ("gfx1250-strict", "gfx1250v0"))
+    ti.setForceScaledWMMA(_stArchName == "gfx1250-strict")
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
@@ -8582,10 +8832,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # pack or input conversion DTV case, need double buffer (LoopIters * 2)
         numVgprBufferA = self.states.numVgprBuffer if not (self.states.packDTVA or self.states.convDTVA) else kernel["LoopIters"] * 2
         numVgprBufferB = self.states.numVgprBuffer if not (self.states.packDTVB or self.states.convDTVB) else kernel["LoopIters"] * 2
-        # RAP gives A and its MX scales one buffer set per resident k-tile rather
-        # than one per prefetch slot, so the whole K extent is addressable at
-        # once. B is untouched: it is still reloaded every tile.
-        numVgprBufferA *= self.rapResidentKTiles(kernel)
+        # RAP gives A and its MX scales a buffer set per iteration of every
+        # resident k-tile rather than one per prefetch slot, so the whole K extent
+        # is addressable at once: rapResidentBufferIdx numbers them k-tile *
+        # LoopIters + u, which outruns the prefetch slots whenever
+        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. B is
+        # untouched: it is still reloaded every tile.
+        if kernel["ReuseAcrossPersistent"]:
+          numVgprBufferA = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         valuBlocks  = self.states.numVgprBuffer * kernel["InnerUnroll"] # for Sparse
         valuBlocksA = (1.5 if kernel["HalfPLRA"] else numVgprBufferA) * kernel["InnerUnroll"]
         valuBlocksB = (1.5 if kernel["HalfPLRB"] else numVgprBufferB) * kernel["InnerUnroll"]
@@ -8998,7 +9252,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # read offset, which must span the far segment. [1,4] puts the jump in the address reg instead.
           wavesPerCompB = kernel["MIWaveGroup"][1] // numComp
           compColsB = kernel["MacroTile1"] // numComp
-          segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
+          segILWaveSpansCompB = wave_tile_span(kernel, "B") >= compColsB
           if wavesPerCompB == 1 and not segILWaveSpansCompB:
             segOffsets = kernel["LDSSegInterleaveOffsets"]
             readStride = segOffsets.get("readStrideBytesB", segOffsets["writeStrideBytes"])
@@ -9282,10 +9536,26 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.startMXDummyValuVgpr = vgprIdx
         vgprIdx += 2
 
-      # TODO: alignment hack, figure out a better solution
+      # MXScaleVgprInterleave (see _mxsInterleavePlan): the MXSA valu block becomes the region
+      # shared by the MXSA and MXSB scales and the MXSB valu block is empty; packs and G2L
+      # follow as usual. The region keeps the default length when the layout fits in it, so
+      # the accumulators keep their place. The scale-bank rule it avoids is gfx1250's.
+      self.states.mxsInterleave = None
+      mxsPlan, mxsRegionLen = None, 0
+      if self.do["MXScaleVgprInterleave"] and kernel["ISA"][:2] == (12, 5) \
+         and kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        mxsPlan, mxsRegionLen, reason = self._mxsInterleaveRegion(
+            kernel, tensorParametersMXSA, tensorParametersMXSB, vgprIdx, papEnabled)
+        if mxsPlan is None:
+          # The block sizes are only known here (TileSpan, 2D scales): kernels the interleave
+          # does not fit keep the default layout.
+          print2("MXScaleVgprInterleave not applied (%s): %s" % (reason, self.states.kernelName))
+      numValuMXSA = mxsRegionLen if mxsPlan else self.states.mxsa.numVgprValu
+      numValuMXSB = 0 if mxsPlan else self.states.mxsb.numVgprValu
+
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.startVgprValu = vgprIdx
-        vgprIdx += self.states.mxsa.numVgprValu
+        vgprIdx += numValuMXSA
         numVgprValuPackMXSA = 0
         if not kernel["UnrollMajorLDSMXSA"]:
           self.states.mxsa.startVgprValuPack = vgprIdx
@@ -9309,22 +9579,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if (not kernel["PrefetchGlobalRead"]) and not papEnabled: # g2l can overlap valu
             self.states.mxsa.startVgprG2L = self.states.mxsa.startVgprValu
             vgprIdx = self.states.mxsa.startVgprValu  \
-                + max(self.states.mxsa.numVgprValu + numVgprValuPackMXSA, self.states.mxsa.numVgprG2LAllocated)
+                + max(numValuMXSA + numVgprValuPackMXSA, self.states.mxsa.numVgprG2LAllocated)
 
       if kernel["ProblemType"]["MXBlockB"]:
-        # TODO: alignment hack, figure out a better solution
-        if(self.states.archCaps["VgprBank"]):
-          residual = (vgprIdx % 4)
-          if (residual % 2) == 0:
-            # if 2-aligned bank(bank0 and bank2), move to bank1 or bank3.
-            vgprIdx += 1
-          if kernel["ISA"][:2] == (12, 5):
-            vgprIdx = ((vgprIdx+1)//2)*2
-        else:
-          vgprIdx = ((vgprIdx+1)//2)*2
+        if not mxsPlan:
+          vgprIdx = self._alignMXSB(kernel, vgprIdx)
 
         self.states.mxsb.startVgprValu = vgprIdx
-        vgprIdx += self.states.mxsb.numVgprValu
+        vgprIdx += numValuMXSB
         numVgprValuPackMXSB = 0
         if not kernel["UnrollMajorLDSMXSB"]:
           self.states.mxsb.startVgprValuPack = vgprIdx
@@ -9348,7 +9610,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if (not kernel["PrefetchGlobalRead"]) and not papEnabled: # g2l can overlap valu
             self.states.mxsb.startVgprG2L = self.states.mxsb.startVgprValu
             vgprIdx = self.states.mxsb.startVgprValu  \
-                + max(self.states.mxsb.numVgprValu + numVgprValuPackMXSB, self.states.mxsb.numVgprG2LAllocated)
+                + max(numValuMXSB + numVgprValuPackMXSB, self.states.mxsb.numVgprG2LAllocated)
+        if mxsPlan:
+          # MXSB scales live in the shared region; its BASE symbol shares the MXSA start.
+          self.states.mxsb.startVgprValu = self.states.mxsa.startVgprValu
 
       if kernel["ProblemType"]["MXBlockA"] and not papEnabled:
         if self.states.mxsa.startVgprG2L is None and self.states.mxsa.numVgprG2LAllocated > 0:
@@ -9372,6 +9637,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       vgprIdx = (vgprIdx+1)//2*2
       self.states.lastValuMXSAB = vgprIdx
+
+      if mxsPlan:
+        # The accumulators start here (c.startVgprValu below).
+        self.placeMXScaleInterleave(kernel, mxsPlan, self.states.mxsa.startVgprValu,
+                                    self.states.mxsa.startVgprValu + mxsRegionLen, vgprIdx)
+        self.states.mxsInterleave = mxsPlan
 
       self.states.totalAgprs      = 0
       self.states.totalMixedAgprs = 0
@@ -10002,21 +10273,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
   
       if kernel["PrefetchGL2"]:
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -10055,21 +10312,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # GL2 prefetch: init tp fields and allocate address VGPRs
       if kernel["PrefetchGL2"]:
         self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       self.states.totalVgprs = vgprIdx
 
@@ -10235,7 +10478,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # since the General Batched GEMM will also use this value like
     # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
     #if kernel["ProblemType"]["SupportUserArgs"]:
-    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args, 3: general batched; bits 8+ = TDM wave id
+    # 0: normal, 1: hbm, 2: user args, 3: general batched;
+    # bit 8 = TDM wave-parity, bit 9 = device scalar alpha.
+    self.defineSgpr("ArgType", 1)
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
@@ -10978,7 +11223,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         storeSgprLoad += self.states.rpga
         self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
-        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+        self.states.FactorDim = max(self.states.FactorDim, scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]))
         if self.states.FactorDim == 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:
@@ -11995,6 +12240,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     openGuards = []
     # A barrier only some waves reach is not a workgroup barrier.
     unsafeBarriers = []
+    # Branch-aware token state. The linear walk below would otherwise carry the
+    # state left by one arm of an if/else-style forward branch into the next arm
+    # (e.g. the FactorDim/BiasType arms of the epilogue vector load), although the
+    # arms are mutually exclusive and each one needs its own barrier. Remember the
+    # state at every forward branch and restore it when the walk reaches the branch
+    # target with an unreachable fall-through (previous instruction was an
+    # unconditional branch / end of program).
+    forwardBranchStates = {}
+    fallthroughDead = False
+    unconditionalEndClassNames = unconditionalBranchClassNames + ("SEndpgm",)
+
+    def _mergeBranchStates(dst, src):
+        # Tokens whose state differs between two incoming edges are dropped, so
+        # the walk keeps its current (linear) value for them.
+        for token in list(dst.keys()):
+          if src.get(token, "standby") != dst[token]:
+            del dst[token]
 
     def _crossesLoopBoundary(fromIdx, toIdx):
       return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
@@ -12009,6 +12271,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # recover token state from the snapshot
           tokenState.clear()
           tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+        if fallthroughDead and labelName in forwardBranchStates and \
+           labelName not in loopHeadInfo and not _isOptNllEndLabelName(labelName):
+          # Entered only through forward branches: continue from their state.
+          tokenState.update(forwardBranchStates[labelName])
+        fallthroughDead = False
         if labelName == rapLoopEntryLabel:
           rapLoopEntryTokenState.clear()
           rapLoopEntryTokenState.update(deepcopy(tokenState))
@@ -12053,6 +12320,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         continue
 
       branchLabelName = getattr(item, "labelName", None)
+      if isinstance(item, BranchInstruction) and branchLabelName is not None and \
+         labelDefIndex.get(branchLabelName, -1) > idx:
+        if branchLabelName not in forwardBranchStates:
+          forwardBranchStates[branchLabelName] = dict(tokenState)
+        else:
+          _mergeBranchStates(forwardBranchStates[branchLabelName], tokenState)
+      fallthroughDead = type(item).__name__ in unconditionalEndClassNames
       if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
         # Save token state at the first branch to OptNLL_End.
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
@@ -12303,7 +12577,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # -- FactorDim -------------------------------------------------------------
     enableFactorDim = False
-    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
+    if scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]) == 3:
       enableFactorDim = True
     if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
       enableFactorDim = True
@@ -12552,14 +12826,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def cmpNamedArgTypeEq(self, module, value, comment=""):
     """Compare the named ArgType domain (low 8 bits) to *value*.
 
-    Bits 8+ of sgpr ArgType are a TDM wave-id side channel on wave-separated
-    stagger kernels. Masking every named value test keeps == 2 / == 3 dispatch
-    correct independent of whether pack has run yet (persistent graWorkGroup
-    is emitted before pack but runs after pack on tile N+1).
+    Bits above the low byte of sgpr ArgType are internal side channels: bit 8
+    is TDM wave parity and bit 9 is device scalar alpha. Masking every named
+    value test keeps == 2 / == 3 dispatch correct independent of those flags
+    (persistent graWorkGroup is emitted before parity packing but runs after it
+    on tile N+1).
     """
     with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
       module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
-                         comment="mask ArgType domain (bits 8+ = TDM wave id)"))
+                         comment="mask ArgType domain (bits 8+ are internal flags)"))
       module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
@@ -12568,6 +12843,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     return ""
+
+  @abc.abstractmethod
+  def allocGL2PrefetchAddrVgprs(self, kernel, tPA, tPB, vgprIdx: int) -> int:
+    return vgprIdx
   
   @abc.abstractmethod
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
@@ -12577,6 +12856,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     return ""
   
+  @abc.abstractmethod
+  def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
+    return ""
+
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""

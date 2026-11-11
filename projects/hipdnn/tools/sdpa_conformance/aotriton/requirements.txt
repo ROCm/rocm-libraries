@@ -1,0 +1,7 @@
+# Python packages the CPU suites (aotriton/tests, tests -m "not gpu") and the runner import.
+# Minimums are the versions tested with (Python 3.12, CPU torch). Nothing here is installed by hipDNN.
+pytest>=9.2
+pytest-xdist>=3.8
+numpy>=2.5
+# torch: use the ROCm torch already installed (GPU runs); not installed from here.
+# The CPU suites ran with torch 2.15.0+cpu.

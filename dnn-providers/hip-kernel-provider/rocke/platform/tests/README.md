@@ -65,7 +65,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 
 | Layer | Python (pytest-collected) | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
 | `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
@@ -97,7 +97,9 @@ do not all edit one central file:
 | `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
-| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+| `platform/CMakeLists.txt` | Installed Python CTest entries; includes `library/tests/ctest_lists.cmake`; not build-tree C++ ownership |
+| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files) |
+| `library/cpp/tests/CMakeLists.txt` | Library C++ mirror host tests (`rocke_wgrad_streamk_host`, `rocke_conv_direct_dw_dgrad_host`) |
 
 Add a native target to its concern-owned fragment. Do not put registration back
 in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
@@ -316,7 +318,7 @@ then obtains each native parity executable from CTest, as listed in
 (`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
 storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
 HIP-source parity and unsigned integer op C API parity tests run automatically.
-The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
+The installed `rocke_pytest_*` ctest entries set `ROCKE_UNSIGNED_INT_OPS_CLI` themselves.
 `--config` selects the native test configuration (default `Release`). A build
 or fixture-discovery failure stops the runner instead of silently skipping
 coverage.
@@ -383,21 +385,23 @@ environment without Torch; they do not invoke the offline CPU oracles.
 
 | CTest entry | Scope | Registration |
 |---|---|---|
-| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, and that each installed bundle records the enrolled cohort | Host suite; skips the cohort check for a bundle that is not installed |
+| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, that each committed lock pins its adapter's cohort, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_<arch>_pytest` | The SDPA cases enrolled for `<arch>` and three failure checks | For each published SDPA architecture, when its bundle is installed |
-| `rocke_conv_gpu_<arch>_pytest` | The forward convolution cases enrolled for `<arch>` and three failure checks | For each published convolution architecture, when its bundle is installed |
+| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; five minutes per variant |
+| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; five minutes per variant |
 
-`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs and is on by default in provider builds.
+`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of every published
+variant and is on by default in provider builds.
 `platform/cmake/PublishedGpuReferences.cmake`, relative to the rocKE root, lists
-the published pairs. From the rocKE root,
+the published operation/architecture pairs; each installs every variant with a
+committed lock, and `python library/tests/reference_common/artifact.py published`
+lists them. From the rocKE root,
 `python library/tests/run_<operation>_reference.py cases --arch <arch>` lists an
-architecture's enrolled cases and their count without a GPU. CMake uses the
-standard archives and committed locks; verify replacement candidates with the
-offline CLI using explicit `--bundle` and `--lock` paths. Each operation and
-architecture retains a separate archive, lock, and installed payload.
+architecture's enrolled cases by variant, with their count, without a GPU.
+CMake uses the standard archives and committed locks; verify replacement
+candidates with the offline CLI using explicit `--bundle` and `--lock` paths.
+Each variant retains a separate archive, lock, and installed payload.
 
 The optional `conv_reference/check_torch_reference.py` and
 `sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
@@ -409,6 +413,9 @@ and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-re
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
+The conv IR golden, platform-regression, split-K, `ceil_div` and conv
+doc-example (`test_verify_dsl_docs_conv.py`) host tests run as their own entry,
+`rocke_library_conv_ir_pytest`.
 `rocke_library_gpu_pytest` also runs the dgrad and wgrad cases in
 `conv_reference/gradient_cases.py` on each of gfx942/gfx950 against live NumPy
 oracles, with three executions per case.

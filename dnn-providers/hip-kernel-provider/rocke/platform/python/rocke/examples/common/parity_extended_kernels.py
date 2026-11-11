@@ -817,8 +817,10 @@ def case_block_scale_gemm() -> Result:
     B_f32 = torch.randn(K, N, dtype=torch.float32, device="cuda") * 0.3
     A_fp8 = A_f32.to(torch.float8_e4m3fn)
     B_fp8 = B_f32.to(torch.float8_e4m3fn)
-    a_scale = torch.full((M, 1), 1.5, dtype=torch.float32, device="cuda")
-    b_scale = torch.full((1, N), 0.7, dtype=torch.float32, device="cuda")
+    # A scale per row and B scale per column, each different, so an output
+    # scaled with another row's or column's scale misses the reference.
+    a_scale = 1.0 + torch.rand(M, 1, dtype=torch.float32, device="cuda")
+    b_scale = 0.5 + 0.5 * torch.rand(1, N, dtype=torch.float32, device="cuda")
     C = torch.zeros(M, N, dtype=torch.float32, device="cuda")
     _launch(
         launcher,
