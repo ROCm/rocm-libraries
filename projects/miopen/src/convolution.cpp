@@ -78,6 +78,33 @@ ExceedsWorkspaceBudget(const std::string& solver, std::size_t size, std::size_t 
     return miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; });
 }
 
+// Whether a solver other than GEMM and the naive reference solvers could serve `problem`: one
+// that Find would consider (allowed by MIOPEN_DEBUG_FIND_ONLY_SOLVER, its algorithm enabled,
+// dynamic when only dynamic solutions are wanted) and that is applicable.
+[[maybe_unused]] bool HasNonNaiveAlternativeToGemm(const miopen::ExecutionContext& ctx,
+                                                   const conv::ProblemDescription& problem)
+{
+    const auto find_only = GetEnvFindOnlySolver();
+    for(const auto& id : solver::GetSolversByPrimitive(solver::Primitive::Convolution))
+    {
+        const auto algo = id.GetAlgo();
+        if(algo == miopenConvolutionAlgoGEMM || conv::IsAlgorithmDisabled(algo, problem))
+            continue;
+        const auto name = id.ToString();
+        if(name.find("Naive") != std::string::npos)
+            continue;
+        if(find_only && std::ranges::find(*find_only, id) == find_only->end())
+            continue;
+        const auto& solver = id.GetSolver();
+        if(solver.IsEmpty() || (ctx.use_dynamic_solutions_only && !solver.IsDynamic()) ||
+           !solver.IsApplicable(ctx, problem))
+            continue;
+        MIOPEN_LOG_I2(name << " applies, so no dilated GEMM workspace is reported");
+        return true;
+    }
+    return false;
+}
+
 std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
                                  const conv::ProblemDescription& problem)
 {
@@ -86,11 +113,15 @@ std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
         return 0;
 
     auto sizes = AllGemmWorkspaceSize(ctx, problem);
-    // Dilated GEMM workspace is reported only within the free-memory budget: reporting it
-    // unconditionally made callers that allocate the reported size run out of memory on large
-    // diffusion shapes (~120 GB, see #6974). Other solvers keep their previous limits.
+    // Dilated GEMM workspace is reported only where GEMM is the alternative to the naive solvers,
+    // and only within the free-memory budget. Where another solver applies, a reported GEMM
+    // workspace makes Find benchmark GEMM as well, which costs seconds on large shapes; and
+    // reporting it unconditionally made callers that allocate the reported size run out of memory
+    // on large diffusion shapes (~120 GB, see #6974). Other solvers keep their previous limits.
     if(IsDilated(problem) && miopen::any_of(sizes, [](const auto& pr) { return pr.second > 0; }))
     {
+        if(HasNonNaiveAlternativeToGemm(ctx, problem))
+            return 0;
         const auto budget = FreeMemoryWorkspaceBudget(ctx);
         std::erase_if(sizes, [budget](const auto& pr) {
             return ExceedsWorkspaceBudget(pr.first, pr.second, budget);

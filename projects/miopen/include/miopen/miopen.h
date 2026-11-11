@@ -1706,8 +1706,9 @@ miopenConvolutionBackwardWeightsImmediate(miopenHandle_t handle,
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
  *
- * For a dilated convolution, GEMM workspace is included only when it fits in 85% of the device
- * memory free at the time of the call, so the result can change between calls.
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
  *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise
@@ -1874,8 +1875,9 @@ MIOPEN_EXPORT miopenStatus_t miopenConvolutionForwardBias(miopenHandle_t handle,
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
  *
- * For a dilated convolution, GEMM workspace is included only when it fits in 85% of the device
- * memory free at the time of the call, so the result can change between calls.
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
  *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise
@@ -2019,8 +2021,9 @@ miopenConvolutionBackwardData(miopenHandle_t handle,
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
  *
- * For a dilated convolution, GEMM workspace is included only when it fits in 85% of the device
- * memory free at the time of the call, so the result can change between calls.
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
  *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise

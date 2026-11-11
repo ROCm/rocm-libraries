@@ -65,12 +65,14 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
   so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
   was found" when the naive solver was disabled (#14965). Dilated GEMM workspace is now reported
-  when it fits in 85% of the device memory free at query time; larger requests stay unreported to
-  avoid the out-of-memory failures that caused #6974. The same limit applies when a find-db record
-  names a GEMM solver for a dilated problem (that workspace used to be reported whatever its size),
-  and to the workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it
-  can now return GEMM solutions for dilated problems. When free memory cannot be read, no dilated
-  GEMM workspace is reported.
+  when GEMM is the only alternative to the naive solvers and the workspace fits in 85% of the
+  device memory free at query time. Where another solver applies, it stays unreported, so Find
+  does not also benchmark GEMM; larger requests stay unreported to avoid the out-of-memory
+  failures that caused #6974. The memory limit also applies when a find-db record names a GEMM
+  solver for a dilated problem (that workspace used to be reported whatever its size), and to the
+  workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
+  return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
+  workspace is reported.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for

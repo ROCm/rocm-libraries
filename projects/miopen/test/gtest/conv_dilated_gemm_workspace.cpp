@@ -2,19 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 // miopenConvolution*GetWorkSpaceSize must report the GEMM workspace of a dilated convolution when
-// it fits in 85% of the device memory free at query time, as miopen.h documents
-// (GetWorkSpaceSizeGEMM in src/convolution.cpp), in every direction, and must leave non-dilated
-// problems unchanged.
+// GEMM is the only alternative to the naive solvers and its workspace fits in 85% of the device
+// memory free at query time, as miopen.h documents (GetWorkSpaceSizeGEMM in src/convolution.cpp),
+// in every direction, and must leave non-dilated problems unchanged.
 //
 // Applications such as PyTorch size the Find workspace from that query. When it under-reports,
 // Find drops the GEMM solvers for lack of workspace, and if no other solver applies it fails with
 // "No suitable algorithm was found" (rocm-libraries#14965). A size that does not fit in free
 // memory is not reported, so callers do not try to allocate it (#6974).
 //
-// MIOPEN_DEBUG_FIND_ONLY_SOLVER makes one GEMM solver the only candidate on every arch, and the
-// workspace queries also disable the other solver families, so the reported size is that solver's.
-// Free memory comes from AvailableMemoryHandle. ScopedFindDb keeps find-db records out, except in
-// the find-db test, which points the find-db at a temporary file.
+// MIOPEN_DEBUG_FIND_ONLY_SOLVER makes one GEMM solver the only candidate on every arch, so GEMM is
+// the alternative to the naive solvers, and the workspace queries also disable the other solver
+// families, so the reported size is that solver's. Free memory comes from AvailableMemoryHandle.
+// ScopedFindDb keeps find-db records out, except in the find-db test, which points the find-db at
+// a temporary file.
 
 #include <gtest/gtest.h>
 
@@ -34,6 +35,7 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -225,6 +227,29 @@ struct ConvProblem
         miopenDestroyProblem(problem);
         return result;
     }
+
+    // A forward solver, other than GEMM and the naive ones, that the immediate-mode API lists as
+    // applicable, if any.
+    std::optional<std::string> NonNaiveAlternativeToGemm(miopenHandle_t handle)
+    {
+        std::size_t count = 0;
+        EXPECT_EQ(miopenConvolutionForwardGetSolutionCount(
+                      handle, &w.desc, &x.desc, &conv, &y.desc, &count),
+                  miopenStatusSuccess);
+        std::vector<miopenConvSolution_t> solutions(count);
+        EXPECT_EQ(miopenConvolutionForwardGetSolution(
+                      handle, &w.desc, &x.desc, &conv, &y.desc, count, &count, solutions.data()),
+                  miopenStatusSuccess);
+        solutions.resize(count);
+        for(const auto& solution : solutions)
+        {
+            const auto name = miopen::solver::Id{solution.solution_id}.ToString();
+            if(solution.algorithm != miopenConvolutionAlgoGEMM &&
+               name.find("Naive") == std::string::npos)
+                return name;
+        }
+        return std::nullopt;
+    }
 };
 
 // rocm-libraries#14965 in miniature: dilated fp32 Conv1d.
@@ -327,6 +352,31 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          Direction::BackwardData,
                                          Direction::BackwardWeights),
                          [](const auto& info) { return DirectionName(info.param); });
+
+// Dilated GEMM is the alternative to the naive solvers only: where another solver applies, no GEMM
+// workspace is reported, so Find does not benchmark GEMM as well. The query then matches the one
+// with the GEMM family disabled.
+TEST(GPU_ConvDilatedGemmWorkspace_FP32, NoGemmWorkspaceWhereAnotherSolverApplies)
+{
+#if !MIOPEN_USE_GEMM
+    GTEST_SKIP() << "Built without GEMM support";
+#else
+    auto& handle = get_handle();
+    ScopedFindDb no_find_db;
+
+    auto problem = LargeConv(2);
+    ASSERT_GT(problem.SolverWorkspace(&handle, Direction::Forward, "GemmFwdRest"), 0)
+        << "GemmFwdRest needs Im2Col workspace for this problem";
+    const auto alternative = problem.NonNaiveAlternativeToGemm(&handle);
+    if(!alternative)
+        GTEST_SKIP() << "Only GEMM and the naive solvers apply on this device";
+
+    const auto queried = problem.QueriedWorkspace(&handle, Direction::Forward);
+    ScopedEnvironment<bool> no_gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    EXPECT_EQ(queried, problem.QueriedWorkspace(&handle, Direction::Forward))
+        << *alternative << " applies";
+#endif
+}
 
 // rocm-libraries#14965: Find given the queried workspace must select GemmFwdRest instead of
 // failing.
