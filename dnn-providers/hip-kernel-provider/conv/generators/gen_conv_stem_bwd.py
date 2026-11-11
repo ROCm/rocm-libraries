@@ -83,7 +83,11 @@ GEOMETRIES = [
     (4, 1),
     (4, 4),
 ]
-INTS = ["atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw"]
+# 3-D (ft depth taps, unit depth stride: the dx planes in the grid, the taps in the reduction):
+# (stride, extent, taps). 1x7x7 s(1,2,2) p(0,3,3) -> (2, 4, 1); 3x7x7 s(1,2,2) p(1,3,3) ->
+# (2, 4, 3); 3x3x3 s1 "same" -> (1, 3, 3). After every 2-D config, which keep their order.
+GEOMETRIES_3D = [(2, 4, 1), (2, 4, 3), (1, 3, 3)]
+INTS = ["atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft"]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
 
@@ -137,58 +141,62 @@ def build():
         e = eb(dtype)
         ev = 16 // e
         cfgs = []
-        for atom in atoms:
+        # 2-D configs first (their order, and so their priorities, as before), then 3-D ones.
+        plan = [(atom, s, w, 0) for atom in atoms for s, w in GEOMETRIES] + [
+            (atom, s, w, ft) for atom in atoms for s, w, ft in GEOMETRIES_3D
+        ]
+        for atom, s, w, ft in plan:
             dim, ka, wave = SHAPE[atom]
-            for s, w in GEOMETRIES:
-                # Wide windows stage more of B per chunk: smaller chunks.
-                kcs = (
-                    [8, 16]
-                    if dtype == "FLOAT"
-                    else ([16, 32, 64] if w * w <= 4 else [16, 32])
-                )
-                tiles = (
-                    # 16 threads a row; 8 x 1 for the wide windows' 48 / 64 columns (11x11 s4),
-                    # whose B chunk leaves the larger tiles no room in 64 KiB or registers.
-                    [(8, 4), (16, 2), (16, 4), (32, 2)]
-                    + ([(8, 1)] if w * w > 4 and s > 2 else [])
-                    if atom == "fma"
-                    else [(2, 4), (4, 2), (4, 4), (8, 2)]
-                )
-                for nb in nbs(atom, s):
-                    for layout, vec in [(1, ev), (0, ev), (0, 1)]:
-                        for kc in kcs:
-                            if kc % ka or kc % ev:
+            # Wide windows stage more of B per chunk: smaller chunks.
+            kcs = (
+                [8, 16]
+                if dtype == "FLOAT"
+                else ([16, 32, 64] if w * w <= 4 else [16, 32])
+            )
+            tiles = (
+                # 16 threads a row; 8 x 1 for the wide windows' 48 / 64 columns (11x11 s4),
+                # whose B chunk leaves the larger tiles no room in 64 KiB or registers.
+                [(8, 4), (16, 2), (16, 4), (32, 2)]
+                + ([(8, 1)] if w * w > 4 and s > 2 else [])
+                if atom == "fma"
+                else [(2, 4), (4, 2), (4, 4), (8, 2)]
+            )
+            for nb in nbs(atom, s):
+                for layout, vec in [(1, ev), (0, ev), (0, 1)]:
+                    for kc in kcs:
+                        if kc % ka or kc % ev:
+                            continue
+                        for th, fm in tiles:
+                            if th * wave > 1024:
                                 continue
-                            for th, fm in tiles:
-                                if th * wave > 1024:
-                                    continue
-                                if lds_bytes(e, w, w, nb, kc, th, fm * dim) > lds_limit(
-                                    atom
-                                ):
-                                    continue
-                                if (
-                                    prefetch_vgprs(
-                                        e, layout, vec, w, nb, kc, th, fm * dim, wave
-                                    )
-                                    > 96
-                                ):
-                                    continue
-                                cfgs.append(
-                                    {
-                                        "atom": atom,
-                                        "atom_id": ATOMS.index(atom),
-                                        "layout": layout,
-                                        "vec": vec,
-                                        "u": w,
-                                        "v": w,
-                                        "nb": nb,
-                                        "kc": kc,
-                                        "th": th,
-                                        "fm": fm,
-                                        "sh": s,
-                                        "sw": s,
-                                    }
+                            if lds_bytes(e, w, w, nb, kc, th, fm * dim) > lds_limit(
+                                atom
+                            ):
+                                continue
+                            if (
+                                prefetch_vgprs(
+                                    e, layout, vec, w, nb, kc, th, fm * dim, wave
                                 )
+                                > 96
+                            ):
+                                continue
+                            cfgs.append(
+                                {
+                                    "atom": atom,
+                                    "atom_id": ATOMS.index(atom),
+                                    "layout": layout,
+                                    "vec": vec,
+                                    "u": w,
+                                    "v": w,
+                                    "nb": nb,
+                                    "kc": kc,
+                                    "th": th,
+                                    "fm": fm,
+                                    "sh": s,
+                                    "sw": s,
+                                    "ft": ft,
+                                }
+                            )
         catalog[dtype] = cfgs
     return catalog
 
@@ -253,6 +261,7 @@ def emit(catalog):
             name = (
                 f"conv_stem_bwd.{dt}.{c['atom']}.{lay}.v{c['vec']}.s{c['sh']}x{c['sw']}"
                 f".w{c['u']}x{c['v']}.nb{c['nb']}.kc{c['kc']}.t{c['th']}f{c['fm']}"
+                + (f".d{c['ft']}" if c["ft"] else "")
             )
             key = (dtype,) + tuple(c[f] for f in INTS)
             assert key not in tuples, name

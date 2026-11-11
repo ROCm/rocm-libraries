@@ -181,6 +181,7 @@ conv_stem_bwd::StemBwdConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelD
     c.fm = kernel.getIntMetadata("fm");
     c.sh = kernel.getIntMetadata("sh");
     c.sw = kernel.getIntMetadata("sw");
+    c.ft = kernel.getIntMetadata("ft");
     return c;
 }
 
@@ -349,6 +350,34 @@ std::vector<DeviceCase> deviceCases()
     threeD.stride = {1, 2, 2};
     threeD.dilation = {1, 1, 1};
     cases.push_back({"ThreeDOfDepthOne", threeD});
+    // 3-D stems: the dx planes in the grid, the depth taps in the reduction (unit depth stride).
+    const auto stem3d = [](int64_t c,
+                           int64_t k,
+                           std::vector<int64_t> input,
+                           int64_t taps,
+                           int64_t filter,
+                           int64_t stride,
+                           int64_t padding,
+                           bool channelsLast = false) {
+        auto shape = stem(c, k, std::move(input), filter, stride, padding, channelsLast);
+        shape.filter = {taps, filter, filter};
+        shape.prePadding = shape.postPadding = {taps / 2, padding, padding};
+        shape.stride = {1, stride, stride};
+        shape.dilation = {1, 1, 1};
+        return shape;
+    };
+    cases.push_back({"Stem1x7x7S2Planes", stem3d(3, 16, {3, 21, 30}, 1, 7, 2, 3)});
+    cases.push_back({"Stem3x7x7S2Taps", stem3d(3, 24, {4, 21, 30}, 3, 7, 2, 3)});
+    cases.push_back({"Stem3x7x7S2TapsNhwc", stem3d(3, 16, {3, 17, 26}, 3, 7, 2, 3, true)});
+    cases.push_back({"Stem3x3x3S1OneChannel", stem3d(1, 16, {4, 10, 20}, 3, 3, 1, 1)});
+    // Depth padding on one side only: the planes past it read no dy plane.
+    auto leading = stem3d(3, 16, {3, 21, 30}, 3, 7, 2, 3);
+    leading.prePadding = {2, 3, 3};
+    leading.postPadding = {0, 3, 3};
+    cases.push_back({"Stem3x7x7S2LeadingDepthPadding", leading});
+    auto convolution3d = stem3d(3, 16, {3, 21, 30}, 3, 7, 2, 3);
+    convolution3d.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Stem3x7x7S2TrueConvolution", convolution3d});
     return cases;
 }
 
@@ -528,8 +557,8 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 11> KNOBS{
-        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw"};
+    static constexpr std::array<const char*, 12> KNOBS{
+        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {

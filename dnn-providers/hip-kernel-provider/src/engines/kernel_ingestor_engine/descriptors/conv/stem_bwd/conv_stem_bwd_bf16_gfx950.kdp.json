@@ -32,7 +32,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 420
     },
@@ -59,7 +60,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 419
     },
@@ -86,7 +88,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 418
     },
@@ -113,7 +116,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 417
     },
@@ -140,7 +144,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 416
     },
@@ -167,7 +172,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 415
     },
@@ -194,7 +200,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 414
     },
@@ -221,7 +228,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 413
     },
@@ -248,7 +256,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 412
     },
@@ -275,7 +284,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 411
     },
@@ -302,7 +312,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 410
     },
@@ -329,7 +340,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 409
     },
@@ -356,7 +368,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 408
     },
@@ -383,7 +396,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 407
     },
@@ -410,7 +424,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 406
     },
@@ -437,7 +452,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 405
     },
@@ -464,7 +480,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 404
     },
@@ -491,7 +508,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 403
     },
@@ -518,7 +536,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 402
     },
@@ -545,7 +564,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 401
     },
@@ -572,7 +592,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 400
     },
@@ -599,7 +620,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 399
     },
@@ -626,7 +648,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 398
     },
@@ -653,7 +676,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 397
     },
@@ -680,7 +704,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 396
     },
@@ -707,7 +732,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 395
     },
@@ -734,7 +760,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 394
     },
@@ -761,7 +788,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 393
     },
@@ -788,7 +816,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 392
     },
@@ -815,7 +844,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 391
     },
@@ -842,7 +872,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 390
     },
@@ -869,7 +900,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 389
     },
@@ -896,7 +928,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 388
     },
@@ -923,7 +956,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 387
     },
@@ -950,7 +984,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 386
     },
@@ -977,7 +1012,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 385
     },
@@ -1004,7 +1040,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 384
     },
@@ -1031,7 +1068,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 383
     },
@@ -1058,7 +1096,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 382
     },
@@ -1085,7 +1124,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 381
     },
@@ -1112,7 +1152,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 380
     },
@@ -1139,7 +1180,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 379
     },
@@ -1166,7 +1208,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 378
     },
@@ -1193,7 +1236,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 377
     },
@@ -1220,7 +1264,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 376
     },
@@ -1247,7 +1292,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 375
     },
@@ -1274,7 +1320,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 374
     },
@@ -1301,7 +1348,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 373
     },
@@ -1328,7 +1376,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 372
     },
@@ -1355,7 +1404,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 371
     },
@@ -1382,7 +1432,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 370
     },
@@ -1409,7 +1460,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 369
     },
@@ -1436,7 +1488,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 368
     },
@@ -1463,7 +1516,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 367
     },
@@ -1490,7 +1544,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 366
     },
@@ -1517,7 +1572,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 365
     },
@@ -1544,7 +1600,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 364
     },
@@ -1571,7 +1628,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 363
     },
@@ -1598,7 +1656,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 362
     },
@@ -1625,7 +1684,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 361
     },
@@ -1652,7 +1712,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 360
     },
@@ -1679,7 +1740,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 359
     },
@@ -1706,7 +1768,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 358
     },
@@ -1733,7 +1796,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 357
     },
@@ -1760,7 +1824,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 356
     },
@@ -1787,7 +1852,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 355
     },
@@ -1814,7 +1880,8 @@
         "th": 2,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 354
     },
@@ -1841,7 +1908,8 @@
         "th": 4,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 353
     },
@@ -1868,7 +1936,8 @@
         "th": 4,
         "fm": 4,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 352
     },
@@ -1895,7 +1964,8 @@
         "th": 8,
         "fm": 2,
         "sh": 2,
-        "sw": 2
+        "sw": 2,
+        "ft": 0
       },
       "priority": 351
     },
@@ -1922,7 +1992,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 350
     },
@@ -1949,7 +2020,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 349
     },
@@ -1976,7 +2048,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 348
     },
@@ -2003,7 +2076,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 347
     },
@@ -2030,7 +2104,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 346
     },
@@ -2057,7 +2132,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 345
     },
@@ -2084,7 +2160,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 344
     },
@@ -2111,7 +2188,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 343
     },
@@ -2138,7 +2216,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 342
     },
@@ -2165,7 +2244,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 341
     },
@@ -2192,7 +2272,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 340
     },
@@ -2219,7 +2300,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 339
     },
@@ -2246,7 +2328,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 338
     },
@@ -2273,7 +2356,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 337
     },
@@ -2300,7 +2384,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 336
     },
@@ -2327,7 +2412,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 335
     },
@@ -2354,7 +2440,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 334
     },
@@ -2381,7 +2468,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 333
     },
@@ -2408,7 +2496,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 332
     },
@@ -2435,7 +2524,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 331
     },
@@ -2462,7 +2552,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 330
     },
@@ -2489,7 +2580,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 329
     },
@@ -2516,7 +2608,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 328
     },
@@ -2543,7 +2636,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 327
     },
@@ -2570,7 +2664,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 326
     },
@@ -2597,7 +2692,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 325
     },
@@ -2624,7 +2720,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 324
     },
@@ -2651,7 +2748,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 323
     },
@@ -2678,7 +2776,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 322
     },
@@ -2705,7 +2804,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 321
     },
@@ -2732,7 +2832,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 320
     },
@@ -2759,7 +2860,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 319
     },
@@ -2786,7 +2888,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 318
     },
@@ -2813,7 +2916,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 317
     },
@@ -2840,7 +2944,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 316
     },
@@ -2867,7 +2972,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 315
     },
@@ -2894,7 +3000,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 314
     },
@@ -2921,7 +3028,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 313
     },
@@ -2948,7 +3056,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 312
     },
@@ -2975,7 +3084,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 311
     },
@@ -3002,7 +3112,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 310
     },
@@ -3029,7 +3140,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 309
     },
@@ -3056,7 +3168,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 308
     },
@@ -3083,7 +3196,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 307
     },
@@ -3110,7 +3224,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 306
     },
@@ -3137,7 +3252,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 305
     },
@@ -3164,7 +3280,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 304
     },
@@ -3191,7 +3308,8 @@
         "th": 2,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 303
     },
@@ -3218,7 +3336,8 @@
         "th": 4,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 302
     },
@@ -3245,7 +3364,8 @@
         "th": 4,
         "fm": 4,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 301
     },
@@ -3272,7 +3392,8 @@
         "th": 8,
         "fm": 2,
         "sh": 1,
-        "sw": 1
+        "sw": 1,
+        "ft": 0
       },
       "priority": 300
     },
@@ -3299,7 +3420,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 299
     },
@@ -3326,7 +3448,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 298
     },
@@ -3353,7 +3476,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 297
     },
@@ -3380,7 +3504,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 296
     },
@@ -3407,7 +3532,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 295
     },
@@ -3434,7 +3560,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 294
     },
@@ -3461,7 +3588,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 293
     },
@@ -3488,7 +3616,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 292
     },
@@ -3515,7 +3644,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 291
     },
@@ -3542,7 +3672,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 290
     },
@@ -3569,7 +3700,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 289
     },
@@ -3596,7 +3728,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 288
     },
@@ -3623,7 +3756,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 287
     },
@@ -3650,7 +3784,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 286
     },
@@ -3677,7 +3812,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 285
     },
@@ -3704,7 +3840,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 284
     },
@@ -3731,7 +3868,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 283
     },
@@ -3758,7 +3896,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 282
     },
@@ -3785,7 +3924,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 281
     },
@@ -3812,7 +3952,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 280
     },
@@ -3839,7 +3980,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 279
     },
@@ -3866,7 +4008,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 278
     },
@@ -3893,7 +4036,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 277
     },
@@ -3920,7 +4064,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 276
     },
@@ -3947,7 +4092,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 275
     },
@@ -3974,7 +4120,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 274
     },
@@ -4001,7 +4148,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 273
     },
@@ -4028,7 +4176,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 272
     },
@@ -4055,7 +4204,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 271
     },
@@ -4082,7 +4232,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 270
     },
@@ -4109,7 +4260,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 269
     },
@@ -4136,7 +4288,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 268
     },
@@ -4163,7 +4316,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 267
     },
@@ -4190,7 +4344,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 266
     },
@@ -4217,7 +4372,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 265
     },
@@ -4244,7 +4400,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 264
     },
@@ -4271,7 +4428,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 263
     },
@@ -4298,7 +4456,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 262
     },
@@ -4325,7 +4484,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 261
     },
@@ -4352,7 +4512,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 260
     },
@@ -4379,7 +4540,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 259
     },
@@ -4406,7 +4568,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 258
     },
@@ -4433,7 +4596,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 257
     },
@@ -4460,7 +4624,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 256
     },
@@ -4487,7 +4652,8 @@
         "th": 2,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 255
     },
@@ -4514,7 +4680,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 254
     },
@@ -4541,7 +4708,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 253
     },
@@ -4568,7 +4736,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 252
     },
@@ -4595,7 +4764,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 251
     },
@@ -4622,7 +4792,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 250
     },
@@ -4649,7 +4820,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 249
     },
@@ -4676,7 +4848,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 248
     },
@@ -4703,7 +4876,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 247
     },
@@ -4730,7 +4904,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 246
     },
@@ -4757,7 +4932,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 245
     },
@@ -4784,7 +4960,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 244
     },
@@ -4811,7 +4988,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 243
     },
@@ -4838,7 +5016,8 @@
         "th": 4,
         "fm": 4,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 242
     },
@@ -4865,7 +5044,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 241
     },
@@ -4892,7 +5072,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 240
     },
@@ -4919,7 +5100,8 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 239
     },
@@ -4946,7 +5128,8 @@
         "th": 4,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 238
     },
@@ -4973,9 +5156,962 @@
         "th": 8,
         "fm": 2,
         "sh": 4,
-        "sw": 4
+        "sw": 4,
+        "ft": 0
       },
       "priority": 237
+    },
+    {
+      "version": "1.0",
+      "id": "33e230fa-dad7-5923-a2e0-cda3a89a4fb3",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t2f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -634
+    },
+    {
+      "version": "1.0",
+      "id": "6e09c42a-06ae-581b-bcdc-46dd6bfc95b6",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -635
+    },
+    {
+      "version": "1.0",
+      "id": "46188e75-08b9-5ae2-a68d-e08f2afebd92",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -636
+    },
+    {
+      "version": "1.0",
+      "id": "5f453291-1247-59e7-afdb-b7eed1019a04",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t8f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -637
+    },
+    {
+      "version": "1.0",
+      "id": "6bc420a3-c880-5a3c-acce-b498416795fc",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t2f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -638
+    },
+    {
+      "version": "1.0",
+      "id": "01a6156a-5ae2-5e10-a1d6-75e542fc46ba",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -639
+    },
+    {
+      "version": "1.0",
+      "id": "e219d26d-ed73-5e66-959b-4d9dfffab27f",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -640
+    },
+    {
+      "version": "1.0",
+      "id": "57f5ba4a-1a0c-5d32-b0e5-15e2387bbce3",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t8f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -641
+    },
+    {
+      "version": "1.0",
+      "id": "1290f388-9cf7-57d3-b18b-c6fb3dcca1a5",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -642
+    },
+    {
+      "version": "1.0",
+      "id": "b977f06f-fd62-51c1-b87b-7d0d05dde2cc",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -643
+    },
+    {
+      "version": "1.0",
+      "id": "b040467c-a059-50f3-8a5b-102e5d8911d1",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t8f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1
+      },
+      "priority": -644
+    },
+    {
+      "version": "1.0",
+      "id": "8f7b4148-6461-50db-ad30-9e42c80ae979",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -645
+    },
+    {
+      "version": "1.0",
+      "id": "6c8ab50c-384e-5eeb-b60a-c6216bd69f35",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -646
+    },
+    {
+      "version": "1.0",
+      "id": "5fcd92a0-b6d8-5e11-ac73-b997f5f363f0",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -647
+    },
+    {
+      "version": "1.0",
+      "id": "862d4bd6-40da-52ed-ad8f-196c2b765cc5",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -648
+    },
+    {
+      "version": "1.0",
+      "id": "a9e0fe05-5a89-5a6a-9127-5f1b3e932461",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -649
+    },
+    {
+      "version": "1.0",
+      "id": "80609cd2-9011-5958-9be4-4d17e8efc52b",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -650
+    },
+    {
+      "version": "1.0",
+      "id": "71041e2b-c3fa-5199-8fa5-eb0a8853f023",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -651
+    },
+    {
+      "version": "1.0",
+      "id": "d25e7677-a611-5b59-99cb-024f5a1d20c6",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -652
+    },
+    {
+      "version": "1.0",
+      "id": "3db060f0-e398-5db6-aec9-4ed42b629b7f",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -653
+    },
+    {
+      "version": "1.0",
+      "id": "1eeb8117-6c02-5e75-816d-b19ae59219ab",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -654
+    },
+    {
+      "version": "1.0",
+      "id": "43e01b38-91c9-5073-a743-6bff92e497ef",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3
+      },
+      "priority": -655
+    },
+    {
+      "version": "1.0",
+      "id": "34ed7fbf-88df-53ab-88ae-f32f17e2af67",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -656
+    },
+    {
+      "version": "1.0",
+      "id": "500a4cc1-fb02-56b4-8321-69a36f366120",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -657
+    },
+    {
+      "version": "1.0",
+      "id": "b56665e4-a88b-5f33-82d6-a8fa0dd14e00",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -658
+    },
+    {
+      "version": "1.0",
+      "id": "dce62ac9-cc62-5569-9ac2-d371f9a23bfb",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -659
+    },
+    {
+      "version": "1.0",
+      "id": "97c843e6-aadc-503c-900c-2e54913fd1e0",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -660
+    },
+    {
+      "version": "1.0",
+      "id": "57cee10c-b2b4-5dad-a343-9b8e379a55a8",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -661
+    },
+    {
+      "version": "1.0",
+      "id": "edfb85af-aa48-57c0-894a-9e59f6ce0ddd",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -662
+    },
+    {
+      "version": "1.0",
+      "id": "0dc8d73c-035a-509a-94db-f1b6d9318a43",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -663
+    },
+    {
+      "version": "1.0",
+      "id": "585a1c25-7c90-53f9-a473-1c650bc526eb",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -664
+    },
+    {
+      "version": "1.0",
+      "id": "6eb2b3f5-ae5e-523c-9c9c-3bb52d1c1dbf",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -665
+    },
+    {
+      "version": "1.0",
+      "id": "c28f816d-6781-5b9e-8cae-b477ccdf3c42",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -666
+    },
+    {
+      "version": "1.0",
+      "id": "7049e06c-32b4-5860-bd4d-91057776bf0b",
+      "name": "conv_stem_bwd.bf16.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t8f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3
+      },
+      "priority": -667
     }
   ]
 }

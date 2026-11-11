@@ -22,6 +22,11 @@ struct ConvStemBwdArgs
     long long dys[4];
     long long dxs[4];
     long long dyImage; ///< elements of one image of dy (its buffer's extent)
+    // 3-D (CONV_SB_FT depth taps, depth stride 1): dx planes d of dy's dout, depth padding pd;
+    // the reduction runs over (depth tap, k), kpr the per-tap k padding (kp = FT kpr); dyd and
+    // dxd the planes' element strides. The grid's z is n d.
+    int d, dout, pd, kpr;
+    long long dyd, dxd;
 };
 
 /// b[nb = (c, p, q)][u][v][k] = w[k][c][r][s] with r = sh (u - oh) + p + ph and s = sw (v - ow)
@@ -35,6 +40,10 @@ struct ConvStemBwdTransformArgs
     int c, k, r, s, sh, sw, ph, pw, oh, ow, flip;
     int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
     long long ws[4];
+    // 3-D: b's k axis is (depth tap, k), kpr per tap; ft depth taps (0: 2-D), wsd the filter's
+    // depth stride.
+    int ft, kpr;
+    long long wsd;
 };
 
 /// Elements a staged k run is padded by: 16 bytes, which keeps every run's 16-byte stores

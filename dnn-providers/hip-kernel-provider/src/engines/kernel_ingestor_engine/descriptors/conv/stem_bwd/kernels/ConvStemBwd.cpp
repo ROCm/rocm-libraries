@@ -13,9 +13,15 @@
 //   CONV_SB_KC       output channels per chunk
 //   CONV_SB_TH, _FM  super-rows per block (one wave each on an atom), fragments of super-columns
 //   CONV_SB_SH, _SW  the filter's height and width strides
+//   CONV_SB_FT       3-D: filter depth taps (depth stride 1), the planes folded into the grid;
+//                    absent (0) for 2-D
 // ConvStemBwdTransform, the filter's rearrangement into the workspace, shares the source.
 
 #include "ConvStemBwdCore.h"
+
+#ifndef CONV_SB_FT
+#define CONV_SB_FT 0
+#endif
 
 #ifdef CONV_SB_ATOM
 #define CONV_SB_FMA 0
@@ -40,10 +46,11 @@ extern "C" __global__ void __launch_bounds__(CONV_SB_TH* CONV_SB_ATOM_T::WAVE)
               CONV_SB_TH,
               CONV_SB_FM,
               CONV_SB_SH,
-              CONV_SB_SW>(a);
+              CONV_SB_SW,
+              CONV_SB_FT>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvStemBwdTransform(ConvStemBwdTransformArgs a)
 {
-    sbTransform<CONV_SB_T>(a);
+    sbTransform<CONV_SB_T, CONV_SB_FT>(a);
 }
