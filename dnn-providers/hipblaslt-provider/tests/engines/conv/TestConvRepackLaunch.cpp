@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdint>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -242,8 +243,56 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     g.prePadding[1] = g.prePadding[2] = 0;
     g.stride[1] = g.stride[2] = 2;
     auto args = col2im(g);
-    EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImDisjoint2");
-    EXPECT_EQ(col2imLaunch(args, "Float", 4).entry, "Col2ImDisjoint4");
+    // Channels-first: runs along width, as wide as every row start keeps aligned (rows of 28:
+    // 8 bytes of fp16, 16 of fp32).
+    auto launch = col2imLaunch(args, "Half", 2);
+    EXPECT_EQ(launch.entry, "Col2ImDisjointWidth2V4");
+    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 7 + 255) / 256);
+    launch = col2imLaunch(args, "Float", 4);
+    EXPECT_EQ(launch.entry, "Col2ImDisjointWidth4V4");
+    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 7 + 255) / 256);
+
+    // Channels-last: runs along (width, channels), which dx packs together.
+    auto last = geometry(8, 64, 28, 28, true);
+    last.filter[1] = last.filter[2] = 1;
+    last.prePadding[1] = last.prePadding[2] = 0;
+    last.stride[1] = last.stride[2] = 2;
+    auto lastArgs = col2im(last);
+    launch = col2imLaunch(lastArgs, "Half", 2);
+    EXPECT_EQ(launch.entry, "Col2ImDisjointChannels2V8");
+    EXPECT_EQ(lastArgs.launch.rows, 1);
+    EXPECT_EQ(launch.grid, (8u * 28 * 28 * 64 / 8 + 255) / 256);
+    // Three channels (RGB patchify): the fused run still fills 16 bytes; padded positions do not
+    // pack (width, channels), so runs stay within one position's channels, at most
+    // as wide as they.
+    auto rgb = last;
+    rgb.cPerGroup = 3;
+    rgb.xStrides[4] = 3;
+    rgb.xStrides[3] = 3 * 32;
+    rgb.input[2] = 32;
+    auto rgbArgs = col2im(rgb);
+    EXPECT_EQ(col2imLaunch(rgbArgs, "Half", 2).entry, "Col2ImDisjointChannels2V8");
+    rgb.xStrides[4] = 4;
+    rgb.xStrides[3] = 4 * 32;
+    rgbArgs = col2im(rgb);
+    EXPECT_EQ(col2imLaunch(rgbArgs, "Half", 2).entry, "Col2ImDisjointChannels2V2");
+    EXPECT_EQ(rgbArgs.launch.rows, 0);
+
+    // Offsets past 32 bits: the generic kernel.
+    auto huge = geometry(4096, 256, 64, 64, true);
+    huge.filter[1] = huge.filter[2] = 1;
+    huge.prePadding[1] = huge.prePadding[2] = 0;
+    huge.stride[1] = huge.stride[2] = 2;
+    auto hugeArgs = col2im(huge);
+    EXPECT_EQ(col2imLaunch(hugeArgs, "Half", 2).entry, "Col2ImDisjoint2");
+    // Neither width nor channels contiguous: the generic kernel.
+    auto strided = g;
+    strided.xStrides[4] = 2;
+    strided.xStrides[3] = 56;
+    strided.xStrides[1] = 56 * 28;
+    strided.xStrides[0] = 64 * 56 * 28;
+    auto stridedArgs = col2im(strided);
+    EXPECT_EQ(col2imLaunch(stridedArgs, "Float", 4).entry, "Col2ImDisjoint4");
 
     // A 4x4 patchify (stride 4): disjoint taps too; a 3x3 at stride 2 overlaps.
     auto patchify = geometry(8, 3, 224, 224, false);
@@ -251,11 +300,12 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     patchify.stride[1] = patchify.stride[2] = 4;
     patchify.prePadding[1] = patchify.prePadding[2] = 0;
     auto patchArgs = col2im(patchify);
-    EXPECT_EQ(col2imLaunch(patchArgs, "Half", 2).entry, "Col2ImDisjoint2");
+    EXPECT_EQ(col2imLaunch(patchArgs, "Half", 2).entry, "Col2ImDisjointWidth2V8");
     auto overlap = geometry(8, 3, 224, 224, false);
     overlap.stride[1] = overlap.stride[2] = 2;
     auto overlapArgs = col2im(overlap);
-    EXPECT_NE(col2imLaunch(overlapArgs, "Half", 2).entry, "Col2ImDisjoint2");
+    EXPECT_EQ(col2imLaunch(overlapArgs, "Half", 2).entry.rfind("Col2ImDisjoint", 0),
+              std::string::npos);
 }
 
 TEST(TestConvRepackLaunch, ChannelsFirstToLastCopyIsATiledTranspose)

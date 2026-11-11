@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <numeric>
 #include <random>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -12,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/conv/RepackProgram.hpp"
+#include "kernels/ConvRepackLaunch.hpp"
 
 /**
  * @file TestGpuRepackKernels.cpp
@@ -137,6 +140,208 @@ TEST(TestGpuRepackKernels, StridedCopyMatchesTheHostOverRandomPermutations)
             runCopy<uint16_t>(copyCase, program);
             runCopy<uint32_t>(copyCase, program);
         }
+    }
+}
+
+/// A random disjoint-filter col2im (stride at least the dilated extent on every axis): 2-D or
+/// 3-D, groups, padding, flip, dx channels-first, channels-last or strided, both column orders,
+/// widths and channel counts that do and do not fill 16-byte runs.
+struct DisjointCase
+{
+    ConvColumnGeometry g{};
+    int64_t xSpan = 0;
+    int64_t columnElements = 0;
+};
+
+DisjointCase randomDisjointCase(std::mt19937& random, int trial)
+{
+    const auto pick
+        = [&](int lo, int hi) { return std::uniform_int_distribution<int>(lo, hi)(random); };
+    DisjointCase result;
+    auto& g = result.g;
+    g.n = pick(1, 3);
+    g.groups = pick(1, 2);
+    g.cPerGroup = trial % 6 == 0 ? 8 * pick(1, 2) : pick(1, 6);
+    const bool threeD = trial % 4 == 3;
+    for(int axis = 0; axis < 3; ++axis)
+    {
+        const bool used = axis > 0 || threeD;
+        g.filter[axis] = used ? pick(1, 3) : 1;
+        g.dilation[axis] = used && g.filter[axis] > 1 && pick(0, 3) == 0 ? 2 : 1;
+        const long long extent = (g.filter[axis] - 1) * g.dilation[axis] + 1;
+        g.stride[axis] = used ? extent + pick(0, 2) : 1;
+        g.prePadding[axis] = used ? pick(0, 2) : 0;
+        const long long post = used ? pick(0, 2) : 0;
+        g.input[axis] = used ? (axis == 2 && trial % 2 == 0 ? 8 * pick(2, 5) : pick(3, 37)) : 1;
+        g.output[axis] = (g.input[axis] + g.prePadding[axis] + post - extent) / g.stride[axis] + 1;
+        if(g.output[axis] < 1)
+        {
+            g.input[axis] += extent;
+            g.output[axis]
+                = (g.input[axis] + g.prePadding[axis] + post - extent) / g.stride[axis] + 1;
+        }
+    }
+    g.flipFilter = pick(0, 1);
+    g.channelsInner = pick(0, 1);
+    g.columnsFirst = pick(0, 1);
+    const long long c = g.groups * g.cPerGroup;
+    const long long d = g.input[0];
+    const long long h = g.input[1];
+    const long long w = g.input[2];
+    switch(trial % 3)
+    {
+    case 0: // channels-last
+        g.xStrides[1] = 1;
+        g.xStrides[4] = c;
+        g.xStrides[3] = c * w;
+        g.xStrides[2] = c * w * h;
+        g.xStrides[0] = c * w * h * d;
+        break;
+    case 1: // channels-first
+        g.xStrides[4] = 1;
+        g.xStrides[3] = w;
+        g.xStrides[2] = w * h;
+        g.xStrides[1] = w * h * d;
+        g.xStrides[0] = w * h * d * c;
+        break;
+    default: // channels-first rows padded to an odd pitch, or every other width element
+        g.xStrides[4] = pick(0, 1) == 0 ? 1 : 2;
+        g.xStrides[3] = g.xStrides[4] * w + 3;
+        g.xStrides[2] = g.xStrides[3] * h;
+        g.xStrides[1] = g.xStrides[2] * d;
+        g.xStrides[0] = g.xStrides[1] * c;
+        break;
+    }
+    result.xSpan = g.xStrides[0] * g.n;
+    result.columnElements = g.n * g.output[0] * g.output[1] * g.output[2] * c * g.filter[0]
+                            * g.filter[1] * g.filter[2];
+    return result;
+}
+
+/// The generic disjoint col2im (ConvRepack.cpp col2imDisjoint) on the host.
+template <typename Bits>
+void disjointReference(const DisjointCase& caseData,
+                       const std::vector<Bits>& col,
+                       std::vector<Bits>& x)
+{
+    const auto& g = caseData.g;
+    const long long channels = g.groups * g.cPerGroup;
+    const long long taps = g.filter[0] * g.filter[1] * g.filter[2];
+    const long long columns = channels * taps;
+    const long long outputs = g.output[0] * g.output[1] * g.output[2];
+    const long long total = g.n * channels * g.input[0] * g.input[1] * g.input[2];
+    for(long long index = 0; index < total; ++index)
+    {
+        long long rest = index;
+        long long position[3];
+        for(int axis = 2; axis >= 0; --axis)
+        {
+            position[axis] = rest % g.input[axis];
+            rest /= g.input[axis];
+        }
+        const long long c = rest % channels;
+        const long long n = rest / channels;
+        long long o = 0;
+        long long element = 0;
+        bool read = true;
+        for(int axis = 0; axis < 3; ++axis)
+        {
+            const long long s = position[axis] + g.prePadding[axis];
+            const long long coordinate = s >= 0 ? s / g.stride[axis] : 0;
+            const long long offset = s - coordinate * g.stride[axis];
+            const long long tap = offset / g.dilation[axis];
+            read = read && s >= 0 && coordinate < g.output[axis] && offset % g.dilation[axis] == 0
+                   && tap < g.filter[axis];
+            o = o * g.output[axis] + coordinate;
+            element
+                = element * g.filter[axis] + (g.flipFilter != 0 ? g.filter[axis] - 1 - tap : tap);
+        }
+        long long target = n * g.xStrides[0] + c * g.xStrides[1];
+        for(int axis = 0; axis < 3; ++axis)
+        {
+            target += position[axis] * g.xStrides[2 + axis];
+        }
+        const long long group = c / g.cPerGroup;
+        const long long column = g.channelsInner != 0 ? (group * taps + element) * g.cPerGroup
+                                                            + (c - group * g.cPerGroup)
+                                                      : c * taps + element;
+        x[static_cast<size_t>(target)]
+            = read ? col[static_cast<size_t>(g.columnsFirst != 0
+                                                 ? (n * columns + column) * outputs + o
+                                                 : (n * outputs + o) * columns + column)]
+                   : Bits(0);
+    }
+}
+
+template <typename Bits>
+void runDisjoint(const DisjointCase& caseData, const RepackProgram& program)
+{
+    std::vector<Bits> col(static_cast<size_t>(caseData.columnElements));
+    std::iota(col.begin(), col.end(), Bits(1));
+    constexpr Bits SENTINEL = Bits(0xabab);
+    std::vector<Bits> want(static_cast<size_t>(caseData.xSpan), SENTINEL);
+    disjointReference(caseData, col, want);
+
+    void* deviceCol = nullptr;
+    void* deviceX = nullptr;
+    ASSERT_EQ(hipMalloc(&deviceCol, col.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&deviceX, want.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceCol, col.data(), col.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    const std::vector<Bits> sentinel(want.size(), SENTINEL);
+    ASSERT_EQ(
+        hipMemcpy(deviceX, sentinel.data(), sentinel.size() * sizeof(Bits), hipMemcpyHostToDevice),
+        hipSuccess);
+
+    Col2ImArgs args{};
+    args.geometry = caseData.g;
+    args.total = caseData.g.n * caseData.g.groups * caseData.g.cPerGroup * caseData.g.input[0]
+                 * caseData.g.input[1] * caseData.g.input[2];
+    const RepackStep step{args,
+                          sizeof(Bits) == 4 ? data_objects::DataType::FLOAT
+                                            : data_objects::DataType::HALF,
+                          0,
+                          0};
+    program.launch(step, deviceCol, deviceX, nullptr);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::vector<Bits> got(want.size());
+    ASSERT_EQ(hipMemcpy(got.data(), deviceX, got.size() * sizeof(Bits), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(deviceCol), hipSuccess);
+    ASSERT_EQ(hipFree(deviceX), hipSuccess);
+    EXPECT_EQ(got, want);
+}
+
+TEST(TestGpuRepackKernels, DisjointCol2imMatchesTheGenericKernelBitForBit)
+{
+    SKIP_IF_NO_DEVICES();
+    const RepackProgram program;
+    std::mt19937 random(2027);
+    std::set<std::string> entries;
+    for(int trial = 0; trial < 96; ++trial)
+    {
+        const auto caseData = randomDisjointCase(random, trial);
+        SCOPED_TRACE(::testing::Message() << "trial " << trial);
+        for(const int bytes : {2, 4})
+        {
+            Col2ImArgs probe{};
+            probe.geometry = caseData.g;
+            probe.x = nullptr; // 16-byte aligned, as hipMalloc's are
+            entries.insert(col2imLaunch(probe, bytes == 2 ? "Half" : "Float", bytes).entry);
+        }
+        runDisjoint<uint16_t>(caseData, program);
+        runDisjoint<uint32_t>(caseData, program);
+    }
+    // Every disjoint kernel ran: both run axes, scalar and 16-byte runs, and the generic one.
+    for(const char* entry : {"Col2ImDisjointWidth2V1",
+                             "Col2ImDisjointWidth2V8",
+                             "Col2ImDisjointWidth4V4",
+                             "Col2ImDisjointChannels2V8",
+                             "Col2ImDisjointChannels4V4",
+                             "Col2ImDisjoint2"})
+    {
+        EXPECT_EQ(entries.count(entry), 1u) << entry;
     }
 }
 

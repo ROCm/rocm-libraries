@@ -323,8 +323,53 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
     args.launch = RepackLaunchShape{};
 
     // Disjoint taps (a single one included): the columns are in dx's type (ConvRepackArgs.h).
+    // Within 32-bit offsets, one thread per run of dx along its contiguous axis -- width, or
+    // channels (with width too when dx packs them together), the longer when both are unit --
+    // the run the widest of 16, 8, 4 bytes or one element that every run start keeps aligned
+    // and the run's axis holds; otherwise the generic kernel.
     if(convColumnsDisjoint(g))
     {
+        const long long channels = g.groups * g.cPerGroup;
+        const bool channelsUnit = g.xStrides[1] == 1;
+        const bool widthUnit = g.xStrides[4] == 1;
+        if(fitsInt(g) && (channelsUnit || widthUnit))
+        {
+            const bool byChannels = channelsUnit && (!widthUnit || channels >= g.input[2]);
+            const bool fused = byChannels && g.xStrides[4] == channels;
+            // The axes whose strides place a run's start: all but the run's own.
+            long long starts[5]
+                = {g.xStrides[0], g.xStrides[1], g.xStrides[2], g.xStrides[3], g.xStrides[4]};
+            starts[byChannels ? 1 : 4] = 0;
+            if(fused)
+            {
+                starts[4] = 0;
+            }
+            const long long length
+                = byChannels ? (fused ? channels * g.input[2] : channels) : g.input[2];
+            int width = 16 / bytes;
+            while(width > 1)
+            {
+                bool fits = width <= length && aligned(args.x, width * bytes);
+                for(const long long stride : starts)
+                {
+                    fits = fits && stride % width == 0;
+                }
+                if(fits)
+                {
+                    break;
+                }
+                width /= 2;
+            }
+            const long long runs = (length + width - 1) / width;
+            const long long lines = byChannels
+                                        ? g.n * g.input[0] * g.input[1] * (fused ? 1 : g.input[2])
+                                        : g.n * channels * g.input[0] * g.input[1];
+            args.launch.rows = fused ? 1 : 0;
+            launch.entry = std::string("Col2ImDisjoint") + (byChannels ? "Channels" : "Width")
+                           + std::to_string(bytes) + "V" + std::to_string(width);
+            launch.grid = static_cast<unsigned int>((lines * runs + BLOCK - 1) / BLOCK);
+            return launch;
+        }
         launch.entry = "Col2ImDisjoint" + std::to_string(bytes);
         launch.grid = genericBlocks(args.total);
         return launch;
