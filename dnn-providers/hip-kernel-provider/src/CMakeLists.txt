@@ -301,8 +301,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         "quick_RMSNorm_Variant3.*"
         "quick_RMSNormBackward_Variant2.*"
         "quick_SdpaFwd_*.*"
-        "quick_SdpaBackward_Default.*"
+        "quick_SdpaBackward_*.*"
         "-*DISABLED*"
+        "quick_SdpaBackward_*_fwd_pair*"
         "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
         "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
     )

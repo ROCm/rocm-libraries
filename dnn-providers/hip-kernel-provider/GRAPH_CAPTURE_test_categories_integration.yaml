@@ -28,13 +28,14 @@ _graph_capture_patterns: &graph_capture_patterns
   - "quick_RMSNorm_Variant3.*"
   - "quick_RMSNormBackward_Variant2.*"
   - "quick_SdpaFwd_*.*"
-  - "quick_SdpaBackward_Default.*"
+  - "quick_SdpaBackward_*.*"
 
 # The two 4096-token fp16 causal bhsd cases cost about two minutes each in the GPU
 # reference on an RDNA iGPU. hipkernel_flydsl_sdpa_test_categories_integration.yaml
 # keeps them out of its fast tiers for the same reason.
 _graph_capture_excludes: &graph_capture_excludes
   - "*DISABLED*"
+  - "quick_SdpaBackward_*_fwd_pair*"
   - "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
   - "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
 
