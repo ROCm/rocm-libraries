@@ -913,6 +913,7 @@ namespace rocblaslt
         bool Store::appendUnlessKnown(
             std::string const&                                     scope,
             std::function<std::string(JournalState const&)> const& makeLine,
+            JournalCursor*                                         from,
             std::string*                                           error) const
         {
             const std::string path = journalPath(scope, error);
@@ -956,7 +957,10 @@ namespace rocblaslt
                     return false;
                 }
                 state  = JournalState{};
-                prefix = newVersionLine() + "\n";
+                prefix = newVersionLine();
+                if(from)
+                    *from = JournalCursor{prefix, 0};
+                prefix += "\n";
             }
             else if(first != state.cursor.journal || uint64_t(st.st_size) < state.cursor.offset)
             {
@@ -980,9 +984,13 @@ namespace rocblaslt
                 if(entry.kind == JournalEntry::Kind::Payload)
                     state.payloads.insert(entry.payload.id);
                 else
-                    state.lastExact[shapeOf(entry.exact)] = entry.exact;
+                    state.lastExact[shapeOf(entry.exact)] = entry;
             }
             state.cursor.offset = end;
+            // A line appended now starts at or after `end`, which is where the
+            // last complete line ends.
+            if(from && complete)
+                *from = JournalCursor{first, end};
 
             const std::string line = makeLine(state);
             if(line.empty())
@@ -999,12 +1007,14 @@ namespace rocblaslt
                 [&](JournalState const& state) {
                     return state.payloads.count(record.id) ? std::string() : payloadLine(record);
                 },
+                nullptr,
                 error);
         }
 
         bool Store::appendExact(std::string const&   scope,
                                 PayloadRecord const& payload,
                                 ExactRecord const&   record,
+                                JournalCursor*       from,
                                 std::string*         error) const
         {
             return appendUnlessKnown(
@@ -1015,11 +1025,15 @@ namespace rocblaslt
                         lines = payloadLine(payload) + "\n";
                     auto last = state.lastExact.find(shapeOf(record));
                     if(lines.empty() && last != state.lastExact.end()
-                       && last->second.id == record.id
-                       && last->second.payloadIndex == record.payloadIndex)
+                       && last->second.exact.id == record.id
+                       && last->second.exact.payloadIndex == record.payloadIndex)
+                    {
+                        from->offset = last->second.offset;
                         return std::string();
+                    }
                     return lines + exactLine(record);
                 },
+                from,
                 error);
         }
 
