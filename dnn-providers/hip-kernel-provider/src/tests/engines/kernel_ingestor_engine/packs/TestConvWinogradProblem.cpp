@@ -421,7 +421,7 @@ struct ConfigFields
     int64_t llc = 0;
     int64_t gemmBm = 128, gemmBn = 64, gemmBk = 8;
     int64_t bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0, waves = 0;
-    int64_t bins = 0, f16math = 0;
+    int64_t bins = 0, f16math = 0, pf = 0;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
@@ -446,7 +446,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"tn", f.tn},
                        {"waves", f.waves},
                        {"bins", f.bins},
-                       {"f16math", f.f16math}};
+                       {"f16math", f.f16math},
+                       {"pf", f.pf}};
     return kernel;
 }
 
@@ -674,6 +675,10 @@ TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16From
     EXPECT_TRUE(admits(coop("gfx9", 1), "gfx950", baseShape(), "HALF"));
     EXPECT_TRUE(admits(coop("gfx9", 1), "gfx908", baseShape(), "HALF"));
     EXPECT_TRUE(admits(coop("gfx9", 0), "gfx90a", baseShape(), "BFLOAT16"));
+    // Cross-item prefetch (pf 1).
+    auto prefetch = coop("gfx9", 1);
+    prefetch.pf = 1;
+    EXPECT_TRUE(admits(prefetch, "gfx950", baseShape(), "HALF"));
     // bf16 MFMA (bf16_1k) starts at gfx90a.
     EXPECT_FALSE(admits(coop("gfx9", 0), "gfx908", baseShape(), "BFLOAT16"));
     // No MFMA before gfx908, and not on RDNA.
@@ -845,6 +850,18 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
          [] {
              auto f = coop("gfx11", 1);
              f.llc = 1;
+             return f;
+         }},
+        {"CoopPrefetchTwo",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.pf = 2;
+             return f;
+         }},
+        {"FusedPrefetch",
+         [] {
+             auto f = fused();
+             f.pf = 1;
              return f;
          }},
         {"CoopNhwc",
