@@ -39,7 +39,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
-#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
+#include "harness/tolerance/ConvDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -1501,13 +1501,13 @@ VerificationOutcome
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
     //
-    // A half or bfloat16 output of a convolution-forward graph is graded with the dynamic
-    // tolerance computed from the graph and its input statistics instead of the fixed per-op
-    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
-    // inputs read from golden blobs are scanned on the host; a scalar baked into the graph is
-    // read from the graph (convFwdErrorScale() asks this lookup only for the rest). Computed
-    // once, and only when an output needs it.
-    std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
+    // A float, half or bfloat16 output of a convolution graph (forward, backward data or
+    // backward weights) is graded with the dynamic tolerance computed from the graph and its
+    // input statistics instead of the fixed per-op default. Inputs filled from a recipe take
+    // their statistics from the recipe, at no cost; inputs read from golden blobs are scanned on
+    // the host; a scalar baked into the graph is read from the graph (convErrorScale() asks this
+    // lookup only for the rest). Computed once, and only when an output needs it.
+    std::optional<std::optional<tolerance::ConvErrorScale>> convScale;
     const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
         if(_inputsFromRecipes)
         {
@@ -1527,11 +1527,11 @@ VerificationOutcome
         {
             if(!convScale.has_value())
             {
-                convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
+                convScale = tolerance::convErrorScale(wrapper, momentsFor);
             }
             if(convScale->has_value())
             {
-                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
+                dynamic = tolerance::convOutputTolerance(**convScale, dataType);
             }
         }
         if(dynamic.has_value())

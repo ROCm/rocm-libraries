@@ -88,6 +88,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp
+    TestConvBwdDynamicTolerance.cpp
     TestConvFwdDynamicTolerance.cpp
     TestConvFwdToleranceGrading.cpp
     TestVerificationModePaths.cpp
