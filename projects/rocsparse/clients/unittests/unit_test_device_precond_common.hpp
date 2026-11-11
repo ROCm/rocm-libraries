@@ -465,10 +465,15 @@ namespace precond_ut
 
     // boost_tol < 0 disables the numeric boost. Otherwise a pivot with
     // |pivot| <= boost_tol is replaced by |boost_val| * pivot / |pivot|.
+    // `pivots` (optional) receives every |pivot| before the boost.
     template <typename T>
-    std::vector<T>
-        host_ilu0(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    std::vector<T> host_ilu0(const csr_matrix<T>& a,
+                             double               boost_tol = -1.0,
+                             double               boost_val = 0.0,
+                             std::vector<double>* pivots    = nullptr)
     {
+        if(pivots != nullptr)
+            pivots->assign(static_cast<size_t>(a.n), 0.0);
         std::vector<std::complex<double>> v(a.val.size());
         for(size_t i = 0; i < v.size(); ++i)
             v[i] = to_cd(a.val[i]);
@@ -496,6 +501,8 @@ namespace precond_ut
                     }
                 }
             }
+            if(pivots != nullptr && diag[i] >= 0)
+                (*pivots)[i] = std::abs(v[diag[i]]);
             if(boost_tol >= 0.0 && diag[i] >= 0)
             {
                 const double mag = std::abs(v[diag[i]]);

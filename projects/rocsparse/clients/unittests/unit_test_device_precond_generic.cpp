@@ -224,40 +224,87 @@ namespace
         }
     }
 
-    // Float and double tolerances, in host and device memory. The float is followed
-    // by 0x7fefffff, so an 8-byte read would boost every pivot.
+    // |u_ii| of ILU(0) of `a` before any boost, with the boost tolerance `boost_tol` and
+    // the boost value `boost_val` (no boost by default).
+    template <typename T>
+    std::vector<double>
+        ilu_pivots(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    {
+        std::vector<double> pivots;
+        host_ilu0(a, boost_tol, boost_val, &pivots);
+        return pivots;
+    }
+
+    // Calls `check(opt, what)` with tolerances above every pivot of ILU(0) of `a`, between
+    // the pivots and below every pivot, each passed as a float or a double, in host or
+    // device memory. The float is followed by 0x7fefffff, so an 8-byte read boosts every
+    // pivot: only the tolerances below some pivot tell it apart.
+    template <typename T, typename F>
+    void for_ilu_boost_inputs(const csr_matrix<T>& a, F&& check)
+    {
+        const auto   pivots   = ilu_pivots(a);
+        const double largest  = *std::max_element(pivots.begin(), pivots.end());
+        const double smallest = *std::min_element(pivots.begin(), pivots.end());
+        // The boosted pivots change the later ones, so the margin to the tolerance is
+        // checked on the pivots of the boosted factorization.
+        const double between        = 0.5 * (smallest + largest);
+        const auto   boosted_pivots = ilu_pivots(a, between, 7.0);
+        const auto   boosted_count  = std::count_if(
+            boosted_pivots.begin(), boosted_pivots.end(), [&](double p) { return p <= between; });
+        ASSERT_TRUE(clear_of_pivots(boosted_pivots, between));
+        ASSERT_GT(boosted_count, 0);
+        ASSERT_LT(boosted_count, a.n);
+        for(const double tol : {2.0 * largest, between, 0.5 * smallest})
+        {
+            for(const bool float_tol : {false, true})
+            {
+                for(const bool device : {false, true})
+                {
+                    run_options opt;
+                    opt.boost           = true;
+                    opt.boost_tol       = tol;
+                    opt.boost_val       = 7.0;
+                    opt.boost_tol_float = float_tol;
+                    opt.boost_device    = device;
+                    check(opt,
+                          "tol " + std::to_string(tol) + " float_tol " + std::to_string(float_tol)
+                              + " device " + std::to_string(device));
+                }
+            }
+        }
+    }
+
+    // CSR through the hash kernel (the grid matrix) and the binary-search kernel (a last
+    // row of 1100 entries, at least 1024 on a wave64 device).
     template <typename T>
     void check_ilu_boost_inputs(rocsparse_handle handle)
     {
-        for(const auto& a : {make_grid_matrix<T>(4, true), make_fat_row_matrix<T>(600)})
+        for(const auto& a :
+            {make_grid_matrix<T>(4, true), with_upper_triangle(make_fat_row_matrix<T>(1100))})
         {
-            const std::vector<T> plain = host_ilu0(a);
-            std::vector<double>  pivots;
-            for(int32_t r = 0; r < a.n; ++r)
-                pivots.push_back(std::abs(to_cd(plain[diagonal_position(a, r)])));
-            const double largest  = *std::max_element(pivots.begin(), pivots.end());
-            const double smallest = *std::min_element(pivots.begin(), pivots.end());
-            for(const double tol : {2.0 * largest, 0.5 * smallest})
+            for_ilu_boost_inputs(a, [&](const run_options& opt, const std::string& what) {
+                check_csr_matrix<Kind::ilu, T>(
+                    handle, a, opt, "n " + std::to_string(a.n) + " " + what);
+            });
+        }
+    }
+
+    // BSR through the bsrilu0 kernels: block_dim 2, 9 and 33 select the 2_8, 9_32 and
+    // 33_64 kernels on a wave64 device (33 the general kernel for double complex), every
+    // block_dim selects the general kernel on a wave32 device.
+    template <typename T>
+    void check_ilu_bsr_boost_inputs(rocsparse_handle handle)
+    {
+        for(const int32_t block_dim : {2, 9, 33})
+        {
+            for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
             {
-                for(const bool float_tol : {false, true})
-                {
-                    for(const bool device : {false, true})
-                    {
-                        run_options opt;
-                        opt.boost           = true;
-                        opt.boost_tol       = tol;
-                        opt.boost_val       = 7.0;
-                        opt.boost_tol_float = float_tol;
-                        opt.boost_device    = device;
-                        check_csr_matrix<Kind::ilu, T>(handle,
-                                                       a,
-                                                       opt,
-                                                       "n " + std::to_string(a.n) + " tol "
-                                                           + std::to_string(tol) + " float_tol "
-                                                           + std::to_string(float_tol) + " device "
-                                                           + std::to_string(device));
-                    }
-                }
+                const auto m = make_block_matrix<T>(2, block_dim, dir, true);
+                for_ilu_boost_inputs(
+                    expand_bsr(m), [&](const run_options& opt, const std::string& what) {
+                        check_bsr_matrix<Kind::ilu, T>(
+                            handle, m, opt, "block_dim " + std::to_string(block_dim) + " " + what);
+                    });
             }
         }
     }
@@ -389,8 +436,13 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost_inputs)
     for_all_types([&](auto tag) { check_ilu_boost_inputs<decltype(tag)>(handle); });
 }
 
-// Documented 3x3: first pivot 1e-4, tolerance 1e-3, boost value 1. A float
-// tolerance must boost the same pivot a double tolerance does.
+TEST_F(PrecondGeneric, spilu0_bsr_numeric_boost_inputs)
+{
+    for_all_types([&](auto tag) { check_ilu_bsr_boost_inputs<decltype(tag)>(handle); });
+}
+
+// The 3x3 of the AISPARSE-1063 reproducer: first pivot 1e-4, tolerance 1e-3, boost
+// value 1. A float tolerance must boost the same pivot a double tolerance does.
 TEST_F(PrecondGeneric, spilu0_numeric_boost_float_tolerance)
 {
     csr_matrix<float> a;
