@@ -192,7 +192,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     // only: for P16 the extra live state raises SGPR spills.
     static constexpr bool kEarlyKvPrologue = PagedTransfer::kFragmentsPerWave == 1;
 
-    // D64 M64 TDM/LDS ordering workaround (Policy::kDrainLdsBeforeTdmIssue): the barrier after
+    // TDM/LDS ordering workaround (Policy::kDrainLdsBeforeTdmIssue): the barrier after
     // the K prefetch issue, which publishes the V tile (and the prologue's K0/V0), also waits
     // for the wave's own LDS reads.
     static constexpr index_t kKPrefetchBarrierDsCount =

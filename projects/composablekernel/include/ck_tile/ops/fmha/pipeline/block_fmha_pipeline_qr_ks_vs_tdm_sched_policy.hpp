@@ -122,13 +122,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // contents of that LDS buffer, and one whole query tile of a rare launch is wrong. It occurs
     // with M64 and M128 tiles and with both KV layouts, and its rate depends on the issue
     // schedule: on large dense BF16 grids about 1-3e-5 per launch with M128 D64 tiles, none seen
-    // on boards with newer firmware. The hardware cause is not known. Workaround for D64 M64 tiles,
-    // where it was most frequent (about 5e-5 per launch without it): before every K/V TDM issue
-    // the wave waits for its own LDS reads (s_wait_dscnt 0, in the pipeline and in the page-tile
-    // window), and the barrier that publishes the next V tile waits for them too. With P128 pages
-    // no event in 150000 relaunches followed; P64 pages keep about 3e-6 with or without it.
+    // on boards with newer firmware. The hardware cause is not known. Workaround: before every K/V
+    // TDM issue the wave waits for its own LDS reads (s_wait_dscnt 0, in the pipeline and in the
+    // page-tile window), and the barrier that publishes the next V tile waits for them too. Taken
+    // by D64 M64 tiles, where it was most frequent (about 5e-5 per launch without it), and by the
+    // problems whose options ask for it (Options::kDrainLdsBeforeTdmIssue: the linear page tile,
+    // where P64 D128 softcap tiles showed it in most relaunches of a device-filling grid). With
+    // P128 pages no event in 150000 relaunches followed; P64 pages keep about 3e-6 with or
+    // without it.
     static constexpr bool kDrainLdsBeforeTdmIssue =
-        Geometry::kM == 64 && Geometry::kHeadDimQK == 64;
+        Options::kDrainLdsBeforeTdmIssue || (Geometry::kM == 64 && Geometry::kHeadDimQK == 64);
 
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()

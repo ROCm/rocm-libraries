@@ -94,6 +94,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     // P>=128: fragment 0 only, table column t / P.
     // P64   : fragment 0 only, table column (t + 32*w) / 64; valid_rows stays tile-level.
     // P16   : fragment f = 2*w + r, table column (t + 16*f) / 16.
+    // The id is the same in every lane of the wave and is read into an SGPR (scalar load). Left
+    // to the compiler, the read becomes a vector load and the page address of the TDM issue is
+    // formed with VALU; that schedule gave launch-to-launch different outputs on gfx1250 (P64
+    // KV-split and linear tiles), the scalar form does not.
     CK_TILE_DEVICE FmhaBatchPrefillPageFragmentId load_fragment_id(long_index_t tile_origin,
                                                                    index_t wave,
                                                                    index_t fragment) const
@@ -109,7 +113,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             if(valid_rows <= 0)
                 return result; // absent: no table read, dummy id, zero rows
             const index_t logical_page  = static_cast<index_t>(fragment_origin / kFragmentRows);
-            const index_t physical_page = page_row_[logical_page];
+            const index_t physical_page = amd_wave_read_first_lane(page_row_[logical_page]);
             result.physical_page        = physical_page;
             result.valid_rows           = valid_rows;
         }
@@ -125,7 +129,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 return result;
             const index_t logical_page =
                 static_cast<index_t>(tile_origin / PageSize_) + page_in_tile;
-            const index_t physical_page = page_row_[logical_page];
+            const index_t physical_page = amd_wave_read_first_lane(page_row_[logical_page]);
             result.physical_page        = physical_page;
         }
         else
@@ -137,7 +141,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             if(valid_rows <= 0)
                 return result;
             const index_t logical_page  = static_cast<index_t>(tile_origin / PageSize_);
-            const index_t physical_page = page_row_[logical_page];
+            const index_t physical_page = amd_wave_read_first_lane(page_row_[logical_page]);
             result.physical_page        = physical_page;
             result.valid_rows           = valid_rows;
         }
@@ -431,7 +435,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
-    // D64 M64 TDM/LDS ordering workaround (kDrainLdsBeforeTdmIssue of the TDM-sched policy): the
+    // TDM/LDS ordering workaround (kDrainLdsBeforeTdmIssue of the TDM-sched policy): the
     // wave's own LDS reads complete right before each of its tensor_load_to_lds issues.
     CK_TILE_DEVICE static void WaitOwnLdsReadsBeforeIssue()
     {
