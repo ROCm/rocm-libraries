@@ -17142,43 +17142,6 @@
     },
     {
       "version": "1.0",
-      "id": "70e2e762-5a44-58cf-9188-b950b8e58930",
-      "name": "conv_wrw.f16.wmma12_f16.l7.nchw.128x32x64.w4x2.fr1s3sw1dw1.v8.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "HALF",
-        "atom": "wmma12_f16",
-        "atom_id": 14,
-        "loop": 7,
-        "layout": 0,
-        "bk": 128,
-        "bc": 32,
-        "bq": 64,
-        "fr": 1,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 4,
-        "wc": 2,
-        "tk": 0,
-        "tc": 0,
-        "vec": 8,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 0
-      },
-      "priority": -165
-    },
-    {
-      "version": "1.0",
       "id": "d996428a-e8a9-5470-ac1b-bd8015175dfa",
       "name": "conv_wrw.f16.wmma12_f16.l7.nchw.128x32x32.w4x2.fr1s3sw1dw1.v8.x0a0n0b2",
       "kernel_source": {
@@ -17212,7 +17175,7 @@
         "wq": 0,
         "dws": 0
       },
-      "priority": -166
+      "priority": -165
     },
     {
       "version": "1.0",
@@ -17249,7 +17212,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": -167
+      "priority": -166
     },
     {
       "version": "1.0",
@@ -17286,7 +17249,7 @@
         "wq": 0,
         "dws": 0
       },
-      "priority": -168
+      "priority": -167
     }
   ]
 }
