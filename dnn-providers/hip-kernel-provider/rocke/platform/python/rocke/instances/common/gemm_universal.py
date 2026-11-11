@@ -1518,6 +1518,30 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # ``readfirstlane`` is safe.
         block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
         block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
+    elif __import__("os").environ.get("ROCKE_EXP_MC_REMAP"):
+        # EXPERIMENT (uncommitted): cluster-aware XCD remap for a (1, cy)
+        # cluster launch. Assumes clusters go round-robin over ``xcds`` XCDs by
+        # linear cluster id, and that the grid splits into exactly ``xcds``
+        # regions of RM x RN tiles: XCD k gets region k, filled with its
+        # clusters (each cy M-tiles x 1 N-tile) M-group-major.
+        import os as _os_rm
+
+        _RM, _RN, _XC = (int(v) for v in _os_rm.environ["ROCKE_EXP_MC_REMAP"].split(","))
+        _cy = int(_os_rm.environ["ROCKE_EXP_CLUSTER"].split(",")[1])
+        n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        cid = b.add(b.cluster_id("x"), b.mul(b.cluster_id("y"), n_pid_n))
+        xcd = b.mod(cid, b.const_i32(_XC))
+        slot = b.div(cid, b.const_i32(_XC))
+        nreg_n = b.div(n_pid_n, b.const_i32(_RN))
+        reg_m = b.div(xcd, nreg_n)
+        reg_n = b.mod(xcd, nreg_n)
+        m_tile = b.add(
+            b.add(b.mul(reg_m, b.const_i32(_RM)), b.mul(b.div(slot, b.const_i32(_RN)), b.const_i32(_cy))),
+            b.cluster_workgroup_id("y"),
+        )
+        n_tile = b.add(b.mul(reg_n, b.const_i32(_RN)), b.mod(slot, b.const_i32(_RN)))
+        block_m_off = b.to_sgpr_u32(b.mul(m_tile, c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(n_tile, c_block_n))
     else:
         # P57: pin the non-swizzled batched-GEMM offsets in SGPR too.
         block_m_off = b.to_sgpr_u32(b.mul(b.block_id_y(), c_block_m))
@@ -1726,6 +1750,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _tdm_wave_id = (
             b.readfirstlane(b.div(tid, c_wave)) if _tdm_waves > 1 else b.const_i32(0)
         )
+        # EXPERIMENT (uncommitted): ROCKE_EXP_CLUSTER="cx,cy" -> TDM multicast.
+        # Grid x walks N tiles and y walks M tiles, so A is shared along the
+        # cluster's x row and B along its y column. Every member issues the same
+        # load with the group mask (bit = cluster flat id = x + y * cx) and the
+        # hardware merges them, as CK Tile's TDM pipeline does.
+        import os as _os_mc
+
+        _mc = _os_mc.environ.get("ROCKE_EXP_CLUSTER")
+        _tdm_a_mask = _tdm_b_mask = 0
+        if _mc:
+            _cx, _cy = (int(v) for v in _mc.split(","))
+            b.set_cluster_dims(_cx, _cy, 1)
+            _cwx = b.readfirstlane(b.cluster_workgroup_id("x"))
+            _cwy = b.readfirstlane(b.cluster_workgroup_id("y"))
+            _tdm_a_mask = b.shl(
+                b.const_i32((1 << _cx) - 1), b.mul(_cwy, b.const_i32(_cx))
+            )
+            _col = sum(1 << (y * _cx) for y in range(_cy))
+            _tdm_b_mask = b.shl(b.const_i32(_col), _cwx)
+            # ROCKE_EXP_MC_SOLO0=1: an operand nobody else shares gets mask 0
+            # (plain load) instead of a self-only multicast.
+            if _os_mc.environ.get("ROCKE_EXP_MC_SOLO0") == "1":
+                if _cx == 1:
+                    _tdm_a_mask = 0
+                if _cy == 1:
+                    _tdm_b_mask = 0
 
     def emit_load_phase(
         A_dst: Value,
@@ -1778,7 +1828,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
-            def _issue(ptr, row_off, rows, extent, lds_base, batch64):
+            def _issue(ptr, row_off, rows, extent, lds_base, batch64, wg_mask=0):
                 # The element offset in i64: an operand past 2^31 elements
                 # (e.g. M = K = 131072) wraps an i32 one, and the GEP would
                 # sign-extend it to an address before the tensor. Every term is
@@ -1804,6 +1854,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     tile_dim1=rows,
                     pad_interval=_tdm_pad_interval if _tdm_pad_enable else None,
                     pad_amount=_tdm_pad_amount,
+                    workgroup_mask=wg_mask,
                 )
                 if before_issue is not None:
                     before_issue()
@@ -1826,12 +1877,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     _b_wave = b.add(a_wave, b.const_i32(1))
                     b_wave = lambda: _b_wave
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, a_wave)):
-                    _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a)
+                    _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask)
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, b_wave())):
-                    _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b)
+                    _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b, _tdm_b_mask)
             else:
-                _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a)
-                _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b)
+                _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask)
+                _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b, _tdm_b_mask)
             return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves

@@ -6332,6 +6332,10 @@ class IRBuilder:
         for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
             if not 1 <= value <= 0xFFFF:
                 raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
+        # EXPERIMENT (uncommitted): a runtime i32 mask is OR-ed into the flags word.
+        runtime_mask = workgroup_mask if isinstance(workgroup_mask, Value) else None
+        if runtime_mask is not None:
+            workgroup_mask = 0
         if not 0 <= workgroup_mask <= 0xFFFF:
             raise ValueError(
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
@@ -6373,7 +6377,7 @@ class IRBuilder:
             | pad_amount << 25
         )
         group1 = (
-            word(flags),
+            word(flags) if runtime_mask is None else self.lor(word(flags), runtime_mask),
             self.shl(tensor_dim0, c16),
             self.lor(self.lshr(tensor_dim0, c16), self.shl(tensor_dim1, c16)),
             self.lor(self.lshr(tensor_dim1, c16), word(tile_dim0 << 16)),
