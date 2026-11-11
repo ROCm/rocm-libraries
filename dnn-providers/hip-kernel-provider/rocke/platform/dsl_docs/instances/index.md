@@ -46,7 +46,7 @@ implementation.
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` (incl. split-K forward: `split_k`, `split_k_cluster`) | `instances/convolution.md` |
 | `conv_fwd_split_k_reduce.py` | `FwdSplitKReduceSpec` (split-K forward Stage 2) | `instances/convolution.md` |
 | `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `instances/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode) | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode), `DirectConvWgradSpec` (incl. the gfx1250 image-per-block and small-C wgrad), `DirectDepthwiseWgradSpec` (VALU depthwise wgrad, cached for the wave32 targets) | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `conv_dgrad_patch_wmma.py` | `DgradPatchWmmaSpec` (gfx1250 patch-embedding dgrad) | `instances/convolution.md` |
 | `conv_dgrad_smallc_wmma.py` | `DgradSmallcWmmaSpec` (gfx1250 small-C stem dgrad) | `instances/convolution.md` |
@@ -249,11 +249,12 @@ From `helpers/README.md`:
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
-| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
+| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
 | conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
 | conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
 | conv_winograd (fwd / fwd_rt / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |
 | conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
+| conv_direct_wgrad (gfx1250 image / small-C; depthwise) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` (image `tdm_stages`), `buffer_atomic_fadd_f32` two-stage scratch |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |

@@ -353,7 +353,9 @@ Before allocating, every `hipblaslt-test` matmul case estimates the device and h
 needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
 when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
 allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
-them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
+them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
+memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
+large-memory lane:
 
 - `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
   that every case ran.
@@ -729,7 +731,7 @@ about "what do we currently know is broken" has to check all nine.
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| [`logic/known_bugs.yaml`](tensilelite/tensilelite/logic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
 | Filename-driven marks in `tensilelite/tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **Partly.** An `xfail` or `wip` path is strict, because `tensilelite/pytest.ini` sets `xfail_strict = True`, so an unexpected pass fails the run. A `disabled` path is a plain skip |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
@@ -895,7 +897,7 @@ the set of architectures the library supports or builds for.
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
-| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
+| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
 ### Scoping test cases to architectures
 

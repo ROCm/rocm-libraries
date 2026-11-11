@@ -80,7 +80,7 @@ class TestAttributeNodePresenceInAST:
         assert "Attribute" not in node_types
 
     def test_bool_expr_no_attribute_node(self):
-        # TensileBenchmarkCluster.py:288 constraint -- no dotted access
+        # benchmark_cluster.py:288 constraint -- no dotted access
         node_types = self._node_types("RunDeployStep or RunBenchmarkStep or RunResultsStep")
         assert "Attribute" not in node_types
 
