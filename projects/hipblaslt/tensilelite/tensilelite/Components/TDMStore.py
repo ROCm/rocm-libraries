@@ -77,8 +77,9 @@ def tdmStoreRejectReason(state):
 
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
-  tensor_store_from_lds per wave. That needs fp32 D, or bf16 or fp16 D converted from fp32 accumulators, written
-  directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than atomic StreamK, which
+  tensor_store_from_lds per wave. That needs fp32 D, int32 D from int32 accumulators, or bf16 or fp16 D converted
+  from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
+  atomic StreamK, which
   stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
   split evenly across the waves.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
@@ -100,9 +101,11 @@ def tdmStoreRejectReason(state):
 
   pt = state["ProblemType"]
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
-  if not pt["ComputeDataType"].isSingle() \
-      or not (pt["DestDataType"].isSingle() or (sixteenBit and pt["HighPrecisionAccumulate"])):
-    return "TDMStoreInst supports fp32 D, and bf16 and fp16 D converted from fp32 accumulators"
+  int32 = pt["DestDataType"].isInt32() and pt["ComputeDataType"].isInt32()
+  if not int32 and (not pt["ComputeDataType"].isSingle()
+                    or not (pt["DestDataType"].isSingle() or (sixteenBit and pt["HighPrecisionAccumulate"]))):
+    return "TDMStoreInst supports fp32 D, int32 D from int32 accumulators, and bf16 and fp16 D converted from fp32 " \
+           "accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
