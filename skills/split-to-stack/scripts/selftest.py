@@ -1055,22 +1055,13 @@ def test_regressions():
 
 def forge(repo, parent, changes, msg="forged"):
     """Commit on `parent` with `changes` {path: bytes|None} using plumbing; returns (sha, tree)."""
-    tmp = tempfile.mkdtemp(prefix="split-forge-")
-    env = dict(GENV, GIT_INDEX_FILE=os.path.join(tmp, "index"))
-    git(repo, "read-tree", parent, env=env)
-    for p, data in changes.items():
-        if data is None:
-            git(repo, "update-index", "--force-remove", "--", p, env=env)
-        else:
-            blob = (
-                run(
-                    ["git", "-C", repo, "hash-object", "-w", "--stdin"],
-                    env=GENV,
-                    check_rc=True,
-                )
-                if False
-                else None
-            )
+    with tempfile.TemporaryDirectory(prefix="split-forge-") as tmp:
+        env = dict(GENV, GIT_INDEX_FILE=os.path.join(tmp, "index"))
+        git(repo, "read-tree", parent, env=env)
+        for p, data in changes.items():
+            if data is None:
+                git(repo, "update-index", "--force-remove", "--", p, env=env)
+                continue
             proc = subprocess.run(
                 ["git", "-C", repo, "hash-object", "-w", "--stdin"],
                 input=data,
@@ -1085,7 +1076,7 @@ def forge(repo, parent, changes, msg="forged"):
                 "100644,%s,%s" % (proc.stdout.decode().strip(), p),
                 env=env,
             )
-    tree = git(repo, "write-tree", env=env).strip()
+        tree = git(repo, "write-tree", env=env).strip()
     sha = git(repo, "commit-tree", tree, "-p", parent, "-m", msg, env=GENV).strip()
     return sha, tree
 
