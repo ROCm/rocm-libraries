@@ -48,7 +48,6 @@ from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, 
   VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
-from ..Common.ScaleAlphaVec import scaleAlphaVectorMode
 from ..Common.Utilities import persistentSpatialCluster
 from ..ExecutionPolicy import isPersistent, isStreamK
 from .NonTemporal import tdmCacheModifiers
@@ -84,11 +83,10 @@ def tdmStoreRejectReason(state):
   stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
   split evenly across the waves.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
-  besides C and D the epilogue may only read the bias and ScaleAlphaVec vectors along M, the latter
-  with or without the device-scalar bit of UseScaleAlphaVec, and the ScaleAB vectors, which the staged
-  tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or reduce per-element
-  outputs (hasEpilogueSideEffects). GroupedGemm sets the sizes, strides and addresses the block reads for
-  each group.
+  besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
+  M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or
+  reduce per-element outputs (hasEpilogueSideEffects). GroupedGemm sets the sizes, strides and addresses
+  the block reads for each group.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block only
   when the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store.
   """
@@ -119,8 +117,6 @@ def tdmStoreRejectReason(state):
   if hasEpilogueSideEffects(pt):
     return "TDMStoreInst does not support per-element epilogue side effects beyond C and D " \
       "(E, Gradient, gate residual, AmaxD)"
-  if pt["UseBias"] > 1 or scaleAlphaVectorMode(pt["UseScaleAlphaVec"]) > 1:
-    return "TDMStoreInst supports bias and ScaleAlphaVec only along M"
   if state["MacroTile1"] % (state["NumThreads"] // state["WavefrontSize"]) != 0:
     return "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"
   return None
