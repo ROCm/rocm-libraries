@@ -28,5 +28,8 @@
     "kv_gpfetch",
     "dv_split",
     "k_chunk"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

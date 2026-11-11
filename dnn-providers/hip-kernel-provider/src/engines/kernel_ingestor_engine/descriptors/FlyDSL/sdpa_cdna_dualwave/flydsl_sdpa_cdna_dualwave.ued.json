@@ -20,5 +20,8 @@
     "block_m",
     "waves_per_eu",
     "setprio"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }
