@@ -13,34 +13,6 @@ namespace ck_tile {
 
 namespace mx_tdm_v4 {
 
-/// The operands of one run: A, B and their K-major scales as bytes, and the problem.
-struct Operands
-{
-    const uint8_t* a;
-    const uint8_t* b;
-    const uint8_t* a_scale;
-    const uint8_t* b_scale;
-    index_t M;
-    index_t N;
-    index_t K;
-};
-
-/// The calling thread's place: lane, wave, the tile's first row and column, and the cluster.
-struct Coords
-{
-    index_t tid;
-    index_t lane;
-    index_t lane_col;
-    index_t lane_half;
-    index_t wave;
-    index_t wave_m;
-    index_t wave_n;
-    index_t block_m;
-    index_t block_n;
-    index_t cluster_wx;
-    index_t cluster_wy;
-};
-
 // The GL2 prefetch's cache policy: th:TH_LOAD_NT | scope:SCOPE_SE (the enum has it on gfx12 only).
 #if defined(__gfx12__)
 inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::SE_NT;
@@ -162,7 +134,6 @@ struct GemmPipelineAgBgCrCompTDMV4
     /// The cluster multicast takes grid x as N tiles and grid y as M tiles
     /// (GemmTile2DNMajorPartitioner).
     static constexpr bool kGridXWalksN = true;
-    using Coords                       = mx_tdm_v4::Coords;
 
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
     static constexpr index_t kThreads         = Policy::template GetBlockSize<Problem>();
@@ -266,41 +237,6 @@ struct GemmPipelineAgBgCrCompTDMV4
         if(N % Traits::kStoreWidth != 0)
             return "the store width does not divide N";
         return nullptr;
-    }
-
-    /// This thread's coordinates in the tile at (block_m, block_n); the cluster ids are 0 without
-    /// a cluster.
-    CK_TILE_DEVICE static mx_tdm_v4::Coords MakeCoords(index_t block_m, index_t block_n)
-    {
-        mx_tdm_v4::Coords c{};
-        c.tid       = static_cast<index_t>(threadIdx.x);
-        c.lane      = integer_modulo_nonnegative<mx_tdm_v4::kWave>(c.tid);
-        c.lane_col  = integer_modulo_nonnegative<16>(c.lane);
-        c.lane_half = integer_divide_nonnegative<16>(c.lane);
-        // Wave-uniform, so the TDM descriptors built from it stay scalar.
-        c.wave    = amd_wave_read_first_lane(integer_divide_nonnegative<mx_tdm_v4::kWave>(c.tid));
-        c.wave_n  = integer_modulo_nonnegative<kWarpN>(c.wave);
-        c.wave_m  = integer_divide_nonnegative<kWarpN>(c.wave);
-        c.block_m = block_m;
-        c.block_n = block_n;
-        if constexpr(kHasCluster)
-        {
-            c.cluster_wx = static_cast<index_t>(get_cluster_workgroup_id_x());
-            c.cluster_wy = static_cast<index_t>(get_cluster_workgroup_id_y());
-        }
-        return c;
-    }
-
-    /// RowMaps: WMMA positions to tile rows. A lane's M repeats are adjacent A rows, so its A
-    /// scales of a K step are contiguous; its N repeats are adjacent D columns, so one
-    /// accumulator slot is one vector store.
-    CK_TILE_DEVICE static index_t MRow(const mx_tdm_v4::Coords& c, index_t rm, index_t m_local)
-    {
-        return c.wave_m * (kRm * kAtomM) + m_local * kRm + rm;
-    }
-    CK_TILE_DEVICE static index_t NRow(const mx_tdm_v4::Coords& c, index_t rn, index_t n_local)
-    {
-        return c.wave_n * (kRn * kAtomN) + n_local * kRn + rn;
     }
 
     /// Whether A's or B's fragments are read through a tile window (see
@@ -407,8 +343,27 @@ struct GemmPipelineAgBgCrCompTDMV4
 
     struct Run
     {
-        const mx_tdm_v4::Operands& p;
-        const mx_tdm_v4::Coords& c;
+        // The operands as bytes and the problem, from the DRAM windows' views.
+        const uint8_t* a_data;
+        const uint8_t* b_data;
+        const uint8_t* a_scales;
+        const uint8_t* b_scales;
+        index_t M;
+        index_t N;
+        index_t K;
+        // The calling thread's place: lane, wave, the tile's first row and column (the A and B
+        // windows' origins) and the cluster (0 without one).
+        index_t tid;
+        index_t lane;
+        index_t lane_col;
+        index_t lane_half;
+        index_t wave;
+        index_t wave_m;
+        index_t wave_n;
+        index_t block_m;
+        index_t block_n;
+        index_t cluster_wx = 0;
+        index_t cluster_wy = 0;
         CK_TILE_LDS_ADDR uint8_t* smem;
         uint32_t smem_addr;
         index_t packed_k;
@@ -432,25 +387,73 @@ struct GemmPipelineAgBgCrCompTDMV4
         AScaleWindow as_window;
         BScaleWindow bs_window;
 
-        CK_TILE_DEVICE Run(const mx_tdm_v4::Operands& p_,
-                           const mx_tdm_v4::Coords& c_,
+        template <typename ADram, typename BDram, typename AScaleDram, typename BScaleDram>
+        CK_TILE_DEVICE Run(const ADram& a_dram,
+                           const BDram& b_dram,
+                           const AScaleDram& a_scale_dram,
+                           const BScaleDram& b_scale_dram,
                            CK_TILE_LDS_ADDR uint8_t* smem_)
-            : p(p_),
-              c(c_),
+            : a_data(Bytes(a_dram)),
+              b_data(Bytes(b_dram)),
+              a_scales(Bytes(a_scale_dram)),
+              b_scales(Bytes(b_scale_dram)),
+              M(Lengths(a_dram)[number<0>{}]),
+              N(Lengths(b_dram)[number<0>{}]),
+              K(Lengths(a_dram)[number<1>{}]),
+              tid(get_thread_id()),
+              lane(integer_modulo_nonnegative<mx_tdm_v4::kWave>(tid)),
+              lane_col(integer_modulo_nonnegative<16>(lane)),
+              lane_half(integer_divide_nonnegative<16>(lane)),
+              // Wave-uniform, so the TDM descriptors built from it stay scalar.
+              wave(get_warp_id()),
+              wave_m(integer_divide_nonnegative<kWarpN>(wave)),
+              wave_n(integer_modulo_nonnegative<kWarpN>(wave)),
+              block_m(a_dram.get_window_origin()[number<0>{}]),
+              block_n(b_dram.get_window_origin()[number<0>{}]),
               smem(smem_),
               smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
-              packed_k(integer_divide_nonnegative<kKPerByte>(p_.K)),
+              packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
               k_atoms(integer_divide_nonnegative<mx_tdm_v4::kAtomK>(
-                  Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
-              a_scale_stride(opaque_scalar(p_.M * 4)),
-              b_scale_stride(opaque_scalar(p_.N * 4)),
+                  Traits::kHasTail ? K + mx_tdm_v4::kAtomK - 1 : K)),
+              a_scale_stride(opaque_scalar(M * 4)),
+              b_scale_stride(opaque_scalar(N * 4)),
               b_window(MakeLdsWindow<false>(smem_)),
-              as_window(MakeLdsScaleWindow<true>(smem_, c_.wave_m)),
-              bs_window(MakeLdsScaleWindow<false>(smem_, c_.wave_n))
+              as_window(MakeLdsScaleWindow<true>(smem_, wave_m)),
+              bs_window(MakeLdsScaleWindow<false>(smem_, wave_n))
         {
-            b_mask = Policy::template GetTDMWorkgroupMask<false>(c.cluster_wx, c.cluster_wy);
-            a_mask = Policy::template GetTDMWorkgroupMask<true>(c.cluster_wx, c.cluster_wy);
+            if constexpr(kHasCluster)
+            {
+                cluster_wx = static_cast<index_t>(get_cluster_workgroup_id_x());
+                cluster_wy = static_cast<index_t>(get_cluster_workgroup_id_y());
+            }
+            b_mask = Policy::template GetTDMWorkgroupMask<false>(cluster_wx, cluster_wy);
+            a_mask = Policy::template GetTDMWorkgroupMask<true>(cluster_wx, cluster_wy);
+        }
+
+        template <typename Window>
+        CK_TILE_DEVICE static const uint8_t* Bytes(const Window& window)
+        {
+            return reinterpret_cast<const uint8_t*>(
+                window.get_bottom_tensor_view().get_buffer_view().p_data_);
+        }
+        template <typename Window>
+        CK_TILE_DEVICE static auto Lengths(const Window& window)
+        {
+            return detail::tdm_real_lengths(
+                window.get_bottom_tensor_view().get_tensor_descriptor());
+        }
+
+        /// RowMaps: WMMA positions to tile rows. A lane's M repeats are adjacent A rows, so its A
+        /// scales of a K step are contiguous; its N repeats are adjacent D columns, so one
+        /// accumulator slot is one vector store.
+        CK_TILE_DEVICE index_t MRow(index_t rm, index_t m_local) const
+        {
+            return wave_m * (kRm * kAtomM) + m_local * kRm + rm;
+        }
+        CK_TILE_DEVICE index_t NRow(index_t rn, index_t n_local) const
+        {
+            return wave_n * (kRn * kAtomN) + n_local * kRn + rn;
         }
 
         CK_TILE_DEVICE static constexpr index_t BufferBase(index_t parity)
@@ -458,7 +461,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             return parity * kLdsBufferStride;
         }
 
-        CK_TILE_DEVICE index_t ClampK(index_t k) const { return k < p.K ? k : p.K - kTileK; }
+        CK_TILE_DEVICE index_t ClampK(index_t k) const { return k < K ? k : K - kTileK; }
 
         // ---------------------------------------------------------------- TdmLoader
 
@@ -467,7 +470,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA>
         CK_TILE_DEVICE index_t RowsLeft(index_t row0) const
         {
-            const index_t extent = IsA ? p.M : p.N;
+            const index_t extent = IsA ? M : N;
             const index_t left   = extent - row0;
             constexpr bool edge  = IsA ? Traits::kEdgeM : Traits::kEdgeN;
             if constexpr(!edge)
@@ -526,8 +529,8 @@ struct GemmPipelineAgBgCrCompTDMV4
             constexpr bool wide         = IsA ? Traits::kWideA : Traits::kWideB;
             constexpr bool iterate      = L.iterate_rows > 0;
             constexpr index_t tile_rows = iterate ? L.iterate_rows : L.rows;
-            const index_t block         = IsA ? c.block_m : c.block_n;
-            const uint8_t* base         = IsA ? p.a : p.b;
+            const index_t block         = IsA ? block_m : block_n;
+            const uint8_t* base         = IsA ? a_data : b_data;
             const index_t row0          = block + component * L.rows;
             const uint8_t* global =
                 wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
@@ -567,9 +570,9 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             constexpr MxTdmV4Operand L = Policy::template GetLdsOperand<Problem, IsA, true>();
             constexpr bool edge        = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            const index_t block        = IsA ? c.block_m : c.block_n;
-            const index_t extent       = IsA ? p.M : p.N;
-            const uint8_t* base        = IsA ? p.a_scale : p.b_scale;
+            const index_t block        = IsA ? block_m : block_n;
+            const index_t extent       = IsA ? M : N;
+            const uint8_t* base        = IsA ? a_scales : b_scales;
             const index_t row_stride   = extent * 4;
             const index_t mn0          = block + component * L.rows;
             const index_t col0         = mn0 * 4;
@@ -588,8 +591,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// Both descriptors for tile 0, buffer 0, selected by wave parity; every word uniform.
         CK_TILE_DEVICE void Hoist()
         {
-            const bool even         = integer_modulo_nonnegative<2>(c.wave) == 0;
-            const index_t component = integer_divide_nonnegative<2>(c.wave);
+            const bool even         = integer_modulo_nonnegative<2>(wave) == 0;
+            const index_t component = integer_divide_nonnegative<2>(wave);
             const auto select       = [&](const TDMGroups& b, const TDMGroups& a) {
                 return amd_wave_read_first_lane(even ? b : a);
             };
@@ -599,7 +602,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             scale_lds = scale.g0.lds_addr;
             data_global  = data.g0.getGlobalAddr();
             scale_global = scale.g0.getGlobalAddr();
-            scale_stride = even ? p.N * 4 : p.M * 4;
+            scale_stride = even ? N * 4 : M * 4;
         }
 
         /// This wave's data and scale loads of the tile at k0 into buffer parity.
@@ -649,14 +652,12 @@ struct GemmPipelineAgBgCrCompTDMV4
             if constexpr(kGl2Distance != 0)
             {
                 constexpr index_t line = mx_tdm_v4::kGl2LineBytes;
-                k_ahead                = k_ahead < p.K ? k_ahead : p.K - kTileK;
+                k_ahead                = k_ahead < K ? k_ahead : K - kTileK;
                 const index_t k_byte   = integer_divide_nonnegative<kKPerByte>(k_ahead);
                 constexpr index_t data_lines =
                     kLdsRowBytes / line == 0 && AheadParity == 0 ? 1 : kLdsRowBytes / line;
-                const index_t cluster_m0 =
-                    kHasCluster ? c.block_m - c.cluster_wy * kTileM : c.block_m;
-                const index_t cluster_n0 =
-                    kHasCluster ? c.block_n - c.cluster_wx * kTileN : c.block_n;
+                const index_t cluster_m0 = kHasCluster ? block_m - cluster_wy * kTileM : block_m;
+                const index_t cluster_n0 = kHasCluster ? block_n - cluster_wx * kTileN : block_n;
                 constexpr index_t b_scale_row     = kClusterX * kTileN * 4;
                 constexpr index_t a_scale_row     = kClusterY * kTileM * 4;
                 constexpr index_t b_lines_per_row = b_scale_row / line;
@@ -673,8 +674,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 constexpr index_t total = starts[3] + counts[3];
                 constexpr index_t pool  = kClusterX * kClusterY * kThreads;
                 const index_t thread =
-                    kHasCluster ? (c.cluster_wx + c.cluster_wy * kClusterX) * kThreads + c.tid
-                                : c.tid;
+                    kHasCluster ? (cluster_wx + cluster_wy * kClusterX) * kThreads + tid : tid;
                 // A partial last tile has fewer K steps than the k_steps rows prefetched for it;
                 // a partial M/N tile has lines past the end.
                 const index_t k_step = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k_ahead);
@@ -691,10 +691,10 @@ struct GemmPipelineAgBgCrCompTDMV4
                         constexpr index_t lines = is_a ? data_lines : data_lines;
                         const index_t row0      = is_a ? cluster_m0 : cluster_n0;
                         const index_t row       = LastInside<edge>(
-                            row0 + integer_divide_nonnegative<lines>(index), is_a ? p.M : p.N);
+                            row0 + integer_divide_nonnegative<lines>(index), is_a ? M : N);
                         const index_t offset =
                             k_byte + integer_modulo_nonnegative<lines>(index) * line;
-                        const uint8_t* base = is_a ? p.a : p.b;
+                        const uint8_t* base = is_a ? a_data : b_data;
                         if constexpr(wide)
                             return base + (static_cast<uint64_t>(static_cast<uint32_t>(row)) *
                                                static_cast<uint32_t>(packed_k) +
@@ -716,7 +716,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                             mn0 * 4 + integer_modulo_nonnegative<lines_per_row>(index) * line;
                         const index_t element =
                             LastInside<clamp>(row * row_bytes + offset, k_atoms * row_bytes);
-                        return (is_a ? p.a_scale : p.b_scale) + static_cast<uint32_t>(element);
+                        return (is_a ? a_scales : b_scales) + static_cast<uint32_t>(element);
                     }
                 };
 
@@ -763,7 +763,7 @@ struct GemmPipelineAgBgCrCompTDMV4
 
         CK_TILE_DEVICE index_t LaneK(index_t step) const
         {
-            return step * kStepBytes + c.lane_half * mx_tdm_v4::kChunkBytes;
+            return step * kStepBytes + lane_half * mx_tdm_v4::kChunkBytes;
         }
 
         CK_TILE_DEVICE RowFrag RowFragment(index_t buffer,
@@ -814,15 +814,14 @@ struct GemmPipelineAgBgCrCompTDMV4
             const index_t lane_k = LaneK(step);
             if constexpr(kMma32)
             {
-                const int32x8_t r0 = RowFragment(buffer, true, MRow(c, rm, c.lane_col), lane_k);
-                const int32x8_t r1 =
-                    RowFragment(buffer, true, MRow(c, rm, c.lane_col + 16), lane_k);
+                const int32x8_t r0 = RowFragment(buffer, true, MRow(rm, lane_col), lane_k);
+                const int32x8_t r1 = RowFragment(buffer, true, MRow(rm, lane_col + 16), lane_k);
                 return __builtin_shufflevector(
                     r0, r1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             }
             else
             {
-                return Pad16(RowFragment(buffer, true, MRow(c, rm, c.lane_col), lane_k));
+                return Pad16(RowFragment(buffer, true, MRow(rm, lane_col), lane_k));
             }
         }
 
@@ -842,9 +841,9 @@ struct GemmPipelineAgBgCrCompTDMV4
             constexpr index_t base = Policy::template GetLdsOperand<Problem, IsA>().base / 4;
             constexpr index_t wave_words =
                 Policy::template GetLdsRowOffset<Problem, IsA>(repeats * atom);
-            const index_t wave = IsA ? c.wave_m : c.wave_n;
-            const index_t offset =
-                buffer / 4 + base + wave * wave_words + repeat_offsets[r] + step * (kStepBytes / 4);
+            const index_t wave_index = IsA ? wave_m : wave_n;
+            const index_t offset = buffer / 4 + base + wave_index * wave_words + repeat_offsets[r] +
+                                   step * (kStepBytes / 4);
             const auto tile =
                 b_window.load_with_offset(offset, number<-1>{}, bool_constant<false>{});
             using Vec = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
@@ -857,7 +856,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 if constexpr(kTileReadB)
                     return LdsFragment<false>(buffer, rn, step);
                 else
-                    return RowFragment(buffer, false, NRow(c, rn, c.lane_col), LaneK(step));
+                    return RowFragment(buffer, false, NRow(rn, lane_col), LaneK(step));
             }();
             if constexpr(kMma32)
                 return f;
@@ -924,12 +923,12 @@ struct GemmPipelineAgBgCrCompTDMV4
             {
                 constexpr MxTdmV4Operand as_lds =
                     Policy::template GetLdsOperand<Problem, true, true>();
-                const index_t a_lane = kMma32 ? c.lane : c.lane_col;
+                const index_t a_lane = kMma32 ? lane : lane_col;
                 ScaleWords<kRm>(h.as,
                                 buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
                                              as_lds,
                                              static_cast<uint32_t>(step),
-                                             static_cast<uint32_t>(MRow(c, 0, a_lane)))));
+                                             static_cast<uint32_t>(MRow(0, a_lane)))));
             }
             if constexpr(kTileReadBScale)
             {
@@ -943,7 +942,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                                 buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
                                              bs_lds,
                                              static_cast<uint32_t>(step),
-                                             static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
+                                             static_cast<uint32_t>(NRow(0, lane_col)))));
             }
             static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
             return h;
@@ -971,7 +970,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             if constexpr(kHasCluster)
             {
                 mx_tdm_v4::fence();
-                cluster_barrier_signal_wave0(c.wave);
+                cluster_barrier_signal_wave0(wave);
                 mx_tdm_v4::fence();
             }
         }
@@ -1224,7 +1223,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 carry.head = ReadHead(BufferBase(0), 0);
                 ReadB<0, kRn>(carry.b, BufferBase(0), 0);
             }
-            const index_t full_tiles = integer_divide_nonnegative<kTileK>(p.K);
+            const index_t full_tiles = integer_divide_nonnegative<kTileK>(K);
             constexpr index_t kOdd   = Traits::kOddTiles;
             // The loop runs tile pairs, one tile per buffer, so buffer offsets fold. A known odd
             // tile count peels tile 0 before the loop, as rocKE; an unknown one runs the odd
@@ -1238,7 +1237,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             constexpr index_t kFirst = kOdd == 1 ? 1 : 0;
             const index_t loop_end   = kOdd < 0
                                            ? integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK)
-                                           : (Traits::kHasTail ? full_tiles * kTileK : p.K);
+                                           : (Traits::kHasTail ? full_tiles * kTileK : K);
             for(index_t k0 = start; k0 < loop_end; k0 += 2 * kTileK)
             {
                 Tile<kKSteps, kFirst>(acc, carry, k0, kFirst);
@@ -1300,26 +1299,11 @@ struct GemmPipelineAgBgCrCompTDMV4
                       "comp_tdm_v4 runs single A and B tensors");
         CBlockTile c_block_tile;
 #if defined(__gfx125__)
-        const auto& a_window = a_dram_block_window_tmp[number<0>{}];
-        const auto& b_window = b_dram_block_window_tmp[number<0>{}];
-        const auto bytes     = [](const auto& window) {
-            return reinterpret_cast<const uint8_t*>(
-                window.get_bottom_tensor_view().get_buffer_view().p_data_);
-        };
-        const auto a_lengths =
-            detail::tdm_real_lengths(a_window.get_bottom_tensor_view().get_tensor_descriptor());
-        const auto b_lengths =
-            detail::tdm_real_lengths(b_window.get_bottom_tensor_view().get_tensor_descriptor());
-        const mx_tdm_v4::Operands operands{bytes(a_window),
-                                           bytes(b_window),
-                                           bytes(scale_a_window[number<0>{}]),
-                                           bytes(scale_b_window[number<0>{}]),
-                                           a_lengths[number<0>{}],
-                                           b_lengths[number<0>{}],
-                                           a_lengths[number<1>{}]};
-        const auto coords = MakeCoords(a_window.get_window_origin()[number<0>{}],
-                                       b_window.get_window_origin()[number<0>{}]);
-        Run run(operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
+        Run run(a_dram_block_window_tmp[number<0>{}],
+                b_dram_block_window_tmp[number<0>{}],
+                scale_a_window[number<0>{}],
+                scale_b_window[number<0>{}],
+                c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
         run.Main(c_block_tile.get_thread_buffer().template get_as<CVec>());
 #else
         ignore = a_dram_block_window_tmp;
