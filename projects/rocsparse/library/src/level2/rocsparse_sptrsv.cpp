@@ -579,6 +579,9 @@ namespace rocsparse
             }
             case rocsparse_pointer_mode_device:
             {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_device_scalars(
+                    handle->stream, scalar_datatype, compute_datatype, alpha, handle->alpha));
+
                 *local_alpha = handle->alpha;
                 break;
             }

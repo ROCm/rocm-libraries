@@ -36,7 +36,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                          const rocsparse_mat_descr csr_descr,
                                          rocsparse_indextype       csr_row_ptr_indextype,
                                          void*                     csr_row_ptr,
-                                         int64_t*                  csr_nnz)
+                                         int64_t*                  csr_nnz,
+                                         rocsparse_pointer_mode    csr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -70,6 +71,9 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
         case rocsparse_indextype_i32:
         {
+            // The nnz is computed into a host variable and then copied to csr_nnz.
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      csr_nnz_pointer_mode == rocsparse_pointer_mode_device);
             int32_t csr_nnz_32;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::ell2csr_nnz_template(handle,
                                                                       m32,
@@ -79,7 +83,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                                                       (const int32_t*)ell_col_ind,
                                                                       csr_descr,
                                                                       (int32_t*)csr_row_ptr,
-                                                                      &csr_nnz_32));
+                                                                      &csr_nnz_32,
+                                                                      csr_nnz_pointer_mode));
             csr_nnz[0] = csr_nnz_32;
             return rocsparse_status_success;
         }
@@ -93,7 +98,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                                                       (const int32_t*)ell_col_ind,
                                                                       csr_descr,
                                                                       (int64_t*)csr_row_ptr,
-                                                                      (int64_t*)csr_nnz));
+                                                                      (int64_t*)csr_nnz,
+                                                                      csr_nnz_pointer_mode));
             return rocsparse_status_success;
         }
 
@@ -115,6 +121,9 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
         case rocsparse_indextype_i32:
         {
+            // The nnz is computed into a host variable and then copied to csr_nnz.
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      csr_nnz_pointer_mode == rocsparse_pointer_mode_device);
             int32_t csr_nnz_32;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::ell2csr_nnz_template(handle,
                                                                       m,
@@ -124,7 +133,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                                                       (const int64_t*)ell_col_ind,
                                                                       csr_descr,
                                                                       (int32_t*)csr_row_ptr,
-                                                                      &csr_nnz_32));
+                                                                      &csr_nnz_32,
+                                                                      csr_nnz_pointer_mode));
             csr_nnz[0] = csr_nnz_32;
             return rocsparse_status_success;
         }
@@ -138,7 +148,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                                                       (const int64_t*)ell_col_ind,
                                                                       csr_descr,
                                                                       (int64_t*)csr_row_ptr,
-                                                                      (int64_t*)csr_nnz));
+                                                                      (int64_t*)csr_nnz,
+                                                                      csr_nnz_pointer_mode));
             return rocsparse_status_success;
         }
 
@@ -486,7 +497,8 @@ rocsparse_status rocsparse::spmat_ell2csr_nnz(rocsparse_handle            handle
                                                       target->descr,
                                                       target->row_type,
                                                       target->row_data,
-                                                      out_csr_nnz));
+                                                      out_csr_nnz,
+                                                      rocsparse_pointer_mode_host));
 
     return rocsparse_status_success;
 }

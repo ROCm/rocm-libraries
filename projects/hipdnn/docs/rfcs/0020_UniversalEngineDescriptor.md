@@ -231,7 +231,7 @@ structure, and it holds whichever of the two arms (§ 4.3, § 4.5) this engine m
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3** (not yet built; the loader rejects it as an unknown key), or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 8). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 13.2). |
-| `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value. The loader accepts `runtime_compilation` and rejects any other tag. No duplicates. Absent => none. |
+| `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value. The loader accepts `runtime_compilation` and `supports_graph_capture` and rejects any other tag. No duplicates. Absent => none. |
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags (§ 9). No duplicates. Absent => none. |
 
 Every field but `version`, `id`, `name`, and `metadata` may be omitted; a valid engine can expose
