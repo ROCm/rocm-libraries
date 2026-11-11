@@ -68,6 +68,9 @@ for g in [(1, 3, 3, 1, 1, 1), (3, 3, 3, 1, 1, 1), (3, 3, 3, 2, 2, 2)]:
     CMAX_OF[g] = [1, 3, 4]
 # Tiles: (fm, fn, wm, wq, wn).
 TILES = [(4, 2, 2, 2, 2), (4, 2, 4, 2, 1), (2, 4, 4, 1, 1), (2, 2, 4, 1, 1)]
+# Per-arch extras by filter height: gfx90a's 16x16x16 MFMA prefers the 4 x 4 fragment tile (fm 4,
+# fn 4, 2 x 2 waves) on 7x7 stems: s2 c3 5-11% (deeplab n16 1024²: 4.53 -> 4.02 ms).
+ARCH_TILES = {"gfx90a": {7: [(4, 4, 2, 2, 1)]}}
 
 
 def pow2(v):
@@ -127,7 +130,7 @@ for arch, atoms in ARCH_ATOMS.items():
             if not lane_ok(atom, g[2]):
                 continue
             for cmax in CMAX_OF[g]:
-                for t in TILES:
+                for t in TILES + ARCH_TILES.get(arch, {}).get(g[1], []):
                     if lds_bytes(atom, cmax, g, t, elem) > ldsmax:
                         continue
                     c = dict(
