@@ -128,27 +128,92 @@ namespace
 
 TEST_F(ExtraBell, no_stored_blocks_scales_C)
 {
-    // mb and kb differ. For trans_A != none, C has A.cols rows. The quick
-    // return used to scale A.rows, so kb < mb writes the padding past the
-    // last row of C and kb > mb leaves rows of C unscaled. Conjugate
-    // transpose shares that quick return. ldc = Mc + 2 keeps the extra
-    // write inside the allocation.
-    const rocsparse_operation ops[] = {rocsparse_operation_none,
-                                       rocsparse_operation_transpose,
-                                       rocsparse_operation_conjugate_transpose};
-    const int64_t             kbs[] = {2, 5};
+    // mb and kb differ, so a quick return that used A's row count would scale
+    // the wrong number of rows of C. ldc = Mc + 2 keeps an extra write inside
+    // the allocation. Transposed A is not supported; see the test below.
+    const int64_t kbs[] = {2, 5};
+    for(bool device : {false, true})
+        for(int64_t kb : kbs)
+        {
+            BellRun r;
+            r.device = device;
+            r.kb     = kb;
+            run_empty_bell(handle, r);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)
+{
+    // The unsupported-transpose check has to run before the empty-product
+    // quick return, or a matrix with no stored blocks would succeed while
+    // the same call with stored blocks returns not_implemented.
+    const rocsparse_operation ops[]
+        = {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose};
     for(rocsparse_operation opA : ops)
-        for(bool device : {false, true})
-            for(int64_t kb : kbs)
-            {
-                BellRun r;
-                r.opA    = opA;
-                r.device = device;
-                r.kb     = kb;
-                run_empty_bell(handle, r);
-                if(HasFatalFailure())
-                    return;
-            }
+    {
+        BellRun r;
+        r.opA           = opA;
+        r.kb            = 5;
+        const int64_t m = r.mb * r.bd, k = r.kb * r.bd;
+        const int64_t Mc = k, Kc = m;
+        Rng           rng(17);
+        const Dense   C0  = random_dense<float>(Mc, r.n, rng);
+        const int64_t ldb = Kc + 1, ldc = Mc + 2;
+        DevBuf<float> dB
+            = up_raw<float>(store_dense<float>(Dense(Kc, r.n), rocsparse_order_column, ldb));
+        DevBuf<float>   dC  = up_raw<float>(store_dense<float>(C0, rocsparse_order_column, ldc));
+        DevBuf<int32_t> ind = up_idx<int32_t>(std::vector<int64_t>(4, 0));
+        DevBuf<float>   val = up_raw<float>(std::vector<float>(4, 0.0f));
+        ASSERT_TRUE(dB.ptr && dC.ptr && ind.ptr && val.ptr);
+
+        SpmatH sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                              m,
+                                              k,
+                                              rocsparse_direction_row,
+                                              r.bd,
+                                              0,
+                                              ind.ptr,
+                                              val.ptr,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_index_base_zero,
+                                              rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+        DnmatH mB, mC;
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(
+                &mB.p, Kc, r.n, ldb, dB.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(
+                &mC.p, Mc, r.n, ldc, dC.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+            rocsparse_status_success);
+        Scalar<float> alpha(cplx(2.0, 0.0), false);
+        Scalar<float> beta(cplx(-0.5, 0.0), false);
+        size_t        bsz = 0;
+        for(rocsparse_spmm_stage stage : {rocsparse_spmm_stage_buffer_size,
+                                          rocsparse_spmm_stage_preprocess,
+                                          rocsparse_spmm_stage_compute})
+        {
+            ASSERT_EQ(rocsparse_spmm(handle,
+                                     opA,
+                                     rocsparse_operation_none,
+                                     alpha.get(),
+                                     sp.p,
+                                     mB.p,
+                                     beta.get(),
+                                     mC.p,
+                                     rocsparse_datatype_f32_r,
+                                     rocsparse_spmm_alg_bell,
+                                     stage,
+                                     &bsz,
+                                     nullptr),
+                      rocsparse_status_not_implemented);
+        }
+        expect_dense_equal<float>(dC.host(), C0, rocsparse_order_column, ldc, "C");
+    }
 }
 
 namespace

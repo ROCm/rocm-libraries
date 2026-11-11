@@ -270,6 +270,12 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_SIZE(7, bell_block_dim);
         ROCSPARSE_CHECKARG(7, bell_block_dim, (bell_block_dim == 0), rocsparse_status_invalid_size);
 
+        // Blocked ELL supports only trans_A == none, including the quick return.
+        // Checking it here keeps an empty product from succeeding when a product
+        // with stored blocks would return not_implemented.
+        ROCSPARSE_CHECKARG(
+            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
+
         const rocsparse_status status = rocsparse::bellmm_quickreturn(handle,
                                                                       trans_A,
                                                                       trans_B,
@@ -308,11 +314,6 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(14, dense_B);
         ROCSPARSE_CHECKARG_POINTER(19, beta);
         ROCSPARSE_CHECKARG_POINTER(20, dense_C);
-
-        ROCSPARSE_CHECKARG(
-            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             15,
