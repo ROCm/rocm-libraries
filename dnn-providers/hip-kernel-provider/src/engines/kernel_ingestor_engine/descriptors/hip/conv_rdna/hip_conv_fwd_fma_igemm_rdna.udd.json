@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "6214eb42-fa7a-47f8-84e1-8a18bdd36917",
+  "name": "hip_conv_fwd_fma_igemm_rdna dispatch",
+  "dispatch_symbol": "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch"
+}
