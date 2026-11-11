@@ -110,8 +110,9 @@ void throwOnHiprtcError(hiprtcResult status, const char* what)
 /// The code object of the repack program for @p arch.
 std::vector<char> compile(const std::string& arch)
 {
-    const std::array<const char*, 1> headers = {kernels::CONV_REPACK_ARGS_SOURCE};
-    const std::array<const char*, 1> headerNames = {"ConvRepackArgs.h"};
+    const std::array<const char*, 2> headers
+        = {kernels::CONV_REPACK_ARGS_SOURCE, kernels::CONV_REPACK_DISJOINT_SOURCE};
+    const std::array<const char*, 2> headerNames = {"ConvRepackArgs.h", "ConvRepackDisjoint.h"};
     hiprtcProgram program = nullptr;
     throwOnHiprtcError(hiprtcCreateProgram(&program,
                                            kernels::CONV_REPACK_SOURCE,
