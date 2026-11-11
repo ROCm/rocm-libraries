@@ -83,7 +83,8 @@ TELLABLE = {
 }
 SEED_POLICIES = ("shared", "per_problem")
 MEASUREMENT_POLICIES = ("full",)
-PRIOR_STRATEGIES = ("tpe", "gp", "portfolio")  # the strategies that read a prior
+MODEL_STRATEGIES = ("tpe", "gp", "coupled_tpe")
+PRIOR_STRATEGIES = (*MODEL_STRATEGIES, "portfolio")  # the strategies that read a prior
 NO_WARM_STRATEGIES = ("random", "exhaustive")  # the strategies that ignore warm starts
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_INTERRUPTED = 0, 1, 2, 130
 OUTPUT_FILES = ("run.json", "trials.jsonl", "winners.json", "summary.json")
@@ -392,11 +393,11 @@ class SearchSettings:
         if "build_aware" in data:
             bd, bw = data["build_aware"], w + ".build_aware"
             _check_keys(bd, BuildAwareSettings.__dataclass_fields__, bw)
-            supported = (strategy in ("tpe", "gp") or strategy == "portfolio"
-                         and any(m in ("tpe", "gp") for m in
+            supported = (strategy in MODEL_STRATEGIES or strategy == "portfolio"
+                         and any(m in MODEL_STRATEGIES for m in
                                  (members or _ck_search().DEFAULT_PORTFOLIO)))
             if not supported:
-                raise SettingsError(f"{bw}: requires TPE or GP, alone or in a portfolio")
+                raise SettingsError(f"{bw}: requires TPE, GP or coupled_tpe, alone or in a portfolio")
             build_aware = BuildAwareSettings(
                 rank_fraction=_get(bd, bw, "rank_fraction", float, 0.1,
                                    lambda v: 0 < v <= 1, "in (0, 1]"),

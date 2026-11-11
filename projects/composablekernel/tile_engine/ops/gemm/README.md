@@ -633,9 +633,10 @@ the default search and fixed-confirmation policies are unchanged.
 | Broad predictor prior | Selector `--ranked_top_k 0`; search `warm_start.ranked_csv` and `use_prior: true` | Ranked CSV truncated to selector `top_k`; no prior unless requested |
 | Diverse warm starts | Selector `--family_cap 1` | Ordinary predicted top-K |
 | Bounded statistical confirmation | `confirm.mode: "race"` | Fixed `fresh_calls`, minimum passing median |
-| Build-aware TPE/GP proposals | `build_aware: {"rank_fraction": 0.1, "explore_probability": 0.2}` | Highest acquisition score |
+| Build-aware TPE/GP/coupled proposals | `build_aware: {"rank_fraction": 0.1, "explore_probability": 0.2}` | Highest acquisition score |
 | TPE-containing portfolio | `strategy: "portfolio"`, `portfolio_members: ["hill", "gp", "de", "tpe"]` | Portfolio members `hill,gp,de` |
 | TPE over the full candidate list | `strategy: "tpe"`, `tpe_candidate_pool: "listed"` | Sampled acquisition pool |
+| Coupled multivariate TPE + trust region | `strategy: "coupled_tpe"` | Univariate sampled TPE |
 
 `tpe_candidate_pool: "listed"` scores every catalog member before selecting
 the next trial. It keeps TPE's density model, prior, startup, pending-trial
@@ -661,6 +662,19 @@ Without warm starts it was 3.193% versus 3.481%; 16-trial results also did
 not improve. These fixed-catalog results support an opt-in warm-start
 experiment, not a default change or a universal speedup claim. Compare
 against GP as well: its mean quality was better at the 64-trial budget.
+
+`strategy: "coupled_tpe"` addresses two failure modes of factorized catalog TPE
+under coupled GPU parameters (`pipeline`, `tile_m/n/k`, `wave_m/n`, `warp_tile`):
+univariate cross-product chimera modes and pipeline-wide marginal penalties from
+in-flight batch trials. It blends regularized univariate log-density ratios with
+a joint mixture-of-product-kernels KDE (log-geometric ordinal kernels plus
+dimension-scaled Aitchison-Aitken categorical kernels; see [Falkner et al.
+(2018)](https://proceedings.mlr.press/v80/falkner18a.html) and [Song et al.
+(2022)](https://proceedings.mlr.press/v162/song22b.html)), applies pending batch
+repulsion only in the joint density, and interleaves surrogate-ranked local
+trust-region moves ([Wan et al. (2021)](https://arxiv.org/abs/2102.07188)) around
+the incumbent best kernel. It supports `warm_start`, `use_prior`, `build_aware`,
+and `portfolio_members`, and has an independent `coupled_tpe` comparison arm.
 
 `--top_k` controls warm picks independently of `--ranked_top_k` (omitted:
 same top-K CSV as before; zero: every ranked candidate). `--family_cap`

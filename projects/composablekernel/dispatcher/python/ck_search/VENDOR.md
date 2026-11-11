@@ -58,7 +58,11 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
   with randomized ties and the unchanged upstream density/prior/protocol.
   Select with `options={"candidate_pool": "listed"}` for `tpe`; the default
   sampled pool and upstream trial parity remain unchanged.
-- `build_aware.py`: optional, evaluator-owned reuse context for TPE/GP scored
+- `coupled_tpe.py`: opt-in `coupled_tpe` strategy combining univariate-to-multivariate
+  shrinkage Parzen estimation (log-geometric ordinal kernels and dimension-scaled
+  Aitchison-Aitken categorical kernels), expected-improvement linear quantile weights,
+  joint-only pending batch repulsion, and surrogate-ranked local trust-region moves.
+- `build_aware.py`: optional, evaluator-owned reuse context for TPE/GP/coupled_tpe scored
   pools, also attachable to portfolio model members. Prefer a successfully
   built or planned key within a top acquisition-rank band, with cost-blind
   exploration. It does not alter startup, legality, pending trials or

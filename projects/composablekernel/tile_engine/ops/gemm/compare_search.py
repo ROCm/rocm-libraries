@@ -25,6 +25,7 @@ from adaptive_search import SearchSettings, SettingsError, sha256_file, valid_la
 ARMS = {
     "baseline": ("baseline", ()),
     "listed_tpe": ("baseline", ("listed_tpe",)),
+    "coupled_tpe": ("baseline", ("coupled_tpe",)),
     "broad_prior": ("baseline", ("prior",)),
     "diverse_warm": ("baseline", ("warm",)),
     "confirmation_control": ("baseline", ("long_confirm",)),
@@ -52,6 +53,7 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
         raise SettingsError("ranked CSV and diverse pairs must be existing files")
     patches = {
         "listed_tpe": {"tpe_candidate_pool": "listed"},
+        "coupled_tpe": {"strategy": "coupled_tpe"},
         "prior": {"warm_start": {"ranked_csv": str(ranked_csv), "use_prior": True}},
         "warm": {"warm_start": {"pairs_file": str(diverse_pairs)}},
         "long_confirm": {"confirm": {"fresh_calls": max(9, baseline.confirm.fresh_calls)}},
@@ -217,7 +219,7 @@ def summarize(manifest, stream):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    prep = commands.add_parser("prepare", help="Write ten paired ablations per seed")
+    prep = commands.add_parser("prepare", help="Write eleven paired ablations per seed")
     prep.add_argument("--baseline", required=True)
     prep.add_argument("--ranked-csv", required=True, help="Full eligible-domain predictor CSV")
     prep.add_argument("--diverse-pairs", required=True)

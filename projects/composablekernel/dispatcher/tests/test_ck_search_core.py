@@ -52,7 +52,15 @@ VENDORED = (
     "surrogate.py",
     "trial.py",
 )
-CK_AUTHORED = ("__init__.py", "_compat.py", "factory.py", "build_aware.py", "listed_tpe.py")
+CK_AUTHORED = (
+    "__init__.py",
+    "_compat.py",
+    "factory.py",
+    "build_aware.py",
+    "listed_tpe.py",
+    "coupled_tpe.py",
+)
+UPSTREAM_STRATEGIES = ("random", "exhaustive", "de", "hill", "tpe", "gp", "portfolio")
 PATCH_MARK = re.compile(r"# ck_search patch (\d+)")
 UPSTREAM_SUBDIR = Path("rocke", "dispatch", "tuning", "search")
 FORBIDDEN_MODULES = {"rocke", "lightgbm", "pandas", "torch", "hip", "ctypes_utils"}
@@ -236,7 +244,7 @@ def test_strategy_improves_on_its_first_sample(name):
     assert strat.best()[1] == min(times)
 
 
-@pytest.mark.parametrize("name", ["de", "hill", "tpe", "gp", "portfolio"])
+@pytest.mark.parametrize("name", ["de", "hill", "tpe", "gp", "coupled_tpe", "portfolio"])
 def test_warm_records_are_asked_first(name):
     trace, strat = _drive(VENDORED_NS, name, 0, warm=WARM)
     space = strat.space
@@ -248,7 +256,7 @@ def test_warm_records_are_asked_first(name):
 
 
 @pytest.mark.parametrize("batch", [1, BATCH])
-@pytest.mark.parametrize("name", ["de", "hill", "tpe", "gp", "portfolio"])
+@pytest.mark.parametrize("name", ["de", "hill", "tpe", "gp", "coupled_tpe", "portfolio"])
 def test_every_warm_start_is_asked_before_the_strategys_own_picks(name, batch):
     # One field of 100 values: more warm starts than DE's default population (6).
     records = [{"tile_m": 16 * (i + 1)} for i in range(100)]
@@ -356,7 +364,7 @@ def test_factory_reproduces_upstream_defaults():
     hill = cs.make_strategy("hill", space, 7, warm_records=[UNLISTED_WARM])
     assert hill.start == repaired
     prior = cs.TablePrior(PRIOR_TABLE, _record_key)
-    for name in ("gp", "tpe"):
+    for name in ("gp", "tpe", "coupled_tpe"):
         assert cs.make_strategy(name, space, prior=prior).prior is prior
     pf = cs.make_strategy("portfolio", space, prior=prior)
     readers = [m for m in pf.members if hasattr(m, "prior")]
@@ -454,10 +462,11 @@ needs_rocke = pytest.mark.skipif(bool(ROCKE_SKIP), reason=ROCKE_SKIP)
 
 # Patch 3 changes what a batched hill ask returns while warm starts wait, so
 # hill with warm starts is compared one trial per ask, where it changes nothing.
+# coupled_tpe is CK-authored and not present in the pinned ROCKE snapshot.
 PARITY_CASES = [
     dict(name=name, seed=seed, warm=warm, prior=prior,
          batch=1 if name == "hill" and warm else BATCH)
-    for name in cs.STRATEGY_NAMES
+    for name in UPSTREAM_STRATEGIES
     for seed, warm, prior in (
         (0, (), False),
         (7, WARM, True),

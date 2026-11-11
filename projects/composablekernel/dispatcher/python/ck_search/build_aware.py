@@ -54,10 +54,11 @@ def attach_build_preference(strategy, preference: BuildPreference) -> int:
     Startup queues and non-model members are intentionally unchanged. Context
     is not checkpointed: the evaluator must restore availability before ask.
     """
+    from .coupled_tpe import CoupledTPE
     from .portfolio import Portfolio
     from .surrogate import GPEI, TPE
 
-    if isinstance(strategy, (TPE, GPEI)):
+    if isinstance(strategy, (TPE, GPEI, CoupledTPE)):
         strategy.build_preference = preference
         return 1
     if isinstance(strategy, Portfolio):

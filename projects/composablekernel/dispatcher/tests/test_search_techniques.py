@@ -230,7 +230,7 @@ def test_build_preference_only_chooses_reusable_near_ties_and_reserves_explorati
     assert pref.choose(space, random.Random(0), genomes, [1.0] * 10, 0) == genomes[9]
 
 
-@pytest.mark.parametrize("name", ["tpe", "gp"])
+@pytest.mark.parametrize("name", ["tpe", "gp", "coupled_tpe"])
 def test_model_reuse_choice_happens_before_trial_ownership(name):
     space = ck_search.SearchSpace.from_configs([{"x": i} for i in range(30)])
     strategy = ck_search.make_strategy(name, space, options={"n_startup": 2})
@@ -341,14 +341,15 @@ def test_comparison_runs_all_independent_and_combined_arms(comparison):
     for arm, field in (("broad_prior", "warm_start"), ("diverse_warm", "warm_start"),
                        ("confirmation_control", "confirm"), ("race", "confirm"),
                        ("build_aware", "build_aware"), ("portfolio_control", "strategy"),
-                       ("listed_tpe", "tpe_candidate_pool")):
+                       ("listed_tpe", "tpe_candidate_pool"),
+                       ("coupled_tpe", "strategy")):
         changed = {k for k in set(baseline) | set(by_arm[arm]["settings"])
                    if baseline.get(k) != by_arm[arm]["settings"].get(k)}
         assert changed == {field}
     output = io.StringIO()
     assert compare.summarize(comparison, output) == 0
     rows = list(csv.DictReader(io.StringIO(output.getvalue())))
-    assert len(rows) == 10
+    assert len(rows) == 11
     assert all(r["status"] == "complete" and r["paired_winners"] == "2" for r in rows)
     assert all(float(r["control_relative_quality"]) == 1 for r in rows)
     assert next(r for r in rows if r["arm"] == "race")["control_arm"] == "confirmation_control"
@@ -459,7 +460,7 @@ def test_comparison_retains_real_setup_failed_arms_and_controls(comparison, arm,
     output = io.StringIO()
     assert compare.summarize(comparison, output) == 1
     rows = {r["arm"]: r for r in csv.DictReader(io.StringIO(output.getvalue()))}
-    assert len(rows) == 10
+    assert len(rows) == 11
     assert rows[arm]["status"] == "setup_failed"
     assert rows[arm]["exit_code"] == str(expected_exit)
     assert expected_error in rows[arm]["error"]
