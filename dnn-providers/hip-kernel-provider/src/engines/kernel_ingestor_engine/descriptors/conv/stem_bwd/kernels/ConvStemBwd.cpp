@@ -58,5 +58,5 @@ extern "C" __global__ void __launch_bounds__(CONV_SB_TH* CONV_SB_ATOM_T::WAVE)
 
 extern "C" __global__ void __launch_bounds__(256) ConvStemBwdTransform(ConvStemBwdTransformArgs a)
 {
-    sbTransform<CONV_SB_T, CONV_SB_FT, CONV_SB_SD>(a);
+    sbTransform<CONV_SB_T, CONV_SB_FT, CONV_SB_SD, CONV_SB_KC>(a);
 }
