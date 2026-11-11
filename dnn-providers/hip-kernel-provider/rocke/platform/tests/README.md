@@ -272,7 +272,7 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | `rocke_library_attention_cpu_pytest` | Fast counted-sync contracts alongside the existing attention host units | quick and higher |
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | quick and higher; pure policy contracts |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | standard and higher; host process integration |
-| `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate, pending standard-shard capacity (#15334) |
+| `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate, pending standard-shard capacity |
 | `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
 
 The compiler gate preserves the resource table's existing qualification contract:

@@ -386,9 +386,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 prop["name"]: prop["value"] for prop in counted["properties"]
             }
             assert counted_properties["PROCESSORS"] == 4
-            assert counted_properties["RESOURCE_LOCK"] == [
-                "rocke_counted_sync_gate"
-            ]
+            assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
         # COMGR-only gates get the package and nothing compiler-specific.
         comgr_only_environment = environment_for(
             tests, "rocke_arch_domain_reproducibility"

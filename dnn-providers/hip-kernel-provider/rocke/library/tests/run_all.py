@@ -47,6 +47,8 @@ else:
 TESTS = Path(__file__).resolve().parent
 _LIBRARY_ROOT = Path(__file__).resolve().parents[1]
 _ROCKE_ROOT = _LIBRARY_ROOT.parent
+PLATFORM_TOOLS = _ROCKE_ROOT / "platform" / "tools"
+IR_CORPORA = (TESTS / "test_conv_ir_golden.py",)
 _SOURCE_PLATFORM_PYTHON = _ROCKE_ROOT / "platform" / "python"
 if _SOURCE_PLATFORM_PYTHON.is_dir() and str(_SOURCE_PLATFORM_PYTHON) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PLATFORM_PYTHON))
@@ -475,7 +477,12 @@ def main() -> int:
     parser.add_argument(
         "--pytest-only",
         action="store_true",
-        help="run affordable discovered pytest only; omit explicit gates",
+        help="run affordable discovered pytest only; omit explicit resource gates",
+    )
+    parser.add_argument(
+        "--no-ir-gates",
+        action="store_true",
+        help="skip emitted-IR validity and arch-domain gates over IR_CORPORA",
     )
     parser.add_argument(
         "--gate",
@@ -615,6 +622,26 @@ def main() -> int:
 
     status = 0
     skipped = False
+    run_ir_gates = (
+        run_discovered_pytest
+        and not args.gpu_only
+        and not args.no_ir_gates
+        and PLATFORM_TOOLS.is_dir()
+    )
+    if run_ir_gates:
+        for corpus in IR_CORPORA:
+            for tool in ("check_ir_validity.py", "check_arch_domain.py"):
+                ir_result = _run(
+                    f"{tool} over {corpus.name}",
+                    [
+                        sys.executable,
+                        str(PLATFORM_TOOLS / tool),
+                        "--cases",
+                        str(corpus),
+                    ],
+                )
+                status = status or ir_result.code
+
     if run_discovered_pytest:
         marker = _lane_marker(
             gpu=args.gpu,
@@ -646,7 +673,7 @@ def main() -> int:
         skipped |= pytest_result.skipped
         if status and not args.keep_going:
             print(
-                "\nRESULT: RED (resource gates not run after discovered-pytest failure) "
+                "\nRESULT: RED (resource gates not run after an earlier stage failure) "
                 f"in {time.monotonic() - run_started:.2f}s",
                 flush=True,
             )

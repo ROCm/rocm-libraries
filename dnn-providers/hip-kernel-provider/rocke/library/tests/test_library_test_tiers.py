@@ -253,7 +253,7 @@ def test_inherited_config_file_cannot_filter_direct_gate(tmp_path):
     environment = dict(os.environ)
     environment.update(
         {
-            "PYTEST_ADDOPTS": f"--config-file={config}",
+            "PYTEST_ADDOPTS": f"--config-file={config.as_posix()}",
             "ROCKE_EXPLICIT_GATE_RUN": "1",
             "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
@@ -547,12 +547,12 @@ def test_exhaustive_device_tests_remain_in_the_gpu_lane():
     "arguments, marker",
     [
         (
-            ["--pytest-only"],
+            ["--pytest-only", "--no-ir-gates"],
             "not gpu and not exhaustive and not worker_integration and not compiler_integration",
         ),
-        (["--pytest-only", "--exhaustive"], "not gpu"),
+        (["--pytest-only", "--no-ir-gates", "--exhaustive"], "not gpu"),
         (
-            ["--pytest-only", "--gpu"],
+            ["--pytest-only", "--no-ir-gates", "--gpu"],
             "gpu or (not exhaustive and not worker_integration and not compiler_integration)",
         ),
         (["--gpu-only"], "gpu"),
@@ -589,7 +589,9 @@ def test_inherited_pytest_selection_is_explicit_and_reports_partial(
         "_run_affordable_file_stage",
         lambda **kwargs: calls.append(kwargs) or run_all._StageResult(0),
     )
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--pytest-only"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--pytest-only", "--no-ir-gates"]
+    )
     assert run_all.main() == 0
     assert calls[0]["extra"] == expected
     assert "PYTEST_ADDOPTS" not in run_all._pytest_environment()
@@ -616,7 +618,7 @@ def test_project_selection_options_report_partial(option, value, monkeypatch, ca
     monkeypatch.setattr(
         run_all.sys,
         "argv",
-        ["run_all.py", "--pytest-only", "--", option, value],
+        ["run_all.py", "--pytest-only", "--no-ir-gates", "--", option, value],
     )
     assert run_all.main() == 0
     assert "RESULT: PARTIAL" in capsys.readouterr().out
@@ -624,7 +626,9 @@ def test_project_selection_options_report_partial(option, value, monkeypatch, ca
 
 def test_inherited_shard_requires_single_process(monkeypatch, capsys):
     monkeypatch.setenv("ROCKE_TEST_SHARD", "0/2")
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--pytest-only"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--pytest-only", "--no-ir-gates"]
+    )
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
@@ -641,7 +645,7 @@ def test_inherited_shard_reports_partial_in_single_process(monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
-        ["run_all.py", "--pytest-only", "--jobs", "0"],
+        ["run_all.py", "--pytest-only", "--no-ir-gates", "--jobs", "0"],
     )
     assert run_all.main() == 0
     assert "RESULT: PARTIAL" in capsys.readouterr().out
@@ -650,7 +654,7 @@ def test_inherited_shard_reports_partial_in_single_process(monkeypatch, capsys):
 @pytest.mark.parametrize(
     "arguments",
     (
-        ["--pytest-only", "--", "-m", "gpu"],
+        ["--pytest-only", "--no-ir-gates", "--", "-m", "gpu"],
         ["--gpu", "--", "--markexpr=not gpu"],
     ),
 )
@@ -686,6 +690,7 @@ def test_positive_jobs_use_file_workers_and_accept_plugin_values(monkeypatch):
         [
             "run_all.py",
             "--pytest-only",
+            "--no-ir-gates",
             "--jobs",
             "3",
             "--",
@@ -715,7 +720,9 @@ def test_host_default_uses_effective_cpu_limit(monkeypatch):
         "_run_affordable_file_stage",
         lambda **kwargs: calls.append(kwargs) or run_all._StageResult(0),
     )
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--pytest-only"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--pytest-only", "--no-ir-gates"]
+    )
     assert run_all.main() == 0
     assert calls[0]["jobs"] == 3
 
@@ -927,7 +934,7 @@ def test_affordable_lane_enforces_whole_stage_deadline(tmp_path, monkeypatch, ca
         lambda *args, **kwargs: (0, files, ""),
     )
 
-    def slow_file(path, marker, only, extra, timeout, log):
+    def slow_file(path, _marker, _only, _extra, _timeout, log):
         time.sleep(0.1)
         return run_all._FileResult(path, 0, 0.1, log)
 
@@ -1347,7 +1354,16 @@ def test_source_runner_rejects_nested_xdist(monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
-        ["run_all.py", "--pytest-only", "--jobs", "3", "--", "-n", "2"],
+        [
+            "run_all.py",
+            "--pytest-only",
+            "--no-ir-gates",
+            "--jobs",
+            "3",
+            "--",
+            "-n",
+            "2",
+        ],
     )
     with pytest.raises(SystemExit) as error:
         run_all.main()
@@ -1368,7 +1384,15 @@ def test_file_workers_reject_suite_wide_semantics(pytest_args, monkeypatch, caps
     monkeypatch.setattr(
         run_all.sys,
         "argv",
-        ["run_all.py", "--pytest-only", "--jobs", "3", "--", *pytest_args],
+        [
+            "run_all.py",
+            "--pytest-only",
+            "--no-ir-gates",
+            "--jobs",
+            "3",
+            "--",
+            *pytest_args,
+        ],
     )
     with pytest.raises(SystemExit) as error:
         run_all.main()
@@ -1437,7 +1461,9 @@ def test_source_runner_stops_before_resource_gates_after_unit_failure(monkeypatc
         return SimpleNamespace(returncode=1)
 
     monkeypatch.setattr(run_all.subprocess, "run", fail_units)
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--no-ir-gates", "--jobs", "0"]
+    )
     assert run_all.main() == 1
     assert len(calls) == 1
 
@@ -1451,7 +1477,9 @@ def test_source_runner_stops_before_compiler_gate_after_structural_failure(monke
         return _completed(next(results), kwargs)
 
     monkeypatch.setattr(run_all.subprocess, "run", fail_structural)
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--no-ir-gates", "--jobs", "0"]
+    )
     assert run_all.main() == 1
     assert len(calls) == 2
     assert calls[-1][-1] == str(EXPLICIT_GATES["counted-structural"])
@@ -1467,7 +1495,9 @@ def test_source_runner_keep_going_runs_named_stages_in_order(monkeypatch):
 
     monkeypatch.setattr(run_all.subprocess, "run", run_all_stages)
     monkeypatch.setattr(
-        run_all.sys, "argv", ["run_all.py", "--keep-going", "--jobs", "0"]
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--no-ir-gates", "--keep-going", "--jobs", "0"],
     )
     assert run_all.main() == 1
 
@@ -1506,6 +1536,31 @@ def test_source_runner_reports_incomplete_when_optional_gate_skips(monkeypatch, 
         "run",
         lambda *args, **kwargs: _completed(next(results), kwargs),
     )
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--no-ir-gates", "--jobs", "0"]
+    )
     assert run_all.main() == 0
     assert "RESULT: INCOMPLETE" in capsys.readouterr().out
+
+
+def test_source_runner_preserves_library_ir_gates(monkeypatch):
+    calls = []
+
+    def record(command, **kwargs):
+        calls.append(command)
+        return _completed(0, kwargs)
+
+    monkeypatch.setattr(run_all.subprocess, "run", record)
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--pytest-only", "--jobs", "0"]
+    )
+    assert run_all.main() == 0
+    assert calls[:2] == [
+        [
+            run_all.sys.executable,
+            str(run_all.PLATFORM_TOOLS / tool),
+            "--cases",
+            str(run_all.IR_CORPORA[0]),
+        ]
+        for tool in ("check_ir_validity.py", "check_arch_domain.py")
+    ]

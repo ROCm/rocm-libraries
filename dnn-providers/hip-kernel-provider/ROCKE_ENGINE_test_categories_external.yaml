@@ -279,15 +279,21 @@ test_categories:
       - "ckc"
       - "hip-kernel-provider"
 
-  comprehensive:
-    description: "rocKE checks run by scheduled CI only"
+  counted-compiler-comprehensive:
+    description: "rocKE counted-sync compiler, ISA, and resource gate"
     test_patterns:
-      - "rocke_tiling_visualization_pytest"
       - "rocke_library_counted_compiler_gate"
     labels:
+      - "comprehensive"
+      - "full"
       - "host"
       - "compiler"
       - "attention"
       - "python"
       - "ckc"
       - "hip-kernel-provider"
+
+  comprehensive:
+    description: "rocKE checks run by scheduled CI only"
+    test_patterns:
+      - "rocke_tiling_visualization_pytest"

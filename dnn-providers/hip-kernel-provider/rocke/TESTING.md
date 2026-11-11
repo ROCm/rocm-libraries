@@ -568,8 +568,8 @@ The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in unit discovery; the exhaustive
 IR/LDS matrix and pinned representative compile/final-ISA/resource subset are
 comprehensive-tier gates. Structural enrollment can return to standard after the
-hipkernelprovider standard shards regain clear outer-timeout margin (public issue
-#15334). The compiler gate preserves the existing resource-table qualification:
+hipkernelprovider standard shards regain clear outer-timeout margin. The compiler
+gate preserves the existing resource-table qualification:
 LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
 expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
 emission/parity profiles but are not qualified by this code-object resource gate.

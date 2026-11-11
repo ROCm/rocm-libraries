@@ -12,6 +12,7 @@ import pytest
 _PROVIDER = Path(__file__).resolve().parents[2]
 _PROVIDER_CMAKE = _PROVIDER / "src" / "CMakeLists.txt"
 _ROCKE_CMAKE = _PROVIDER / "rocke" / "platform" / "CMakeLists.txt"
+_ROCKE_CTEST_LISTS = _PROVIDER / "rocke" / "library" / "tests" / "ctest_lists.cmake"
 _ROCKE_CATEGORIES = _PROVIDER / "ROCKE_ENGINE_test_categories_external.yaml"
 _CATEGORY_PARSER = _PROVIDER.parents[1] / "shared/ctest/parse_ctest_categories.py"
 
@@ -72,6 +73,7 @@ def test_category_parser_produces_counted_gate_tiers(tmp_path):
 
 def test_counted_gates_have_installed_and_tier_owners():
     cmake = _ROCKE_CMAKE.read_text(encoding="utf-8")
+    cmake += _ROCKE_CTEST_LISTS.read_text(encoding="utf-8")
     categories = _ROCKE_CATEGORIES.read_text(encoding="utf-8")
     assert "test_attention_bwd_resources.py" in cmake
     assert 'pytest -m \\"not compiler_integration\\"' in cmake
@@ -88,9 +90,11 @@ def test_counted_gates_have_installed_and_tier_owners():
     assert "structural\\\\;comprehensive\\\\;full" in cmake
     assert "compiler\\\\;comprehensive\\\\;full" in cmake
     structural_at = categories.index("  counted-structural-comprehensive:")
+    compiler_at = categories.index("  counted-compiler-comprehensive:")
     comprehensive_at = categories.index("  comprehensive:")
     before_structural = categories[:structural_at]
-    structural = categories[structural_at:comprehensive_at]
+    structural = categories[structural_at:compiler_at]
+    compiler = categories[compiler_at:comprehensive_at]
     comprehensive = categories[comprehensive_at:]
     assert "rocke_library_counted_structural_gate" not in before_structural
     assert '"rocke_library_counted_structural_gate"' in structural
@@ -98,5 +102,7 @@ def test_counted_gates_have_installed_and_tier_owners():
         assert f'- "{label}"' in structural
     assert '- "standard"' not in structural
     assert "rocke_library_counted_compiler_gate" not in structural
-    assert '"rocke_library_counted_compiler_gate"' in comprehensive
-    assert '- "compiler"' in comprehensive
+    assert '"rocke_library_counted_compiler_gate"' in compiler
+    for label in ("comprehensive", "full", "compiler"):
+        assert f'- "{label}"' in compiler
+    assert "rocke_library_counted_compiler_gate" not in comprehensive
