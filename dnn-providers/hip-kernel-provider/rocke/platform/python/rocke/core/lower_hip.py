@@ -31,6 +31,7 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     F64,
     _int_add_wrap_error,
+    _int_cmp_pred_error,
     _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
@@ -195,9 +196,12 @@ def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
     that reads an integer through the unsigned type of its own width asks
     here, so an element type that is not an integer is refused with one
     message wherever it is met (the C++ engine's twin is
-    ``rocke_h_require_unsigned_int_type``). ``arith.zext`` reads the table
-    itself: its vector source is valid IR that the HIP lowering has not
-    implemented, and it refuses it as such.
+    ``rocke_h_require_unsigned_int_type``). The ``nuw`` add and the ``ult``
+    compare check their IR rule first (``_int_add_wrap_error``,
+    ``_int_cmp_pred_error``: i32 or i64 operands), so for them this lookup
+    cannot fail. ``arith.zext`` reads the table itself: its vector source is
+    valid IR that the HIP lowering has not implemented, and it refuses it as
+    such.
     """
     try:
         return _HIP_UNSIGNED_INT_TYPE[type_name]
@@ -632,8 +636,11 @@ class _Lowerer:
         self._binary(op, "%")
 
     def _op_arith_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
         a, b = op.operands
+        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+        if pred_error:
+            raise ValueError(pred_error)
+        pred = op.attrs.get("pred", "lt")
         if pred == "ult":
             unsigned = _hip_unsigned_int_type(op.name, a.type.name)
             self._emit(

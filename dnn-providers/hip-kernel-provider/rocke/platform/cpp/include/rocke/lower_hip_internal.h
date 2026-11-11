@@ -178,7 +178,10 @@ const char* rocke_h_unsigned_int_type(const rocke_type_t* t);
  * element type of op_name's operand: the operand's own type for a scalar op,
  * its lane type for a vector op), or fail with ROCKE_ERR_TYPE (Python
  * _hip_unsigned_int_type's TypeError, same text) naming op_name. For every
- * handler that reads an integer through the unsigned type of its own width. */
+ * handler that reads an integer through the unsigned type of its own width.
+ * The nuw add and the ult compare check their IR rule first
+ * (rocke_i_add_wrap_error, rocke_i_cmp_pred_error: i32 or i64 operands), so
+ * for them this lookup cannot fail. */
 const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
                                               const char* op_name,
                                               const char* ir_type_name);

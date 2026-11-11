@@ -288,18 +288,23 @@ static rocke_status_t rocke_h_op_arith_mod(rocke_h_lowerer_t* lw, const rocke_op
 
 /* ----------------------------- arith: cmp / select ------------------------- */
 
-/* def _op_arith_cmp(self, op):
- *     pred = op.attrs.get("pred", "lt")
- *     c_op = {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]
- *     a, b = op.operands
- *     self._emit(f"bool {_name(op.result)} = {_name(a)} {c_op} {_name(b)};") */
+/* def _op_arith_cmp(self, op): the pred is checked by the IR rule first
+ * (_int_cmp_pred_error, a ValueError: "ult" takes i32 or i64 operands); "ult"
+ * compares as unsigned at the operand's width, the others with
+ * {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]. */
 static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     const char* c_op;
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
+    char pred_buf[128];
+    const char* pred_error = rocke_i_cmp_pred_error(&op->attrs, a->type, pred_buf, sizeof pred_buf);
+    if(pred_error)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", pred_error);
+    }
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(!pred)
     {
         pred = "lt";
@@ -342,7 +347,9 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     }
     else
     {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.cmp: unknown pred %s", pred);
+        /* Not reached: rocke_i_cmp_pred_error admits only the preds above and
+         * ult. Python's {...}[pred] lookup would raise KeyError(pred). */
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "'%s'", pred);
     }
     rocke_h_emitf(lw,
                   "bool %s = %s %s %s;",

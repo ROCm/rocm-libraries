@@ -8,12 +8,13 @@
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
  * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
  * through the unsigned type of the operand's own width) and its refusal of a
- * non-integer operand, the builders' operand-type refusals, the verifier's
- * acceptance of the new attrs and its refusals of bad marker attrs (texts
- * identical to the Python verifier), and the constant folder (unsigned compare
- * at the operand width; constants read at their width; a marker on a constant
- * folds to the constant; signed div / mod rounded toward zero, undefined ones
- * left unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
+ * non-integer operand, the HIP refusal of a pred the verifier refuses, the
+ * builders' operand-type refusals, the verifier's acceptance of the new attrs
+ * and its refusals of bad marker attrs (texts identical to the Python
+ * verifier), and the constant folder (unsigned compare at the operand width;
+ * constants read at their width; a marker on a constant folds to the constant;
+ * signed div / mod rounded toward zero, undefined ones left unfolded), and the
+ * verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -396,8 +397,55 @@ void case_unsigned_forms_need_i32_or_i64()
     }
 }
 
+/* The HIP lowering checks an arith.cmp pred against the verifier's rule before
+ * reading it and refuses it with ROCKE_ERR_VALUE in the verifier's words: ult
+ * takes i32 or i64 operands, and an unknown or non-string pred is not read as
+ * lt. The same cases and texts as test_unsigned_int_ops.py. */
+void case_hip_refuses_a_bad_pred()
+{
+    struct PredCase
+    {
+        const char* pred; /* nullptr: the int attr 1 */
+        const rocke_type_t* type;
+        const char* want;
+    };
+    const PredCase cases[] = {
+        {"ult", rocke_f32(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
+        {"ult", rocke_i8(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
+        {"ugt", rocke_i32(), "arith.cmp: unknown pred 'ugt'"},
+        {nullptr, rocke_i32(), "arith.cmp: pred must be a string"},
+    };
+    for(const PredCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "refused_pred");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* operands[2] = {a, a};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(c.pred)
+        {
+            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
+        }
+        else
+        {
+            rocke_attr_set_int(&b, &attrs, "pred", 1);
+        }
+        rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        EXPECT(status == ROCKE_ERR_VALUE && msg && std::string(c.want) == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_VALUE) + " '" + c.want
+                   + "', got status " + std::to_string((int)status) + " '" + (msg ? msg : "")
+                   + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
 /* A wrap or pred of another attr kind is refused, not read as the default
- * (nsw, lt): by the verifier, and for the wrap by both lowerers. */
+ * (nsw, lt): by the verifier, and for the wrap by both lowerers (the HIP
+ * lowerer's refusal of such a pred is case_hip_refuses_a_bad_pred). */
 void case_non_string_wrap_and_pred()
 {
     const char* wrap_error = "arith.add: wrap must be the string 'nsw' or 'nuw'";
@@ -617,6 +665,7 @@ int main(int argc, char** argv)
     case_llvm_text();
     case_hip_text();
     case_lshr_hip_text();
+    case_hip_refuses_a_bad_pred();
     case_builder_refusals();
     case_verifier_accepts();
     case_verifier_rejects_marker_attrs();
