@@ -6,19 +6,32 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 from _tensilelite_client_binding import (
     ClientBindingError,
+    current_installation,
     default_client_candidate,
     selected_client,
     validate_client,
 )
 
-from ._rocm import TensileLiteRuntimeError, ValidatedRocm, validate_distribution
+from ._rocm import (
+    TensileLiteRuntimeError,
+    ValidatedRocm,
+    _canonical_rocm_version,
+    comparable_identity,
+    validate_distribution,
+)
+
+
+class ClientRocmWarning(UserWarning):
+    """The client's build ROCm could not be confirmed against the selected ROCm."""
 
 
 _client: Path | None = None
 _installation: ValidatedRocm | None = None
+_warned: set[str] = set()
 
 
 def initialize() -> None:
@@ -39,17 +52,18 @@ def client_executable() -> Path:
     if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
 
-    from . import __version__
-
     candidate = None
     try:
+        package = current_installation()
         candidate = selected_client(
             lambda: default_client_candidate(
+                package,
                 _installation.executable_search_paths,
                 _installation.source,
-            )
+            ),
+            package,
         )
-        validate_client(candidate.path, __version__)
+        identity = validate_client(candidate.path, package)
     except ClientBindingError as exc:
         selected = (
             f"  selected client: {candidate.path}\n"
@@ -61,6 +75,7 @@ def client_executable() -> Path:
             f"{exc}\n"
             f"{selected}"
         ) from exc
+    check_client_build_rocm(identity.build_rocm, _installation, candidate.path)
     _client = candidate.path
     return _client
 
@@ -70,3 +85,60 @@ def executable_search_paths() -> list[Path]:
     if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
     return list(_installation.executable_search_paths)
+
+
+def _warn_once(key: str, message: str) -> None:
+    if key in _warned:
+        return
+    _warned.add(key)
+    warnings.warn(message, ClientRocmWarning, stacklevel=3)
+
+
+def check_client_build_rocm(build_rocm: str, rocm: ValidatedRocm, client: Path) -> None:
+    """Compare the ROCm a client was compiled against with the selected ROCm.
+
+    Full identities are compared in full, or base to base when either side
+    records only a base version. A different major version is an error (HIP's
+    soname changes across major versions); any other difference, or an unknown
+    identity on either side, warns once per process.
+    """
+    details = (
+        f"  client: {client}\n"
+        f"  client build ROCm: {build_rocm}\n"
+        f"  selected ROCm: {rocm.version or 'unknown'} at {rocm.path}\n"
+        f"  selected by: {rocm.source}"
+    )
+    parts = build_rocm.split()
+    kind = parts[1] if len(parts) == 2 else "unknown"
+    if kind not in ("full", "base") or rocm.version is None:
+        _warn_once(
+            "unknown",
+            "The ROCm the TensileLite client was built against could not be checked.\n"
+            + details,
+        )
+        return
+    try:
+        client_identity = _canonical_rocm_version(parts[0])
+    except TensileLiteRuntimeError:
+        _warn_once("unknown", f"The client reports an unreadable build ROCm.\n{details}")
+        return
+
+    base_only = kind == "base" or rocm.identity_kind == "base"
+    client_value = comparable_identity(client_identity, base_only=base_only)
+    selected_value = comparable_identity(rocm.version, base_only=base_only)
+    if client_value == selected_value:
+        return
+    if client_value.split(".", 1)[0] != selected_value.split(".", 1)[0]:
+        raise TensileLiteRuntimeError(
+            "The TensileLite client was built for a different major ROCm version "
+            "than the one selected.\n"
+            + details
+            + "\nUse a client built against the selected ROCm, or select the ROCm it "
+            "was built against."
+        )
+    _warn_once(
+        f"mismatch:{client_value}:{selected_value}",
+        "The TensileLite client was built against a different ROCm than the one "
+        "selected; HIP is backward compatible within a major version, so it is used.\n"
+        + details,
+    )
