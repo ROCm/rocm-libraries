@@ -54,9 +54,6 @@ from benchmarks.common.case_results import (
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
 from benchmarks.common.tf32_verify import rank_verified, tf32_implies_verify
-from builders.common.conv_reference import conv_reference as _conv_reference
-from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
-from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
@@ -630,6 +627,7 @@ def _run_depthwise_sweep(
 ) -> "tuple[int, List[DepthwiseResult]]":
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -949,6 +947,7 @@ def _run_sweep(
 ) -> "tuple[int, List[Result]]":
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1184,6 +1183,7 @@ def _run_nongrouped_sweep(
     """
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_nongrouped import (
@@ -1414,6 +1414,9 @@ def _run_wgrad_sweep(
     """Benchmark the direct wgrad kernel."""
     import torch
 
+    from builders.common.conv_reference import (
+        wgrad_reference as _wgrad_reference_shared,
+    )
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
@@ -1709,6 +1712,9 @@ def _run_dgrad_sweep(
     """
     import torch
 
+    from builders.common.conv_reference import (
+        dgrad_reference as _dgrad_reference_shared,
+    )
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -2739,6 +2745,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     from benchmarks.common.direct_kernel_sweep import direct_plans
     from benchmarks.common.module_cache import ModuleCache
+    from builders.common.conv_reference import (
+        conv_reference as _conv_reference,
+        dgrad_reference as _dgrad_reference_shared,
+        wgrad_reference as _wgrad_reference_shared,
+    )
     from rocke.runtime.hip_module import Runtime
 
     def _u8(t):
