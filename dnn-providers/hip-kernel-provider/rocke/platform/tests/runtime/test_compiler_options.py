@@ -48,6 +48,8 @@ from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subproce
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 ISA = "amdgcn-amd-amdhsa--gfx942"
+# Where the loader reports it mapped COMGR. Only forwarded as text, never opened.
+MAPPED_COMGR = "rocm/lib/libamd_comgr.so"
 
 
 def _compiler(*version: int) -> CompilerInfo:
@@ -56,7 +58,7 @@ def _compiler(*version: int) -> CompilerInfo:
         llvm_version=version or None,
         source="LLVMGetVersion",
         requested_comgr="libamd_comgr.so",
-        comgr_path="/opt/rocm/lib/libamd_comgr.so",
+        comgr_path=MAPPED_COMGR,
         query_library_path=None,
     )
 
@@ -354,8 +356,22 @@ def refusing_compiler_loaded() -> Iterator[CompilerInfo]:
         yield refusing
 
 
-# Each public entry point that can hand OPTION to COMGR, called as a user
-# would, and the name its refusal gives to what is being compiled.
+# Each COMGR entry point, called with a given option list.
+_COMGR_CALLS: dict[str, Callable[[list[str]], object]] = {
+    "build_hsaco_from_llvm_ir": lambda options: build_hsaco_from_llvm_ir(
+        _empty_ir("k"), isa=ISA, options=options
+    ),
+    "build_hsaco_from_llvm_ir_fresh_process": lambda options: build_hsaco_from_llvm_ir(
+        _empty_ir("k"), isa=ISA, options=options, fresh_process=True
+    ),
+    "build_hsaco_from_llvm_modules": lambda options: build_hsaco_from_llvm_modules(
+        [_empty_ir("k_a"), _empty_ir("k_b")], isa=ISA, options=options
+    ),
+}
+
+
+# Each public entry point that checks OPTION before COMGR would see it, called
+# as a user would, and the name its refusal gives to what is being compiled.
 _ENTRY_POINTS: dict[str, tuple[Callable[[], object], str]] = {
     "compile_kernel": (
         lambda: compile_kernel(
@@ -384,32 +400,13 @@ _ENTRY_POINTS: dict[str, tuple[Callable[[], object], str]] = {
         lambda: accepted_comgr_options(_vgpr_form_kernel("k_vgpr_form")),
         "kernel 'k_vgpr_form'",
     ),
-    "build_hsaco_from_llvm_ir": (
-        lambda: build_hsaco_from_llvm_ir(
-            _empty_ir("k"), isa=ISA, options=["-O3", "-mllvm", OPTION]
-        ),
-        "this COMGR compile",
-    ),
-    "build_hsaco_from_llvm_ir_fresh_process": (
-        lambda: build_hsaco_from_llvm_ir(
-            _empty_ir("k"),
-            isa=ISA,
-            options=["-O3", "-mllvm", OPTION],
-            fresh_process=True,
-        ),
-        "this COMGR compile",
-    ),
+    **{
+        name: (functools.partial(call, ["-O3", "-mllvm", OPTION]), "this COMGR compile")
+        for name, call in _COMGR_CALLS.items()
+    },
     "build_hsaco_from_llvm_ir_joined_spelling": (
-        lambda: build_hsaco_from_llvm_ir(
-            _empty_ir("k"), isa=ISA, options=["-O3", f"-mllvm={OPTION}"]
-        ),
-        "this COMGR compile",
-    ),
-    "build_hsaco_from_llvm_modules": (
-        lambda: build_hsaco_from_llvm_modules(
-            [_empty_ir("k_a"), _empty_ir("k_b")],
-            isa=ISA,
-            options=["-O3", "-mllvm", OPTION],
+        functools.partial(
+            _COMGR_CALLS["build_hsaco_from_llvm_ir"], ["-O3", f"-mllvm={OPTION}"]
         ),
         "this COMGR compile",
     ),
@@ -443,20 +440,6 @@ def comgr_unreachable() -> Iterator[None]:
         yield
 
 
-# Each COMGR entry point, called with a given option list.
-_COMGR_CALLS: dict[str, Callable[[list[str]], object]] = {
-    "build_hsaco_from_llvm_ir": lambda options: build_hsaco_from_llvm_ir(
-        _empty_ir("k"), isa=ISA, options=options
-    ),
-    "build_hsaco_from_llvm_ir_fresh_process": lambda options: build_hsaco_from_llvm_ir(
-        _empty_ir("k"), isa=ISA, options=options, fresh_process=True
-    ),
-    "build_hsaco_from_llvm_modules": lambda options: build_hsaco_from_llvm_modules(
-        [_empty_ir("k_a"), _empty_ir("k_b")], isa=ISA, options=options
-    ),
-}
-
-
 @pytest.mark.parametrize("entry_point", list(_COMGR_CALLS))
 def test_comgr_entry_points_refuse_a_nul_character(
     entry_point: str, comgr_unreachable: None
@@ -467,21 +450,7 @@ def test_comgr_entry_points_refuse_a_nul_character(
         _COMGR_CALLS[entry_point](["-O3", "-mllvm\0", "-amdgpu-no-such-option"])
 
 
-# What each entry point names as the thing compiled, for the unqueryable-compiler
-# refusal: accepted_comgr_options names the kernel, the COMGR calls the compile.
-_UNQUERYABLE_CALLS: dict[str, tuple[Callable[[], object], str]] = {
-    "accepted_comgr_options": (
-        lambda: accepted_comgr_options(_vgpr_form_kernel("k_vgpr_form")),
-        "kernel 'k_vgpr_form'",
-    ),
-    **{
-        name: (functools.partial(call, ["-O3", "-mllvm", OPTION]), "this COMGR compile")
-        for name, call in _COMGR_CALLS.items()
-    },
-}
-
-
-@pytest.mark.parametrize("entry_point", list(_UNQUERYABLE_CALLS))
+@pytest.mark.parametrize("entry_point", list(_ENTRY_POINTS))
 @pytest.mark.parametrize(
     "loaded",
     [None, dataclasses.replace(_compiler(20, 0, 0), llvm_version=None)],
@@ -493,7 +462,7 @@ def test_an_unqueryable_compiler_is_a_comgr_error_naming_the_options(
     """The answer depends on the loaded compiler's LLVM version, so the error
     points at loading a queryable COMGR, not at an LLVM flavor (which cannot
     answer it)."""
-    call, needed_by = _UNQUERYABLE_CALLS[entry_point]
+    call, needed_by = _ENTRY_POINTS[entry_point]
     with (
         mock.patch.object(comgr, "loaded_compiler_info", return_value=loaded),
         pytest.raises(comgr.ComgrError) as err,
@@ -518,7 +487,7 @@ def _loaded_compiler() -> CompilerInfo:
 @pytest.mark.parametrize(
     ("comgr_path", "expected_lib"),
     [
-        ("/opt/rocm/lib/libamd_comgr.so", "/opt/rocm/lib/libamd_comgr.so"),
+        (MAPPED_COMGR, MAPPED_COMGR),
         # The loader could not say which file it mapped: the name it was asked for.
         (None, "libamd_comgr.so"),
     ],
