@@ -129,6 +129,23 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     |     f64 / f64 / f64          |  gfx90a+            |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 
+Thread safety
+--------------
+
+hipTensor API functions can be called concurrently from multiple host threads:
+
+* A ``hiptensorHandle_t``, including its plan cache, can be shared by all threads.
+* Plans can be created concurrently, and a ``hiptensorPlan_t`` can be executed by several
+  threads at once, whether each thread uses its own plan or all threads share one.
+  This applies to ``hiptensorContract``, ``hiptensorContractTrinary``, ``hiptensorPermute``,
+  ``hiptensorElementwiseBinaryExecute``, ``hiptensorElementwiseTrinaryExecute``, and
+  ``hiptensorReduce``.
+* Each concurrent call must use its own output tensor and workspace. Calls that write
+  the same memory, or that share a workspace, race on the GPU.
+* With ``HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL``, threads that execute the same plan
+  interleave the candidate kernels they try. Every candidate solves the problem, but the
+  kernel a given call uses is not deterministic until autotuning completes.
+
 Limitations
 ------------
 

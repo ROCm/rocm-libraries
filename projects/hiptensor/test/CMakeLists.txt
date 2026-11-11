@@ -477,6 +477,7 @@ endif()
 
 set(_HIPTENSOR_HOST_TESTS
   batched_contraction_test
+  concurrency_test
   contraction_mode_test
   elementwise_cpu_test
   elementwise_mode_test

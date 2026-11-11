@@ -38,6 +38,24 @@
 
 namespace hiptensor
 {
+    // Problem metrics derived while building the kernel arguments for one call.
+    struct ReductionMetrics
+    {
+        std::size_t mElements = 0; // number of elements in A
+        std::size_t mBytes    = 0;
+    };
+
+    // Kernel arguments for one call, owned by the caller.
+    // A ReductionSolution is shared by every plan (and thread) that selects it,
+    // so per-call state must never be stored on the solution itself.
+    struct ReductionArgs
+    {
+        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
+        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
+        ReductionMetrics                                            mMetrics;
+        bool                                                        mValid = false;
+    };
+
     class ReductionSolution
     {
     public:
@@ -56,20 +74,22 @@ namespace hiptensor
         ReductionSolution(ReductionSolution&& other)            = delete;
         ReductionSolution& operator=(ReductionSolution&& other) = delete;
 
-        // Must specialize incoming arg handling
-        virtual bool initArgs(std::vector<std::size_t> const& a_lengths,
-                              std::vector<std::size_t> const& a_strides,
-                              std::vector<int32_t> const&     a_modes,
-                              std::vector<std::size_t> const& c_lengths,
-                              std::vector<std::size_t> const& c_strides,
-                              std::vector<int32_t> const&     c_modes,
-                              hiptensorOperator_t             aOp,
-                              hiptensorOperator_t             cOp,
-                              double                          alpha,
-                              double                          beta,
-                              void const*                     A,
-                              void*                           C,
-                              hiptensorOperator_t             opReduce)
+        // Must specialize incoming arg handling.
+        // Builds the kernel arguments for one call; mValid is false if this kernel
+        // cannot solve the problem.
+        virtual ReductionArgs makeArgs(std::vector<std::size_t> const& a_lengths,
+                                       std::vector<std::size_t> const& a_strides,
+                                       std::vector<int32_t> const&     a_modes,
+                                       std::vector<std::size_t> const& c_lengths,
+                                       std::vector<std::size_t> const& c_strides,
+                                       std::vector<int32_t> const&     c_modes,
+                                       hiptensorOperator_t             aOp,
+                                       hiptensorOperator_t             cOp,
+                                       double                          alpha,
+                                       double                          beta,
+                                       void const*                     A,
+                                       void*                           C,
+                                       hiptensorOperator_t             opReduce) const
             = 0;
 
         std::pair<bool, float> operator()(std::vector<std::size_t> const& a_lengths,
@@ -85,7 +105,8 @@ namespace hiptensor
                                           void const*                     A,
                                           void*                           C,
                                           hiptensorOperator_t             opReduce,
-                                          StreamConfig const& streamConfig = StreamConfig{});
+                                          StreamConfig const& streamConfig = StreamConfig{},
+                                          ReductionMetrics*   metrics      = nullptr) const;
 
         /// Accessors
 
@@ -95,30 +116,13 @@ namespace hiptensor
         // Unique ID for the kernel
         size_t uid() const;
 
-        // Problem dimension
-        ck::index_t problemDim() const;
-
-        // Byte count
-        ck::index_t problemBytes() const;
-
         // Kernel's name encoding
         std::string kernelName() const;
 
-        // Reset all arguments
-        void resetArgs();
-
     protected:
-        // Derived runtime arguments
-        ck::index_t mDim;
-        ck::index_t mBytes;
-        bool        mValid;
-        uint32_t    mThreadDim;
-
         // Kernel Params
         std::unique_ptr<ReductionSolutionParams>                    mParams;
         std::unique_ptr<ck::tensor_operation::device::BaseOperator> mDeviceOp;
-        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
-        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
     };
 
     template <typename InDataType,

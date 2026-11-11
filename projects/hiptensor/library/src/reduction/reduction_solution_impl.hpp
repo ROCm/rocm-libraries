@@ -62,32 +62,31 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(std::vector<std::size_t> const& a_lengths,
-                      std::vector<std::size_t> const& a_strides,
-                      std::vector<int32_t> const&     a_modes,
-                      std::vector<std::size_t> const& c_lengths,
-                      std::vector<std::size_t> const& c_strides,
-                      std::vector<int32_t> const&     c_modes,
-                      hiptensorOperator_t             aOp,
-                      hiptensorOperator_t             cOp,
-                      double                          alpha,
-                      double                          beta,
-                      void const*                     A,
-                      void*                           C,
-                      hiptensorOperator_t             opReduce) override
+        ReductionArgs makeArgs(std::vector<std::size_t> const& a_lengths,
+                               std::vector<std::size_t> const& a_strides,
+                               std::vector<int32_t> const&     a_modes,
+                               std::vector<std::size_t> const& c_lengths,
+                               std::vector<std::size_t> const& c_strides,
+                               std::vector<int32_t> const&     c_modes,
+                               hiptensorOperator_t             aOp,
+                               hiptensorOperator_t             cOp,
+                               double                          alpha,
+                               double                          beta,
+                               void const*                     A,
+                               void*                           C,
+                               hiptensorOperator_t             opReduce) const override
         {
             using Base   = ReductionSolution;
             using Traits = MetaTraits<DeviceOp>;
 
-            // Clear out the previous arguments
-            resetArgs();
+            ReductionArgs args;
 
             // Promote to derived class for necessary functions such as
             // MakeArgumentPointer and MakeInvokerPointer.
             auto* deviceOp = dynamic_cast<DeviceOp*>(Base::mDeviceOp.get());
             if(deviceOp == nullptr)
             {
-                return 0;
+                return {};
             }
 
             static_assert(Traits::TensorRank >= Traits::TensorNumReduceDim,
@@ -144,39 +143,38 @@ namespace hiptensor
                 = ck::tensor_operation::element_wise::HiptensorUnaryOp(cOp);
             auto acc_elementwise_op = ck::tensor_operation::element_wise::PassThrough{};
 
-            Base::mInvokerArgPtr
-                = std::move(deviceOp->MakeArgumentPointer(arrInLengths,
-                                                          arrInStrides,
-                                                          arrOutLengths,
-                                                          arrOutStrides,
-                                                          reduceDims,
-                                                          alpha,
-                                                          beta,
-                                                          A,
-                                                          nullptr,
-                                                          C,
-                                                          nullptr,
-                                                          in_elementwise_op,
-                                                          prior_dest_elementwise_op,
-                                                          acc_elementwise_op));
+            args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(arrInLengths,
+                                                                          arrInStrides,
+                                                                          arrOutLengths,
+                                                                          arrOutStrides,
+                                                                          reduceDims,
+                                                                          alpha,
+                                                                          beta,
+                                                                          A,
+                                                                          nullptr,
+                                                                          C,
+                                                                          nullptr,
+                                                                          in_elementwise_op,
+                                                                          prior_dest_elementwise_op,
+                                                                          acc_elementwise_op));
 
             // Initialize the invoker
-            Base::mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
+            args.mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
 
-            // @todo
             // Fill problem metrics
-            // Base::mDim = Traits::NDim;
-
-            // Byte count
-            // Base::mBytes = sizeof(typename Traits::InDataT) * Base::mDim
-            // + sizeof(typename Traits::OutDataT) * Base::mDim;
+            auto product = [](std::vector<std::size_t> const& v) {
+                return std::accumulate(
+                    v.cbegin(), v.cend(), std::size_t{1}, std::multiplies<std::size_t>{});
+            };
+            args.mMetrics.mElements = product(a_lengths);
+            args.mMetrics.mBytes
+                = sizeof(typename Traits::TensorInDataType) * args.mMetrics.mElements
+                  + sizeof(typename Traits::TensorOutDataType) * product(c_lengths);
 
             // Arg test
-            Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());
+            args.mValid = deviceOp->IsSupportedArgument(args.mInvokerArgPtr.get());
 
-            // Base::mThreadDim = findThreadDim(deviceOp->GetTypeString());
-
-            return mValid;
+            return args;
         }
     };
 

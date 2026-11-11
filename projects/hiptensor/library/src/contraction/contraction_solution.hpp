@@ -52,6 +52,27 @@ namespace hiptensor
         hiptensorOperator_t opC = HIPTENSOR_OP_IDENTITY;
     };
 
+    // Problem metrics derived while building the kernel arguments for one call.
+    struct ContractionMetrics
+    {
+        ck::index_t mM             = 0;
+        ck::index_t mN             = 0;
+        ck::index_t mK             = 0;
+        std::size_t mBytes         = 0;
+        std::size_t mWorkspaceSize = 0;
+    };
+
+    // Kernel arguments for one call, owned by the caller.
+    // A ContractionSolution is shared by every plan (and thread) that selects it,
+    // so per-call state must never be stored on the solution itself.
+    struct ContractionArgs
+    {
+        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
+        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
+        ContractionMetrics                                          mMetrics;
+        bool                                                        mValid = false;
+    };
+
     class ContractionSolution
     {
     public:
@@ -70,57 +91,57 @@ namespace hiptensor
         ContractionSolution(std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
                             std::unique_ptr<ContractionSolutionParams>&&                  params);
 
-        // Must specialize incoming arg handling
-        virtual bool initArgs(void const*                alpha,
-                              void const*                A,
-                              void const*                B,
-                              void const*                beta,
-                              void const*                D,
-                              void*                      E,
-                              std::vector<std::size_t>   a_ms_ns_lengths,
-                              std::vector<std::size_t>   a_ms_ks_strides,
-                              std::vector<int32_t>       a_ms_ks_modes,
-                              std::vector<std::size_t>   b_ns_ks_lengths,
-                              std::vector<std::size_t>   b_ns_ks_strides,
-                              std::vector<int32_t>       b_ns_ks_modes,
-                              std::vector<std::size_t>   ds_ms_ns_lengths,
-                              std::vector<std::size_t>   ds_ms_ns_strides,
-                              std::vector<int32_t>       ds_ms_ns_modes,
-                              std::vector<std::size_t>   e_ms_ns_lengths,
-                              std::vector<std::size_t>   e_ms_ns_strides,
-                              std::vector<int32_t>       e_ms_ns_modes,
-                              ContractionUnaryOps const& unaryOps,
-                              void*                      workspacePtr)
+        // Must specialize incoming arg handling.
+        // Builds the kernel arguments for one call; mValid is false if this kernel
+        // cannot solve the problem.
+        virtual ContractionArgs makeArgs(void const*                alpha,
+                                         void const*                A,
+                                         void const*                B,
+                                         void const*                beta,
+                                         void const*                D,
+                                         void*                      E,
+                                         std::vector<std::size_t>   a_ms_ns_lengths,
+                                         std::vector<std::size_t>   a_ms_ks_strides,
+                                         std::vector<int32_t>       a_ms_ks_modes,
+                                         std::vector<std::size_t>   b_ns_ks_lengths,
+                                         std::vector<std::size_t>   b_ns_ks_strides,
+                                         std::vector<int32_t>       b_ns_ks_modes,
+                                         std::vector<std::size_t>   ds_ms_ns_lengths,
+                                         std::vector<std::size_t>   ds_ms_ns_strides,
+                                         std::vector<int32_t>       ds_ms_ns_modes,
+                                         std::vector<std::size_t>   e_ms_ns_lengths,
+                                         std::vector<std::size_t>   e_ms_ns_strides,
+                                         std::vector<int32_t>       e_ms_ns_modes,
+                                         ContractionUnaryOps const& unaryOps,
+                                         void*                      workspacePtr) const
             = 0;
 
-        std::tuple<hiptensorStatus_t, float> operator()(void const*                alpha,
-                                                        void const*                A,
-                                                        void const*                B,
-                                                        void const*                beta,
-                                                        void const*                D,
-                                                        void*                      E,
-                                                        std::vector<std::size_t>   a_ms_ns_lengths,
-                                                        std::vector<std::size_t>   a_ms_ks_strides,
-                                                        std::vector<int32_t>       a_ms_ks_modes,
-                                                        std::vector<std::size_t>   b_ns_ks_lengths,
-                                                        std::vector<std::size_t>   b_ns_ks_strides,
-                                                        std::vector<int32_t>       b_ns_ks_modes,
-                                                        std::vector<std::size_t>   ds_ms_ns_lengths,
-                                                        std::vector<std::size_t>   ds_ms_ns_strides,
-                                                        std::vector<int32_t>       ds_ms_ns_modes,
-                                                        std::vector<std::size_t>   e_ms_ns_lengths,
-                                                        std::vector<std::size_t>   e_ms_ns_strides,
-                                                        std::vector<int32_t>       e_ms_ns_modes,
-                                                        ContractionUnaryOps const& unaryOps,
-                                                        void*                      workspacePtr,
-                                                        unsigned long              workspaceSize,
-                                                        StreamConfig const&        streamConfig
-                                                        = StreamConfig{});
+        std::tuple<hiptensorStatus_t, float>
+            operator()(void const*                alpha,
+                       void const*                A,
+                       void const*                B,
+                       void const*                beta,
+                       void const*                D,
+                       void*                      E,
+                       std::vector<std::size_t>   a_ms_ns_lengths,
+                       std::vector<std::size_t>   a_ms_ks_strides,
+                       std::vector<int32_t>       a_ms_ks_modes,
+                       std::vector<std::size_t>   b_ns_ks_lengths,
+                       std::vector<std::size_t>   b_ns_ks_strides,
+                       std::vector<int32_t>       b_ns_ks_modes,
+                       std::vector<std::size_t>   ds_ms_ns_lengths,
+                       std::vector<std::size_t>   ds_ms_ns_strides,
+                       std::vector<int32_t>       ds_ms_ns_modes,
+                       std::vector<std::size_t>   e_ms_ns_lengths,
+                       std::vector<std::size_t>   e_ms_ns_strides,
+                       std::vector<int32_t>       e_ms_ns_modes,
+                       ContractionUnaryOps const& unaryOps,
+                       void*                      workspacePtr,
+                       unsigned long              workspaceSize,
+                       StreamConfig const&        streamConfig = StreamConfig{},
+                       ContractionMetrics*        metrics      = nullptr) const;
 
         /// Accessors
-
-        // Problem can be solved with this kernel
-        bool isValid() const;
 
         // Run-time solution parameters
         std::unique_ptr<ContractionSolutionParams> const& params() const;
@@ -128,34 +149,13 @@ namespace hiptensor
         // Unique ID for the kernel
         size_t uid() const;
 
-        // Problem dimensions
-        std::tuple<ck::index_t, ck::index_t, ck::index_t> problemDims() const;
-
-        // Byte count
-        std::size_t problemBytes() const;
-
         // Kernel's name encoding
         std::string kernelName() const;
 
-        // Kernel's required workspace size
-        size_t workspaceSize() const;
-
-        // Reset all arguments
-        void resetArgs();
-
     protected:
-        void resetInvokerArgs();
-
-        // Derived runtime arguments
-        ck::index_t mM, mN, mK;
-        std::size_t mBytes;
-        bool        mValid;
-
         // Kernel Params
         std::unique_ptr<ContractionSolutionParams>                  mParams;
         std::unique_ptr<ck::tensor_operation::device::BaseOperator> mDeviceOp;
-        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
-        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
     };
 
     template <ck::index_t NumDimM,
