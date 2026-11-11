@@ -161,7 +161,9 @@ def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
 
 def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
     forward = next(
-        i for i in tool._common.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
+        i
+        for i in tool._common.read_rocke_catalog("fwd")
+        if i["algorithm"] == "implicit_gemm"
     )
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
     monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [forward])

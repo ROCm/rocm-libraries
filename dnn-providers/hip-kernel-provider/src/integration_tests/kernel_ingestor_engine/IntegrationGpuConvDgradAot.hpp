@@ -1047,9 +1047,10 @@ protected:
             const auto geometry
                 = ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::deriveGeometry(p);
             const auto chunks
-                = geometry ? ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::
-                                 batchChunks(p, *geometry)
-                           : std::nullopt;
+                = geometry
+                      ? ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::batchChunks(
+                            p, *geometry)
+                      : std::nullopt;
             limit = saved;
             ASSERT_TRUE(chunks);
             ASSERT_EQ(chunks->size(), 3U);

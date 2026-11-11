@@ -84,7 +84,6 @@ extern "C" HIPDNN_PLUGIN_EXPORT void
 extern "C" HIPDNN_PLUGIN_EXPORT int64_t
     hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting()
 {
-    return hip_kernel_provider::kernel_ingestor_engine::
-        convDgradAotImplicitLaunchCountForTesting();
+    return hip_kernel_provider::kernel_ingestor_engine::convDgradAotImplicitLaunchCountForTesting();
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
