@@ -7,6 +7,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import struct
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -14,12 +15,16 @@ import pytest
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.verify import verify
-from rocke.examples.gfx950.gemm.mxfp6_tiled import tune
+from rocke.examples.gfx950.gemm.mxfp6_tiled import bench, tune
 from rocke.instances.gfx950.block_scaled_gemm_tiled import (
+    _LOOP_PAD_MAX,
+    _NAME_MAX,
     _PERM_IDENTITY,
     _PERM_ROT16_XOR,
     _STEP_SCALE_BYTE,
+    _XCD_BLOCKS,
     ABLATIONS,
+    AS_DMA_PLACES,
     CC_EXTRAS,
     CC_PASSES,
     DMA_PLACES,
@@ -712,6 +717,640 @@ def test_prologue_wait_stage0_leaves_line_1_in_flight_until_bar_1():
     for other in (replace(base, b_release="full"), TARGET):
         moved = serialize(build_tiled_block_scaled_gemm(replace(other, prologue_wait="stage0"), arch="gfx950"))
         assert moved.replace("_pwstage0", "") == serialize(build_tiled_block_scaled_gemm(other, arch="gfx950"))
+
+
+def _half_steps(body: list[str], kinds: str) -> list[tuple[int, int, str]]:
+    """(half step of the loop body, MFMA gap, op) of every op of `kinds`."""
+    out = []
+    for k, part in enumerate("".join(body).split("|")[:-1]):
+        out += [(k, part[:i].count("M") - 1, c) for i, c in enumerate(part) if c in kinds]
+    return out
+
+
+def _check_scale_dma_slots(spec) -> None:
+    """lds2: epoch e's A scale DMAs go out once stage 8(e - 1) has begun,
+    when no wave reads the slot epoch e - 2 left (after E(8(e - 1)))."""
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    pre, body, post = _kernel_ops(text)
+    n_bar, n_z = 0, 0
+    for op in pre + body * _loop_trips(text) + post:
+        if op == "|":
+            n_bar += 1
+        elif op == "Z":
+            epoch = n_z // 2
+            assert epoch == 0 or n_bar >= 2 * 8 * (epoch - 1) + 2, (epoch, n_bar)
+            n_z += 1
+
+
+# Per as_dma_place: the A scale DMAs' (half step of the pair body, gap).
+_AS_DMA_SLOTS = {
+    "default": [(2, 13), (2, 15)],
+    "spaced": [(2, 11), (2, 15)],
+    "light0": [(1, 11), (1, 15)],
+    "light4": [(9, 11), (9, 15)],
+    "split_light": [(1, 13), (9, 13)],
+    "split_late": [(2, 13), (10, 13)],
+}
+
+
+@pytest.mark.parametrize("place", AS_DMA_PLACES)
+def test_as_dma_place_moves_the_a_scale_dmas_and_keeps_the_rest(place):
+    base = replace(TARGET, **_PLACED, b_scale_fetch="pair", k_order="t10", prologue_wait="stage0")
+    spec = replace(base, as_dma_place=place)
+    assert is_valid_spec(spec) == (True, "ok")
+    assert (spec.kernel_name() != base.kernel_name()) == spec.as_dma_placed == (place != "default")
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "smem_load_vN",
+               "s_barrier_bare"):
+        assert text.count(op) == plain.count(op), op
+    pre, body, post = _kernel_ops(text)
+    pre0, body0, post0 = _kernel_ops(plain)
+    assert pre == pre0 and post == post0
+    # Only the A scale DMAs move; the other VMEM ops keep their gaps.
+    assert [(k, g) for k, g, _ in _half_steps(body, "Z")] == _AS_DMA_SLOTS[place]
+    assert _half_steps(body, "ABsG") == _half_steps(body0, "ABsG")
+    # Every DMA of the half steps they go to in its own odd gap.
+    for k in {k for k, _ in _AS_DMA_SLOTS[place]}:
+        gaps = [g for kk, g, _ in _half_steps(body, "ABZ") if kk == k]
+        assert all(g % 2 for g in gaps) and len(set(gaps)) == len(gaps), (k, gaps)
+    if place == "split_late":
+        # Each after the B scale pair load of its half step.
+        for k, _ in _AS_DMA_SLOTS[place]:
+            ops = [c for kk, _, c in _half_steps(body, "sZ") if kk == k]
+            assert ops == ["s", "Z"], (k, ops)
+    _check_split_barrier_waits(spec)
+    _check_scale_dma_slots(spec)
+    for changes in ({"M": 512, "N": 512, "K": 1408}, {"M": 512, "N": 512, "K": 1152}, {"M": 512, "N": 512, "K": 512},
+                    {"M": 512, "N": 512, "K": 2560, "k_peel": True}, {"M": 512, "N": 512, "K": 3584},
+                    {"mfma_group": 4}, {"k_peel": True}, {"as_read": "b128x4"}, {"sync_place": "split"}):
+        small = replace(spec, **changes, **({"xcd_remap": "none"} if "M" in changes else {}))
+        assert is_valid_spec(small)[0]
+        _check_split_barrier_waits(small)
+        _check_scale_dma_slots(small)
+        _lower(small)
+    if place == "default":
+        return
+    # Elsewhere the value changes the name only.
+    for other in (replace(base, dma_place="default"), replace(base, a_scale_path="direct"), TARGET):
+        named = replace(other, as_dma_place=place)
+        moved = serialize(build_tiled_block_scaled_gemm(named, arch="gfx950"))
+        assert moved.replace(named.kernel_name(), other.kernel_name()) == serialize(
+            build_tiled_block_scaled_gemm(other, arch="gfx950"))
+
+
+def test_aux_place_light_loads_the_second_b_scale_pair_in_the_first_stages_step_1():
+    base = replace(TARGET, **_PLACED, b_scale_fetch="pair", k_order="t10", prologue_wait="stage0")
+    spec = replace(base, aux_place="light")
+    assert is_valid_spec(spec) == (True, "ok") and spec.kernel_name() != base.kernel_name() and spec.aux_placed
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "smem_load_vN",
+               "s_barrier_bare"):
+        assert text.count(op) == plain.count(op), op
+    _, body, _ = _kernel_ops(text)
+    _, body0, _ = _kernel_ops(plain)
+    # The pair loads in step 0 of stages 1, 3, 5 and 7; light moves stage 3's
+    # and 7's to step 1 of stages 0 and 4.
+    loads0 = [k for k, _, _ in _half_steps(body0, "s")]
+    assert loads0 == [2, 6, 10, 14]
+    loads = _half_steps(body, "s")
+    assert sorted(k for k, _, _ in loads) == [1, 2, 9, 10]
+    assert [g for k, g, _ in loads if k in (1, 9)] == [3, 3]
+    assert _half_steps(body, "ABZG") == _half_steps(body0, "ABZG")
+    # The moved load reads the pair stage 3's would: the same index terms.
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    loop0 = plain.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    pairs = re.findall(r"global_load_vN \( %B_scale, %\w+", loop)
+    assert len(pairs) == len(re.findall(r"global_load_vN \( %B_scale, %\w+", loop0)) == 4
+    _check_split_barrier_waits(spec)
+    for changes in ({"M": 512, "N": 512, "K": 1408}, {"M": 512, "N": 512, "K": 1152}, {"M": 512, "N": 512, "K": 512},
+                    {"M": 512, "N": 512, "K": 2560, "k_peel": True}, {"M": 512, "N": 512, "K": 3584},
+                    {"mfma_group": 4}, {"k_peel": True}, {"as_dma_place": "split_light"}, {"clamp_hoist": True}):
+        small = replace(spec, **changes, **({"xcd_remap": "none"} if "M" in changes else {}))
+        assert is_valid_spec(small)[0]
+        _check_split_barrier_waits(small)
+        _lower(small)
+    for other in (replace(base, b_scale_fetch="stage"), replace(base, dma_place="default"), TARGET):
+        named = replace(other, aux_place="light")
+        moved = serialize(build_tiled_block_scaled_gemm(named, arch="gfx950"))
+        assert moved.replace(named.kernel_name(), other.kernel_name()) == serialize(
+            build_tiled_block_scaled_gemm(other, arch="gfx950"))
+
+
+def test_clamp_hoist_computes_a_bodys_stage_clamps_once():
+    base = replace(TARGET, **_PLACED, b_scale_fetch="pair", k_order="t10", prologue_wait="stage0")
+    spec = replace(base, clamp_hoist=True)
+    assert is_valid_spec(spec) == (True, "ok") and spec.kernel_name() != base.kernel_name() and spec.clamp_hoisted
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "smem_load_vN",
+               "s_barrier_bare"):
+        assert text.count(op) == plain.count(op), op
+    assert _kernel_ops(text) == _kernel_ops(plain)
+
+    def body_clamps(t: str) -> list[int]:
+        """Per stage of the loop body (split at its step-0 setprio): its selects."""
+        loop = t.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+        return [part.count("arith.select") for part in loop.split("level = i:1 }")]
+
+    hoisted, every = body_clamps(text), body_clamps(plain)
+    # The eight stages' k + 2 up front; no stage clamps k + 2 (nor an odd
+    # stage k + 1 for its scale pair, the next stage's k + 2) itself.
+    assert len(hoisted) == len(every) == 9 and hoisted[0] - every[0] == 8, (hoisted, every)
+    assert [e - h for e, h in zip(every[1:], hoisted[1:])] == [1, 2] * 4, (hoisted, every)
+    _check_split_barrier_waits(spec)
+    for changes in ({"M": 512, "N": 512, "K": 1408}, {"M": 512, "N": 512, "K": 1152}, {"M": 512, "N": 512, "K": 512},
+                    {"M": 512, "N": 512, "K": 2560, "k_peel": True}, {"mfma_group": 4}, {"k_peel": True},
+                    {"b_scale_fetch": "stage"}, {"a_scale_path": "direct"}, {"b_release": "full"}):
+        small = replace(spec, **changes, **({"xcd_remap": "none"} if "M" in changes else {}))
+        assert is_valid_spec(small)[0]
+        (_check_split_barrier_waits if small.b_split else _check_barrier_waits)(small)
+        _lower(small)
+    for other in (replace(base, frag_pipeline="stage"), TARGET):
+        hoist = replace(other, clamp_hoist=True)
+        moved = serialize(build_tiled_block_scaled_gemm(hoist, arch="gfx950"))
+        assert moved.replace(hoist.kernel_name(), other.kernel_name()) == serialize(
+            build_tiled_block_scaled_gemm(other, arch="gfx950"))
+
+
+_PAIRS = {**_PLACED, "b_scale_fetch": "pair", "k_order": "t10", "prologue_wait": "stage0"}
+
+
+def _ssa_defs(text: str) -> dict[str, tuple[str, list[str]]]:
+    """Each SSA value's defining op and operand names."""
+    return {m.group(1): (m.group(2), re.findall(r"%\w+", m.group(3)))
+            for m in re.finditer(r"^\s*(%\w+) : [^=\n]+= ([\w.]+) \(([^)\n]*)\)", text, re.MULTILINE)}
+
+
+def _name_only(spec, other) -> None:
+    """`spec` is `other` with a knob that changes its name only."""
+    moved = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    assert moved.replace(spec.kernel_name(), other.kernel_name()) == serialize(
+        build_tiled_block_scaled_gemm(other, arch="gfx950"))
+
+
+_SMALL_SHAPES = ({"M": 512, "N": 512, "K": 1408}, {"M": 512, "N": 512, "K": 1152}, {"M": 512, "N": 512, "K": 512},
+                 {"M": 512, "N": 512, "K": 2560, "k_peel": True}, {"M": 512, "N": 512, "K": 3584},
+                 {"mfma_group": 4}, {"k_peel": True})
+
+
+def _check_small(spec, *extra) -> None:
+    for changes in (*_SMALL_SHAPES, *extra):
+        small = replace(spec, **changes, **({"xcd_remap": "none"} if "M" in changes else {}))
+        assert is_valid_spec(small)[0], changes
+        _check_split_barrier_waits(small)
+        _check_scale_dma_slots(small)
+        _lower(small)
+
+
+def test_aux_place_pre_z_loads_the_first_b_scale_pair_ahead_of_the_a_scale_dma():
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    spec = replace(base, aux_place="pre_z")
+    assert is_valid_spec(spec) == (True, "ok") and "_xp" in spec.kernel_name() and spec.aux_placed
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "smem_load_vN",
+               "s_barrier_bare"):
+        assert text.count(op) == plain.count(op), op
+    pre, body, post = _kernel_ops(text)
+    pre0, body0, post0 = _kernel_ops(plain)
+    assert pre == pre0 and post == post0
+    # The pair loads in step 0 of stages 1, 3, 5 and 7; pre_z moves stage 1's
+    # and 5's to step 1 of stages 0 and 4, gap 11, ahead of the A scale DMA
+    # in gap 13 there, so in vmcnt's order too.
+    assert [k for k, _, _ in _half_steps(body0, "s")] == [2, 6, 10, 14]
+    loads = _half_steps(body, "s")
+    assert sorted(k for k, _, _ in loads) == [1, 6, 9, 14]
+    assert [(k, g) for k, g, _ in loads if k in (1, 9)] == [(1, 11), (9, 11)]
+    for k in (1, 9):
+        assert [c for kk, _, c in _half_steps(body, "sZ") if kk == k] == ["s", "Z"]
+    assert _half_steps(body, "ABZG") == _half_steps(body0, "ABZG")
+    # The moved load takes the pair of the stage's own B(s+2) index (stage 1's
+    # k + 1): its index is the one the stage's B DMAs' source offsets scale.
+    defs = _ssa_defs(text)
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    first = re.search(r"(%\w+) : vec<i32x4> = memref\.global_load_vN \( %B_scale, (%\w+)", loop)
+    add = defs[first.group(2)]
+    mul = defs[add[1][0]]
+    lshr = defs[mul[1][0]]
+    assert (add[0], mul[0], lshr[0]) == ("arith.add", "arith.mul", "arith.lshr")
+    assert re.search(rf"= arith\.mul \( {lshr[1][0]}, ", loop), lshr
+    _check_split_barrier_waits(spec)
+    _check_small(spec, {"clamp_hoist": True}, {"as_dma_place": "default"}, {"as_dma_place": "split_late"},
+                 {"sync_place": "split"})
+    for other in (replace(base, b_scale_fetch="stage"), replace(base, dma_place="default"), TARGET):
+        _name_only(replace(other, aux_place="pre_z"), other)
+
+
+def _z_defs_ahead(text: str) -> list[tuple[int, int]]:
+    """Per A scale DMA of the loop body: MFMAs from the definitions of its
+    LDS address and of its source offset to the DMA."""
+    as_rsrc = re.search(r"(%rsrc\d+) : vec<i32x4> = tile\.buffer_rsrc \( %A_scale,", text).group(1)
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    at, m, out = {}, 0, []
+    for line in loop.splitlines():
+        if "tile.mma" in line:
+            m += 1
+        d = re.match(r"\s*(%\w+) :", line)
+        if d:
+            at[d.group(1)] = m
+        if "async_buffer_load_lds" in line and f"( {as_rsrc}," in line:
+            _, dst, _, soff = re.findall(r"%\w+", line.split("(", 1)[1])[:4]
+            out.append((m - at[dst], m - at[soff]))
+    return out
+
+
+@pytest.mark.parametrize("z_addr", ["hoist", "split"])
+@pytest.mark.parametrize("place", ["default", "split_light", "split_late"])
+def test_z_addr_moves_the_a_scale_dma_address_math_ahead(place, z_addr):
+    base = replace(TARGET, **_PAIRS, as_dma_place=place)
+    spec = replace(base, z_addr=z_addr)
+    hoist = {"hoist": 1, "split": 2}[z_addr]
+    assert is_valid_spec(spec) == (True, "ok") and f"_q{z_addr[0]}" in spec.kernel_name() and spec.as_dma_hoisted
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    assert _kernel_ops(text) == _kernel_ops(plain)
+    assert text.count("arith.") == plain.count("arith.")
+    # The address math right at the DMA before (a second DMA of the step
+    # shares the first's source offset). Now its LDS address one MFMA block
+    # ahead, and its source offset one (1) or two (2) blocks ahead.
+    zs, zs1 = _z_defs_ahead(plain), _z_defs_ahead(text)
+    assert zs and {d for d, _ in zs} == {0} and len(zs1) == len(zs), zs
+    for (d0, s0), (d1, s1) in zip(zs, zs1):
+        assert d1 == 1 and s1 == s0 + hoist, (zs, zs1)
+    _check_split_barrier_waits(spec)
+    _check_small(spec, {"as_read": "b128x4"}, {"sync_place": "split"}, {"aux_place": "pre_z"})
+    assert not is_valid_spec(replace(spec, z_addr="early"))[0]
+    for other in (replace(base, dma_place="default"), replace(base, a_scale_path="direct"), TARGET):
+        _name_only(replace(other, z_addr=z_addr), other)
+
+
+def _body_reads(text: str) -> list[tuple[int, int, str]]:
+    """(half step, MFMA gap, index root) of each LDS read of the loop body;
+    the root is the value the read's index adds its block offset to."""
+    defs = _ssa_defs(text)
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    half, m, out = 0, 0, []
+    for line in loop.splitlines():
+        if "tile.mma" in line:
+            m += 1
+        elif "s_barrier" in line:
+            half, m = half + 1, 0
+        elif "smem_load_vN" in line:
+            idx = re.findall(r"%\w+", line.split("(", 1)[1])[1]
+            op, args = defs[idx]
+            out.append((half, m - 1, args[0] if op == "arith.add" else idx))
+    return out
+
+
+@pytest.mark.parametrize("ahead", [3, 5, 9])
+def test_pre_e_frag_reads_the_next_stages_first_a_fragment_before_e(ahead):
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    spec = replace(base, pre_e_frag=f"g{ahead}")
+    assert is_valid_spec(spec) == (True, "ok") and f"_qe{ahead}" in spec.kernel_name() and spec.pre_e
+    gap = 15 - ahead
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "s_barrier_bare",
+               "tile.s_waitcnt"):
+        assert text.count(op) == plain.count(op), op
+    assert _kernel_ops(text) == _kernel_ops(plain)
+    # Two more reads: the prologue's, of stage 0's fragment.
+    assert text.count("smem_load_vN") == plain.count("smem_load_vN") + 2
+    # Index roots defined before the loop (the fragments' per-lane indices)
+    # are named alike in both; the A scale reads' are made in the loop.
+    outer = (set(re.findall(r"^\s*(%\w+) :", text.split("region @body {", 1)[0], re.MULTILINE))
+             & set(re.findall(r"^\s*(%\w+) :", plain.split("region @body {", 1)[0], re.MULTILINE)))
+    reads = [(h, g, r if r in outer else "-") for h, g, r in _body_reads(text)]
+    reads0 = [(h, g, r if r in outer else "-") for h, g, r in _body_reads(plain)]
+    per = 2 * spec.unroll * 2
+    assert {h for h, _, _ in reads0} == set(range(per))
+    for s in range(per // 2):
+        # The pair stage s + 1's step 0 read first after E(s + 1) is now read
+        # in stage s's step 1 after block 15 - ahead, `ahead` gaps ahead of
+        # E's lgkmcnt(0), behind what that gap had.
+        nxt = 2 * (s + 1) % per
+        first0 = [r for h, g, r in reads0 if h == nxt and g == 0]
+        assert len(first0) == 2 and "-" not in first0 and not [r for h, g, r in reads if h == nxt and g == 0], s
+        at_gap = [r for h, g, r in reads if h == 2 * s + 1 and g == gap]
+        had = [r for h, g, r in reads0 if h == 2 * s + 1 and g == gap]
+        assert at_gap == had + first0, s
+        for h in (2 * s, 2 * s + 1):
+            rest = [(g, r) for hh, g, r in reads if hh == h and not (h % 2 and g == gap)]
+            assert rest == [(g, r) for hh, g, r in reads0 if hh == h and not (h % 2 and g == gap)
+                            and not (h % 2 == 0 and g == 0)], h
+    # Step 1's first MFMA takes that pair; the loop carries the last stage's.
+    defs = _ssa_defs(text)
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    mmas = re.findall(r"= tile\.mma \( (%\w+),", loop)
+    carried = re.search(r"%pre0\w*", text.split("region @body {", 1)[0])
+    assert carried and mmas[16] == carried.group(0), (mmas[16], carried)
+    for s in range(1, per // 2):
+        op, args = defs[mmas[32 * s + 16]]
+        assert op == "vector.concat" and defs[args[0]][0] == "vector.concat", (s, op)
+    _check_split_barrier_waits(spec)
+    _check_small(spec, {"as_read": "b128x4"}, {"sync_place": "split"}, {"aux_place": "pre_z"},
+                 {"trip_salu": "hoist"}, {"step_vmem_order": "frag_mid"})
+    assert not is_valid_spec(replace(spec, pre_e_frag="g4"))[0]
+    for other in (replace(base, dma_place="default"), replace(base, b_release="full"), TARGET):
+        _name_only(replace(other, pre_e_frag=f"g{ahead}"), other)
+
+
+def test_trip_salu_hoist_moves_the_loop_bodys_last_e_to_the_next_trips_head():
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    spec = replace(base, trip_salu="hoist")
+    assert is_valid_spec(spec) == (True, "ok") and "_qt" in spec.kernel_name() and spec.trip_headed
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    for op in ("tile.mma", "async_buffer_load_lds", "global_load_vN", "memref.global_load_typed", "smem_load_vN",
+               "s_barrier_bare"):
+        assert text.count(op) == plain.count(op), op
+    pre, body, post = _kernel_ops(text)
+    pre0, body0, post0 = _kernel_ops(plain)
+    # E(0) leaves the prologue; the body opens with the E that closed it, with
+    # its wait, and ends with stage 7's last MFMA; the exit runs that E once.
+    e_last = "".join(body0)[len("".join(body0).rstrip("|").rstrip("W-0123456789")):]
+    assert "".join(pre0).endswith("W-1|") and "".join(pre) == "".join(pre0)[: -len("W-1|")]
+    assert "".join(body) == e_last + "".join(body0)[: -len(e_last)], ("".join(body)[:40], e_last)
+    assert "".join(post) == e_last + "".join(post0)
+    # The first stage's index math goes ahead of the barrier, the same ops.
+    loop = text.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+    loop0 = plain.split("region @body {", 1)[1].split("scf.yield", 1)[0]
+
+    def head_ops(t: str) -> tuple[list[str], list[str]]:
+        head = t.split("tile.mma", 1)[0]
+        before, _, after = head.partition("s_barrier_bare")
+        return [m for m in re.findall(r"= (arith\.\w+)", before) if m != "arith.constant"], [
+            m for m in re.findall(r"= (arith\.\w+)", after) if m != "arith.constant"]
+
+    before, after = head_ops(loop)
+    before0, after0 = head_ops(loop0)
+    assert "s_barrier_bare" not in loop0.split("tile.mma", 1)[0] and not after0
+    assert sorted(before) == sorted(before0) and "arith.select" in before and not after, (before, after)
+    _check_split_barrier_waits(spec)
+    _check_small(spec, {"as_read": "b128x4"}, {"aux_place": "pre_z"}, {"pre_e_frag": "g9"},
+                 {"z_addr": "split"}, {"M": 512, "N": 512, "K": 1024}, {"M": 512, "N": 512, "K": 2048})
+    assert not is_valid_spec(replace(spec, trip_salu="carry"))[0]
+    for other in (replace(base, sync_place="split"), replace(base, b_release="full"), TARGET):
+        _name_only(replace(other, trip_salu="hoist"), other)
+
+
+def test_knobs_after_clamp_hoist_keep_the_name_within_the_direct_compilers_limit():
+    """With the knobs after clamp_hoist set, a name that would pass the limit
+    keeps its head and a hash of the whole; names without them are refused
+    as before (test_direct_kernel_names_fit_the_compilers_file_name)."""
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light", k_peel=True, cc_passes="all", cc_extra="lds_waw")
+    every = replace(base, aux_place="pre_z", z_addr="split", pre_e_frag="g9", trip_salu="hoist", shape_args=False,
+                    xcd_remap="xcd_block84", sync_place="split_lgkm")
+    assert is_valid_spec(every)[0] and len(every.kernel_name()) == _NAME_MAX
+    others = [replace(every, pre_e_frag=v) for v in ("g3", "g5")] + [replace(every, z_addr="hoist")]
+    names = {s.kernel_name() for s in [every, *others]}
+    assert len(names) == 4 and all(n.startswith(every.kernel_name()[:200]) for n in names)
+    assert every.kernel_name() == replace(every).kernel_name()
+    _lower(every)
+    long = replace(base, sync_place="split_lgkm", dma_m0="early_bshare", cc_extra="lds_waw+u16_zext+pin_vmem")
+    if len(long.kernel_name()) > _NAME_MAX:
+        assert not is_valid_spec(long)[0]
+
+
+@pytest.mark.parametrize("remap", ["xcd_block", "xcd_block84"])
+def test_xcd_remap_blocks_cover_every_tile_once(remap):
+    rows, cols = _XCD_BLOCKS[remap]
+    spec = replace(TARGET, xcd_remap=remap)
+    assert is_valid_spec(spec) == (True, "ok")
+    tiles_m, tiles_n, xcds = spec.M // spec.block_m, spec.N // spec.block_n, spec.num_xcds
+    seen = {}
+    for bid in range(tiles_m * tiles_n):
+        xcd, local = bid % xcds, bid // xcds
+        blocks_n = tiles_n // cols
+        tm, tn = xcd // blocks_n * rows + local // cols, xcd % blocks_n * cols + local % cols
+        seen.setdefault((tm, tn), []).append(xcd)
+    assert sorted(seen) == [(m, n) for m in range(tiles_m) for n in range(tiles_n)]
+    for x in range(xcds):
+        mine = [t for t, owner in seen.items() if owner == [x]]
+        assert len({m for m, _ in mine}) == rows and len({n for _, n in mine}) == cols, (x, mine)
+    if remap == "xcd_block84":
+        # Only the mapping's constants change against xcd_block.
+        block = replace(spec, xcd_remap="xcd_block")
+        t8, t4 = (serialize(build_tiled_block_scaled_gemm(s, arch="gfx950")).replace(s.kernel_name(), "K")
+                  for s in (spec, block))
+        diff = [(a, b) for a, b in zip(t8.splitlines(), t4.splitlines()) if a != b]
+        assert len(t8.splitlines()) == len(t4.splitlines()) and len(diff) == 6
+        assert all("arith.constant" in a and "arith.constant" in b for a, b in diff), diff
+        # 64 x 4 tiles fit 8 x 4 blocks, not 4 x 8.
+        tall = replace(spec, M=16384, N=1024)
+        assert is_valid_spec(tall)[0]
+        ok, why = is_valid_spec(replace(tall, xcd_remap="xcd_block"))
+        assert not ok and "4 x 8" in why
+        ok, why = is_valid_spec(replace(spec, M=2048))
+        assert not ok and "xcd_block84" in why and "8 x 4" in why
+        _lower(spec)
+        _lower(replace(spec, **_PAIRS, as_dma_place="split_light"))
+
+
+def test_epi_store_soff_stores_every_element_where_the_default_does():
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    spec = replace(base, epi_store="soff")
+    assert is_valid_spec(spec) == (True, "ok") and "_qb" in spec.kernel_name() and spec.epi_soff
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    assert text.split("scf.yield", 1)[0].replace(spec.kernel_name(), base.kernel_name()) == plain.split(
+        "scf.yield", 1)[0]
+    stores = re.findall(r"tile\.buffer_store_bf16 \( (%\w+), (%\w+), (%\w+), (%\w+) \)", text)
+    assert len(stores) == 256 and "global_store" not in text.split("scf.yield", 1)[1]
+    # One VGPR offset per column block, one SGPR offset per row (16 per row block).
+    assert len({v for _, v, _, _ in stores}) == spec.wave_tile_n // 32
+    assert len({s for _, _, s, _ in stores}) == 16 * spec.wave_tile_m // 32
+    # The byte offsets, evaluated for every lane of every wave and tile: each
+    # element exactly once, at the address of the default epilogue's store.
+    defs = _ssa_defs(text)
+    consts = {m.group(1): int(m.group(2)) for m in re.finditer(r"(%\w+) : i32 = arith\.constant .* value = i:(-?\d+)",
+                                                               text)}
+    ops = {"arith.add": lambda x: x[0] + x[1], "arith.mul": lambda x: x[0] * x[1],
+           "arith.sub": lambda x: x[0] - x[1], "arith.div": lambda x: x[0] // x[1],
+           "arith.mod": lambda x: x[0] % x[1], "arith.lshr": lambda x: x[0] >> x[1],
+           "arith.and": lambda x: x[0] & x[1], "tile.readfirstlane": lambda x: x[0],
+           "tile.pin_sgpr": lambda x: x[0]}
+
+    def value(v, env):
+        if v not in env:
+            if v in consts:
+                env[v] = consts[v]
+            else:
+                op, args = defs[v]
+                env[v] = ops[op]([value(a, env) for a in args])
+        return env[v]
+
+    tid = re.search(r"(%\w+) : i32 = gpu\.thread_id", text).group(1)
+    bid = re.search(r"(%\w+) : i32 = gpu\.block_id", text).group(1)
+    for b in range(0, (spec.M // spec.block_m) * (spec.N // spec.block_n), 37):
+        for t in range(0, spec.threads, 7):
+            env = {tid: t, bid: b}
+            wave, lane = divmod(t, 64)
+            wm_, wn_ = divmod(wave, spec.waves_n)
+            xcd, local = b % 8, b // 8
+            tm_, tn_ = xcd // 2 * 4 + local // 8, xcd % 2 * 8 + local % 8
+            for k, (_, v, s, _) in enumerate(stores):
+                i, rest = divmod(k, 16 * spec.wave_tile_n // 32)
+                j, slot = divmod(rest, 16)
+                row = tm_ * spec.block_m + wm_ * spec.wave_tile_m + 32 * i + slot // 4 * 8 + slot % 4 + 4 * (lane // 32)
+                col = tn_ * spec.block_n + wn_ * spec.wave_tile_n + 32 * j + lane % 32
+                assert value(v, env) + value(s, env) == 2 * (row * spec.N + col), (b, t, k)
+    # And it stores accumulator (i, j)'s element `slot` there, as the default
+    # does: lane e of one packed convert of the slot pair (s, s + 1).
+    ext = {m.group(1): (m.group(2), int(m.group(3))) for m in re.finditer(
+        r"(%\w+) : \w+ = vector\.extract \( (%\w+) \) \{ index = i:(\d+)", text)}
+    got = []
+    for _, _, _, val in stores:
+        pair, e = ext[val]
+        op, (packed,) = defs[pair]
+        _, (x0, x1) = defs[packed]
+        assert op == "vector.trunc_f32_to" and ext[x0][0] == ext[x1][0], (op, x0, x1)
+        got.append(ext[(x0, x1)[e]])
+    assert [s for _, s in got] == list(range(16)) * (len(stores) // 16)
+    # 16 runs of 16 stores, one accumulator each, all different.
+    runs = [{a for a, _ in got[k : k + 16]} for k in range(0, len(got), 16)]
+    assert all(len(r) == 1 for r in runs) and len(set.union(*runs)) == len(runs) == 16
+    _check_split_barrier_waits(spec)
+    _lower(spec)
+    _lower(replace(spec, M=512, N=512, K=1152, xcd_remap="none"))
+    _lower(replace(spec, dtype_c="fp16"))
+    for other in (replace(base, epilogue="sa"), replace(base, store_nt=True)):
+        _name_only(replace(other, epi_store="soff"), other)
+
+
+@pytest.mark.parametrize("wait", ["all", "stage0"])
+def test_prologue_order_dma_first_issues_the_first_fill_among_the_address_math(wait):
+    base = replace(TARGET, **{**_PAIRS, "as_dma_place": "split_light", "prologue_wait": wait})
+    spec = replace(base, prologue_order="dma_first")
+    assert is_valid_spec(spec) == (True, "ok") and "_qf" in spec.kernel_name() and spec.dma_first
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    pre, body, post = _kernel_ops(text)
+    pre0, body0, post0 = _kernel_ops(plain)
+    assert body == body0 and post == post0
+    # The same ops; line 0 and B's stage 0 first, ahead of the B scale pair
+    # load, then the rest in their order: the waits count the same ops.
+    head, head0 = "".join(pre), "".join(pre0)
+    fill = "A" * 8 + "B" * 6
+    if wait == "stage0":
+        assert head0.startswith("s" + fill + "ZZ" + "A" * 8 + "W8|") and head == fill + "s" + head0[15:], head
+    else:
+        assert head0.startswith("s" + "A" * 16 + "B" * 6 + "ZZ" + "W0|") and head == fill + "s" + "A" * 8 + head0[23:]
+    # Each of the 14 interleaved with the line fragment indices: no more than
+    # a sixteenth of the prologue's ops before the first.
+    lines = text.split("region @body {", 1)[0].splitlines()
+    first = next(i for i, ln in enumerate(lines) if "async_buffer_load_lds" in ln)
+    first0 = next(i for i, ln in enumerate(plain.split("region @body {", 1)[0].splitlines())
+                  if "async_buffer_load_lds" in ln)
+    assert first < first0 // 2, (first, first0)
+    _check_split_barrier_waits(spec)
+    _check_small(spec, {"sync_place": "sink"}, {"k_peel": True, "peel_dma": "skip"})
+    for other in (replace(base, b_release="full"), TARGET):
+        _name_only(replace(other, prologue_order="dma_first"), other)
+
+
+def test_peel_dma_skip_issues_no_dma_for_stages_past_k():
+    for changes in ({}, {"M": 512, "N": 512, "K": 1408, "xcd_remap": "none"},
+                    {"M": 512, "N": 512, "K": 2560, "xcd_remap": "none"}):
+        base = replace(TARGET, **{**_PAIRS, "as_dma_place": "split_light", "k_peel": True, **changes})
+        spec = replace(base, peel_dma="skip")
+        assert is_valid_spec(spec) == (True, "ok") and "_qk" in spec.kernel_name() and spec.peel_skip
+        text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+        plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+        pre, body, post = _kernel_ops(text)
+        pre0, body0, post0 = _kernel_ops(plain)
+        ops, ops0 = pre + body + post, pre0 + body0 + post0
+        # Every MFMA and barrier stays, and the loop's DMA; only clamped
+        # re-loads past K go.
+        assert [c for c in ops if c in "M|"] == [c for c in ops0 if c in "M|"] and body == body0
+        n_b, n_a, n_z = (sum(c == x for c in ops0) - sum(c == x for c in ops) for x in "BAZ")
+        if not changes:
+            # Two stages of B, the halves of the two refills whose lines no
+            # stage reads, the A scale DMA of the epoch after the last.
+            assert (n_b, n_a, n_z) == (12, 16, 1), (n_b, n_a, n_z)
+        else:
+            assert n_b == 12 and n_a > 0 and n_z >= 0, (changes, n_b, n_a, n_z)
+        _check_split_barrier_waits(spec)
+        _check_scale_dma_slots(spec)
+        _lower(spec)
+    # Without static stage indices (no k_peel, no tail) the name changes only.
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    _name_only(replace(base, peel_dma="skip"), base)
+    for other in (replace(base, b_release="full"), TARGET):
+        _name_only(replace(other, peel_dma="skip"), other)
+
+
+@pytest.mark.parametrize("shape_args", [True, False])
+def test_kernarg_preload_sets_only_its_kernel_attribute_on_the_direct_backend(shape_args):
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light", shape_args=shape_args)
+    spec = replace(base, kernarg_preload=True)
+    assert is_valid_spec(spec) == (True, "ok") and "_q" in spec.kernel_name() and "p" in spec.kernel_name().split(
+        "_q", 1)[1].split("_", 1)[0]
+    text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+    plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+    assert "kernarg_preload = b:true" in text and "kernarg_preload" not in plain
+    head, head0 = text.split("\n", 3), plain.split("\n", 3)
+    assert head[3] == head0[3] and head[2].replace("kernarg_preload = b:true, ", "") == head0[2], head[2][:200]
+    _lower(spec)
+    # Other backends ignore it.
+    llvm = replace(TARGET, kernarg_preload=True)
+    assert "kernarg_preload" not in serialize(build_tiled_block_scaled_gemm(llvm, arch="gfx950"))
+    _name_only(llvm, TARGET)
+
+
+def test_shape_args_false_drops_the_unread_shape_parameters():
+    for base in (TARGET, replace(TARGET, **_PAIRS, as_dma_place="split_light")):
+        spec = replace(base, shape_args=False)
+        assert is_valid_spec(spec) == (True, "ok") and "_qn" in spec.kernel_name()
+        names = [p["name"] for p in tiled_block_scaled_gemm_signature(spec)]
+        assert names == ["A", "B", "A_scale", "B_scale", "C"]
+        assert [p.name for p in build_tiled_block_scaled_gemm(spec, arch="gfx950").params] == names
+        assert [p.name for p in build_tiled_block_scaled_gemm(base, arch="gfx950").params] == [
+            p["name"] for p in tiled_block_scaled_gemm_signature(base)]
+        text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+        plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+        # The kernel never reads them: the rest of the IR is the same.
+        shape_lines = ["    %M : i32", "    %N : i32", "    %K : i32"]
+        assert [ln for ln in plain.splitlines() if re.search(r"%[MNK]\b", ln)] == shape_lines
+        kept = [ln for ln in plain.replace(base.kernel_name(), spec.kernel_name()).splitlines()
+                if ln not in shape_lines]
+        assert text.splitlines() == kept
+        args = bench.kernel_args(spec, [1, 2, 3, 4, 5])
+        assert args == struct.pack("<QQQQQ", 1, 2, 3, 4, 5)
+        assert bench.kernel_args(base, [1, 2, 3, 4, 5]) == struct.pack("<QQQQQiii", 1, 2, 3, 4, 5,
+                                                                         base.M, base.N, base.K)
+        with pytest.raises(ValueError):
+            bench.kernel_args(spec, [1, 2, 3, 4])
+        _lower(spec)
+        _lower(replace(spec, M=512, N=512, K=1152, xcd_remap="none"))
+
+
+def test_loop_pad_puts_only_priority_zero_pads_right_before_the_k_loop():
+    pad = "    tile.s_setprio (  ) { level = i:0 }"
+    base = replace(TARGET, **_PAIRS, as_dma_place="split_light")
+    for n in (1, 12, _LOOP_PAD_MAX):
+        spec = replace(base, loop_pad=n)
+        assert is_valid_spec(spec) == (True, "ok") and f"_qa{n}_" in spec.kernel_name()
+        text = serialize(build_tiled_block_scaled_gemm(spec, arch="gfx950"))
+        plain = serialize(build_tiled_block_scaled_gemm(base, arch="gfx950"))
+        pre, body = text.split("region @body {", 1)
+        pre0, body0 = plain.replace(base.kernel_name(), spec.kernel_name()).split("region @body {", 1)
+        assert body == body0
+        lines, lines0 = pre.splitlines(), pre0.splitlines()
+        at = [k for k, ln in enumerate(lines) if ln == pad]
+        assert at == list(range(at[0], at[0] + n)) and lines[: at[0]] + lines[at[-1] + 1 :] == lines0
+        # Only the loop's bounds and its header follow the pads, and no
+        # earlier priority is raised: they leave the priority at 0.
+        assert all("arith.constant" in ln for ln in lines[at[-1] + 1 : -2]), lines[at[-1] + 1 :]
+        assert "tile.s_setprio" not in "\n".join(lines[: at[0]])
+        _lower(spec)
+        _lower(replace(spec, M=512, N=512, K=1152, xcd_remap="none"))
+    for n in (-1, _LOOP_PAD_MAX + 1, True):
+        assert not is_valid_spec(replace(base, loop_pad=n))[0]
+    # Without the step pipeline the name changes only.
+    _name_only(replace(TARGET, loop_pad=4), TARGET)
 
 
 @pytest.mark.parametrize("store_nt", [False, True])

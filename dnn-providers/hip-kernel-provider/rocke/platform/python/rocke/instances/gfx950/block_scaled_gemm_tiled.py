@@ -35,6 +35,7 @@ Every optimization is a defaulted spec field so a tuner can toggle it.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -71,7 +72,9 @@ _LDS_BYTES = 160 * 1024
 _VMCNT_MAX = 63
 
 LDS_SWIZZLES = ("none", "rot16")
-XCD_REMAPS = ("none", "xcd_block")
+XCD_REMAPS = ("none", "xcd_block", "xcd_block84")
+# xcd_remap: the (tile rows, tile columns) of the block of tiles an XCD runs.
+_XCD_BLOCKS = {"xcd_block": (4, 8), "xcd_block84": (8, 4)}
 SCHEDULES = ("none", "iglp0", "iglp1", "interleave")
 ACC_FENCES = ("agpr", "none")
 MFMA_FORMS = ("intrinsic", "asm_agpr")
@@ -79,6 +82,15 @@ ABLATIONS = ("none", "no_mfma", "no_dma", "no_lds_read", "no_scales")
 FRAG_PIPELINES = ("stage", "step")
 MFMA_GROUPS = (16, 8, 4, 2, 1)
 MFMA_ORDERS = ("rows", "serp")
+MFMA_ATOMS = ("32x32x64", "16x16x128")
+# mfma_atom="16x16x128": C's stores, one bf16 / fp16 element each. "b16": a
+# store covers four rows of one column block (32-byte runs); "swap": a
+# permlane32 swap first pairs adjacent column blocks, so a store covers two
+# rows of both (64-byte runs).
+EPI16S = ("b16", "swap")
+SCHED16S = ("fence", "pairlight", "midlgkm")
+_SCHED16_TOKENS = {"fence": "f", "pairlight": "p", "midlgkm": "m"}
+PEEL16S = ("none", "skip")
 BACKENDS = ("llvm", "direct")
 DMA_PROBES = ("none", "l2", "contig", "l2contig")
 LAYOUTS = ("row", "kblock")
@@ -112,6 +124,26 @@ _FRAG_MID_START = 4
 DMA_PLACES = ("default", "even", "even_bfirst", "dense_bfirst", "pair_bfirst")
 SYNC_PLACES = ("none", "split", "sink", "split_sink", "split_lgkm")
 PROLOGUE_WAITS = ("all", "stage0")
+AS_DMA_PLACES = ("default", "spaced", "light0", "light4", "split_light", "split_late")
+_AS_DMA_TOKENS = {"spaced": "s", "light0": "l0", "light4": "l4", "split_light": "sl", "split_late": "sk"}
+# as_dma_place: the gaps of an epoch's two A scale DMAs in one step, and of
+# each in its own ("split_light", "split_late"); a step's last B DMA goes in
+# gap 9.
+_AS_GAPS, _AS_SPLIT_GAP = (11, 15), 13
+Z_ADDRS = ("inline", "hoist", "split")
+AUX_PLACES = ("default", "light", "pre_z")
+_AUX_TOKENS = {"light": "l", "pre_z": "p"}
+# aux_place: the step-1 gap of the B scale pair load ("light"), and of the
+# one moved ahead of the A scale DMA in gap 13 ("pre_z").
+_AUX_GAP, _AUX_PRE_Z_GAP = 3, 11
+# pre_e_frag: "g<n>" reads the next stage's first step-1 A fragment n MFMA
+# gaps ahead of E's lgkmcnt(0), after step 1's block 15 - n.
+PRE_E_FRAGS = ("off", "g3", "g5", "g9")
+TRIP_SALUS = ("default", "hoist")
+PEEL_DMAS = ("clamp", "skip")
+EPI_STORES = ("global", "soff")
+PROLOGUE_ORDERS = ("default", "dma_first")
+_LOOP_PAD_MAX = 31
 EPILOGUES = ("default", "sa", "pk2", "ct", "ct4", "lds", "ct_lds")
 # epilogue="lds" / "ct_lds": C rows a wave stages per pass, and the 16-byte
 # LDS chunk an XOR swizzle permutes per row bit (rows 1 / 2 / 4 / 8 apart).
@@ -159,7 +191,9 @@ class TiledBlockScaledGemmSpec:
     stages: int = 2
     lds_swizzle: str = "rot16"
     # "xcd_block" groups the 32 tiles each XCD runs into a 4 x 8 block so the
-    # XCD's L2 serves A rows to 8 tiles and B rows to 4.
+    # XCD's L2 serves A rows to 8 tiles and B rows to 4. "xcd_block84": an 8 x 4
+    # block, A rows to 4 tiles and B rows to 8, the same L2 footprint; the
+    # XCDs that share A rows are then 0-3 and 4-7 instead of pairs.
     xcd_remap: str = "none"
     num_xcds: int = 8
     # Instruction ordering inside each stage: LLVM's own ("none"), its canned
@@ -201,6 +235,38 @@ class TiledBlockScaledGemmSpec:
     # forward; "serp" walks odd rows backward, so consecutive MFMAs change
     # one operand except at the step boundary.
     mfma_order: str = "rows"
+    # The scaled MFMA. "32x32x64": two K64 MFMAs per 32 x 32 tile and stage,
+    # as every other field describes. "16x16x128" (the line ring with lds2 A
+    # scales, b_release="half", kblock B with kblock4 B scale pairs and op_sel
+    # scale selects on the direct backend, 256 x 256 tiles of 2 x 2 waves; K
+    # a power of two times 1024): one K128 MFMA per 16 x 16 tile and stage,
+    # the stage in two column halves of 32 MFMAs, column block outer and row
+    # blocks serpentine, a barrier after each half. A fragment is three 8-byte
+    # LDS reads of the line ring and its scale one byte of the lds2 slot; B is
+    # packed per column half, and its fragments of two column blocks are
+    # three 16-byte reads. The schedule is its own: the dma_place, sync_place,
+    # prologue_wait, as_dma_place, aux_place, clamp_hoist, k_order, fill_split,
+    # step_vmem_order, a_scale_fetch, as_read, dma_m0, acc_init, k_peel,
+    # peel_dma, z_addr, pre_e_frag, trip_salu, epi_store, prologue_order,
+    # mfma_order and sched fields do not apply, and the name omits them.
+    mfma_atom: str = "32x32x64"
+    # mfma_atom="16x16x128": how C is stored (EPI16S). Elsewhere it does not
+    # apply.
+    epi16: str = "b16"
+    # mfma_atom="16x16x128": "none", or names from SCHED16S joined with "+".
+    # "fence": every MFMA is a block of its own, so a gap's VMEM ops and reads
+    # issue after their MFMA instead of the scheduler's choice of either side.
+    # "pairlight": the B scale pairs of stages 4-5 and 8-9 load in stages 0
+    # and 4, with those of 2-3 and 6-7, so no column half issues eight VMEM
+    # ops (a third pair register set). "midlgkm": Bar(mid) waits only for
+    # the B reads before it (the next stage's A reads are not overwritten
+    # before E). Elsewhere it does not apply.
+    sched16: str = "none"
+    # mfma_atom="16x16x128" (PEEL16S): "skip" runs the K loop's last trip
+    # outside the loop without the next trip's DMAs, pair load and reads (the
+    # loop's last trip copies stages past K from wrapped sources into slots
+    # nothing reads). Elsewhere it does not apply.
+    peel16: str = "none"
     # Give every LDS buffer its own alias scope. Without scopes the compiler
     # cannot tell a fragment read from the DMA into another buffer and waits
     # for every DMA in flight before each read.
@@ -327,6 +393,61 @@ class TiledBlockScaledGemmSpec:
     # waits only for what stage 0 reads; Bar(1) waits for line 1. Elsewhere
     # the name changes only.
     prologue_wait: str = "all"
+    # The line ring's step pipeline with b_release="half": "dma_first"
+    # issues line 0's and B stage 0's DMAs one by one among the per-lane
+    # fragment address math, so that math issues while the texture
+    # addresser works through them, instead of all of it first. Elsewhere
+    # the name changes only.
+    prologue_order: str = "default"
+    # With dma_place and lds2 A scales: where a pair body's two A scale DMAs
+    # of the next epoch go. "default": its second stage's step 0, back to
+    # back late in it. "spaced": the same step, four gaps apart. "light0" /
+    # "light4": step 1 of its first / fifth stage (three B DMAs and no
+    # refill), four gaps apart; "split_light": one in each, after the B
+    # DMAs. "split_late": one in step 0 of its second and of its sixth
+    # stage, after the B scale pair load there, so no wait for that pair
+    # also waits for an A scale DMA (vmcnt retires in order). The slot is
+    # free from the epoch's first stage. Elsewhere the name changes only.
+    as_dma_place: str = "default"
+    # With dma_place and lds2 A scales: where the A scale DMA's scalar
+    # address math (its LDS slot address, its clamped epoch and source
+    # offset) goes. "inline": at the DMA. "hoist": all of it one MFMA gap
+    # ahead. "split": the source offset two gaps and the LDS address one gap
+    # ahead, so no gap takes all of it. Elsewhere the name changes only.
+    z_addr: str = "inline"
+    # With dma_place and b_scale_fetch="pair": where an iteration's B scale
+    # pair loads go. "default": step 0 of its second and fourth stages.
+    # "light": the fourth stage's in step 1 of its first (no refill), so the
+    # pair lives one stage longer. "pre_z": the second stage's in step 1 of
+    # the first, gap 11, ahead of as_dma_place="split_light"'s A scale DMA in
+    # gap 13, so the third stage's wait for the pair does not also wait for
+    # that DMA. Elsewhere the name changes only.
+    aux_place: str = "default"
+    # The line ring's step pipeline: compute the clamped stage indices k + 2
+    # of a loop body's stages once, at the body's start, instead of at every
+    # stage's start, and reuse them for k + 1 (and aux_place's k + 4).
+    clamp_hoist: bool = False
+    # With dma_place: "g<n>" reads stage s+1's first step-1 A fragment in
+    # stage s's step 1, n MFMA gaps ahead of E's lgkmcnt(0), into registers
+    # of its own. "off": stage s+1 reads it right after E(s+1), into the
+    # registers of stage s's last A fragment, which its last MFMAs still
+    # read. Step 0's other reads keep their gaps. Elsewhere the name changes
+    # only.
+    pre_e_frag: str = "off"
+    # With b_release="half" and sync_place="none" on the line ring's step
+    # pipeline, "hoist": the K loop body's last E barrier goes to the top of
+    # the next loop iteration, after its index math and its first stage's
+    # clamped indices, so those and the back edge issue while the body's
+    # last MFMAs run instead of after the barrier. On entry the same barrier
+    # is E(0), which the prologue then leaves to it. Elsewhere the name
+    # changes only.
+    trip_salu: str = "default"
+    # The line ring's step pipeline with b_release="half": "skip" emits no
+    # DMA (B halves, line refills, A scale epochs, B scale pairs) for a stage
+    # past K in stages whose index is static (the k_peel iteration, those
+    # after the loop and the tail), instead of a clamped re-load of the last
+    # one. Elsewhere the name changes only.
+    peel_dma: str = "clamp"
     # How C is stored. "default": one bf16 store per accumulator element at
     # a per-element address. "sa": the lane's part of the address once, the
     # rest uniform. "pk2": as "sa", the two rows of an element pair rounded
@@ -343,6 +464,13 @@ class TiledBlockScaledGemmSpec:
     # through a DPP quad permute), "ct_lds" 8 bytes per lane from "ct"'s
     # accumulators.
     epilogue: str = "default"
+    # With epilogue="default" (and no store_nt): "global" stores each
+    # element at its own 64-bit address; "soff" stores C through a buffer
+    # resource, the lane's part of the offset in one VGPR per 32-column
+    # block and the row's (with the wave's origin) in an SGPR made once per
+    # row, so the epilogue has no per-store address math, and rounds two
+    # elements per packed convert. Elsewhere the name changes only.
+    epi_store: str = "global"
     # The streaming (nontemporal) hint on C's stores.
     store_nt: bool = False
     # The K32 block lane half h takes in step s of a stage. "rot": 2h in
@@ -394,12 +522,27 @@ class TiledBlockScaledGemmSpec:
     cc_passes: str = "none"
     # More direct-backend compiler passes, the same way, from CC_EXTRAS.
     cc_extra: str = "none"
+    # The direct backend: preload the kernel's arguments into SGPRs (kernel
+    # attribute kernarg_preload, which needs a compiler build that knows
+    # it) instead of loading them from the kernarg segment. Other backends
+    # ignore it.
+    kernarg_preload: bool = False
     # The accumulators' zero initialization on the line ring's step pipeline
     # (direct backend): "default" after the prologue's wait, or "early"
     # before it (kernel attribute acc_init_keep, which emits the loop's
     # initial accumulator copies where the zeros are), so the AGPR writes
     # overlap the prologue's DMA. Elsewhere the name only.
     acc_init: str = "default"
+    # Declare the problem shape as kernel arguments M, N, K (i32, after the
+    # five pointers). The kernel never reads them: each spec compiles its
+    # own kernel with the shape as constants. False drops them.
+    shape_args: bool = True
+    # The line ring's step pipeline and mfma_atom="16x16x128": this many
+    # `s_setprio 0` (4 bytes each; the priority is 0 there already) right
+    # before the K loop, so the loop's code starts 4 * loop_pad bytes later
+    # and nothing else changes. A code placement probe. Elsewhere the name
+    # changes only.
+    loop_pad: int = 0
     # Diagnostic only, results are wrong when set: every tile streams the
     # first tile's rows so the DMA hits L2 ("l2"), the DMA reads each stage's
     # rows as one contiguous block of the same bytes ("contig"), or both.
@@ -507,6 +650,51 @@ class TiledBlockScaledGemmSpec:
         return self.sync_place != "none" and self.dma_placed
 
     @property
+    def as_dma_placed(self) -> bool:
+        """The A scale DMAs move (`as_dma_place`)."""
+        return self.as_dma_place != "default" and self.dma_placed and self.a_lds_scales
+
+    @property
+    def as_dma_hoisted(self) -> bool:
+        """The A scale DMAs' address math moves ahead of them (`z_addr`)."""
+        return self.z_addr != "inline" and self.dma_placed and self.a_lds_scales
+
+    @property
+    def aux_placed(self) -> bool:
+        """A B scale pair load moves (`aux_place`)."""
+        return self.aux_place != "default" and self.dma_placed and self.b_scale_pairs
+
+    @property
+    def pre_e(self) -> bool:
+        """Stage s reads stage s+1's first step-1 A fragment (`pre_e_frag`)."""
+        return self.pre_e_frag != "off" and self.dma_placed
+
+    @property
+    def epi_soff(self) -> bool:
+        """C goes out through buffer stores with SGPR row offsets (`epi_store`)."""
+        return self.epi_store == "soff" and self.epilogue == "default" and not self.store_nt
+
+    @property
+    def dma_first(self) -> bool:
+        """Line 0's and B stage 0's DMAs go out among the fragment address math (`prologue_order`)."""
+        return self.prologue_order == "dma_first" and self.b_split and self.a_ring == "line"
+
+    @property
+    def peel_skip(self) -> bool:
+        """Stages with static indices issue no DMA for stages past K (`peel_dma`)."""
+        return self.peel_dma == "skip" and self.b_split and self.a_ring == "line"
+
+    @property
+    def trip_headed(self) -> bool:
+        """The loop body's last E barrier opens the next iteration (`trip_salu`)."""
+        return self.trip_salu == "hoist" and self.b_split and self.a_ring == "line" and not self.sync_placed
+
+    @property
+    def clamp_hoisted(self) -> bool:
+        """The stage index clamps are shared (`clamp_hoist`)."""
+        return self.clamp_hoist and self.a_ring == "line" and self.frag_pipeline == "step"
+
+    @property
     def b_scale_pairs(self) -> bool:
         """B scales load two stages at a time (`b_scale_fetch`)."""
         return self.b_scale_fetch == "pair" and self.b_split and self.a_ring == "line" and (
@@ -525,8 +713,41 @@ class TiledBlockScaledGemmSpec:
         return self.k_order == "t10" and self.b_split and self.a_ring == "line" and self.backend == "direct" and (
             self.b_scale_layout == "kblock4" and self.scale_opsel and self.a_lds_scales)
 
-    def kernel_name(self) -> str:
+    @property
+    def atom16(self) -> bool:
+        """The K loop runs on the 16x16x128 scaled MFMA (`mfma_atom`)."""
+        return self.mfma_atom == "16x16x128"
+
+    def _kernel_name16(self) -> str:
+        """`mfma_atom="16x16x128"`'s name: the fields its kernel reads."""
         a, b = (d.removeprefix("fp6") for d in (self.dtype_a, self.dtype_b))
+        return (
+            f"{self.name}_{a}_{b}_{self.dtype_c}_M{self.M}N{self.N}K{self.K}_a16_{self.xcd_remap}"
+            f"_p{int(self.setprio)}_w{self.waves_per_eu}_c{self.dma_cache}"
+            + ("" if self.epi16 == EPI16S[0] else f"_e{self.epi16}")
+            + ("" if self.sched16 == "none" else "_s" + "".join(
+                _SCHED16_TOKENS.get(p, p) for p in self.sched16.split("+")))
+            + ("" if self.peel16 == PEEL16S[0] else f"_k{self.peel16}")
+            + ("" if self.cc_passes == "none" else f"_cc{self.cc_passes.replace('+', '_')}")
+            + ("" if self.cc_extra == "none" else "_cx" + (self.cc_extra if self.cc_extra == "all" else "".join(
+                _CC_EXTRA_TOKENS.get(p, p) for p in self.cc_extra.split("+"))))
+            + ("" if self.shape_args else "_n") + ("_kap" if self.kernarg_preload else "")
+            + (f"_lp{self.loop_pad}" if self.loop_pad else "")
+            + f"_{self.backend}"
+        )
+
+    def kernel_name(self) -> str:
+        if self.atom16:
+            return self._kernel_name16()
+        a, b = (d.removeprefix("fp6") for d in (self.dtype_a, self.dtype_b))
+        # One or two letters each for pre_e_frag, trip_salu, z_addr,
+        # shape_args, peel_dma and epi_store, which the name's length limit
+        # leaves little room for.
+        q = ("" if self.pre_e_frag == "off" else f"e{self.pre_e_frag[1:]}") + (
+            "t" if self.trip_salu == "hoist" else "") + {"inline": "", "hoist": "h", "split": "s"}.get(self.z_addr, "?") + (
+            "" if self.shape_args else "n") + ("" if self.peel_dma == "clamp" else "k") + (
+            "" if self.epi_store == "global" else "b") + ("" if self.prologue_order == "default" else "f") + (
+            "p" if self.kernarg_preload else "") + (f"a{self.loop_pad}" if self.loop_pad else "")
         knobs = (
             f"s{self.stages}_{self.lds_swizzle}_{self.xcd_remap}_{self.sched}"
             f"_p{int(self.setprio)}_w{self.waves_per_eu}"
@@ -554,6 +775,10 @@ class TiledBlockScaledGemmSpec:
             + ("" if self.dma_place == "default" else f"_dp{self.dma_place}")
             + ("" if self.sync_place == "none" else f"_sp{self.sync_place}")
             + ("" if self.prologue_wait == "all" else f"_pw{self.prologue_wait}")
+            + ("" if self.as_dma_place == "default" else f"_z{_AS_DMA_TOKENS[self.as_dma_place]}")
+            + ("" if self.aux_place == "default" else f"_x{_AUX_TOKENS[self.aux_place]}")
+            + ("_ch" if self.clamp_hoist else "")
+            + (f"_q{q}" if q else "")
             + ("" if self.epilogue == "default" else f"_ep{self.epilogue}")
             + ("_snt" if self.store_nt else "")
             + ("" if self.k_order == "rot" else f"_ko{self.k_order}")
@@ -568,10 +793,17 @@ class TiledBlockScaledGemmSpec:
             + ("" if self.backend == "llvm" else f"_{self.backend}")
             + ("" if self.ablate == "none" else f"_X{self.ablate.replace('+', '_')}")
         )
-        return (
+        name = (
             f"{self.name}_{a}_{b}_{self.dtype_c}_M{self.M}N{self.N}K{self.K}"
             f"_t{self.block_m}x{self.block_n}_w{self.waves_m}x{self.waves_n}_{knobs}"
         )
+        # A name with the knobs after clamp_hoist that would pass the direct
+        # compiler's limit keeps its head and a hash of the whole.
+        later = q or self.aux_place == "pre_z" or self.as_dma_place == "split_late" or (
+            self.xcd_remap == "xcd_block84")
+        if later and len(name) > _NAME_MAX:
+            name = f"{name[: _NAME_MAX - 13]}_{hashlib.sha256(name.encode()).hexdigest()[:12]}"
+        return name
 
 
 def _pitch(spec: TiledBlockScaledGemmSpec) -> int:
@@ -694,6 +926,24 @@ def is_valid_spec(spec: TiledBlockScaledGemmSpec, arch: str = "gfx950") -> tuple
         return False, f"sync_place must be one of {SYNC_PLACES}"
     if spec.prologue_wait not in PROLOGUE_WAITS:
         return False, f"prologue_wait must be one of {PROLOGUE_WAITS}"
+    if spec.as_dma_place not in AS_DMA_PLACES:
+        return False, f"as_dma_place must be one of {AS_DMA_PLACES}"
+    if spec.z_addr not in Z_ADDRS:
+        return False, f"z_addr must be one of {Z_ADDRS}"
+    if spec.pre_e_frag not in PRE_E_FRAGS:
+        return False, f"pre_e_frag must be one of {PRE_E_FRAGS}"
+    if spec.trip_salu not in TRIP_SALUS:
+        return False, f"trip_salu must be one of {TRIP_SALUS}"
+    if spec.peel_dma not in PEEL_DMAS:
+        return False, f"peel_dma must be one of {PEEL_DMAS}"
+    if spec.epi_store not in EPI_STORES:
+        return False, f"epi_store must be one of {EPI_STORES}"
+    if spec.prologue_order not in PROLOGUE_ORDERS:
+        return False, f"prologue_order must be one of {PROLOGUE_ORDERS}"
+    if not isinstance(spec.loop_pad, int) or isinstance(spec.loop_pad, bool) or not 0 <= spec.loop_pad <= _LOOP_PAD_MAX:
+        return False, f"loop_pad must be an int in 0..{_LOOP_PAD_MAX}"
+    if spec.aux_place not in AUX_PLACES:
+        return False, f"aux_place must be one of {AUX_PLACES}"
     if spec.epilogue not in EPILOGUES:
         return False, f"epilogue must be one of {EPILOGUES}"
     if spec.k_order not in K_ORDERS:
@@ -727,6 +977,12 @@ def is_valid_spec(spec: TiledBlockScaledGemmSpec, arch: str = "gfx950") -> tuple
         return False, f"mfma_group must be one of {MFMA_GROUPS}"
     if spec.mfma_order not in MFMA_ORDERS:
         return False, f"mfma_order must be one of {MFMA_ORDERS}"
+    if spec.mfma_atom not in MFMA_ATOMS:
+        return False, f"mfma_atom must be one of {MFMA_ATOMS}"
+    if spec.atom16:
+        ok, why = _atom16_valid(spec)
+        if not ok:
+            return False, why
     if spec.backend not in BACKENDS:
         return False, f"backend must be one of {BACKENDS}"
     if spec.backend == "direct" and (spec.mfma_form, spec.agpr_alloc, spec.acc_fence) != ("intrinsic", "auto", "none"):
@@ -771,11 +1027,12 @@ def is_valid_spec(spec: TiledBlockScaledGemmSpec, arch: str = "gfx950") -> tuple
         return False, f"LDS ring needs {spec.lds_bytes} bytes (> {_LDS_BYTES})"
     if max(spec.M, spec.N) * _pitch(spec) > 0x7FFFFFFF or spec.M * spec.N > 0x7FFFFFFF:
         return False, "tensor byte offsets exceed i32"
-    if spec.xcd_remap == "xcd_block":
+    if spec.xcd_remap in _XCD_BLOCKS:
         tiles_m, tiles_n = spec.M // spec.block_m, spec.N // spec.block_n
         per_xcd, rem = divmod(tiles_m * tiles_n, spec.num_xcds)
-        if rem or per_xcd != 32 or tiles_m % 4 or tiles_n % 8:
-            return False, "xcd_block needs 32 tiles per XCD in a grid of 4 x 8 blocks"
+        rows, cols = _XCD_BLOCKS[spec.xcd_remap]
+        if rem or per_xcd != rows * cols or tiles_m % rows or tiles_n % cols:
+            return False, f"{spec.xcd_remap} needs {rows * cols} tiles per XCD in a grid of {rows} x {cols} blocks"
     if spec.backend == "direct" and len(spec.kernel_name()) > _NAME_MAX:
         return False, f"the kernel name is longer than {_NAME_MAX} bytes (the direct compiler's file name)"
     return True, "ok"
@@ -795,8 +1052,9 @@ def tiled_block_scaled_gemm_signature(spec: TiledBlockScaledGemmSpec):
         ("C", spec.dtype_c),
     ):
         signature.ptr(name, dtype)
-    for name in ("M", "N", "K"):
-        signature.scalar(name, "i32")
+    if spec.shape_args:
+        for name in ("M", "N", "K"):
+            signature.scalar(name, "i32")
     return signature.build()
 
 
@@ -844,19 +1102,20 @@ def _l2r_source(q: int, step: int, piece: str, half: int) -> tuple[int | str, in
 def _tile_origin(ir: IRBuilder, spec: TiledBlockScaledGemmSpec) -> tuple[Value, Value]:
     tiles_n = spec.N // spec.block_n
     bid = ir.block_id_x()
-    if spec.xcd_remap == "xcd_block":
+    if spec.xcd_remap in _XCD_BLOCKS:
         # Hardware places workgroup i on XCD i % num_xcds; give each XCD a
-        # 4 x 8 block of tiles, walked row-major inside the block.
+        # block of tiles (4 x 8, or 8 x 4), walked row-major inside the block.
+        rows, cols = _XCD_BLOCKS[spec.xcd_remap]
         xcd = ir.mod(bid, ir.const_i32(spec.num_xcds))
         local = ir.div(bid, ir.const_i32(spec.num_xcds))
-        blocks_n = tiles_n // 8
+        blocks_n = tiles_n // cols
         tm = ir.add(
-            ir.mul(ir.div(xcd, ir.const_i32(blocks_n)), ir.const_i32(4)),
-            ir.div(local, ir.const_i32(8)),
+            ir.mul(ir.div(xcd, ir.const_i32(blocks_n)), ir.const_i32(rows)),
+            ir.div(local, ir.const_i32(cols)),
         )
         tn = ir.add(
-            ir.mul(ir.mod(xcd, ir.const_i32(blocks_n)), ir.const_i32(8)),
-            ir.mod(local, ir.const_i32(8)),
+            ir.mul(ir.mod(xcd, ir.const_i32(blocks_n)), ir.const_i32(cols)),
+            ir.mod(local, ir.const_i32(cols)),
         )
     else:
         tm = ir.div(bid, ir.const_i32(tiles_n))
@@ -871,6 +1130,8 @@ def build_tiled_block_scaled_gemm(
     ok, reason = is_valid_spec(spec, arch)
     if not ok:
         raise ValueError(f"invalid tiled block-scaled GEMM spec for {arch}: {reason}")
+    if spec.atom16:
+        return _build_tiled16(spec)
     atom = ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mfma_scaled",
         a_dtype=spec.dtype_a,
@@ -911,6 +1172,8 @@ def build_tiled_block_scaled_gemm(
     if spec.cc_extra != "none" and spec.backend == "direct":
         for p in CC_EXTRAS if spec.cc_extra == "all" else spec.cc_extra.split("+"):
             ir.kernel.attrs[p] = True
+    if spec.kernarg_preload and spec.backend == "direct":
+        ir.kernel.attrs["kernarg_preload"] = True
     b_share = spec.b_share
     if b_share:
         ir.kernel.attrs["m0_cse"] = True
@@ -933,8 +1196,9 @@ def build_tiled_block_scaled_gemm(
     )
     c_ty = _OUTPUT_DTYPES[spec.dtype_c]
     C = ir.param("C", PtrType(c_ty, "global"), noalias=True, writeonly=True, align=16)
-    for name in ("M", "N", "K"):
-        ir.param(name, I32)
+    if spec.shape_args:
+        for name in ("M", "N", "K"):
+            ir.param(name, I32)
 
     c32 = ir.const_i32(32)
     tid = ir.thread_id_x()
@@ -1201,6 +1465,17 @@ def build_tiled_block_scaled_gemm(
             return out
         return out[len(out) // 2 :] if part else out[: len(out) // 2]
 
+    # prologue_order="dma_first": line 0's and B stage 0's fill DMAs, issued
+    # one per line fragment index below (the rest after them).
+    early_fill = [*line_thunks(ir.const_i32(0), 0, prologue=True),
+                  *(t for h in range(2) for t in b_half_thunks(ir.const_i32(0), 0, h, prologue=True))
+                  ] if spec.dma_first else []
+    early_left = list(early_fill)
+
+    def fill_one() -> None:
+        if early_left:
+            early_left.pop(0)()
+
     # ---- per-lane fragment and scale addressing ---------------------------
     rot = _rotation(ir, spec, r32)
 
@@ -1276,6 +1551,9 @@ def build_tiled_block_scaled_gemm(
                 row_dw = ir.mul(a_row, ir.const_i32(_LINE_BYTES // 4))
                 in_chunk = ir.lshr(ir.land(w, ir.const_i32(15)), ir.const_i32(2))
                 line_idx[(phase, *key)] = ir.add(ir.add(slot_dw, row_dw), ir.add(ir.mul(lds_chunk, ir.const_i32(4)), in_chunk))
+                fill_one()
+        while early_left:
+            fill_one()
 
     # line2r: R stores row r = 32 b + 8 g + m at byte g * 8 block_m + 256 b +
     # 32 m (its two chunks in the order `_remnant_swizzle` gives), the slots
@@ -1658,7 +1936,8 @@ def build_tiled_block_scaled_gemm(
 
     def as_dma_thunks(epoch: Value) -> list[Callable[[], None]]:
         """lds2: one callable per scale DMA of `epoch` (clamped to the last)
-        into slot `epoch % 2`."""
+        into slot `epoch % 2`. Each has `preps`, callables that emit its LDS
+        address and its source offset ahead of it (`z_addr`)."""
         if spec.ablated("no_scales"):
             return []
         src = _Once(lambda: ir.select(ir.cmp_lt(epoch, c_epoch_last), epoch, c_epoch_last))
@@ -1666,12 +1945,14 @@ def build_tiled_block_scaled_gemm(
         slot = _Once(lambda: ir.mul(ir.land(epoch, ir.const_i32(1)), ir.const_i32(as_slot_bytes)))
         out = []
         for k, voff in enumerate(as_voff):
+            dst = _Once(lambda k=k: ir.smem_ptr_add(as_wave, ir.zext(
+                ir.to_sgpr_u32(ir.add(slot(), ir.const_i32(k * n_waves * _WAVE * 16))), I64)))
 
-            def issue(k=k, voff=voff):
-                off = ir.to_sgpr_u32(ir.add(slot(), ir.const_i32(k * n_waves * _WAVE * 16)))
-                ir.async_buffer_load_lds_addr(as_rsrc, ir.smem_ptr_add(as_wave, ir.zext(off, I64)), voff, soff(), 4)
+            def issue(voff=voff, dst=dst):
+                ir.async_buffer_load_lds_addr(as_rsrc, dst(), voff, soff(), 4)
                 logged("AS")
 
+            issue.preps = (dst, soff)
             out.append(issue)
         return out
 
@@ -1970,6 +2251,11 @@ def build_tiled_block_scaled_gemm(
     read_last = max(n_blocks - 3, 0) if sync_early else n_blocks - 1
     # The barrier group a step left for the next step's first block.
     pending_sync: list[list[Callable[[], None]]] = [[]]
+    # trip_salu: the E barrier group the loop body's last stage left for the
+    # head of the next stage emitted. pre_e_frag: the next stage's first
+    # step-1 A fragment.
+    trip_sync: list[list[Callable[[], None]]] = [[]]
+    pre_carry: list[Value | None] = [None]
 
     def sync_group(waits: Sequence[Callable[[], None]], bar: Callable[[], None],
                    slots: dict[int, list]) -> list[Callable[[], None]]:
@@ -2005,8 +2291,29 @@ def build_tiled_block_scaled_gemm(
         place_fixed(first, odd, slots)
         return place_fixed(second, odd[len(first) :] or odd[-1:], slots)
 
+    def at_gaps(at: Sequence[int]) -> list[int]:
+        return [min(g, n_blocks - 1) for g in at]
+
+    def place_z_preps(thunks: Sequence[Callable[[], None]], at: Sequence[int], first: int,
+                      slots: dict[int, list]) -> None:
+        """z_addr: the address math of A scale DMAs `thunks`, which
+        `place_fixed` puts after blocks `at` from its `first`-th entry on:
+        "hoist", all of it a block ahead of each; "split", the source offset
+        two blocks and the LDS address one block ahead."""
+        if not spec.as_dma_hoisted:
+            return
+        for k, thunk in enumerate(thunks):
+            gap = at[min(first + k, len(at) - 1)]
+            dst, soff = thunk.preps
+            if spec.z_addr == "hoist":
+                slots.setdefault(max(gap - 1, 0), []).extend((dst, soff))
+            else:
+                slots.setdefault(max(gap - 2, 0), []).append(soff)
+                slots.setdefault(max(gap - 1, 0), []).append(dst)
+
     def step_line_stage(kt: Value, u: int, accs, F, scales, a_vals, group_start, n_it, rotate_group=None,
-                        final=False, a_lds_next=None, a_dma_epoch=None, bv=None, t_static=None):
+                        final=False, a_lds_next=None, a_dma_epoch=None, bv=None, t_static=None, a_dma_at=None,
+                        aux_load=None, aux_vals=None, kc=None, trip_end=False):
         """One stage of the line ring's step pipeline; returns (accs, the next
         stage's step-0 fragments, its per-stage scales, next group or None,
         b_path="vgpr" state or None).
@@ -2022,31 +2329,52 @@ def build_tiled_block_scaled_gemm(
         fragments of the next); step 0 loads the next stage's step-1 ones and
         step 1 the step-0 ones of the stage after, which the state returned
         holds. `t_static`: the stage's index where known, so loads past K,
-        which nothing reads and the compiler would drop, are not emitted."""
+        which nothing reads and the compiler would drop, are not emitted.
+        as_dma_place: `a_dma_at` = (step, A scale DMAs, their gaps).
+        aux_place: `aux_load` = (list, o, gap) receives the B scale pair of
+        stage s+o, loaded in step 1 after block `gap`; `aux_vals` is the pair
+        an odd stage passes on instead of loading it. clamp_hoist: `kc` maps
+        1 / 2 / 4 to the clamped kt + 1 / + 2 / + 4, shared by the loop
+        body's stages. pre_e_frag: `pre_carry[0]` holds this stage's first
+        step-1 A fragment, and step 1 leaves the next stage's there.
+        trip_salu: a barrier group left in `trip_sync` goes after the stage's
+        index math, ahead of its setprio; `trip_end` leaves its E there."""
+        def ck(o: int) -> Value:
+            return kc[o]() if kc is not None else clamp_stage(ir.add(kt, ir.const_i32(o)))
+
+        def past(o: int) -> bool:
+            """peel_dma="skip": stage s + o lies past K, where s is known."""
+            return spec.peel_skip and t_static is not None and t_static + o >= KT
+
+        if spec.peel_skip and t_static is not None and (t_static // _EPOCH_STAGES + 1) * _EPOCH_STAGES >= KT:
+            a_dma_epoch = a_dma_at = None
         carried_scales = list(scales)
         if a_vals is not None:
             scales = [*a_vals, *scales]
-        if spec.setprio:
+        head, trip_sync[0] = trip_sync[0], []
+        if spec.setprio and not head:
             ir.s_setprio(1)
         G, nxt, group_vals = [None] * (tm_w + tn_w), [], []
         # b_split: B(s+2)'s step-0 half goes into its sub-slot first, which
         # the previous stage's end barrier freed.
-        b_kt = clamp_stage(ir.add(kt, ir.const_i32(2))) if b_split else None
-        h0 = b_half_thunks(b_kt, u % S, 0) if b_split else []
+        b_kt = ck(2) if b_split else None
+        h0 = b_half_thunks(b_kt, u % S, 0) if b_split and not past(2) else []
         # b_scale_pairs: an even stage passes its pair on to the odd one.
         hi = u % 2 if b_pairs else 0
-        sc = [] if final or (b_pairs and not hi) else [
-            lambda t=t: nxt.append(t()) for t in scale_thunks(clamp_stage(ir.add(kt, ir.const_i32(1))))
+        sc = [] if final or (b_pairs and not hi) or aux_vals is not None else [
+            lambda t=t: nxt.append(t()) for t in scale_thunks(ck(1))
         ]
         if b_pairs and not hi:
             nxt = list(carried_scales)
-        refill = line_refill(n_it, u, part=1 if placed else None)
+        elif aux_vals is not None and not final:
+            nxt = aux_vals
+        refill = [] if past(2) else line_refill(n_it, u, part=1 if placed else None)
         vmem = h0 + sc + refill
         group = [] if group_start is None else [
             lambda t=t: group_vals.append(t()) for t in a_group_thunks(group_start)
         ]
-        if a_dma_epoch is not None:
-            group = group + as_dma_thunks(a_dma_epoch)
+        z_dma = [] if a_dma_epoch is None else as_dma_thunks(a_dma_epoch)
+        group = group + z_dma
         late_group = group if vmem_order == "group_late" else []
         vmem += [] if late_group else group
         bg_next: list[Value] = [None] * tn_w
@@ -2054,9 +2382,19 @@ def build_tiled_block_scaled_gemm(
         if b_vgpr:
             G[tm_w:] = bv[0]
             if not final and (t_static is None or t_static + 1 < KT):
-                vmem += b_vgpr_thunks(clamp_stage(ir.add(kt, ir.const_i32(1))), 1, bg_next)
+                vmem += b_vgpr_thunks(ck(1), 1, bg_next)
         reads = read_thunks(u, 1, G)
+        # pre_e_frag: the first fragment came with the previous stage; the
+        # other reads keep their blocks.
+        read_start = 0
+        if spec.pre_e:
+            G[0], reads, read_start = pre_carry[0], reads[1:], 2
         e_prev, pending_sync[0] = pending_sync[0], []
+        if head:
+            for part in head:
+                part()
+            if spec.setprio:
+                ir.s_setprio(1)
 
         def bar_lgkm() -> None:
             ir.s_waitcnt(lgkmcnt=0)
@@ -2088,9 +2426,14 @@ def build_tiled_block_scaled_gemm(
 
         bar_rest = [bar_lgkm, bar_vm, bar_sync]
         if placed:
-            slots0 = place_dmas(refill, h0, one_per_block(reads, 2, {}, last=read_last))
+            slots0 = place_dmas(refill, h0, one_per_block(reads, 2, {}, start=read_start, last=read_last))
             place_fixed(sc, gaps(2, 2) if refill else gaps(3, 4), slots0)
-            place_fixed(group, gaps(n_blocks - 1 if refill else n_blocks - 3, 2), slots0)
+            at_group = gaps(n_blocks - 1 if refill else n_blocks - 3, 2)
+            place_z_preps(z_dma, at_group, len(group) - len(z_dma), slots0)
+            place_fixed(group, at_group, slots0)
+            if a_dma_at is not None and a_dma_at[0] == 0:
+                place_z_preps(a_dma_at[1], at_gaps(a_dma_at[2]), 0, slots0)
+                place_fixed(a_dma_at[1], at_gaps(a_dma_at[2]), slots0)
             bar_rest = sync_group([bar_lgkm, bar_vm], bar_sync, slots0)
             accs = step_mfma(accs, F, *scale_ops(scales, 0, hi), [], step_sel[0], slots0, after0=e_prev)
         elif vmem_order == "refill_early":
@@ -2108,11 +2451,11 @@ def build_tiled_block_scaled_gemm(
             F_next[tm_w:] = bv[1]
             b_dma = []
             if not final and (t_static is None or t_static + 2 < KT):
-                b_dma = b_vgpr_thunks(clamp_stage(ir.add(kt, ir.const_i32(2))), 0, bf_next2)
+                b_dma = b_vgpr_thunks(ck(2), 0, bf_next2)
         elif b_split:
-            b_dma = b_half_thunks(b_kt, u % S, 1)
+            b_dma = [] if past(2) else b_half_thunks(b_kt, u % S, 1)
         else:
-            b_dma = dma_thunks(clamp_stage(ir.add(kt, ir.const_i32(2))), u % S, operands="b")
+            b_dma = dma_thunks(ck(2), u % S, operands="b")
         slots: dict[int, list] = {}
         rotated: list[Value] = []
         if opsel:
@@ -2150,7 +2493,8 @@ def build_tiled_block_scaled_gemm(
         if placed:
             # The next stage's refill, its first half; its slot is free from Bar(s+1).
             nu = u + 1
-            ra = [] if final else line_refill(n_it if nu < U else ir.add(n_it, ir.const_i32(1)), nu % U, part=0)
+            ra = [] if final or past(3) else line_refill(n_it if nu < U else ir.add(n_it, ir.const_i32(1)), nu % U,
+                                                         part=0)
             if vmem_order == "reads_first":
                 spread = _round_robin(reads, b_dma)
                 n_rd = read_last + 1
@@ -2163,6 +2507,20 @@ def build_tiled_block_scaled_gemm(
                 held = one_per_block(pairs1, 1, {}, start=0 if vmem_order == "frag_first" else _FRAG_MID_START,
                                      last=read_last)
             held = place_dmas(ra, b_dma, held)
+            if aux_load is not None and not past(aux_load[1]):
+                aux_to, aux_o, aux_gap = aux_load
+                # The pair of stage s+2 is B(s+2)'s, whose index the stage has.
+                aux_kt = (lambda: b_kt) if aux_o == 2 and b_kt is not None else (lambda: ck(aux_o))
+                place_fixed([lambda: aux_to.extend(t() for t in scale_thunks(aux_kt()))], at_gaps([aux_gap]), held)
+            if spec.pre_e and not final:
+
+                def pre_read() -> None:
+                    pre_carry[0] = a_fragment((u + 1) % U, 1, 0)
+
+                place_fixed([pre_read], at_gaps([max(n_blocks - 1 - int(spec.pre_e_frag[1:]), 0)]), held)
+            if a_dma_at is not None and a_dma_at[0] == 1:
+                place_z_preps(a_dma_at[1], at_gaps(a_dma_at[2]), 0, held)
+                place_fixed(a_dma_at[1], at_gaps(a_dma_at[2]), held)
             for b, extra in slots.items():
                 held.setdefault(b, []).extend(extra)
             fill1, slots = [], held
@@ -2179,13 +2537,15 @@ def build_tiled_block_scaled_gemm(
         e_rest: list[Callable[[], None]] = []
         if b_split and not final:
             # Deferred past this step's end, the wait counts to the mark before.
-            nth = int(sync_sink and sync_early < 2)
+            nth = int((sync_sink and sync_early < 2) or trip_end)
             e_rest = sync_group([end_lgkm, lambda: end_vm(("BG",), nth)], end_sync, slots)
         accs = step_mfma(accs, G, *scale_ops(scales, 1, hi), fill1, step_sel[1], slots, after0=bar_next)
         if spec.setprio:
             ir.s_setprio(0)
         if sync_sink:
             pending_sync[0] = e_rest
+        elif trip_end:
+            trip_sync[0] = e_rest
         else:
             for part in e_rest:
                 part()
@@ -2331,6 +2691,16 @@ def build_tiled_block_scaled_gemm(
                 read()
             if opsel:
                 group = [as_fix(x) for x in group]
+        if spec.pre_e:
+            # Stage 0's first step-1 A fragment, as if from a stage before it.
+            pre_carry[0] = a_fragment(0, 1, 0)
+        loops, tail = divmod(KT, U)
+        n_loop = loops - 1 if spec.k_peel and loops else loops
+        # iter2: a two-iteration loop body (even, odd); left-over iterations
+        # after it. line2r: six iterations, the 24 stages of its slot pattern.
+        pairs = a_iter2 or as_lds_on
+        per_body = _L2R_PERIOD // U if l2r else 2 if pairs else 1
+        n_body = n_loop // per_body
         if b_split and sync_sink:
             # E(0) after stage 0's first block. In the loop it is the back
             # edge's E too; on entry no B half precedes the mark it counts to.
@@ -2339,10 +2709,14 @@ def build_tiled_block_scaled_gemm(
                 pending_sync[0] = [end_sync]
             else:
                 pending_sync[0] = [end_lgkm, lambda: end_vm(("BG",), 1), end_sync]
+        elif b_split and spec.trip_headed and n_body:
+            # E(0) at the head of stage 0, as trip_salu puts the loop body's
+            # last E. In the loop it is the back edge's E too; on entry no B
+            # half precedes the mark it counts to.
+            trip_sync[0] = [end_lgkm, lambda: end_vm(("BG",), 1), end_sync]
         elif b_split:
             # E(0): stage 0's step-0 DMA overwrites what F_0 read.
             end_barrier(need=())
-        loops, tail = divmod(KT, U)
 
         def swapped(group: Sequence[Value], later: list) -> _GroupDwords:
             """iter2: `group` holds iteration j+1+h in lane half h. Each dword's
@@ -2355,12 +2729,15 @@ def build_tiled_block_scaled_gemm(
 
             return _GroupDwords(get)
 
-        def iteration(it, accs, F, scales, group, last=False, parity=None, later=None, it_static=None, w=None):
+        def iteration(it, accs, F, scales, group, last=False, parity=None, later=None, it_static=None, w=None,
+                      hoist=None, trip_end=False):
             """One loop iteration (`U` stages). iter2: `parity` 0 loads the next
             two iterations' groups and returns the second's dwords; 1 loads
             none and rotates `later`. `it_static`: `it` where it is known
             (straight-line code). line2r: `w` = `it` mod 6, the iteration's
-            place in the slot pattern."""
+            place in the slot pattern. clamp_hoist: `hoist` holds the clamped
+            stage indices of a pair body, from its first iteration's base.
+            trip_salu: `trip_end`, the loop body's last iteration."""
             # The peeled last iteration with no tail after it loads no next
             # group (nothing reads it; the compiler would drop the loads that
             # the barrier waits count).
@@ -2368,17 +2745,42 @@ def build_tiled_block_scaled_gemm(
             base = ir.mul(it, ir.const_i32(U))
             nxt_group, out_later = group, None
             epoch = ir.lshr(it, ir.const_i32(1)) if as_lds_on else None
+            kc_base = None
+            if spec.clamp_hoisted:
+                body = hoist is not None
+                hoist = {} if hoist is None else hoist
+                if not hoist:
+                    for o in range(1, (2 * U if body else U) + 4):
+                        hoist[o] = _Once(lambda o=o: clamp_stage(ir.add(base, ir.const_i32(o))))
+                    # Every stage's k + 2 up front; the rest at first use.
+                    for o in range(2, (2 * U if body else U) + 2):
+                        hoist[o]()
+                kc_base = U if body and parity == 1 else 0
+            zp = spec.as_dma_place if spec.as_dma_placed else "default"
+            aux: list[Value] = []
             for u in range(U):
                 final = not next_group and u == U - 1
-                a_next = a_dma = None
+                a_next = a_dma = a_dma_at = None
                 if as_lds_on:
                     # lds2: the pair body is one epoch; its first iteration's
                     # stage 1 copies the next epoch.
                     at = U * parity + u + 1
                     if not final:
                         a_next = (ir.add(epoch, ir.const_i32(1)), 0) if at == _EPOCH_STAGES else (epoch, at)
-                    if parity == 0 and u == 1 and next_group:
+                    if zp == "default" and parity == 0 and u == 1 and next_group:
                         a_dma = ir.add(epoch, ir.const_i32(1))
+                    elif zp == "spaced" and parity == 0 and u == 1 and next_group:
+                        a_dma_at = (0, as_dma_thunks(ir.add(epoch, ir.const_i32(1))), _AS_GAPS)
+                    elif u == 0 and next_group and (zp == "split_light" or parity == {"light0": 0, "light4": 1}.get(zp)):
+                        thunks = as_dma_thunks(ir.add(epoch, ir.const_i32(1)))
+                        if zp == "split_light":
+                            n0 = (len(thunks) + 1) // 2
+                            thunks = thunks[:n0] if parity == 0 else thunks[n0:]
+                        a_dma_at = (1, thunks, (_AS_SPLIT_GAP,) if zp == "split_light" else _AS_GAPS)
+                    elif zp == "split_late" and u == 1 and next_group:
+                        thunks = as_dma_thunks(ir.add(epoch, ir.const_i32(1)))
+                        n0 = (len(thunks) + 1) // 2
+                        a_dma_at = (0, thunks[:n0] if parity == 0 else thunks[n0:], (_AS_SPLIT_GAP,))
                 start = None
                 if a_grouped and u == step_group_phase and next_group and parity != 1:
                     start = ir.add(base, ir.const_i32(U))
@@ -2405,21 +2807,24 @@ def build_tiled_block_scaled_gemm(
                         a_lds_next=a_next, a_dma_epoch=a_dma,
                     )
                 else:
+                    # aux_place: the first stage loads the last one's pair
+                    # ("light") or the second one's ("pre_z").
+                    pre_z = spec.aux_place == "pre_z"
+                    aux_on = spec.aux_placed and (next_group or pre_z)
+                    aux_at, aux_o, aux_gap = (1, 2, _AUX_PRE_Z_GAP) if pre_z else (U - 1, 4, _AUX_GAP)
+                    kc = None if kc_base is None else {o: hoist[kc_base + u + o] for o in (1, 2, 4)}
                     accs, F, scales, loaded, b_state = step_line_stage(
                         kt, u, accs, F, scales, a_vals, start, it,
                         rotate_group, final=final, a_lds_next=a_next, a_dma_epoch=a_dma, bv=b_carry[0],
-                        t_static=None if it_static is None else it_static * U + u,
+                        t_static=None if it_static is None else it_static * U + u, a_dma_at=a_dma_at,
+                        aux_load=(aux, aux_o, aux_gap) if aux_on and u == 0 else None,
+                        aux_vals=aux if aux_on and u == aux_at else None, kc=kc,
+                        trip_end=trip_end and u == U - 1,
                     )
                 nxt_group = loaded or nxt_group
                 b_carry[0] = b_state
             return accs, F, scales, nxt_group, out_later
 
-        n_loop = loops - 1 if spec.k_peel and loops else loops
-        # iter2: a two-iteration loop body (even, odd); left-over iterations
-        # after it. line2r: six iterations, the 24 stages of its slot pattern.
-        pairs = a_iter2 or as_lds_on
-        per_body = _L2R_PERIOD // U if l2r else 2 if pairs else 1
-        n_body = n_loop // per_body
         later = None
         if n_body:
             n_acc, n_f, n_sc = len(accs), len(F), len(scales)
@@ -2428,6 +2833,8 @@ def build_tiled_block_scaled_gemm(
             carried += [(f"sc{k}", s) for k, s in enumerate(scales)]
             carried += [(f"sa{k}", g) for k, g in enumerate(group)]
             n_g = len(group)
+            n_pre = 1 if spec.pre_e else 0
+            carried += [(f"pre{k}", v) for k, v in enumerate(pre_carry[:n_pre])]
             b_in = [] if b_carry[0] is None else [*b_carry[0][0], *b_carry[0][1]]
             carried += [(f"bv{k}", v) for k, v in enumerate(b_in)]
             n_ac = tm_w if as_b128 else 0
@@ -2435,12 +2842,15 @@ def build_tiled_block_scaled_gemm(
             clamping[0] = not spec.k_peel
             # A single-trip body is straight-line code: its stage indices are known.
             one = n_body == 1
+            for _ in range(spec.loop_pad):
+                ir.s_setprio(0)
             loop = ir.scf_for_iter(ir.const_i32(0), ir.const_i32(n_body), ir.const_i32(1), carried, iv_name="kloop")
             with loop as (it, vals):
                 accs, F = list(vals[:n_acc]), list(vals[n_acc : n_acc + n_f])
                 scales = list(vals[n_acc + n_f : n_acc + n_f + n_sc])
                 group = list(vals[n_acc + n_f + n_sc : n_acc + n_f + n_sc + n_g])
-                b_vals = list(vals[n_acc + n_f + n_sc + n_g : len(vals) - n_ac])
+                pre_carry[:n_pre] = vals[n_acc + n_f + n_sc + n_g : n_acc + n_f + n_sc + n_g + n_pre]
+                b_vals = list(vals[n_acc + n_f + n_sc + n_g + n_pre : len(vals) - n_ac])
                 as_cache[:n_ac] = vals[len(vals) - n_ac :]
                 if b_in:
                     b_carry[0] = (b_vals[:tn_w], b_vals[tn_w:])
@@ -2457,31 +2867,34 @@ def build_tiled_block_scaled_gemm(
                         )
                 elif pairs:
                     even = ir.mul(it, ir.const_i32(2))
+                    hoist = {} if spec.clamp_hoisted else None
                     accs, F, scales, group, later = iteration(even, accs, F, scales, group, parity=0,
-                                                              it_static=0 if one else None)
+                                                              it_static=0 if one else None, hoist=hoist)
                     accs, F, scales, group, _ = iteration(
                         ir.add(even, ir.const_i32(1)), accs, F, scales, group, last=n_body * 2 == loops == 2,
-                        parity=1, later=later, it_static=1 if one else None,
+                        parity=1, later=later, it_static=1 if one else None, hoist=hoist,
+                        trip_end=spec.trip_headed,
                     )
                 else:
                     # A single-trip loop with nothing after it is the last iteration.
                     accs, F, scales, group, _ = iteration(it, accs, F, scales, group, last=n_loop == loops == 1,
-                                                          it_static=0 if one else None)
+                                                          it_static=0 if one else None, trip_end=spec.trip_headed)
                 close_loop()
                 # Loads past K are not emitted; their slots yield what came in.
                 b_out = [] if not b_in else [
                     v if v is not None else b_vals[k] for k, v in enumerate([*b_carry[0][0], *b_carry[0][1]])
                 ]
                 F = [v if v is not None else vals[n_acc + k] for k, v in enumerate(F)]
-                ir.scf_yield(*fence(accs), *F, *scales, *group, *b_out, *as_cache[:n_ac])
+                ir.scf_yield(*fence(accs), *F, *scales, *group, *pre_carry[:n_pre], *b_out, *as_cache[:n_ac])
             clamping[0] = True
             res = list(loop.results)
             as_cache[:n_ac] = res[len(res) - n_ac :]
             res = res[: len(res) - n_ac]
             accs, F = res[:n_acc], res[n_acc : n_acc + n_f]
             scales, group = res[n_acc + n_f : n_acc + n_f + n_sc], res[n_acc + n_f + n_sc : n_acc + n_f + n_sc + n_g]
+            pre_carry[:n_pre] = res[n_acc + n_f + n_sc + n_g : n_acc + n_f + n_sc + n_g + n_pre]
             if b_in:
-                b_res = res[n_acc + n_f + n_sc + n_g :]
+                b_res = res[n_acc + n_f + n_sc + n_g + n_pre :]
                 b_carry[0] = (b_res[:tn_w], b_res[tn_w:])
         for k in range(per_body * n_body, loops):
             accs, F, scales, group, later = iteration(
@@ -2508,7 +2921,7 @@ def build_tiled_block_scaled_gemm(
                 )
             group = loaded or group
         # The last stage's E, left for a next stage there is none of.
-        for part in pending_sync[0]:
+        for part in pending_sync[0] + trip_sync[0]:
             part()
         return accs
 
@@ -2528,10 +2941,13 @@ def build_tiled_block_scaled_gemm(
         spec.backend == "direct")
     if a_line:
         # Lines 0 and 1 and B's stage 0; stage 0 itself refills line 2.
-        for line in range(1 if line1_late else 2):
+        # prologue_order="dma_first" issued line 0 and B's stage 0 already.
+        for line in range(1 if early_fill else 0, 1 if line1_late else 2):
             for issue in line_thunks(ir.const_i32(line), line, prologue=True):
                 issue()
-        if b_vgpr:
+        if early_fill:
+            b0 = []
+        elif b_vgpr:
             # B's fragments of stage 0, both steps.
             b_stage0 = ([None] * tn_w, [None] * tn_w)
             b0 = [t for s in range(2) for t in b_vgpr_thunks(ir.const_i32(0), s, b_stage0[s], prologue=True)]
@@ -2658,6 +3074,31 @@ def build_tiled_block_scaled_gemm(
         else:
             ir.global_store_vN(C, idx, val, n, align=2 * n, temporal_hint=hint)
 
+    if spec.epi_soff:
+        # Element (i, j, slot) of lane (h, r) sits at row 32 i + 8 (slot // 4)
+        # + slot % 4 + 4 h and column 32 j + r of the wave's tile: the row
+        # and the wave's origin in the SGPR offset, the lane and column block
+        # in the VGPR one.
+        c_rsrc = ir.buffer_rsrc(C, ir.const_i32(spec.M * spec.N * 2))
+        origin = ir.add(ir.mul(ir.add(m0, ir.mul(wm, ir.const_i32(spec.wave_tile_m))), c_n),
+                        ir.add(n0, ir.mul(wn, ir.const_i32(spec.wave_tile_n))))
+        s_origin = ir.mul(origin, ir.const_i32(2))
+        lane_b = ir.mul(ir.add(ir.mul(half, ir.const_i32(4 * spec.N)), r32), ir.const_i32(2))
+        voffs = [lane_b] + [ir.add(lane_b, ir.const_i32(64 * j)) for j in range(1, tn_w)]
+        store = ir.buffer_store_bf16 if spec.dtype_c == "bf16" else ir.buffer_store_f16
+        for i in range(tm_w):
+            soffs = [ir.add(s_origin, ir.const_i32((32 * i + (slot // 4) * 8 + slot % 4) * 2 * spec.N))
+                     for slot in range(16)]
+            for j in range(tn_w):
+                acc = accs[i * tn_w + j]
+                # One packed convert rounds two elements.
+                for s in range(0, 16, 2):
+                    pair = ir.vec_cast_f32_to(ir.vec_pack([ir.vec_extract(acc, s), ir.vec_extract(acc, s + 1)], F32),
+                                              c_ty)
+                    for e in range(2):
+                        store(c_rsrc, voffs[j], soffs[s + e], ir.vec_extract(pair, e))
+        ir.ret()
+        return ir.kernel
     if spec.epilogue == "default":
         row0 = ir.add(ir.add(m0, ir.mul(wm, ir.const_i32(spec.wave_tile_m))), ir.mul(half, ir.const_i32(4)))
         col0 = ir.add(ir.add(n0, ir.mul(wn, ir.const_i32(spec.wave_tile_n))), r32)
@@ -2914,6 +3355,608 @@ def _step_pipeline(ir, spec, accs, sc0, h: SimpleNamespace, dma_ops: int):
         accs, F, sc_k, sc_k1 = stage(ir.const_i32(loops * S + u), u, accs, F, sc_k, sc_k1, False)
     accs, *_ = stage(ir.const_i32(KT - 1), (KT - 1) % S, accs, F, sc_k, sc_k1, True)
     return accs
+
+
+# ---- mfma_atom="16x16x128" ----------------------------------------------------
+_MX16_OP = "mfma_scale_f32_16x16x128_f8f6f4"
+# A K-loop trip: one lds2 epoch of eight stages, two periods of the line ring.
+_TRIP16 = _EPOCH_STAGES
+# MFMAs per column half of a stage.
+_HALF16 = 32
+# A column half's VMEM ops and reads start at gap 2 (none in the two gaps
+# right after a barrier); its VMEM ops are at least four gaps apart.
+_GAP0_16, _VMEM_SPACING16 = 2, 4
+_LGKMCNT_MAX = 15
+# Every field mfma_atom="16x16x128" requires, with its value.
+_ATOM16_FIELDS = {
+    "backend": "direct", "mfma_form": "intrinsic", "a_ring": "line", "a_layout": "row", "a_scale_layout": "row",
+    "a_scale_path": "lds2", "b_layout": "kblock", "b_scale_layout": "kblock4", "b_scale_fetch": "pair",
+    "b_release": "half", "b_path": "lds", "frag_pipeline": "step", "lds_swizzle": "rot16", "scale_opsel": True,
+    "stages": 2, "mfma_group": 1, "epilogue": "default", "store_nt": False, "dma_probe": "none", "ablate": "none",
+    "block_m": 256, "block_n": 256, "waves_m": 2, "waves_n": 2,
+}
+
+
+def mx16_operand_lane(lane, ir: IRBuilder | None = None):
+    """The 16x16x128 scaled MFMA's operand lane map, as (kg, r): lane
+    l = 16 kg + r holds row r of an A 16-row block (column r of a B 16-column
+    block), the 24 bytes of K32 block kg (bytes 24 kg .. 24 kg + 24 of the
+    stage's 96) and that block's E8M0 scale. Ints and numpy arrays, or with
+    `ir` an IR value."""
+    if ir is None:
+        return lane // 16, lane % 16
+    return ir.lshr(lane, ir.const_i32(4)), ir.land(lane, ir.const_i32(15))
+
+
+def mx16_acc_lane(lane, e: int):
+    """Element e (0..3) of a 16x16x128 accumulator in lane l, as (row,
+    column) of its 16 x 16 tile: (4 (l // 16) + e, l % 16)."""
+    return 4 * (lane // 16) + e, lane % 16
+
+
+def a_piece16(u: int, kg: int, p: int) -> tuple[int, int]:
+    """mfma_atom="16x16x128": (line of the window, byte of the line) of piece
+    p (0..2) of the A fragment of a lane of K32 block kg in ring phase u: the
+    8 bytes at 96 u + 24 kg + 8 p of its row's three-line window. 8 divides
+    16, so a piece never crosses the 16-byte chunk that the line rotation
+    moves."""
+    return divmod(_ROW_BYTES * u + 24 * kg + 8 * p, _LINE_BYTES)
+
+
+def line16_first_need(line: int) -> int:
+    """mfma_atom="16x16x128": the first stage whose fragments read line
+    `line` of a row (stage and line counted from the same trip)."""
+    return _LINE_BYTES * line // _ROW_BYTES
+
+
+def line16_at(s: int) -> int | None:
+    """mfma_atom="16x16x128": the line (counted from the trip's first) that
+    stage s (0..7) of a trip refills, three lines on from the last one stage
+    s's own fragments read (read in stage s-1, so its slot is free from
+    E(s-1)). Stages 0 and 4 refill none."""
+    return None if s % _LINE_PERIOD == 0 else _LINE_SLOTS * (s // _LINE_PERIOD) + s % _LINE_PERIOD + 2
+
+
+def slots16(n: int) -> list[int]:
+    """mfma_atom="16x16x128": the gaps (gap g follows MFMA g of a column half)
+    of a half's n VMEM ops, evenly from gap 2 and at least four apart."""
+    if n > (_HALF16 - _GAP0_16 + _VMEM_SPACING16 - 1) // _VMEM_SPACING16:
+        raise ValueError(f"{n} VMEM ops do not fit {_VMEM_SPACING16} gaps apart in a column half")
+    step = max(_VMEM_SPACING16, (_HALF16 - _GAP0_16) // max(n, 1))
+    return [_GAP0_16 + q * step for q in range(n)]
+
+
+def _atom16_valid(spec: TiledBlockScaledGemmSpec) -> tuple[bool, str]:
+    """`is_valid_spec`'s rules for mfma_atom="16x16x128"."""
+    for field, value in _ATOM16_FIELDS.items():
+        if getattr(spec, field) != value:
+            return False, f"mfma_atom=16x16x128 takes {field}={value!r}"
+    if spec.epi16 not in EPI16S:
+        return False, f"epi16 must be one of {EPI16S}"
+    if spec.sched16 != "none":
+        names = spec.sched16.split("+")
+        if any(p not in SCHED16S for p in names) or len(set(names)) != len(names):
+            return False, f"sched16 must be 'none' or distinct names from {SCHED16S} joined with '+'"
+    if spec.peel16 not in PEEL16S:
+        return False, f"peel16 must be one of {PEEL16S}"
+    trips, rem = divmod(spec.K, _TRIP16 * STAGE_K)
+    if rem or trips < 1 or trips & (trips - 1):
+        return False, (f"mfma_atom=16x16x128 runs a power of two of whole trips of {_TRIP16} K128 stages: "
+                       f"K = {_TRIP16 * STAGE_K} * 2^n")
+    return True, "ok"
+
+
+def _barrier_vmcnt16(log: Sequence[int | None], bars: Sequence[tuple[int, int, bool | str]], body: tuple[int, int],
+                     trips: int, tail: tuple[int, int] | None = None) -> list[int]:
+    """mfma_atom="16x16x128": each barrier's vmcnt. `log` holds every VMEM op
+    in program order with the barrier it must land by (None: the compiler
+    waits for it), the K loop's body at `log[body[0]:body[1]]` with barriers
+    counted from its trip (2 s for Bar(mid) of stage s, 2 s + 1 for E(s)), the
+    rest (the prologue) from the first trip. With `tail` (peel16) the loop
+    runs trips - 1 times and the last trip, at `log[tail[0]:tail[1]]`, follows
+    it with barriers counted from its own trip. `bars`: (log position,
+    barrier, True in the loop / False in the prologue / "peel" in the last
+    trip). A barrier lets the VMEM ops issued after the last one it needs
+    stay in flight, the fewest over the trips (vmcnt retires in order); the
+    second trip's count holds for every later one. -1: no wait."""
+    pro, loop = list(log[: body[0]]), list(log[body[0] : body[1]])
+    period = 2 * _TRIP16
+    span = min(trips - (tail is not None), 2)
+    stream = pro + [None if g is None else g + period * t for t in range(span) for g in loop]
+    if tail is not None:
+        stream += [None if g is None else g + period * span for g in log[tail[0] : tail[1]]]
+    out = []
+    for at, bid, in_loop in bars:
+        counts = []
+        if in_loop == "peel":
+            pos = len(pro) + span * len(loop) + at - tail[0]
+            last = next((q for q in range(pos - 1, -1, -1)
+                         if stream[q] is not None and stream[q] <= bid + period * span), None)
+            out.append(min(pos - 1 - last, _VMCNT_MAX) if last is not None else -1)
+            continue
+        for t in range(span) if in_loop else (0,):
+            pos = len(pro) + t * len(loop) + at - body[0] if in_loop else at
+            gate = bid + period * t if in_loop else bid
+            last = next((q for q in range(pos - 1, -1, -1) if stream[q] is not None and stream[q] <= gate), None)
+            if last is not None:
+                counts.append(pos - 1 - last)
+        out.append(min(min(counts), _VMCNT_MAX) if counts else -1)
+    return out
+
+
+def _build_tiled16(spec: TiledBlockScaledGemmSpec) -> KernelDef:
+    """mfma_atom="16x16x128": the tiled FP6 GEMM on the 16x16x128 scaled MFMA.
+
+    Stage s computes each wave's 8 x 8 tiles of 16 x 16 in two column halves
+    of four column blocks, 32 MFMAs each: column block outer, the row blocks
+    forward in even and backward in odd column blocks, so that consecutive
+    MFMAs change one operand. A barrier ends each half: Bar(mid) and E. The
+    MFMAs read stage s's eight A fragments and their scale bytes, read during
+    stage s-1 (row blocks 0-3 in its first half, 4-7 in its second), and the
+    B fragments of their column half, read one half earlier (column half 0
+    in stage s-1's second half, column half 1 in stage s's first). A lane's
+    B scale dword of a column half holds one byte per column block.
+
+    The memory side is the line ring's (`a_ring="line"`) with lds2 A scales,
+    and B in two K128 slots of two column halves. Stage s issues B(s+2)'s
+    column half h in its half h (that sub-slot is free from the barrier
+    before); in the stages that refill a line (`line16_at`), the DMA passes of
+    every wave's row blocks 0-3 in half 0 and the rest in half 1 (the slot is
+    free from E(s-1)); in even stages the B scale pair of stages s+2 and s+3
+    in half 0; in stages 0 and 4 of a trip one of the next epoch's two A scale
+    DMAs in half 1, behind that pair load (vmcnt retires in order). A half's
+    VMEM ops are at least four MFMA gaps apart from gap 2 (`slots16`), its
+    reads one per remaining gap from gap 2, and every barrier waits for the
+    DMAs that the reads after it need (`_barrier_vmcnt16`).
+
+    A K-loop trip is eight stages, one lds2 epoch. Its last stages issue the
+    next trip's DMAs from the next trip's sources, which wrap to the first
+    trip (K / 1024 trips, a power of two), so the last trip's copies for
+    stages past K stay inside the tensors and land in slots no stage reads.
+    """
+    T = spec.threads
+    KT = spec.K // STAGE_K
+    trips = KT // _TRIP16
+    pitch = _pitch(spec)
+    tm, tn = spec.wave_tile_m // 16, spec.wave_tile_n // 16
+    half_cols = tn // 2
+    pairs_half = half_cols // 2
+    lines_per_trip = _TRIP16 // _LINE_PERIOD * _LINE_SLOTS
+    opts = set() if spec.sched16 == "none" else set(spec.sched16.split("+"))
+
+    ir = IRBuilder(spec.kernel_name())
+    c = ir.const_i32
+
+    def plus(x: Value, k: int) -> Value:
+        return ir.add(x, c(k)) if k else x
+
+    ir.kernel.attrs["max_workgroup_size"] = T
+    if spec.waves_per_eu:
+        ir.kernel.attrs["waves_per_eu"] = (spec.waves_per_eu, spec.waves_per_eu)
+    # The ring is read while DMAs land in its other slots; the barrier waits
+    # order every DMA.
+    ir.kernel.attrs["lds_dma_explicit"] = True
+    if spec.cc_passes != "none":
+        for p in CC_PASSES if spec.cc_passes == "all" else spec.cc_passes.split("+"):
+            ir.kernel.attrs[p] = True
+    if spec.cc_extra != "none":
+        for p in CC_EXTRAS if spec.cc_extra == "all" else spec.cc_extra.split("+"):
+            ir.kernel.attrs[p] = True
+    if spec.kernarg_preload:
+        ir.kernel.attrs["kernarg_preload"] = True
+
+    A = ir.param("A", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
+    B = ir.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
+    AS = ir.param("A_scale", PtrType(I32, "global"), noalias=True, readonly=True, align=4)
+    BS = ir.param("B_scale", PtrType(I32, "global"), noalias=True, readonly=True, align=16)
+    c_ty = _OUTPUT_DTYPES[spec.dtype_c]
+    C = ir.param("C", PtrType(c_ty, "global"), noalias=True, writeonly=True, align=16)
+    if spec.shape_args:
+        for name in ("M", "N", "K"):
+            ir.param(name, I32)
+
+    tid = ir.thread_id_x()
+    lane = ir.mod(tid, c(_WAVE))
+    wave = ir.to_sgpr_u32(ir.div(tid, c(_WAVE)))
+    r32, half = ir.mod(lane, c(32)), ir.div(lane, c(32))
+    wm = ir.div(wave, c(spec.waves_n))
+    wn = ir.mod(wave, c(spec.waves_n))
+    kg, r16 = mx16_operand_lane(lane, ir)
+    m0, n0 = _tile_origin(ir, spec)
+
+    # ---- sources: A rows, B per stage and column half, row-major A scales,
+    # B scale pairs ([stage pair][column group][lane][16 B])
+    a_rsrc = ir.buffer_rsrc(A, c(spec.M * pitch))
+    b_rsrc = ir.buffer_rsrc(B, c(spec.N * pitch))
+    as_rsrc = ir.buffer_rsrc(AS, c(spec.M * KT * 4))
+    pair_bytes = spec.N // spec.wave_tile_n * _WAVE * 16
+    bs_rsrc = ir.buffer_rsrc(BS, c(KT // 2 * pair_bytes))
+    a_soff0 = ir.mul(m0, c(pitch))
+    b_soff0 = ir.mul(n0, c(_HALF_ROW_BYTES))
+    as_soff0 = ir.mul(m0, c(KT * 4))
+    bs_soff0 = ir.mul(ir.add(ir.div(n0, c(spec.wave_tile_n)), wn), c(_WAVE * 16))
+
+    # ---- LDS: B's two slots, A's line ring, the two lds2 epoch slots
+    b_lds = [ir.smem_alloc(I32, [spec.block_n * _ROW_DWORDS], name_hint=f"b_lds{s}") for s in range(spec.stages)]
+    a_ring = ir.smem_alloc(I32, [_LINE_SLOTS * spec.block_m * _LINE_BYTES // 4], name_hint="a_lines")
+    as_slot = spec.block_m * _EPOCH_BYTES
+    as_lds = ir.smem_alloc(I8, [2 * as_slot], name_hint="a_scales")
+    wave_lds = ir.zext(ir.to_sgpr_u32(ir.mul(wave, c(_WAVE * 16))), I64)
+    b_wave = [ir.smem_ptr_add(ir.smem_addr_of(x), wave_lds) for x in b_lds]
+    a_ring_wave = ir.smem_ptr_add(ir.smem_addr_of(a_ring), wave_lds)
+    as_wave = ir.smem_ptr_add(ir.smem_addr_of(as_lds), wave_lds)
+
+    # ---- DMA lanes. A line: lane q of pass p writes row q // 8's LDS chunk
+    # q % 8, which holds the line's chunk rotated by `_line_rotation`; pass p
+    # covers rows 32 p .. 32 p + 32, so each wave row's row blocks 0-3 come
+    # from its first two passes.
+    line_passes = spec.block_m * _LINE_CHUNKS // T
+    voff_line = []
+    for p in range(line_passes):
+        q = ir.add(tid, c(p * T))
+        row = ir.lshr(q, c(3))
+        chunk = ir.land(ir.add(ir.land(q, c(_LINE_CHUNKS - 1)), _line_rotation(ir, spec, row)), c(_LINE_CHUNKS - 1))
+        voff_line.append(ir.add(ir.mul(row, c(pitch)), ir.mul(chunk, c(16))))
+    rows_per_pass = T // _LINE_CHUNKS
+    line_half = [[p for p in range(line_passes) if p * rows_per_pass % spec.wave_tile_m // (spec.wave_tile_m // 2) == h]
+                 for h in range(2)]
+    half_passes = spec.block_n * _HALF_ROW_BYTES // 16 // T
+    voff_half = [ir.mul(ir.add(tid, c(p * T)), c(16)) for p in range(half_passes)]
+    n_waves = T // _WAVE
+    as_voff = [
+        ir.add(ir.mul(ir.add(ir.mul(ir.add(wave, c(n_waves * k)), c(32)), r32), c(KT * 4)), ir.mul(half, c(16)))
+        for k in range(spec.block_m // 32 // n_waves)
+    ]
+    bs_voff = ir.mul(lane, c(16))
+
+    # ---- read lanes. A: one dword index per (ring phase u, piece p) with the
+    # line slot of the lane's piece; a row block is 16 rows of 128 bytes on.
+    rot = _line_rotation(ir, spec, r16)
+    a_row_dw = ir.mul(ir.add(ir.mul(wm, c(spec.wave_tile_m)), r16), c(_LINE_BYTES // 4))
+    kg24 = ir.mul(kg, c(24))
+    a_idx = {}
+    for u in range(_LINE_PERIOD):
+        for p in range(3):
+            pos = ir.add(kg24, c(_ROW_BYTES * u + 8 * p))
+            w = ir.land(pos, c(_LINE_BYTES - 1))
+            chunk = ir.land(ir.sub(ir.add(ir.lshr(w, c(4)), c(_LINE_CHUNKS)), rot), c(_LINE_CHUNKS - 1))
+            slot_dw = ir.mul(ir.lshr(pos, c(7)), c(spec.block_m * _LINE_BYTES // 4))
+            in_chunk = ir.lshr(ir.land(w, c(15)), c(2))
+            a_idx[(u, p)] = ir.add(ir.add(slot_dw, a_row_dw), ir.add(ir.mul(chunk, c(4)), in_chunk))
+    a_blk_dw = 16 * _LINE_BYTES // 4
+    # B: a column half's sub-slot holds per wave column, column-block pair and
+    # plane the 64 lanes' 16 bytes (`bench.b_c0c1p`).
+    half_dw = spec.block_n * _HALF_ROW_BYTES // 4
+    plane_dw = _WAVE * 4
+    b_idx = ir.add(ir.mul(lane, c(4)), ir.mul(wn, c(pairs_half * 3 * plane_dw)))
+    # A scales: lds2 holds [slot][32-row block][epoch half][32 rows][16 B];
+    # the byte of row block i at stage t of the epoch is at `as_imm(i, t)`.
+    as_half, as_blk = 32 * 16, 2 * 32 * 16
+    as_lane = ir.add(ir.add(ir.mul(wm, c(spec.wave_tile_m // 32 * as_blk)), ir.mul(r16, c(16))), kg)
+
+    def as_imm(i: int, t: int) -> int:
+        return i // 2 * as_blk + i % 2 * 16 * 16 + t // 4 * as_half + 4 * (t % 4)
+
+    # ---- VMEM log: each op with the barrier it must land by; the barriers'
+    # vmcnt come from it once the program is known.
+    vlog: list[int | None] = []
+    bars: list = []
+
+    def barrier(bid: int, in_loop: bool, lgkm: int = 0) -> None:
+        bars.append((ir.s_waitcnt(lgkmcnt=lgkm), len(vlog), bid, in_loop))
+        ir.s_barrier_bare(fence="compiler")
+
+    def line_dma(slot: int, soff: Callable[[], Value], passes: Sequence[int], gate: int) -> list[Callable[[], None]]:
+        out = []
+        for p in passes:
+            def issue(p=p):
+                off = slot * spec.block_m * _LINE_BYTES + p * T * 16
+                dst = ir.smem_ptr_add(a_ring_wave, ir.const_i64(off)) if off else a_ring_wave
+                ir.async_buffer_load_lds_addr(a_rsrc, dst, voff_line[p], soff(), 4, coherency=spec.dma_cache)
+                vlog.append(gate)
+
+            out.append(issue)
+        return out
+
+    def b_dma(slot: int, h: int, soff: Callable[[], Value], gate: int) -> list[Callable[[], None]]:
+        out = []
+        for p, voff in enumerate(voff_half):
+            def issue(p=p, voff=voff):
+                off = h * spec.block_n * _HALF_ROW_BYTES + p * T * 16
+                dst = ir.smem_ptr_add(b_wave[slot], ir.const_i64(off)) if off else b_wave[slot]
+                ir.async_buffer_load_lds_addr(b_rsrc, dst, voff, soff(), 4, coherency=spec.dma_cache)
+                vlog.append(gate)
+
+            out.append(issue)
+        return out
+
+    def z_dma(k: int, slot: Callable[[], Value] | None, soff: Callable[[], Value], gate: int) -> Callable[[], None]:
+        def issue():
+            off = k * n_waves * _WAVE * 16
+            if slot is None:
+                dst = ir.smem_ptr_add(as_wave, ir.const_i64(off)) if off else as_wave
+            else:
+                dst = ir.smem_ptr_add(as_wave, ir.zext(ir.to_sgpr_u32(plus(slot(), off)), I64))
+            ir.async_buffer_load_lds_addr(as_rsrc, dst, as_voff[k], soff(), 4)
+            vlog.append(gate)
+
+        return issue
+
+    def pair_load(soff: Callable[[], Value], pairs: dict, v: int) -> Callable[[], None]:
+        def issue():
+            pairs[v] = ir.buffer_load_vN(bs_rsrc, bs_voff, soff(), I32, 4)
+            vlog.append(None)
+
+        return issue
+
+    zero2 = ir.vector_splat(c(0), 2)
+
+    def a_reads(u: int, sbase: Callable[[], Value], t: int, frags: list, scales: list,
+                rows: Sequence[int]) -> list[Callable[[], None]]:
+        """Per row block: its fragment's three 8-byte pieces of ring phase u,
+        then its scale byte of stage t of the epoch (lds2 slot at `sbase`)."""
+        out = []
+        for i in rows:
+            parts: list = [None] * 3
+            for p in range(3):
+                def piece(i=i, p=p, parts=parts):
+                    parts[p] = ir.smem_load_vN(a_ring, plus(a_idx[(u, p)], i * a_blk_dw), dtype=I32, n=2)
+                    if p == 2:
+                        frags[i] = ir.vec_concat(ir.vec_concat(ir.vec_concat(parts[0], parts[1]), parts[2]), zero2)
+
+                out.append(piece)
+
+            def scale(i=i):
+                # ds_read_u8 zero-extends; the MFMA reads byte 0 of the register.
+                scales[i] = ir.vec_extract(ir.smem_load_vN(as_lds, plus(sbase(), as_imm(i, t)), dtype=I8, n=1), 0)
+
+            out.append(scale)
+        return out
+
+    def b_reads(slot: int, h: int, frags: list) -> list[Callable[[], None]]:
+        """Column half h's fragments: per column-block pair three 16-byte
+        planes, twelve dwords that are the pair's two operands."""
+        out = []
+        for pr in range(pairs_half):
+            planes: list = [None] * 3
+            for k in range(3):
+                def plane(pr=pr, k=k, planes=planes):
+                    planes[k] = ir.smem_load_vN(b_lds[slot], plus(b_idx, h * half_dw + (3 * pr + k) * plane_dw),
+                                                dtype=I32, n=4)
+                    if k == 2:
+                        # Each operand takes eight registers and the MFMA reads
+                        # six: as eight of one 14-register tuple, the first
+                        # operand's last two are the second's first two, and
+                        # the second's last two pad the tuple, so the three
+                        # reads land in the operands' registers.
+                        dw = [ir.vec_extract(x, e) for x in planes for e in range(4)]
+                        both = ir.vec_pack(dw + [c(0), c(0)], I32)
+                        for q in range(2):
+                            frags[2 * pr + q] = ir.vec_pack([ir.vec_extract(both, 6 * q + e) for e in range(8)], I32)
+
+                out.append(plane)
+        return out
+
+    fmt = {"a_format": spec.dtype_a, "b_format": spec.dtype_b}
+
+    def stage_vmem(s: int, pairs: dict, tv: dict, last: bool = False) -> tuple[list, list]:
+        """Stage s's VMEM ops per column half, B's first in each. `last`
+        (peel16="skip"): none of the next trip's."""
+        out: tuple[list, list] = ([], [])
+        t, base = (s + 2, tv["b_cur"]) if s + 2 < _TRIP16 else (s + 2 - _TRIP16, tv["b_nxt"])
+        for h in range(2):
+            if last and s + 2 >= _TRIP16:
+                break
+            soff = _Once(lambda h=h: plus(base(), t * spec.N * _ROW_BYTES + h * spec.N * _HALF_ROW_BYTES))
+            out[h].extend(b_dma(s % 2, h, soff, 2 * (s + 1) + h))
+        line = line16_at(s)
+        if last and line is not None and line >= lines_per_trip:
+            line = None
+        if line is not None:
+            lbase, lo = (tv["a_cur"], line) if line < lines_per_trip else (tv["a_nxt"], line - lines_per_trip)
+            soff = _Once(lambda: plus(lbase(), lo * _LINE_BYTES))
+            first = line16_first_need(line)
+            for h, gate in enumerate((2 * (first - 2) + 1, 2 * (first - 1))):
+                out[h].extend(line_dma(line % _LINE_SLOTS, soff, line_half[h], gate))
+        if "pairlight" in opts:
+            loads = [s // 2 + 1, s // 2 + 2] if s % _LINE_PERIOD == 0 else []
+        else:
+            loads = [s // 2 + 1] if s % 2 == 0 else []
+        for v in loads:
+            if (trips == 1 or last) and v == _TRIP16 // 2:
+                # One trip: the pair of stages past K, which nothing reads; the
+                # compiler would drop it while the waits count it.
+                continue
+            pbase, vo = (tv["p_cur"], v) if v < _TRIP16 // 2 else (tv["p_nxt"], v - _TRIP16 // 2)
+            out[0].append(pair_load(_Once(lambda pbase=pbase, vo=vo: plus(pbase(), vo * pair_bytes)), pairs, v))
+        if s % _LINE_PERIOD == 0 and not last:
+            out[1].append(z_dma(s // _LINE_PERIOD, tv["z_slot"], tv["z_soff"], 2 * (_TRIP16 - 2) + 1))
+        return out
+
+    def place(vmem: list, reads: list) -> list[list]:
+        slots: list[list] = [[] for _ in range(_HALF16)]
+        at = slots16(len(vmem))
+        for g, fill in zip(at, vmem):
+            slots[g].append(fill)
+        free = [g for g in range(_GAP0_16, _HALF16) if g not in at]
+        if len(reads) > len(free):
+            raise ValueError("a column half's reads do not fit one per free gap")
+        for g, fill in zip(free, reads):
+            slots[g].append(fill)
+        return slots
+
+    def stage(s: int, accs: list, a_cur: list, sa_cur: list, b_h0: list, pairs: dict, tv: dict,
+              last: bool = False) -> tuple:
+        """Stage s (0..7) of a trip; returns (accs, stage s+1's A fragments,
+        their scale bytes, its column half 0's B fragments). `last`: the
+        peeled last trip, whose stage 7 reads nothing for a next stage."""
+        a_nxt, sa_nxt = [None] * tm, [None] * tm
+        b_h1, b_h0n = [None] * half_cols, [None] * half_cols
+        end = last and s == _TRIP16 - 1
+        ra = [] if end else a_reads((s + 1) % _LINE_PERIOD, tv["s_nxt" if s == _TRIP16 - 1 else "s_cur"],
+                                    (s + 1) % _TRIP16, a_nxt, sa_nxt, range(tm))
+        reads = (b_reads(s % 2, 1, b_h1) + ra[: len(ra) // 2],
+                 ([] if end else b_reads((s + 1) % 2, 0, b_h0n)) + ra[len(ra) // 2 :])
+        vmem = stage_vmem(s, pairs, tv, last)
+        for h in range(2):
+            slots = place(vmem[h], reads[h])
+            if h == 0 and spec.setprio:
+                ir.s_setprio(1)
+            sb = ir.vec_extract(pairs[s // 2], 2 * (s % 2) + h)
+            frags = b_h0 if h == 0 else b_h1
+            for g in range(_HALF16):
+                jj, ii = divmod(g, tm)
+                i = ii if jj % 2 == 0 else tm - 1 - ii
+                k = i * tn + half_cols * h + jj
+                accs[k] = ir.mma(_MX16_OP, a_cur[i], frags[jj], accs[k], sa_cur[i], sb,
+                                 attrs={**fmt, "scale_sel": [0, jj]})
+                if "fence" in opts:
+                    ir.sched_barrier(0)
+                for fill in slots[g]:
+                    fill()
+                ir.sched_barrier(0)
+            if h == 1 and spec.setprio:
+                ir.s_setprio(0)
+            # midlgkm: LDS returns in order, so Bar(mid) need only see the half's
+            # B reads, its first, done; the A reads after them may be in flight.
+            # One trip: the last stage's A reads are for a stage past K, which
+            # the compiler drops, so they cannot hold the count.
+            n_after = 0 if trips == 1 and s == _TRIP16 - 1 else len(reads[0]) - 3 * pairs_half
+            barrier(2 * s + h, "peel" if last else True,
+                    min(n_after, _LGKMCNT_MAX) if h == 0 and "midlgkm" in opts else 0)
+        return accs, a_nxt, sa_nxt, b_h0n
+
+    def trip_values(it: Value) -> dict:
+        """A trip's source offsets (and the next trip's, wrapped) and lds2
+        slots, each emitted where first used."""
+        nxt = _Once(lambda: ir.land(ir.add(it, c(1)), c(trips - 1)))
+        par = _Once(lambda: ir.land(it, c(1)))
+        npar = _Once(lambda: ir.land(ir.add(it, c(1)), c(1)))
+        a_step, b_step, p_step = lines_per_trip * _LINE_BYTES, _TRIP16 * spec.N * _ROW_BYTES, _TRIP16 // 2 * pair_bytes
+        return {
+            "a_cur": _Once(lambda: ir.add(a_soff0, ir.mul(it, c(a_step)))),
+            "a_nxt": _Once(lambda: ir.add(a_soff0, ir.mul(nxt(), c(a_step)))),
+            "b_cur": _Once(lambda: ir.add(b_soff0, ir.mul(it, c(b_step)))),
+            "b_nxt": _Once(lambda: ir.add(b_soff0, ir.mul(nxt(), c(b_step)))),
+            "p_cur": _Once(lambda: ir.add(bs_soff0, ir.mul(it, c(p_step)))),
+            "p_nxt": _Once(lambda: ir.add(bs_soff0, ir.mul(nxt(), c(p_step)))),
+            "z_soff": _Once(lambda: ir.add(as_soff0, ir.mul(nxt(), c(_EPOCH_BYTES)))),
+            "z_slot": _Once(lambda: ir.mul(npar(), c(as_slot))),
+            "s_cur": _Once(lambda: ir.add(as_lane, ir.mul(par(), c(as_slot)))),
+            "s_nxt": _Once(lambda: ir.add(as_lane, ir.mul(npar(), c(as_slot)))),
+        }
+
+    # ---- prologue: epoch 0's A scales, lines 0-2, B(0) and B(1), in the
+    # order their barriers come, then B scale pair 0. Bar(mid) of stage -1
+    # covers the reads of stage 0's A fragments and column half 0, and E(-1)
+    # their end, before stage 0 refills B(0)'s column half 0.
+    pro: list[tuple[int, Callable[[], None]]] = []
+    for k in range(len(as_voff)):
+        pro.append((-2, z_dma(k, None, lambda: as_soff0, -2)))
+    for line in range(_LINE_SLOTS):
+        soff = _Once(lambda line=line: plus(a_soff0, line * _LINE_BYTES))
+        first = line16_first_need(line)
+        for h, gate in enumerate((2 * (first - 2) + 1, 2 * (first - 1))):
+            pro += [(max(gate, -2), x) for x in line_dma(line, soff, line_half[h], max(gate, -2))]
+    for t in range(2):
+        for h in range(2):
+            gate = 2 * (t - 1) + h
+            soff = _Once(lambda t=t, h=h: plus(b_soff0, t * spec.N * _ROW_BYTES + h * spec.N * _HALF_ROW_BYTES))
+            pro += [(gate, x) for x in b_dma(t, h, soff, gate)]
+    for _, issue in sorted(pro, key=lambda e: e[0]):
+        issue()
+    pairs0: dict = {}
+    pair_load(lambda: bs_soff0, pairs0, 0)()
+    barrier(-2, False)
+    a_cur, sa_cur, b_h0 = [None] * tm, [None] * tm, [None] * half_cols
+    for read in a_reads(0, lambda: as_lane, 0, a_cur, sa_cur, range(tm)) + b_reads(0, 0, b_h0):
+        read()
+    barrier(-1, False)
+    accs = [ir.zero_vec_f32(4) for _ in range(tm * tn)]
+
+    # ---- K loop
+    n_acc = len(accs)
+    carried = [(f"acc{k}", a) for k, a in enumerate(accs)] + [(f"fa{i}", f) for i, f in enumerate(a_cur)]
+    carried += [(f"sa{i}", x) for i, x in enumerate(sa_cur)] + [(f"fb{j}", f) for j, f in enumerate(b_h0)]
+    carried += [("bs", pairs0[0])]
+    body_at = len(vlog)
+    for _ in range(spec.loop_pad):
+        ir.s_setprio(0)
+    peel = spec.peel16 == "skip"
+    if trips - peel:
+        loop = ir.scf_for_iter(c(0), c(trips - peel), c(1), carried, iv_name="kloop")
+        with loop as (it, vals):
+            vals = list(vals)
+            accs = vals[:n_acc]
+            a_cur, sa_cur = vals[n_acc : n_acc + tm], vals[n_acc + tm : n_acc + 2 * tm]
+            b_h0 = vals[n_acc + 2 * tm : n_acc + 2 * tm + half_cols]
+            pairs = {0: vals[-1]}
+            tv = trip_values(it)
+            for s in range(_TRIP16):
+                accs, a_cur, sa_cur, b_h0 = stage(s, accs, a_cur, sa_cur, b_h0, pairs, tv)
+            ir.scf_yield(*accs, *a_cur, *sa_cur, *b_h0, pairs.get(_TRIP16 // 2, vals[-1]))
+        carried = [(k, v) for (k, _), v in zip(carried, loop.results)]
+    body = (body_at, len(vlog))
+    vals = [v for _, v in carried]
+    accs = vals[:n_acc]
+    tail = None
+    if peel:
+        a_cur, sa_cur = vals[n_acc : n_acc + tm], vals[n_acc + tm : n_acc + 2 * tm]
+        b_h0 = vals[n_acc + 2 * tm : n_acc + 2 * tm + half_cols]
+        pairs = {0: vals[-1]}
+        tv = trip_values(c(trips - 1))
+        for s in range(_TRIP16):
+            accs, a_cur, sa_cur, b_h0 = stage(s, accs, a_cur, sa_cur, b_h0, pairs, tv, last=True)
+        tail = (body[1], len(vlog))
+    for (op, *_), n in zip(bars, _barrier_vmcnt16(vlog, [b[1:] for b in bars], body, trips, tail)):
+        op.attrs["vmcnt"] = n
+    # The last trip's copies past K land in slots nothing reads; drain them.
+    ir.s_waitcnt(vmcnt=0)
+
+    # ---- epilogue: element e of accumulator (i, j) in lane (kg, r) is row
+    # 16 i + 4 kg + e, column 16 j + r of the wave's tile; the row and the
+    # wave's origin in the SGPR offset, the lane in the VGPR one.
+    c_rsrc = ir.buffer_rsrc(C, c(spec.M * spec.N * 2))
+    origin = ir.add(ir.mul(ir.add(m0, ir.mul(wm, c(spec.wave_tile_m))), c(spec.N)),
+                    ir.add(n0, ir.mul(wn, c(spec.wave_tile_n))))
+    s_origin = ir.mul(origin, c(2))
+    store = ir.buffer_store_bf16 if spec.dtype_c == "bf16" else ir.buffer_store_f16
+
+    def rounded(acc: Value, e: int) -> Value:
+        """Elements e and e + 1 of `acc`, rounded by one packed convert."""
+        return ir.vec_cast_f32_to(ir.vec_pack([ir.vec_extract(acc, e), ir.vec_extract(acc, e + 1)], F32), c_ty)
+
+    if spec.epi16 == "swap":
+        # Swapping lanes 32-63 of column block 2p's dword with lanes 0-31 of
+        # 2p + 1's leaves in lane (kg, r) of the first rows 4 (kg % 2) + e and
+        # of the second rows 8 + 4 (kg % 2) + e, column 16 (kg // 2) + r of
+        # the pair.
+        lane_b = ir.mul(ir.add(ir.add(ir.mul(ir.land(kg, c(1)), c(4 * spec.N)), ir.mul(ir.lshr(kg, c(1)), c(16))),
+                               r16), c(2))
+        voffs = [plus(lane_b, 64 * p) for p in range(tn // 2)]
+        for i in range(tm):
+            soffs = [[plus(s_origin, (16 * i + 8 * y + e) * 2 * spec.N) for e in range(4)] for y in range(2)]
+            for p in range(tn // 2):
+                for e in range(0, 4, 2):
+                    dw = [ir.bitcast(rounded(accs[i * tn + 2 * p + q], e), I32) for q in range(2)]
+                    four = ir.bitcast(ir.vec_pack(list(ir.permlane32_swap(*dw)), I32), VectorType(c_ty, 4))
+                    for y in range(2):
+                        for d in range(2):
+                            store(c_rsrc, voffs[p], soffs[y][e + d], ir.vec_extract(four, 2 * y + d))
+        ir.ret()
+        return ir.kernel
+    lane_b = ir.mul(ir.add(ir.mul(kg, c(4 * spec.N)), r16), c(2))
+    voffs = [plus(lane_b, 32 * j) for j in range(tn)]
+    for i in range(tm):
+        soffs = [plus(s_origin, (16 * i + e) * 2 * spec.N) for e in range(4)]
+        for j in range(tn):
+            acc = accs[i * tn + j]
+            for e in range(0, 4, 2):
+                two = rounded(acc, e)
+                for d in range(2):
+                    store(c_rsrc, voffs[j], soffs[e + d], ir.vec_extract(two, d))
+    ir.ret()
+    return ir.kernel
 
 
 __all__ = [
