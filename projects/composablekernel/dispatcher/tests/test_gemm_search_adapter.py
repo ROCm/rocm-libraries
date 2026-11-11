@@ -1284,6 +1284,8 @@ def test_streamk_plain_repeat_top_keeps_each_budget(tmp_path, monkeypatch, capsy
     discovery, *repeats = tc.payloads
     assert discovery["arch"] == "gfx950" and discovery["verify"] is True
     assert len(repeats) == 4 and all(p["verify"] is False for p in repeats)
+    assert all(p["arch"] == "gfx950" for p in repeats)
+    assert tc.arches == ["gfx950"] * 6
     for payloads in ([discovery], repeats[:2], repeats[2:]):
         assert sorted(
             (it["kernel_name"], it["env"][ENV]) for p in payloads for it in p["items"]

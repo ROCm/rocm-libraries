@@ -769,6 +769,73 @@ def test_streamk_default_configs_and_budget_option(monkeypatch, capsys, tmp_path
         assert e.value.code == 2 and message in capsys.readouterr().err
 
 
+def test_streamk_pipeline_filter_preserves_budgets_across_run_modes(
+    monkeypatch, capsys, tmp_path
+):
+    kernels, full = _sk_listing(
+        monkeypatch, capsys, tmp_path, "--budget-pct", "100,50", problems=PROBLEMS[:1]
+    )
+    kernel = next(
+        n
+        for n in full[KEYS[0]]
+        if kernels[n]["pipeline"] == "comp_tdm_v3"
+        and not kernels[n]["persistent"]
+        and kernels[n]["budget_pct"] == 100
+    )
+    expected = [kernel, f"{kernel}@budget50"]
+    argv = [
+        "--budget-pct",
+        "100,50",
+        "--pipelines",
+        "comp_tdm_v3",
+        "--max-kernels",
+        "1",
+    ]
+    selected, pairs = _sk_listing(
+        monkeypatch, capsys, tmp_path, *argv, problems=PROBLEMS[:1]
+    )
+    assert pairs == {KEYS[0]: expected}
+    assert {r["pipeline"] for r in selected.values()} == {"comp_tdm_v3"}
+    assert {r["budget_pct"] for r in selected.values()} == {100, 50}
+    assert _read(tmp_path, "sk-pairs.json")["pipelines"] == ["comp_tdm_v3"]
+    rc, cap, built, calls = _main(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        SK_CONFIG,
+        *STREAMK,
+        *argv,
+        problems=PROBLEMS[:1],
+        fixed=SK_BF16,
+    )
+    assert rc == 0, cap.out
+    assert built == [kernel] and [n for c in calls for n in c["names"]] == expected
+    pick = tmp_path / "pick.json"
+    pick.write_text(json.dumps({KEYS[0]: expected}))
+    rc, cap, built, calls, out = _search(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        SK_CONFIG,
+        *STREAMK,
+        *argv,
+        "--pairs",
+        str(pick),
+        problems=PROBLEMS[:1],
+        fixed=SK_BF16,
+        host_cache={"max_total_gib": 0},
+    )
+    assert rc == 0, cap.out
+    assert built == [kernel] and {n for c in calls for n in c["names"]} == set(expected)
+    context = _read(out, "run.json")["context"]
+    assert context["pipelines"] == ["comp_tdm_v3"] and context["budget_pct"] == [
+        100,
+        50,
+    ]
+    assert _read(out, "summary.json")["budget"]["builds_charged"] == 1
+    _assert_worker(calls)
+
+
 def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsys,
                                                               tmp_path):
     # Without a search: every kernel is built once and measured once per

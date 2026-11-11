@@ -1591,32 +1591,34 @@ def test_warm_start_cover_list_must_leave_trials_to_the_strategy(tmp_path):
 def test_warm_start_pairs_cover_values_in_every_field(tmp_path):
     picks = tmp_path / "picks.json"
     picks.write_text(json.dumps({"P1": ["D", "E", "F", "A"]}))
-    calls = []
-    run(
-        tmp_path,
-        PipePersistAdapter({"P1": list(KERNELS[:9])}),
-        {},
-        calls=calls,
-        strategy="tpe",
-        pair_loader=json_pairs,
-        trials_per_problem=6,
-        warm_start={
-            "pairs_file": str(picks),
-            "top_k": 3,
-            "cover": ["pipeline", "persistent"],
-        },
-    )
-    # D/E/F cover all pipelines and persistent=True; the second field must
-    # add False, not repeat True or let top_k truncate the cover.
-    warm = calls[0]["warm"]
-    assert [w["tile_m"] for w in warm[:3]] == [rec(n)["tile_m"] for n in "DEF"]
-    assert len(warm) == 4 and warm[-1]["persistent"] is False
-    meta = strict(tmp_path / "out" / "run.json")["problems"]["P1"]
-    assert meta["warm_start"][:3] == ["D", "E", "F"]
-    assert meta["warm_cover"] == {
-        "pipeline": {},
-        "persistent": {"False": meta["warm_start"][-1]},
-    }
+    results = []
+    for cover in (["pipeline", "persistent"], ["persistent", "pipeline"]):
+        calls = []
+        out = tmp_path / cover[0]
+        run(
+            out,
+            PipePersistAdapter({"P1": list(KERNELS[:9])}),
+            {},
+            calls=calls,
+            strategy="tpe",
+            seed=1,
+            pair_loader=json_pairs,
+            trials_per_problem=6,
+            warm_start={"pairs_file": str(picks), "top_k": 3, "cover": cover},
+        )
+        # D/E/F cover all pipelines and persistent=True; only False is missing.
+        # Moving an already-covered field must not perturb its representative.
+        warm = calls[0]["warm"]
+        assert [w["tile_m"] for w in warm[:3]] == [rec(n)["tile_m"] for n in "DEF"]
+        assert len(warm) == 4 and warm[-1]["persistent"] is False
+        meta = strict(out / "out" / "run.json")["problems"]["P1"]
+        assert meta["warm_start"][:3] == ["D", "E", "F"]
+        assert meta["warm_cover"] == {
+            "pipeline": {},
+            "persistent": {"False": meta["warm_start"][-1]},
+        }
+        results.append(meta["warm_start"])
+    assert results[0] == results[1]
 
 
 @pytest.mark.parametrize("name", ["hill", "tpe", "gp", "de", "portfolio"])
