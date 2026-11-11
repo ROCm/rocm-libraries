@@ -13,6 +13,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <map>
@@ -264,6 +265,63 @@ namespace
             return {};
         indices.resize(std::min<size_t>(numIndices, indices.size()));
         return indices;
+    }
+
+    // Registers payloads until two of their kernels serve `p`, and returns
+    // those two, or fewer if the build's library has no more.
+    std::vector<int> twoUsableKernels(hipblasLtHandle_t               handle,
+                                      Problem const&                  p,
+                                      std::vector<std::string> const& candidates)
+    {
+        std::vector<int> kernels;
+        for(auto const& stem : candidates)
+        {
+            for(int index : registerPayload(handle, stem + ".dat", stem + ".co"))
+            {
+                hipblasLtMatmulHeuristicResult_t result;
+                size_t                           workspace = 0;
+                if(kernels.size() < 2
+                   && findUsableKernel(handle, p, {index}, result, workspace) >= 0)
+                    kernels.push_back(index);
+            }
+            if(kernels.size() == 2)
+                break;
+        }
+        return kernels;
+    }
+
+    // The kernel the journal's last mapping at M x N x K names, as "<datHash>
+    // <coHash> <payloadIndex>", or empty if there is none.
+    std::string lastMapping(fs::path const& library)
+    {
+        std::string last;
+        for(auto const& line : journalLines(library))
+        {
+            std::istringstream in(line);
+            std::string        kind, dat, co, index;
+            int64_t            m = 0, n = 0, batch = 0, k = 0;
+            if(in >> kind >> dat >> co >> index >> m >> n >> batch >> k && kind == "E" && m == M
+               && n == N && batch == 1 && k == K)
+                last = dat + " " + co + " " + index;
+        }
+        return last;
+    }
+
+    // Maps M x N x K to each kernel in turn, and returns the kernel each
+    // journal mapping names, keyed as lastMapping returns it.
+    std::map<std::string, int> mappingNames(hipblasLtHandle_t       handle,
+                                            fs::path const&         library,
+                                            std::vector<int> const& kernels)
+    {
+        std::map<std::string, int> kernelOf;
+        for(int kernel : kernels)
+        {
+            if(hipblasLtLocalKernelSetExactMatch(handle, kernel, M, N, 1, K)
+               != HIPBLAS_STATUS_SUCCESS)
+                return {};
+            kernelOf[lastMapping(library)] = kernel;
+        }
+        return kernelOf;
     }
 
     // Scratch files shared by the two-code-object workers.
@@ -526,6 +584,62 @@ TEST(LocalKernelPersist, MappingAppliesWhatOthersSavedFirst)
     ASSERT_FALSE(tmp.path.empty());
     EXPECT_EQ(
         runWorker("LocalKernelPersist.DISABLED_ReadBackWorker", {libraryEnv(tmp.path / "lib")}), 0);
+}
+
+// Two threads map M x N x K to different kernels at once, round after round.
+// After each round this process selects the kernel of the journal's last
+// mapping at that shape, which is the one every later process selects.
+TEST(LocalKernelPersist, DISABLED_RacingMappingsWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t first, second;
+    ASSERT_EQ(hipblasLtCreate(&first), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtCreate(&second), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+
+    const auto kernels = twoUsableKernels(first, p, candidates);
+    ASSERT_EQ(kernels.size(), 2u) << "no two kernels in this build's library serve the problem";
+    const auto kernelOf = mappingNames(first, library, kernels);
+    ASSERT_EQ(kernelOf.size(), 2u);
+
+    for(int round = 0; round < 100; ++round)
+    {
+        std::atomic<int> ready{0};
+        hipblasStatus_t  status[2];
+        auto             map = [&](int which) {
+            ++ready;
+            while(ready.load() < 2)
+                std::this_thread::yield();
+            status[which] = hipblasLtLocalKernelSetExactMatch(
+                which ? second : first, kernels[which], M, N, 1, K);
+        };
+        std::thread a(map, 0), b(map, 1);
+        a.join();
+        b.join();
+        ASSERT_EQ(status[0], HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(status[1], HIPBLAS_STATUS_SUCCESS);
+
+        auto const last = kernelOf.find(lastMapping(library));
+        ASSERT_NE(last, kernelOf.end());
+        ASSERT_EQ(topIndex(first, p), last->second) << "round " << round;
+    }
+
+    EXPECT_EQ(hipblasLtDestroy(second), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(hipblasLtDestroy(first), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, RacingMappingsSelectTheLastSaved)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RacingMappingsWorker",
+                        {libraryEnv(tmp.path / "lib")}),
+              0);
 }
 
 // Refresh fails, loading nothing, when the journal cannot be read.
@@ -1223,6 +1337,119 @@ TEST(LocalKernelPersist, SavesForTheHandlesDevice)
               0)
         << "a later process on a device of that scope loads its mappings";
 }
+
+// Device 0 is given another compute unit count than the device hipBLASLt
+// describes its architecture by, which is itself, so the calls that would
+// make or load mappings its queries never find fail.
+TEST(LocalKernelPersist, DISABLED_OtherDeviceClassWorker)
+{
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    const int saved = topIndex(handle, p);
+    ASSERT_GE(saved, LOCAL_INDEX_BASE) << "the saved mapping was loaded at startup";
+
+    int numIndices = -1;
+    EXPECT_EQ(hipblasLtLocalKernelRegister(handle,
+                                           (candidates[0] + ".dat").c_str(),
+                                           (candidates[0] + ".co").c_str(),
+                                           nullptr,
+                                           0,
+                                           &numIndices),
+              HIPBLAS_STATUS_ARCH_MISMATCH);
+    EXPECT_EQ(numIndices, 0);
+    EXPECT_EQ(hipblasLtLocalKernelSetExactMatch(handle, saved, 2 * M, N, 1, K),
+              HIPBLAS_STATUS_ARCH_MISMATCH);
+    size_t added = 123;
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_ARCH_MISMATCH);
+    EXPECT_EQ(added, 0u);
+
+    size_t selectable = 0;
+    counts(handle, nullptr, &selectable);
+    EXPECT_EQ(selectable, 1u) << "nothing was mapped";
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+// A thread maps M x N x K to one kernel and, with
+// HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS, waits between saving the mapping and
+// reading it back. Meanwhile another process maps the shape to a second
+// kernel, here by appending its record, and a Refresh runs. This process
+// then selects the second kernel, as every later process does.
+TEST(LocalKernelPersist, DISABLED_RefreshDuringMappingWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    const auto kernels = twoUsableKernels(handle, p, candidates);
+    ASSERT_EQ(kernels.size(), 2u) << "no two kernels in this build's library serve the problem";
+    const auto kernelOf = mappingNames(handle, library, kernels);
+    ASSERT_EQ(kernelOf.size(), 2u);
+    std::string second;
+    for(auto const& [name, kernel] : kernelOf)
+        if(kernel == kernels[1])
+            second = name;
+    auto lastKernel = [&] {
+        auto found = kernelOf.find(lastMapping(library));
+        return found == kernelOf.end() ? -1 : found->second;
+    };
+
+    hipblasStatus_t mapped = HIPBLAS_STATUS_NOT_INITIALIZED;
+    std::thread     mapping(
+        [&] { mapped = hipblasLtLocalKernelSetExactMatch(handle, kernels[0], M, N, 1, K); });
+    for(int i = 0; i < 6000 && lastKernel() != kernels[0]; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    ASSERT_EQ(lastKernel(), kernels[0]) << "the first mapping was saved";
+    std::ofstream(journalPath(library).string(), std::ios::app)
+        << journalRecord("E " + second + " " + std::to_string(M) + " " + std::to_string(N) + " 1 "
+                         + std::to_string(K))
+        << '\n';
+    size_t added = 123;
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+    mapping.join();
+    ASSERT_EQ(mapped, HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_EQ(lastKernel(), kernels[1]);
+    EXPECT_EQ(topIndex(handle, p), kernels[1]) << "the journal's last mapping is selected";
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, RefreshDuringMappingKeepsJournalOrder)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RefreshDuringMappingWorker",
+                        {libraryEnv(tmp.path / "lib"),
+                         env("HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS", "500")}),
+              0);
+}
+
+TEST(LocalKernelPersist, OtherDeviceClassIsRefused)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    const auto   saved   = journalLines(library);
+    const size_t objects = countObjects(library, ".co");
+
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_OtherDeviceClassWorker",
+                        {libraryEnv(library),
+                         env("HIPBLASLT_LOCAL_KERNEL_TEST_CU",
+                             "0=" + std::to_string(deviceCuCount() + 1))}),
+              0);
+    EXPECT_EQ(journalLines(library), saved) << "nothing was saved";
+    EXPECT_EQ(countObjects(library, ".co"), objects);
+}
 #endif
 
 // A journal locked by a process that is stopped makes readers and writers
@@ -1488,8 +1715,9 @@ TEST(LocalKernelPersist, RejectedSavedPayloadIsPassedQuietly)
     EXPECT_EQ(count, 1u) << log;
 }
 
-// A payload this process registered is recorded again when the journal is
-// replaced: by Register, and by SetExactMatch with the mapping.
+// A payload this process registered is saved again when the library is
+// cleaned: by Register, with its objects, and by SetExactMatch with the
+// mapping when only the journal is replaced.
 TEST(LocalKernelPersist, DISABLED_RecreatedJournalWorker)
 {
     char const* library = std::getenv(LIBRARY_ENV);
@@ -1505,8 +1733,14 @@ TEST(LocalKernelPersist, DISABLED_RecreatedJournalWorker)
     ASSERT_GE(r.index, 0);
 
     ASSERT_TRUE(fs::remove(journalPath(library)));
+    std::vector<fs::path> objects;
+    for(auto const& entry : fs::directory_iterator(fs::path(library) / "objects"))
+        objects.push_back(entry.path());
+    for(auto const& path : objects)
+        ASSERT_TRUE(fs::remove(path)) << path;
     EXPECT_FALSE(registerPayload(handle, r.stem + ".dat", r.stem + ".co").empty());
     EXPECT_EQ(countRecords(journalLines(library), 'R'), 1u) << "Register recorded it again";
+    EXPECT_EQ(countObjects(library, ".co"), 1u) << "with its objects";
 
     ASSERT_TRUE(fs::remove(journalPath(library)));
     ASSERT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
@@ -1526,7 +1760,7 @@ TEST(LocalKernelPersist, RecordsPayloadInAReplacedJournal)
     ASSERT_EQ(
         runWorker("LocalKernelPersist.DISABLED_RecreatedJournalWorker", {libraryEnv(library)}), 0);
     EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0)
-        << "a later process loads the mapping from the new journal";
+        << "a later process loads the mapping and its objects from the cleaned library";
 }
 
 // Device 0 cannot read the journal when it is initialized, because the test

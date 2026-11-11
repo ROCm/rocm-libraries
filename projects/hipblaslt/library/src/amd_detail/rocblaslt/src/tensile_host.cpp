@@ -97,6 +97,9 @@
 #include <map>
 #include <optional>
 #include <set>
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
+#include <thread>
+#endif
 #endif
 
 #include <hipblaslt_benchmark/candidate_search.hpp>
@@ -8674,10 +8677,35 @@ namespace
         return registry;
     }
 
-    // Names the journal a device's kernels are saved in, e.g. "gfx942_CU304",
-    // "gfx950_CU256_ID75a3" or "gfx1250v0_CU<n>": the device class its mappings
-    // are for (TensileLite::LocalDeviceClass), which is its kernel target,
-    // compute unit count and PCI chip ID.
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
+    // A test-only override of the form <device>=<value>, or {-1, ""}.
+    std::pair<int, std::string> localKernelTestOverride(char const* name)
+    {
+        const char* env   = rocblaslt_secure_getenv_impl(name, rocblaslt_process_is_privileged());
+        const char* split = env ? std::strchr(env, '=') : nullptr;
+        if(!split || split == env)
+            return {-1, {}};
+        return {std::atoi(env), split + 1};
+    }
+#endif
+
+    // A device class as a name, e.g. "gfx942_CU304", "gfx950_CU256_ID75a3" or
+    // "gfx1250v0_CU<n>", or empty if its target is unknown.
+    std::string localDeviceClassName(TensileLite::LocalDeviceClass const& kind)
+    {
+        std::string name = kind.target + "_CU" + std::to_string(kind.computeUnitCount);
+        if(kind.pciChipId)
+        {
+            char id[16];
+            std::snprintf(id, sizeof(id), "_ID%04x", unsigned(*kind.pciChipId));
+            name += id;
+        }
+        return kind.target.empty() ? std::string() : name;
+    }
+
+    // Names the journal a device's kernels are saved in: the device class its
+    // mappings are for (TensileLite::LocalDeviceClass), which is its kernel
+    // target, compute unit count and PCI chip ID.
     //
     // In a build with HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST, which is for tests
     // only, HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE=<device>=<name> names one device's
@@ -8685,29 +8713,48 @@ namespace
     std::string localKernelScope(int device, TensileLite::AMDGPU const& gpu)
     {
 #ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
-        static const std::pair<int, std::string> testScope = [] {
-            const char* env   = rocblaslt_secure_getenv_impl("HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE",
-                                                           rocblaslt_process_is_privileged());
-            const char* split = env ? std::strchr(env, '=') : nullptr;
-            if(!split || split == env)
-                return std::pair<int, std::string>{-1, {}};
-            return std::pair<int, std::string>{std::atoi(env), split + 1};
-        }();
+        static const auto testScope = localKernelTestOverride("HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE");
         if(device == testScope.first && !testScope.second.empty())
             return testScope.second;
 #else
         static_cast<void>(device);
 #endif
+        return localDeviceClassName(TensileLite::LocalDeviceClass::of(gpu));
+    }
 
-        const auto  kind  = TensileLite::LocalDeviceClass::of(gpu);
-        std::string scope = kind.target + "_CU" + std::to_string(kind.computeUnitCount);
-        if(kind.pciChipId)
-        {
-            char id[16];
-            std::snprintf(id, sizeof(id), "_ID%04x", unsigned(*kind.pciChipId));
-            scope += id;
-        }
-        return kind.target.empty() ? std::string() : scope;
+    // Fails unless `gpu`, the handle's device, is of the class of the Hardware
+    // that hipBLASLt gives every query on its architecture name. Exact
+    // matches are found under that Hardware's class, but a device's mappings
+    // are made and saved under its own, so on a device of another class they
+    // would never be selected.
+    //
+    // In a build with HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST, which is for tests
+    // only, HIPBLASLT_LOCAL_KERNEL_TEST_CU=<device>=<count> gives one device's
+    // class that compute unit count here, for tests on machines whose devices
+    // are all alike.
+    rocblaslt_status checkLocalKernelDevice(rocblaslt_handle handle, TensileLite::AMDGPU const& gpu)
+    {
+        std::shared_ptr<TensileLite::Hardware> hardware;
+        static_cast<void>(get_library_and_adapter(nullptr, nullptr, &hardware, handle->device));
+        auto const* queried = dynamic_cast<TensileLite::AMDGPU const*>(hardware.get());
+        if(!queried)
+            return rocblaslt_status_internal_error;
+
+        auto kind = TensileLite::LocalDeviceClass::of(gpu);
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
+        static const auto testCu = localKernelTestOverride("HIPBLASLT_LOCAL_KERNEL_TEST_CU");
+        if(handle->device == testCu.first && !testCu.second.empty())
+            kind.computeUnitCount = std::atoi(testCu.second.c_str());
+#endif
+        auto const queriedKind = TensileLite::LocalDeviceClass::of(*queried);
+        if(kind == queriedKind)
+            return rocblaslt_status_success;
+        log_error(__func__,
+                  "local kernels are not supported on this device: it is a",
+                  localDeviceClassName(kind),
+                  "but hipBLASLt describes its architecture by another device, a",
+                  localDeviceClassName(queriedKind));
+        return rocblaslt_status_arch_mismatch;
     }
 
     // Loads a payload shard with all of its solutions parsed, or returns null
@@ -8924,11 +8971,13 @@ namespace
     // and to publish: reading the journal, which can wait for another
     // process's lock on it, hashing objects and parsing shards happen outside
     // it. With `onlyIfUnread`, a journal this process has already applied is
-    // left alone.
+    // left alone. With `start`, the journal is read from there if this
+    // process has read past it.
     //
     // Returns false, applying nothing and leaving the registry's cursor as it
     // was, if the journal cannot be read: a scope with no cursor yet is then
-    // read again when the next device of it is initialized.
+    // read again when the next device of it is initialized. Otherwise `read`,
+    // if not null, receives the V line of the journal that was read.
     bool replayLocalKernelJournal(LocalKernelRegistry&       registry,
                                   uks::Store const&          store,
                                   std::string const&         scope,
@@ -8936,7 +8985,9 @@ namespace
                                   LocalKernelLibrary&        localLibrary,
                                   size_t*                    added,
                                   std::string*               error,
-                                  bool                       onlyIfUnread = false)
+                                  bool                       onlyIfUnread = false,
+                                  uks::JournalCursor const*  start        = nullptr,
+                                  std::string*               read         = nullptr)
     {
         using Key = LocalKernelRegistry::Key;
         *added    = 0;
@@ -8947,7 +8998,9 @@ namespace
         std::lock_guard<std::mutex> inTurn(turn);
 
         // Where to read from: this scope's cursor, or earlier where a payload
-        // skipped there has since been registered or had its objects change.
+        // skipped there has since been registered or had its objects change,
+        // or at `start`. A cursor in another journal is read from the
+        // beginning anyway.
         uks::JournalCursor                                                cursor;
         std::vector<std::pair<uint64_t, LocalKernelRegistry::Unverified>> waiting;
         lock.lock();
@@ -8956,6 +9009,8 @@ namespace
             return true;
         if(known != registry.journals.end())
             cursor = known->second;
+        if(start && start->journal == cursor.journal)
+            cursor.offset = std::min(cursor.offset, start->offset);
         if(auto from = registry.rewind.find(scope); from != registry.rewind.end())
             cursor.offset = std::min(cursor.offset, from->second);
         for(auto const& [key, skipped] : registry.unverified)
@@ -9101,6 +9156,8 @@ namespace
            from != registry.rewind.end() && from->second >= readFrom)
             registry.rewind.erase(from);
         registry.journals[scope] = cursor;
+        if(read)
+            *read = cursor.journal;
         return true;
     }
 
@@ -9226,6 +9283,8 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     auto const gpu = localKernelDevice(handle->device);
     if(!gpu)
         return rocblaslt_status_internal_error;
+    if(auto st = checkLocalKernelDevice(handle, *gpu); st != rocblaslt_status_success)
+        return st;
 
     // Every device loads the code object by this name the first time it runs
     // one of the kernels, so it must not depend on the working directory.
@@ -9252,49 +9311,13 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     auto const* store    = uks::Store::configured();
     auto&       registry = localKernelRegistry();
 
-    // The registry lock is taken only to look up and to publish: device
-    // initialization takes it too, and must not wait for copies, code object
-    // loads or another process's journal lock.
-    std::optional<LocalKernelPayload> here, other;
-    {
-        std::lock_guard<std::mutex> lock(registry.mutex);
-        if(auto found = registry.payloads.find({scope, record.id});
-           found != registry.payloads.end())
-            here = found->second;
-        else if(auto const* registered = registry.anyScope(record.id))
-            other = *registered;
-    }
-
-    // Registered already, or for another scope's device, whose solutions serve
-    // this one if every kernel can run here. Either way the payload is
-    // recorded for this scope, which also covers a journal that was replaced
-    // since it was registered; the record is not appended again when the
-    // journal has it.
-    if(here || other)
-    {
-        auto const& payload = here ? *here : *other;
-        if(!here && !payloadSuits(*localLibrary, payload, *gpu))
-        {
-            log_error(__func__, "library was not built for this device", libraryPath);
-            return rocblaslt_status_invalid_value;
-        }
-        if(store && !store->appendPayload(scope, payload.record, &error))
-        {
-            log_error(__func__, error);
-            return rocblaslt_status_internal_error;
-        }
-        std::lock_guard<std::mutex> lock(registry.mutex);
-        registry.add({scope, record.id}, payload);
-        kernelIndices = registry.payloads.at({scope, record.id}).indices;
-        return rocblaslt_status_success;
-    }
-
-    // With a library configured, the payload is staged in it and its shard
-    // checked before the objects take their names, so a payload for another
-    // device leaves nothing behind. Objects published for a code object that
-    // then fails to load stay; see Store::publishObjects. Staged copies are
-    // named by what was copied, which is what the payload is then identified
-    // by.
+    // With a library configured, the payload is staged in it: saved objects
+    // that still match are used as they are, and missing or damaged ones are
+    // copied. Nothing takes its name until the payload is known to suit this
+    // device, so a payload for another device leaves nothing behind. Objects
+    // published for a code object that then fails to load stay; see
+    // Store::publishObjects. Staged copies are named by what was copied,
+    // which is what the payload is then identified by.
     std::vector<LoadedPayload> loaded(1, LoadedPayload{record, {}});
     auto&                      payload = loaded[0];
     uks::StagedObjects         staged;
@@ -9309,6 +9332,46 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
         shardFile = staged.shardFile();
         coFile    = store->codeObjectPath(payload.record.id);
     }
+    const LocalKernelRegistry::Key key{scope, payload.record.id};
+
+    // The registry lock is taken only to look up and to publish: device
+    // initialization takes it too, and must not wait for copies, code object
+    // loads or another process's journal lock.
+    std::optional<LocalKernelPayload> here, other;
+    {
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        if(auto found = registry.payloads.find(key); found != registry.payloads.end())
+            here = found->second;
+        else if(auto const* registered = registry.anyScope(key.second))
+            other = *registered;
+    }
+
+    // Registered already, or for another scope's device, whose solutions serve
+    // this one if every kernel can run here. Either way the payload's objects
+    // and record are saved for this scope, which also covers a library
+    // cleaned since it was registered; nothing is written for what the
+    // library still has.
+    if(here || other)
+    {
+        auto const& existing = here ? *here : *other;
+        if(!here && !payloadSuits(*localLibrary, existing, *gpu))
+        {
+            log_error(__func__, "library was not built for this device", libraryPath);
+            return rocblaslt_status_invalid_value;
+        }
+        if(store
+           && (!store->publishObjects(&staged, &error)
+               || !store->appendPayload(scope, existing.record, &error)))
+        {
+            log_error(__func__, error);
+            return rocblaslt_status_internal_error;
+        }
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        registry.add(key, existing);
+        kernelIndices = registry.payloads.at(key).indices;
+        return rocblaslt_status_success;
+    }
+
     if(!parseLocalKernelPayload(shardFile, coFile, *gpu, &payload.solutions))
         return rocblaslt_status_invalid_value;
     if(store && !store->publishObjects(&staged, &error))
@@ -9326,8 +9389,7 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
 
     // Another thread may have registered it since the lookup, for this scope
     // or another, whose solutions are shared if they suit.
-    std::lock_guard<std::mutex>    lock(registry.mutex);
-    const LocalKernelRegistry::Key key{scope, payload.record.id};
+    std::lock_guard<std::mutex> lock(registry.mutex);
     if(!registry.payloads.count(key))
     {
         auto const* shared = registry.anyScope(payload.record.id);
@@ -9363,6 +9425,8 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
     auto const gpu = localKernelDevice(handle->device);
     if(!gpu)
         return rocblaslt_status_internal_error;
+    if(auto st = checkLocalKernelDevice(handle, *gpu); st != rocblaslt_status_success)
+        return st;
     auto solution = localLibrary->lookupIndex(kernelIndex);
     if(!solution || !(*solution->hardwarePredicate)(*gpu))
         return rocblaslt_status_invalid_value;
@@ -9408,47 +9472,68 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
         registry.add({scope, record.id}, payload);
     }
 
-    // Recorded before it is published, with its payload's record unless the
-    // journal has that, which a journal replaced since registration may not.
-    // It is then published, and the journal read back with whatever other
-    // processes appended before it, so that when two map one key, this
-    // process selects what every later one will: the mapping appended last.
-    // Publishing first covers a mapping the journal already ended with, which
-    // appendExact does not append again and the read back may be past.
-    std::string                        error;
+    // Recorded, with its payload's record unless the journal has that, which a
+    // journal replaced since registration may not. It is then published only
+    // by reading the journal back from its record, or from the record that
+    // already ends the journal's mappings at this shape with it, which
+    // appendExact does not append again. Every record after it, from any
+    // thread or process, is applied after it, so whichever read back or
+    // Refresh comes last, this process selects what every later one will:
+    // the mapping appended last. Neither the append nor the read back holds
+    // registry.mutex while it waits for the journal's file lock.
     const TensileLite::LocalExactShape shape{m, n, batch, k};
     const auto                         deviceClass = TensileLite::LocalDeviceClass::of(*gpu);
-    if(store && !store->appendExact(scope, payload.record, record, &error))
+
+    auto publish = [&] {
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
+            return rocblaslt_status_invalid_value;
+        return rocblaslt_status_success;
+    };
+    if(!store)
+        return publish();
+
+    std::string        error;
+    uks::JournalCursor saved;
+    if(!store->appendExact(scope, payload.record, record, &saved, &error))
     {
         log_error(__func__, error);
         return rocblaslt_status_internal_error;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(registry.mutex);
-        if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
-            return rocblaslt_status_invalid_value;
-    }
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
+    // HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS=<ms> waits between saving a
+    // mapping and reading it back, for tests of what may happen in between.
+    static const int pauseMs = [] {
+        const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS",
+                                                       rocblaslt_process_is_privileged());
+        return env ? std::atoi(env) : 0;
+    }();
+    if(pauseMs > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(pauseMs));
+#endif
 
-    // The mapping is saved and applied by now, so a read back that fails, or
-    // throws, is reported but does not fail the call.
-    if(store)
+    // The mapping is saved by now, so a read back that fails, throws, or reads
+    // a journal that replaced the one it was saved in is reported, or not, and
+    // the mapping published as it is.
+    size_t      added = 0;
+    std::string read;
+    try
     {
-        size_t added = 0;
-        try
-        {
-            if(!replayLocalKernelJournal(
-                   registry, *store, scope, *gpu, *localLibrary, &added, &error))
-                std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
-                          << std::endl;
-        }
-        catch(std::exception const& e)
-        {
-            std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << e.what()
+        if(replayLocalKernelJournal(
+               registry, *store, scope, *gpu, *localLibrary, &added, &error, false, &saved, &read)
+           && read == saved.journal)
+            return rocblaslt_status_success;
+        if(!error.empty())
+            std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
                       << std::endl;
-        }
     }
-    return rocblaslt_status_success;
+    catch(std::exception const& e)
+    {
+        std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << e.what()
+                  << std::endl;
+    }
+    return publish();
 }
 
 rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t* registered)
@@ -9467,13 +9552,16 @@ rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t*
        st != rocblaslt_status_success)
         return st;
 
+    auto const gpu = localKernelDevice(handle->device);
+    if(!gpu)
+        return rocblaslt_status_internal_error;
+    if(auto st = checkLocalKernelDevice(handle, *gpu); st != rocblaslt_status_success)
+        return st;
+
     auto const* store = uks::Store::configured();
     if(!store)
         return rocblaslt_status_success;
 
-    auto const gpu = localKernelDevice(handle->device);
-    if(!gpu)
-        return rocblaslt_status_internal_error;
     const std::string scope = localKernelScope(handle->device, *gpu);
     if(scope.empty())
         return rocblaslt_status_internal_error;

@@ -34,6 +34,15 @@
  *  printed, if it or a directory in it is owned by another user or is group-
  *  or world-writable, or if the process is running with elevated privileges
  *  (set-user-ID, set-group-ID or file capabilities).
+ *
+ *  As for the shipped kernels, hipBLASLt describes all devices of one
+ *  architecture name in a process by one of them, and heuristic queries on
+ *  any of them see that one's kind. Local kernels are therefore not
+ *  supported on a device of another kind than that one, as in a process whose
+ *  devices of one architecture name differ in compute unit count, chip ID or
+ *  gfx1250 revision: \ref hipblasLtLocalKernelRegister,
+ *  \ref hipblasLtLocalKernelSetExactMatch and \ref hipblasLtLocalKernelRefresh
+ *  fail on it with HIPBLAS_STATUS_ARCH_MISMATCH.
  */
 
 #pragma once
@@ -114,6 +123,9 @@ extern "C" {
  *                                          this device or lacks one of the
  *                                          shard's kernels. Nothing is
  *                                          registered.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH    Local kernels are not supported on
+ *                                          the handle's device (see above).
+ *                                          Nothing is registered.
  *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
  *                                          current or initialized, the local
  *                                          kernel index range is exhausted, or
@@ -136,27 +148,23 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  The mapping is for this shape and the kernel's own transposes and data
  *  types, on devices of the same kind as the handle's (see above); other
  *  devices in the process do not take it, even where the kernel can run on
- *  them. As for the shipped kernels, hipBLASLt describes the devices of one
- *  architecture name in a process by one of them, so devices of one
- *  architecture name that differ in compute unit count or chip ID are not
- *  supported in one process. On those devices, heuristic selection
- *  for such a problem returns the kernel first,
- *  followed by the shipped library's choices, including for problems already
- *  queried. Other shapes and types are unaffected, so kernels for different
- *  data types or transposes can each be mapped to the same shape. Among
- *  kernels mapped under the same shape and types, the one mapped last that can
- *  serve the problem wins.
+ *  them. On devices of the handle's kind, heuristic selection for such a
+ *  problem returns the kernel first, followed by the shipped library's
+ *  choices, including for problems already queried. Other shapes and types
+ *  are unaffected, so kernels for different data types or transposes can each
+ *  be mapped to the same shape. Among kernels mapped under the same shape and
+ *  types, the one mapped last that can serve the problem wins.
  *
  *  A usable tuning-file override, including one supplied through
  *  HIPBLASLT_TUNING_OVERRIDE_FILE, takes priority over this mapping. An
  *  algorithm passed explicitly to hipblasLtMatmul also keeps its selection.
  *
- *  With a local kernel library, "mapped last" is across all processes: the
- *  mapping is saved, then applied together with what other processes saved
- *  before it, as \ref hipblasLtLocalKernelRefresh would. If another process
- *  mapped the same shape and types in between, its kernel is the one
- *  selected, here and in every later process. The mapping is saved for the
- *  same kind of device it applies to.
+ *  With a local kernel library, "mapped last" is across all processes and
+ *  threads: the mapping is saved, then applied together with what other
+ *  processes saved before it, as \ref hipblasLtLocalKernelRefresh would. If
+ *  another process or thread mapped the same shape and types in between, its
+ *  kernel is the one selected, here and in every later process. The mapping
+ *  is saved for the same kind of device it applies to.
  *
  *  @param[in]
  *  handle       Pointer to the allocated hipBLASLt handle.
@@ -170,6 +178,8 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    The index is not a registered local
  *                                          kernel or cannot run on the handle's
  *                                          device.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH    Local kernels are not supported on
+ *                                          the handle's device (see above).
  *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
  *                                          current or initialized, or the
  *                                          mapping could not be saved to the
@@ -198,6 +208,9 @@ hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
  *                                          cannot be loaded are skipped with a
  *                                          warning.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH    Local kernels are not supported on
+ *                                          the handle's device (see above);
+ *                                          nothing was loaded.
  *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
  *                                          current or initialized, or the
  *                                          local kernel library could not be
@@ -209,13 +222,18 @@ hipblasStatus_t hipblasLtLocalKernelRefresh(hipblasLtHandle_t handle, size_t* re
 /*! \ingroup library_module
  *  \brief Report how many kernels are registered and how many mappings exist.
  *
+ *  \details Both counts are for the whole process: the handle selects only
+ *  the device that is initialized if it is not yet.
+ *
  *  @param[in]
  *  handle      Pointer to the allocated hipBLASLt handle.
  *  @param[out]
- *  registered  Number of registered kernels, or NULL if not wanted.
+ *  registered  Number of registered kernels, on every device, or NULL if not
+ *              wanted.
  *  @param[out]
- *  selectable  Number of distinct (shape, transposes, data types) with at
- *              least one kernel mapped, or NULL if not wanted.
+ *  selectable  Number of distinct (shape, transposes, data types, kind of
+ *              device) with at least one kernel mapped, over every kind of
+ *              device in the process, or NULL if not wanted.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The counts were written.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.

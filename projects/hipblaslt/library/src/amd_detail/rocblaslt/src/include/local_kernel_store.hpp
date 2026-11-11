@@ -223,10 +223,15 @@ namespace rocblaslt
              * shape is this one, which applying again would not change. The
              * R record of `payload`, which `record` names, is appended first,
              * in the same write, if the journal does not have it.
+             *
+             * Sets `from` to where a read finds this mapping, appended or
+             * not, in the journal it is in: a cursor at or before its line,
+             * and after every record before it.
              */
             bool appendExact(std::string const&   scope,
                              PayloadRecord const& payload,
                              ExactRecord const&   record,
+                             JournalCursor*       from,
                              std::string*         error) const;
 
             /**
@@ -247,8 +252,8 @@ namespace rocblaslt
             {
                 JournalCursor       cursor;
                 std::set<PayloadId> payloads;
-                // The last mapping at each [m, n, batch, k].
-                std::map<std::array<uint64_t, 4>, ExactRecord> lastExact;
+                // The last mapping at each [m, n, batch, k], with where it is.
+                std::map<std::array<uint64_t, 4>, JournalEntry> lastExact;
             };
 
             explicit Store(std::string root)
@@ -265,10 +270,13 @@ namespace rocblaslt
              * Locks the journal for `scope` exclusively, creating it with its
              * V line if needed, reads what was appended since `state` was last
              * brought up to date, and appends the line `makeLine` returns for
-             * that state, if it is not empty.
+             * that state, if it is not empty. A non-null `from` is set, before
+             * `makeLine` is called, to the journal and the offset its line
+             * would be read from.
              */
             bool appendUnlessKnown(std::string const&                                     scope,
                                    std::function<std::string(JournalState const&)> const& makeLine,
+                                   JournalCursor*                                         from,
                                    std::string* error) const;
 
             std::string m_root;

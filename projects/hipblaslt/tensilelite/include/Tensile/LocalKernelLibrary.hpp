@@ -65,7 +65,8 @@ namespace TensileLite
      * architecture name, so devices of one architecture name are taken to be
      * of one class, as the shipped library's compute unit count and chip ID
      * predicates take them to be. A process whose devices of one architecture
-     * name differ in compute unit count or chip ID is not supported.
+     * name differ in class is not supported: hipBLASLt's local kernel calls
+     * fail on a device of another class than that Hardware's.
      */
     struct LocalDeviceClass
     {
