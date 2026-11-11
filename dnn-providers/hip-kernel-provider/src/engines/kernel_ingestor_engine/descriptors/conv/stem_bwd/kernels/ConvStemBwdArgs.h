@@ -29,7 +29,8 @@ struct ConvStemBwdArgs
     long long dyd, dxd;
     // Space-to-depth (CONV_SB_SD, stride 1): super-pixels of SD x SD dx pixels on a virtual
     // stride SD; super-row y of dy holds rows SD y + sdh + e (e < SD; columns alike), the
-    // reduction runs over (e, k) with kp = SD SD kpr. ho and wo stay dy's own extents.
+    // reduction runs over (channel chunk, (eh, ew), k in the chunk) with kp = SD SD kpr. ho and wo
+    // stay dy's own extents.
     int sdh, sdw;
 };
 
@@ -48,8 +49,9 @@ struct ConvStemBwdTransformArgs
     // depth stride.
     int ft, kpr;
     long long wsd;
-    // Space-to-depth: b's k axis is ((eh, ew), k), kpr per sub-pixel; tap r = sh (u - oh) + p +
-    // ph - dh - eh (sh the virtual stride; columns alike).
+    // Space-to-depth: b's k axis is (channel chunk, (eh, ew), k in the chunk), kpr padded channels
+    // (kp = SD SD kpr); tap r = sh (u - oh) + p + ph - dh - eh (sh the virtual stride; columns
+    // alike).
     int dh, dw;
 };
 

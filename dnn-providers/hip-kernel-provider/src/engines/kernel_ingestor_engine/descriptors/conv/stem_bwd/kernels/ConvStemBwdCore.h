@@ -16,7 +16,7 @@
 
 /// B[n][uv][k] (k padded to kp, zero past K) from w, n = (c, p, q), uv = u V + v; 3-D (FT depth
 /// taps): k = (depth tap, k), each tap's run padded to kpr.
-template <class T, int FT = 0, int SD = 0>
+template <class T, int FT = 0, int SD = 0, int KC = 1>
 __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
 {
     const T* w = static_cast<const T*>(a.w);
@@ -29,10 +29,18 @@ __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
         long long rest = i / a.kp;
         // 3-D: k' = (depth tap, k).
         int td = 0;
-        if constexpr(FT != 0 || SD != 0)
+        if constexpr(FT != 0)
         {
             td = k / a.kpr;
             k -= td * a.kpr;
+        }
+        else if constexpr(SD != 0)
+        {
+            // Space-to-depth: chunk ci of KC holds sub-pixel ci % (SD SD) of channel chunk
+            // ci / (SD SD), so a block's consecutive chunks read the same dy lines.
+            const int ci = k / KC;
+            td = ci % (SD * SD);
+            k = ci / (SD * SD) * KC + k % KC;
         }
         const int v = static_cast<int>(rest % a.v);
         rest /= a.v;
@@ -177,12 +185,14 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         int kb0 = k0;
         bool planeOk = true;
         long long planeOff = 0;
-        // Space-to-depth: a chunk lies in one sub-pixel's k run; dy row SD y + sdh + eh.
+        // Space-to-depth: chunk k0 / KC is sub-pixel (eh, ew) of a channel chunk (sbTransform's
+        // order); dy row SD y + sdh + eh.
         int sy = 0, sx = 0;
         if constexpr(SD != 0)
         {
-            const int sub = k0 / a.kpr;
-            kb0 = k0 - sub * a.kpr;
+            const int ci = k0 / KC;
+            const int sub = ci % (SD * SD);
+            kb0 = ci / (SD * SD) * KC;
             sy = a.sdh + sub / SD;
             sx = a.sdw + sub % SD;
         }
