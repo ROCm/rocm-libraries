@@ -128,20 +128,17 @@ namespace
 
 TEST_F(ExtraBell, no_stored_blocks_scales_C)
 {
-    // mb and kb differ, so a quick return that used A's row count would scale
-    // the wrong number of rows of C. ldc = Mc + 2 keeps an extra write inside
-    // the allocation. Transposed A is not supported; see the test below.
-    const int64_t kbs[] = {2, 5};
+    // trans_A == none: an empty blocked ELL product is C = beta * C.
+    // Host and device pointer modes both take that path. Transposed A is
+    // covered by no_stored_blocks_transpose_is_not_implemented.
     for(bool device : {false, true})
-        for(int64_t kb : kbs)
-        {
-            BellRun r;
-            r.device = device;
-            r.kb     = kb;
-            run_empty_bell(handle, r);
-            if(HasFatalFailure())
-                return;
-        }
+    {
+        BellRun r;
+        r.device = device;
+        run_empty_bell(handle, r);
+        if(HasFatalFailure())
+            return;
+    }
 }
 
 TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)

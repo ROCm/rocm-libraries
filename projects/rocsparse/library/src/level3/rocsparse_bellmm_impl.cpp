@@ -126,6 +126,13 @@ rocsparse_status rocsparse::bellmm_buffer_size(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // Same contract as compute: transposed blocked ELL is not implemented,
+    // including when the later compute stage would have taken the quick return.
+    if(trans_A != rocsparse_operation_none)
+    {
+        return rocsparse_status_not_implemented;
+    }
+
     *buffer_size = 0;
     return rocsparse_status_success;
 }
@@ -158,6 +165,11 @@ rocsparse_status rocsparse::bellmm_preprocess(rocsparse_handle          handle,
                                               void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    if(trans_A != rocsparse_operation_none)
+    {
+        return rocsparse_status_not_implemented;
+    }
 
     return rocsparse_status_success;
 }
