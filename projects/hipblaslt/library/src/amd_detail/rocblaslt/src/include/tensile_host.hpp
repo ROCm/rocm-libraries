@@ -46,6 +46,7 @@
 #include "utility.hpp"
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <atomic>
 
 // Return the value category for a value, as a double precision value, such
@@ -148,6 +149,24 @@ int getMXScaleFormatFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmu
  ***********************************************************************************/
 std::atomic_bool& rocblaslt_internal_tensile_is_initialized();
 
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNELS
+/***********************************************************************************
+ * Local kernel library. See hipblaslt-local-kernel.h for the public contract.
+ ***********************************************************************************/
+rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
+                                                 const char*       libraryPath,
+                                                 const char*       codeObjectPath,
+                                                 std::vector<int>& kernelIndices);
+
+rocblaslt_status rocblaslt_local_kernel_set_exact_match(
+    rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
+
+rocblaslt_status
+    rocblaslt_local_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable);
+
+bool rocblaslt_is_local_kernel_index(int index);
+#endif
+
 /**********************************************
  * Whether to suppress Tensile error messages *
  **********************************************/
@@ -157,21 +176,31 @@ inline bool& rocblaslt_suppress_tensile_error_messages()
     return t_suppress;
 }
 
+// searchType selects how the solution library filters rows. Callers that have
+// already collected the GridBased and Prediction candidates pass
+// GEMM_TYPE_ONLY_NO_RANKING so those rows are not searched again.
+// The value applies only to this call.
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,

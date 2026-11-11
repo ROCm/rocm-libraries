@@ -383,6 +383,13 @@ protected:
         }
     }
 
+    /// Called with the workspace each GPU execute is about to receive, before the execute.
+    /// A suite whose engine must not depend on the workspace's prior contents overrides this
+    /// to fill it with a pattern; the default leaves the fresh allocation as it is.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
+    }
+
     virtual hipStream_t stream() const
     {
         return _stream;
@@ -404,6 +411,11 @@ private:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        if(workspaceSize > 0)
+        {
+            ASSERT_NO_FATAL_FAILURE(
+                prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        }
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());

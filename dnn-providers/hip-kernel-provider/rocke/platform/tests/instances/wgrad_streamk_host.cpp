@@ -362,12 +362,77 @@ void check_validator()
                   "wgrad async_dma requires lds_k_outer=True: the direct global->LDS load "
                   "needs a stride-1 reduction axis, which wgrad only has once the tile is "
                   "stored K-outer"));
+    /* prefetch_addr / register_prefetch reject reasons, verbatim from Python
+     * (_prefetch_addr_conflict / _register_prefetch_conflict). streamk="off"
+     * isolates these gates from the streamk/async_dma conflict checked above. */
+    s = spec(dense());
+    s.streamk = "off";
+    s.lds_k_outer = true;
+    s.async_dma = true;
+    s.prefetch_addr = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_addr is not supported with async_dma: the direct "
+                  "global->LDS ping-pong has its own K loop"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.unroll_k = true;
+    s.prefetch_addr = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_addr is not supported with unroll_k: the "
+                  "double-buffered K loop has its own address schedule"));
+    s = spec(dense());
+    s.register_prefetch = true;
+    CHECK(rejects(s, "gfx950", "register_prefetch requires prefetch_addr=True"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.prefetch_addr = true;
+    s.register_prefetch = true;
+    CHECK(rejects(s, "gfx950", "register_prefetch requires pipeline='compv3'; got pipeline='mem'"));
+    /* prefetch_global_regs reject reasons, verbatim from Python
+     * (_prefetch_global_regs_conflict, wgrad_streamk_available and the WMMA flag
+     * gate). */
+    s = spec(dense());
+    s.prefetch_global_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "streamk runs its own K loop per work item; prefetch_global_regs rewrites "
+                  "the data-parallel K loop, which stream-K never reaches"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.lds_k_outer = true;
+    s.async_dma = true;
+    s.prefetch_global_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_global_regs is not supported with async_dma: the direct "
+                  "global->LDS ping-pong has its own K loop"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.unroll_k = true;
+    s.prefetch_global_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_global_regs is not supported with unroll_k: the "
+                  "double-buffered K loop has its own prefetch"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.prefetch_addr = true;
+    s.prefetch_global_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_global_regs is not supported with prefetch_addr: the "
+                  "carried-offset K loop has its own schedule"));
+
     s = spec(dense());
     s.tile_m = 96;
     CHECK(rejects(s,
                   "gfx9999",
-                  "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1151', "
-                  "'gfx12-generic', 'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. "
+                  "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1100', "
+                  "'gfx1101', 'gfx1102', 'gfx1103', 'gfx1150', 'gfx1151', 'gfx1152', "
+                  "'gfx1153', 'gfx1154', 'gfx12-generic', 'gfx1200', 'gfx1201', 'gfx1250', "
+                  "'gfx908', 'gfx90a', 'gfx942', 'gfx950']. "
                   "Add a row to "
                   "arch_specs.json.\""));
 
@@ -437,6 +502,13 @@ void check_wmma_split_k_validator()
     CHECK(!valid(s, "gfx1250"));
     CHECK(strstr(why, "wg_N=27") != NULL);
 
+    /* The register-prefetch K loop is MFMA-only: the WMMA gate rejects it on
+     * a spec that is otherwise valid. */
+    s = wmma(dense(), 32);
+    s.prefetch_global_regs = true;
+    CHECK(!valid(s, "gfx1250"));
+    CHECK(strcmp(why, "WMMA wgrad does not support prefetch_global_regs on gfx1250") == 0);
+
     /* MFMA keeps the store-width rule: cshuffle at vector_size_c=1 has no pair. */
     s = spec(dense());
     s.streamk = "off";
@@ -451,6 +523,167 @@ void check_wmma_split_k_validator()
     CHECK(strstr(why, "store_vec=1") != NULL);
 }
 
+/* Explicit A/B load-width caps (Python is_valid_wgrad_spec's vector_size_a/b
+ * loop): rejected on the async K loop, whose chunk widths come from the
+ * channel counts alone, and range/divisibility-checked elsewhere. Reasons
+ * verbatim from Python. */
+void check_vector_cap_validator()
+{
+    char why[512];
+    auto valid = [&](const rocke_implicit_gemm_conv_wgrad_spec_t& s, const char* arch) {
+        why[0] = '\0';
+        return rocke_implicit_gemm_conv_wgrad_is_valid_spec(&s, arch, why, sizeof(why));
+    };
+    auto rejects =
+        [&](const rocke_implicit_gemm_conv_wgrad_spec_t& s, const char* arch, const char* reason) {
+            const bool ok = valid(s, arch);
+            if(ok || strcmp(why, reason) != 0)
+            {
+                fprintf(stderr, "  want: %s\n  got:  %s\n", reason, ok ? "(accepted)" : why);
+                return false;
+            }
+            return true;
+        };
+    /* The parity emitter's case 55: gfx1250 async K loop, C=24, fp32 dW. */
+    auto async_spec = []() {
+        rocke_conv_problem_t p = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        p.pH = 1;
+        p.pW = 1;
+        rocke_implicit_gemm_conv_wgrad_spec_t s = rocke_implicit_gemm_conv_wgrad_spec_default();
+        s.problem = p;
+        s.dtype_a = "fp16";
+        s.dtype_b = "fp16";
+        s.dtype_d = "fp32";
+        s.tile_m = 32;
+        s.tile_n = 32;
+        s.tile_k = 32;
+        s.warp_m = 1;
+        s.warp_n = 1;
+        s.warp_tile_m = 16;
+        s.warp_tile_n = 16;
+        s.warp_tile_k = 32;
+        s.wave_size = 32;
+        s.split_k = 2;
+        s.lds_k_outer = true;
+        s.async_dma = true;
+        return s;
+    };
+
+    rocke_implicit_gemm_conv_wgrad_spec_t s = async_spec();
+    CHECK(valid(s, "gfx1250"));
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_a is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    /* Even a cap the auto width already meets is rejected, as in Python. */
+    s.vector_size_a = 1;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_a is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    s = async_spec();
+    s.has_vector_size_b = true;
+    s.vector_size_b = 8;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_b is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    /* The synchronous K-outer loop takes the caps. */
+    s = async_spec();
+    s.async_dma = false;
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    s.has_vector_size_b = true;
+    s.vector_size_b = 2;
+    CHECK(valid(s, "gfx1250"));
+
+    /* MFMA, no async: range and divisibility of the stride-1 channel run. */
+    s = spec(dense());
+    s.streamk = "off";
+    CHECK(valid(s, "gfx950"));
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    CHECK(valid(s, "gfx950"));
+    s.vector_size_a = 0;
+    CHECK(rejects(s, "gfx950", "vector_size_a=0 out of range 1..8 for this dtype"));
+    s.vector_size_a = -1;
+    CHECK(rejects(s, "gfx950", "vector_size_a=-1 out of range 1..8 for this dtype"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.has_vector_size_b = true;
+    s.vector_size_b = 3;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "vector_size_b=3 must divide the stride-1 channel run (32); a wider "
+                  "vector would read across the contiguous boundary"));
+}
+
+/* Every conditional name tag at once: async, kouter, pad, spk, twostage, wsr,
+ * unroll, pfa, rpf, pgr, sk, skpers, skr and tf32 -- fourteen flags. The name
+ * is built before validation, so this invalid spec must still be named without
+ * overrunning the flag arrays (run under ROCKE_SANITIZE to see an overrun).
+ * Expected name from Python WgradConvSpec.kernel_name() for the same spec. */
+void check_kernel_name_all_flags()
+{
+    rocke_implicit_gemm_conv_wgrad_spec_t s = spec(dense());
+    s.has_lds_k_pad = true;
+    s.lds_k_pad = 4;
+    s.split_k = 2;
+    s.two_stage = true;
+    s.ws_replicas = 8;
+    s.streamk = "persistent";
+    s.streamk_reduction = "tree";
+    s.async_dma = true;
+    s.lds_k_outer = true;
+    s.unroll_k = true;
+    s.prefetch_addr = true;
+    s.register_prefetch = true;
+    s.prefetch_global_regs = true;
+    s.mma_dtype = "tf32";
+    char name[512] = {0};
+    CHECK(rocke_wgrad_conv_spec_kernel_name(&s, name, sizeof(name)) == ROCKE_OK);
+    const char* want
+        = "conv_igemm_wgrad_N2H12W12C32_K96Y3X3_t64x64x32_w2x2_a32x32x16_mem_default"
+          "_async_kouter_pad4_spk_twostage_wsr8_unroll_pfa_rpf_pgr_sk_skpers_skrtree_tf32";
+    if(strcmp(name, want) != 0)
+        fprintf(stderr, "  want: %s\n  got:  %s\n", want, name);
+    CHECK(strcmp(name, want) == 0);
+}
+
+/* prefetch_global_regs carries the next tile's global loads in at most
+ * ROCKE_CTL_MAX_VECS_PER_THREAD slots per operand; both engines refuse a
+ * tile that needs more. Reason verbatim from Python _prefetch_global_regs_conflict. */
+void check_prefetch_global_regs_staged_chunks()
+{
+    char why[512] = {0};
+    rocke_implicit_gemm_conv_wgrad_spec_t s = spec(dense());
+    s.streamk = "off";
+    s.lds_k_outer = true;
+    s.prefetch_global_regs = true;
+    s.tile_k = 256;
+    s.has_vector_size_a = true;
+    s.vector_size_a = 1;
+    s.has_vector_size_b = true;
+    s.vector_size_b = 1;
+    /* 64x256 / (1 x 256 threads) = 64 loads per thread. */
+    CHECK(!rocke_implicit_gemm_conv_wgrad_is_valid_spec(&s, "gfx950", why, sizeof(why)));
+    const char* want
+        = "prefetch_global_regs carries at most 32 global loads per thread per operand; "
+          "the A tile needs 64 (use a wider vector or a smaller tile)";
+    if(strcmp(why, want) != 0)
+        fprintf(stderr, "  want: %s\n  got:  %s\n", want, why);
+    CHECK(strcmp(why, want) == 0);
+    /* 64x128 / 256 = 32: at the limit, accepted. */
+    s.tile_k = 128;
+    why[0] = '\0';
+    const bool ok = rocke_implicit_gemm_conv_wgrad_is_valid_spec(&s, "gfx950", why, sizeof(why));
+    if(!ok)
+        fprintf(stderr, "  unexpected reject: %s\n", why);
+    CHECK(ok);
+}
+
 } // namespace
 
 int main()
@@ -461,6 +694,9 @@ int main()
     check_invalid_inputs();
     check_validator();
     check_wmma_split_k_validator();
+    check_vector_cap_validator();
+    check_kernel_name_all_flags();
+    check_prefetch_global_regs_staged_chunks();
     if(g_failures)
     {
         fprintf(stderr, "rocke_wgrad_streamk_host: %d failure(s)\n", g_failures);

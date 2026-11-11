@@ -15,6 +15,8 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -110,10 +112,39 @@ TensorAttributes&
     }
 }
 
+// Converts a stored scalar to a plain Python value; an empty value becomes None.
+nb::object valueToPython(const TensorAttributes::ValueVariant& value)
+{
+    return std::visit(
+        [](const auto& v) -> nb::object {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr(std::is_same_v<T, std::monostate>)
+            {
+                return nb::none();
+            }
+            else if constexpr(std::is_same_v<T, bool>)
+            {
+                return nb::bool_(v);
+            }
+            else if constexpr(std::is_integral_v<T>)
+            {
+                return nb::int_(static_cast<int64_t>(v));
+            }
+            else
+            {
+                return nb::float_(static_cast<double>(v));
+            }
+        },
+        value);
+}
+
 } // namespace
 
 void tensorBindings(nb::module_& m)
 {
+    nb::enum_<ScalarType>(m, "ScalarType")
+        .value("RUNTIME_PARAM", ScalarType::RUNTIME_PARAM)
+        .value("COMPILE_TIME_CONST", ScalarType::COMPILE_TIME_CONST);
     nb::class_<TensorAttributes>(m, "Tensor")
         .def(nb::init<>())
         .def_static(
@@ -149,6 +180,12 @@ void tensorBindings(nb::module_& m)
              "data_type, else the tensor's current type, else inferred from value "
              "(bool -> BOOLEAN, int -> INT64, float -> FLOAT). Resets dims and strides to "
              "[1]; the tensor must have one element.")
+        .def("set_compile_time_constant",
+             &setValue,
+             nb::arg("value"),
+             nb::arg("data_type") = nb::none(),
+             nb::rv_policy::reference_internal,
+             "Alias of set_value(): store a compile-time constant scalar.")
         .def("get_is_pass_by_value", &TensorAttributes::get_is_pass_by_value)
         .def("get_is_runtime_pass_by_value", &TensorAttributes::get_is_runtime_pass_by_value)
         .def("set_is_pass_by_value",
@@ -157,5 +194,37 @@ void tensorBindings(nb::module_& m)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)
+        .def("get_alignment", &TensorAttributes::get_alignment)
+        .def("set_alignment", &TensorAttributes::set_alignment, nb::rv_policy::reference_internal)
+        .def("get_ragged_offset_multiplier", &TensorAttributes::get_ragged_offset_multiplier)
+        .def("set_ragged_offset_multiplier",
+             &TensorAttributes::set_ragged_offset_multiplier,
+             nb::rv_policy::reference_internal)
+        .def("has_ragged_offset_multiplier", &TensorAttributes::has_ragged_offset_multiplier)
+        .def("clear_value", &TensorAttributes::clear_value, nb::rv_policy::reference_internal)
+        .def("set_as_runtime_parameter",
+             &TensorAttributes::set_as_runtime_parameter,
+             nb::rv_policy::reference_internal)
+        .def("get_has_compile_time_constant", &TensorAttributes::get_has_compile_time_constant)
+        .def("has_ragged_offset", &TensorAttributes::has_ragged_offset)
+        .def("get_ragged_offset", &TensorAttributes::get_ragged_offset)
+        .def("set_ragged_offset",
+             &TensorAttributes::set_ragged_offset,
+             nb::arg("value").none(),
+             nb::rv_policy::reference_internal)
+        .def("get_value_variant",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(tensor.get_value_variant());
+             })
+        .def("get_pass_by_value",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(
+                     tensor.get_pass_by_value().value_or(TensorAttributes::ValueVariant{}));
+             })
+        .def("get_compile_time_constant",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(
+                     tensor.get_compile_time_constant().value_or(TensorAttributes::ValueVariant{}));
+             })
         .def("validate", &TensorAttributes::validate);
 }

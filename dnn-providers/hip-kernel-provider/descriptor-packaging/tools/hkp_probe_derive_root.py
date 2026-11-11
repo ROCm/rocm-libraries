@@ -532,8 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="NAME",
-        help="top-level folder of the root this build does not pack (repeatable); "
-        "the packer's own exclude_folders",
+        help="folder of the root this build does not pack, top-level or a "
+        "'/'-separated path (repeatable); the packer's own exclude_folders",
     )
     parser.add_argument(
         "--disable-kind",
