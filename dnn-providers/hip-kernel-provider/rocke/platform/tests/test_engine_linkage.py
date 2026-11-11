@@ -250,10 +250,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, "rocke_library_sdpa_pytest") == {
                 "PYTHONPATH": f"{test_ctest_rel}tests/library"
             }
-            if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-                install_script = (build / "cmake_install.cmake").read_text()
-                assert "attention_sdpa_fwd.graph.json" in install_script
-                assert "/tests/library/tests/sdpa/hipdnn" in install_script
         else:
             # A platform-only tree enrols no library suite.
             assert not [

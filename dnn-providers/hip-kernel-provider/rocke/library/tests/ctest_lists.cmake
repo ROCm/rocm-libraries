@@ -343,9 +343,11 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # case tables. Pointed at the DIRECTORY so a new file there runs automatically;
 # a GPU test added there must be --ignore'd here and enrolled in the GPU lane.
 # Distinct from rocke_sdpa_reference_unit_pytest below, which runs only
-# tests/test_sdpa_reference_contract.py.
+# tests/test_sdpa_reference_contract.py. The rocKE umbrella sets the requirement
+# when it stages the optional hipDNN assets; standalone platform builds leave it
+# disabled.
 set(_ROCKE_SDPA_PYTEST_ARGS "")
-if(_ROCKE_SDPA_HIPDNN_ASSETS)
+if(ROCKE_REQUIRE_INSTALLED_HIPDNN_SDPA_ASSETS)
   set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
 endif()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
