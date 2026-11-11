@@ -256,6 +256,11 @@ struct Arguments
     // thus this is for other use where we want defaults to match those specified in hipblaslt_common.yaml
     void init();
 
+    // Raise each problem's leading dimensions, and its batch strides when
+    // `strides` is set, to at least those of packed column-major storage.
+    // An operation other than 'N' transposes its operand.
+    void raise_to_packed_layout(bool strides);
+
     // clang-format off
 
 // Generic macro which operates over the list of arguments in order of declaration
