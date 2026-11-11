@@ -83,12 +83,12 @@ target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
 
-# Link OpenMP by imported target and embed its directory in BUILD_RPATH so the
-# POST_BUILD --gtest_list_tests discovery (and in-tree ctest) can load it when
-# libomp lives under lib/llvm/lib/<triple> (TheRock) rather than a system path.
-# Prefer ROCm/LLVM OpenMP CONFIG (…/lib/llvm/lib/cmake/openmp); else MODULE.
+# librpp depends on ROCm/LLVM libomp. Require that OpenMP CONFIG package (no
+# MODULE/libgomp fallback). Link OpenMP::OpenMP_CXX so rpp_tests gets a direct
+# DT_NEEDED on libomp.so; BUILD_RPATH must come from openmp_LIB_INSTALL_DIR so
+# POST_BUILD --gtest_list_tests can load it in the build tree.
 if(NOT TARGET OpenMP::OpenMP_CXX)
-  find_package(OpenMP CONFIG QUIET COMPONENTS CXX
+  find_package(OpenMP CONFIG REQUIRED COMPONENTS CXX
     HINTS
       "${ROCM_PATH}/lib/llvm"
       "${ROCM_PATH}/llvm"
@@ -96,25 +96,36 @@ if(NOT TARGET OpenMP::OpenMP_CXX)
       "${ROCM_PATH}/lib/llvm/lib/cmake/openmp"
   )
 endif()
-if(NOT TARGET OpenMP::OpenMP_CXX)
-  find_package(OpenMP MODULE REQUIRED COMPONENTS CXX)
-endif()
-target_link_libraries(rpp_tests PRIVATE OpenMP::OpenMP_CXX)
-# POST_BUILD --gtest_list_tests needs libomp on the loader path in the build tree.
-set(_rpp_tests_build_rpath)
-if(DEFINED openmp_LIB_INSTALL_DIR AND EXISTS "${openmp_LIB_INSTALL_DIR}")
-  list(APPEND _rpp_tests_build_rpath "${openmp_LIB_INSTALL_DIR}")
-endif()
-foreach(_omp_lib IN LISTS OpenMP_CXX_LIBRARIES)
-  if(IS_ABSOLUTE "${_omp_lib}" AND EXISTS "${_omp_lib}")
-    get_filename_component(_omp_dir "${_omp_lib}" DIRECTORY)
-    list(APPEND _rpp_tests_build_rpath "${_omp_dir}")
+
+# Bare -fopenmp selects libomp on Clang but also pulls -lgomp on g++. For
+# non-Clang, drop it from OpenMP::OpenMP_CXX. Today the flag still lives on
+# OpenMP::omp and propagates through INTERFACE_LINK_LIBRARIES -- strip that too
+# while the target exists; safe to omit once omp is folded into OpenMP_CXX.
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set(_rpp_omp_targets OpenMP::OpenMP_CXX)
+  if(TARGET OpenMP::omp)
+    list(APPEND _rpp_omp_targets OpenMP::omp)
   endif()
-endforeach()
-list(REMOVE_DUPLICATES _rpp_tests_build_rpath)
-if(_rpp_tests_build_rpath)
-  set_property(TARGET rpp_tests APPEND PROPERTY BUILD_RPATH ${_rpp_tests_build_rpath})
+  foreach(_rpp_omp_tgt IN LISTS _rpp_omp_targets)
+    get_property(_rpp_omp_link_opts TARGET ${_rpp_omp_tgt} PROPERTY INTERFACE_LINK_OPTIONS)
+    if(_rpp_omp_link_opts)
+      list(REMOVE_ITEM _rpp_omp_link_opts "-fopenmp")
+      set_property(TARGET ${_rpp_omp_tgt} PROPERTY INTERFACE_LINK_OPTIONS "${_rpp_omp_link_opts}")
+    endif()
+    get_property(_rpp_omp_comp_opts TARGET ${_rpp_omp_tgt} PROPERTY INTERFACE_COMPILE_OPTIONS)
+    if(_rpp_omp_comp_opts)
+      list(REMOVE_ITEM _rpp_omp_comp_opts "-fopenmp")
+      set_property(TARGET ${_rpp_omp_tgt} PROPERTY INTERFACE_COMPILE_OPTIONS "${_rpp_omp_comp_opts}")
+    endif()
+  endforeach()
 endif()
+
+target_link_libraries(rpp_tests PRIVATE OpenMP::OpenMP_CXX)
+if(NOT openmp_LIB_INSTALL_DIR)
+  message(FATAL_ERROR
+    "OpenMP CONFIG did not set openmp_LIB_INSTALL_DIR; cannot set rpp_tests BUILD_RPATH for libomp")
+endif()
+set_property(TARGET rpp_tests APPEND PROPERTY BUILD_RPATH "${openmp_LIB_INSTALL_DIR}")
 
 # One CTest test per GTest suite (per operator) by default; see cmake/grouped_tests.cmake.
 # Per-case registration isolates each case in its own process, at the cost of one start per case.
