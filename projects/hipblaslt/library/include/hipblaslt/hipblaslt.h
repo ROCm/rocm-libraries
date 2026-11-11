@@ -50,9 +50,11 @@
 #include <hipblas/hipblas.h>
 #endif
 
+#ifdef __cplusplus
 #include <memory>
 #include <regex>
 #include <vector>
+#endif
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
@@ -67,11 +69,18 @@
 /* Opaque structures holding information */
 // clang-format off
 
+#ifdef __cplusplus
 #define HIPBLASLT_DATATYPE_INVALID static_cast<hipDataType>(255)
 // TODO: Replace static_cast<hipblasComputeType_t>(0) with the appropriate value since 0 represents f16_r
 #define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(0)
 #define HIPBLASLT_OPERATION_INVALID static_cast<hipblasOperation_t>(0)
 #define ROCBLASLT_COMPUTE_TYPE_INVALID static_cast<rocblaslt_compute_type>(255)
+#else
+#define HIPBLASLT_DATATYPE_INVALID ((hipDataType)255)
+#define HIPBLASLT_COMPUTE_TYPE_INVALID ((hipblasComputeType_t)0)
+#define HIPBLASLT_OPERATION_INVALID ((hipblasOperation_t)0)
+#define ROCBLASLT_COMPUTE_TYPE_INVALID ((rocblaslt_compute_type)255)
+#endif
 
 #define HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT \
     static_assert(false, "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT is deprecated and not supported. Please set HIPBLASLT_MATMUL_DESC_A_SCALE_MODE as HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F instead.")
@@ -692,9 +701,15 @@ typedef struct _hipblasLtMatmulAlgo_t{
  */
 typedef struct _hipblasLtMatmulHeuristicResult_t{
   hipblasLtMatmulAlgo_t algo;                      /**<Algo struct*/
+#ifdef __cplusplus
   size_t workspaceSize = 0;                        /**<Actual size of workspace memory required.*/
   hipblasStatus_t state = HIPBLAS_STATUS_SUCCESS;  /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
   float wavesCount = 1.0;                          /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#else
+  size_t workspaceSize;                            /**<Actual size of workspace memory required.*/
+  hipblasStatus_t state;                           /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
+  float wavesCount;                                /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#endif
   int reserved[4];                                 /**<Reserved.*/
 } hipblasLtMatmulHeuristicResult_t;
 #endif
