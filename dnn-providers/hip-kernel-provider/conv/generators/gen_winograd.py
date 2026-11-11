@@ -144,7 +144,7 @@ WREG_BF16 = [(32, 2, 4, 0), (64, 1, 2, 0)]
 
 # Cooperative WMMA (gfx11 / gfx12): the block transforms each input chunk once into LDS. Waves =
 # 4 x kw (one per transform row per K group), each 16 x mt out channels by 16 x nt tiles.
-# m = 3 is F(3,2): stride 2 by phases (RDNA only).
+# m = 3 is F(3,2): stride 2 by phases.
 def coop(blocks, archs=("gfx11", "gfx12"), m=2):
     return [
         C("coop", m, arch=a, bk=16 * mt * kw, bt=16 * nt, waves=4 * kw, f16math=h)
@@ -178,6 +178,8 @@ COOP_CDNA_F16 = [
     (2, 2, 1, 1),
 ]
 COOP_CDNA_BF16 = [(2, 4, 2, 0), (2, 2, 2, 0), (1, 4, 1, 0), (2, 2, 1, 0)]
+COOP3_CDNA_F16 = [(1, 4, 4, 1), (2, 2, 1, 1), (1, 2, 1, 1), (2, 2, 2, 1)]
+COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 
 
 # Register-operand VALU on wave64 gfx9: lane = tile, the transformed filter through the scalar cache.
@@ -214,6 +216,7 @@ CATALOG = {
     "HALF": coop(COOP_F16)
     + coop(COOP3_F16, m=3)
     + coop(COOP_CDNA_F16, ("gfx9",))
+    + coop(COOP3_CDNA_F16, ("gfx9",), m=3)
     + wreg(WREG_F16)
     + wmma()
     + sreg([1, 0])
@@ -223,6 +226,7 @@ CATALOG = {
     "BFLOAT16": coop(COOP_BF16)
     + coop(COOP3_BF16, m=3)
     + coop(COOP_CDNA_BF16, ("gfx9",))
+    + coop(COOP3_CDNA_BF16, ("gfx9",), m=3)
     + wreg(WREG_BF16)
     + wmma()
     + fused(BF16_BLOCKS)

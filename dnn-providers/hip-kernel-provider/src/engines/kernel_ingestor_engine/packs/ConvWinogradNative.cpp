@@ -512,11 +512,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // most 4 on RDNA (8 registers each), 16 on CDNA (4 each; mt and nt cap it).
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
-            // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(3,2)
-            // (stride 2 by phases) on RDNA WMMA only.
+            // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(2,3), or
+            // F(3,2) for stride 2 by phases.
             const bool cdna = config.arch == "gfx9";
-            if((config.m != 2 && (config.m != 3 || cdna)) || config.layout != Layout::NCHW
-               || config.llcPlan || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
+            if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
+               || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
                    && (config.waves != 32 || cdna))
                || (config.bt != 16 && config.bt != 32 && config.bt != 64)

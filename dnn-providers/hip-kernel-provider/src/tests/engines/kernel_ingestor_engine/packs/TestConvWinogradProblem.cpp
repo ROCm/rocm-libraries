@@ -680,6 +680,12 @@ TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16From
     EXPECT_FALSE(admits(coop("gfx9", 1), "gfx906", baseShape(), "HALF"));
     EXPECT_FALSE(admits(coop("gfx9", 1), "gfx1100", baseShape(), "HALF"));
     EXPECT_FALSE(admits(coop("gfx9", 0), "gfx942", baseShape(), "FLOAT"));
+    // F(3,2): stride 2 (by phases) only.
+    auto f32 = coop("gfx9", 1);
+    f32.m = 3;
+    EXPECT_TRUE(admits(f32, "gfx950", strideTwo(), "HALF"));
+    EXPECT_TRUE(admits(f32, "gfx908", strideTwo(), "HALF"));
+    EXPECT_FALSE(admits(f32, "gfx942", baseShape(), "HALF"));
 }
 
 TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
@@ -833,12 +839,6 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
          [] {
              auto f = coop("gfx11", 1);
              f.m = 4;
-             return f;
-         }},
-        {"CoopCdnaTileF32",
-         [] {
-             auto f = coop("gfx9", 1);
-             f.m = 3;
              return f;
          }},
         {"CoopLlc",
