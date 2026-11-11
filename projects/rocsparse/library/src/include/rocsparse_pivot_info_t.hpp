@@ -31,10 +31,8 @@ namespace rocsparse
 {
     struct pivot_info_t : rocsparse::position_t
     {
-    protected:
-        pivot_info_t() = default;
-
     public:
+        pivot_info_t()  = default;
         ~pivot_info_t() = default;
 
         inline rocsparse_status create_zero_pivot_async(rocsparse_indextype indextype,

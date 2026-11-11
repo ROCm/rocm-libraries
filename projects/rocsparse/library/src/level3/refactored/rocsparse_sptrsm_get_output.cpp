@@ -96,7 +96,7 @@ try
         auto csrsm_info = sptrsm_descr->get_csrsm_info();
         if(csrsm_info != nullptr)
         {
-            symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsm_info);
+            symbolic_pivot = csrsm_info->get_pivot_info();
             exact_pivot    = csrsm_info->get_singularity_numeric_exact();
         }
 

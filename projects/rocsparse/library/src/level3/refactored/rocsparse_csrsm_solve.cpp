@@ -619,13 +619,13 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     case rocsparse_diag_type_unit:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
-            1, A->col_type, csrsm_info->get_position(), handle->stream));
+            1, A->col_type, csrsm_info->get_pivot_info()->get_position(), handle->stream));
         if(A->col_type == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 B->batch_count,
                 (int32_t*)csrsm_info->get_singularity_numeric_exact()->get_position(),
-                (const int32_t*)csrsm_info->get_position(),
+                (const int32_t*)csrsm_info->get_pivot_info()->get_position(),
                 handle->stream));
         }
         else
@@ -633,7 +633,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                 B->batch_count,
                 (int64_t*)csrsm_info->get_singularity_numeric_exact()->get_position(),
-                (const int64_t*)csrsm_info->get_position(),
+                (const int64_t*)csrsm_info->get_pivot_info()->get_position(),
                 handle->stream));
         }
 
@@ -646,7 +646,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 B->batch_count,
                 (int32_t*)csrsm_info->get_singularity_numeric_exact()->get_position(),
-                (const int32_t*)csrsm_info->get_position(),
+                (const int32_t*)csrsm_info->get_pivot_info()->get_position(),
                 handle->stream));
         }
         else
@@ -654,7 +654,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                 B->batch_count,
                 (int64_t*)csrsm_info->get_singularity_numeric_exact()->get_position(),
-                (const int64_t*)csrsm_info->get_position(),
+                (const int64_t*)csrsm_info->get_pivot_info()->get_position(),
                 handle->stream));
         }
         break;

@@ -343,7 +343,7 @@ rocsparse::triangular_info_t*
                                                         ell_width,
                                                         idx_base,
                                                         trm_info,
-                                                        this,
+                                                        this->m_pivot_info,
                                                         buffer_size,
                                                         temp_buffer));
     return trm_info;

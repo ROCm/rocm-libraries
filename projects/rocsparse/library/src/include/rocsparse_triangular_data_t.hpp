@@ -65,9 +65,10 @@ namespace rocsparse
 namespace rocsparse
 {
 
-    struct triangular_data_t : rocsparse::pivot_info_t
+    struct triangular_data_t
     {
     protected:
+        rocsparse::pivot_info_t*      m_pivot_info{new rocsparse::pivot_info_t()};
         rocsparse::triangular_info_t* m_data[4]{};
         static int storage_index(rocsparse_operation operation, rocsparse_fill_mode fill_mode)
         {
@@ -77,8 +78,21 @@ namespace rocsparse
     public:
         triangular_data_t() = default;
         ~triangular_data_t();
+        triangular_data_t(const triangular_data_t&)            = delete;
+        triangular_data_t& operator=(const triangular_data_t&) = delete;
+
         void uncouple(const triangular_data_t* that);
         void copy(const triangular_data_t* that, hipStream_t stream);
+
+        rocsparse::pivot_info_t* get_pivot_info()
+        {
+            return this->m_pivot_info;
+        }
+
+        const rocsparse::pivot_info_t* get_pivot_info() const
+        {
+            return this->m_pivot_info;
+        }
 
         rocsparse::triangular_info_t* get(rocsparse_operation operation,
                                           rocsparse_fill_mode fill_mode);
@@ -124,7 +138,7 @@ namespace rocsparse
                                                               csr_col_ind_indextype,
                                                               csr_col_ind,
                                                               trm_info,
-                                                              this,
+                                                              this->m_pivot_info,
                                                               temp_buffer));
             return trm_info;
         }
@@ -157,7 +171,7 @@ namespace rocsparse
                                                               csr_col_ind_indextype,
                                                               csr_col_ind,
                                                               trm_info,
-                                                              this,
+                                                              this->m_pivot_info,
                                                               temp_buffer));
             return trm_info;
         }

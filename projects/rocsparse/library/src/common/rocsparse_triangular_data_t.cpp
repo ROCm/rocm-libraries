@@ -38,7 +38,7 @@ void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that
             }
         }
 
-        this->copy_pivot_info_async(that, stream);
+        this->m_pivot_info->copy_pivot_info_async(that->m_pivot_info, stream);
         THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 }
@@ -78,6 +78,9 @@ rocsparse::triangular_data_t::~triangular_data_t()
             this->m_data[i] = nullptr;
         }
     }
+
+    delete this->m_pivot_info;
+    this->m_pivot_info = nullptr;
 }
 
 rocsparse::triangular_info_t* rocsparse::triangular_data_t::get(rocsparse_operation operation,

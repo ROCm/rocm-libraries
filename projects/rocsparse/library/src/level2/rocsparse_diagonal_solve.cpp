@@ -374,19 +374,19 @@ namespace rocsparse
         auto numeric_exact = info->get_singularity_numeric_exact();
         if(pivot_indextype == rocsparse_indextype_i32)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_device_async<int32_t>(batch_count,
-                                                        (int32_t*)numeric_exact->get_position(),
-                                                        (const int32_t*)info->get_position(),
-                                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+                batch_count,
+                (int32_t*)numeric_exact->get_position(),
+                (const int32_t*)info->get_pivot_info()->get_position(),
+                stream));
         }
         else
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_device_async<int64_t>(batch_count,
-                                                        (int64_t*)numeric_exact->get_position(),
-                                                        (const int64_t*)info->get_position(),
-                                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                batch_count,
+                (int64_t*)numeric_exact->get_position(),
+                (const int64_t*)info->get_pivot_info()->get_position(),
+                stream));
         }
 
         RETURN_IF_ROCSPARSE_ERROR(

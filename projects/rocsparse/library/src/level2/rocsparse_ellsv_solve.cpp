@@ -211,15 +211,15 @@ namespace rocsparse
         {
         case rocsparse_diag_type_unit:
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_max_async(1, A->col_type, info->get_position(), stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+                1, A->col_type, info->get_pivot_info()->get_position(), stream));
             if(A->col_type == rocsparse_indextype_i32)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                     1,
                     reinterpret_cast<int32_t*>(
                         info->get_singularity_numeric_exact()->get_position()),
-                    reinterpret_cast<const int32_t*>(info->get_position()),
+                    reinterpret_cast<const int32_t*>(info->get_pivot_info()->get_position()),
                     stream));
             }
             else
@@ -228,7 +228,7 @@ namespace rocsparse
                     1,
                     reinterpret_cast<int64_t*>(
                         info->get_singularity_numeric_exact()->get_position()),
-                    reinterpret_cast<const int64_t*>(info->get_position()),
+                    reinterpret_cast<const int64_t*>(info->get_pivot_info()->get_position()),
                     stream));
             }
             break;
@@ -241,7 +241,7 @@ namespace rocsparse
                     1,
                     reinterpret_cast<int32_t*>(
                         info->get_singularity_numeric_exact()->get_position()),
-                    reinterpret_cast<const int32_t*>(info->get_position()),
+                    reinterpret_cast<const int32_t*>(info->get_pivot_info()->get_position()),
                     stream));
             }
             else
@@ -250,7 +250,7 @@ namespace rocsparse
                     1,
                     reinterpret_cast<int64_t*>(
                         info->get_singularity_numeric_exact()->get_position()),
-                    reinterpret_cast<const int64_t*>(info->get_position()),
+                    reinterpret_cast<const int64_t*>(info->get_pivot_info()->get_position()),
                     stream));
             }
             break;

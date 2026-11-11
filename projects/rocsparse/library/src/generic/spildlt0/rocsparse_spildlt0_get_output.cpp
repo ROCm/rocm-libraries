@@ -95,7 +95,7 @@ try
         auto csrildlt0_info = spildlt0_descr->get_csrildlt0_info();
         if(csrildlt0_info != nullptr)
         {
-            symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrildlt0_info);
+            symbolic_pivot = csrildlt0_info->get_pivot_info();
             exact_pivot    = csrildlt0_info->get_singularity_numeric_exact();
             near_pivot     = csrildlt0_info->get_singularity_numeric_near();
         }

@@ -109,7 +109,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
+        (rocsparse_int*)bsrsv_info->get_pivot_info()->get_position(), \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -132,7 +132,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
+        (rocsparse_int*)bsrsv_info->get_pivot_info()->get_position(), \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -184,7 +184,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
+        (rocsparse_int*)bsrsv_info->get_pivot_info()->get_position(), \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -207,7 +207,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
+        (rocsparse_int*)bsrsv_info->get_pivot_info()->get_position(), \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -400,7 +400,7 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
                 1,
-                reinterpret_cast<rocsparse_int*>(bsrsv_info->get_position()),
+                reinterpret_cast<rocsparse_int*>(bsrsv_info->get_pivot_info()->get_position()),
                 std::numeric_limits<rocsparse_int>::max(),
                 stream));
         }
