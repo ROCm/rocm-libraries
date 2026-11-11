@@ -20,7 +20,12 @@
 // channels. The block stages its input window (zero outside the image and for c >= C) and its
 // BN x KP weights in LDS once; the reduction is short (KP = CMAX KD R SP rounded to whole MMA
 // steps), so there is no channel loop. Each wave then writes its tile row by row through a
-// private LDS slot, in the output's layout.
+// private LDS slot, in the output's layout (EP 0), or straight from registers (EP 1: the MMA
+// computes the transposed tile, so a lane holds adjacent output channels of one pixel; for
+// channels-fastest outputs, where the stores are 16-byte channel runs).
+//
+// Backward data at unit stride (CONV_SMALLC_BWD) runs on the same kernel: the forward
+// convolution over dy with the filter transposed and reflected by the weight pre-pass.
 #pragma once
 
 #include "ConvSmallcArgs.h"
@@ -90,7 +95,8 @@ template <class T,
           int FN,
           int WM,
           int WQ,
-          int WN>
+          int WN,
+          int EP = 0>
 __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
 {
     constexpr int WAVE = Atom::WAVE, DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
@@ -118,10 +124,28 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
     static_assert(KP % (16 / static_cast<int>(sizeof(T))) == 0, "weight rows move by 16 bytes");
     typedef typename Atom::frag Frag;
     typedef typename K1Raw<KPL * sizeof(T) >= 16 ? 16 : KPL * sizeof(T)>::type RawB;
+    // Register epilogue (EP 1): a lane's accumulators are channels dRow(lane, e) of fragment j's
+    // B rows. Fragment rows read the weight rows (output channels) permuted so that a lane's
+    // stored run is 8 adjacent channels (one 16-byte store of 16-bit output): 16-bit MFMA pairs
+    // fragments (2 x 4 rows); gfx11 WMMA un-weaves its interleaved rows (2e + half -> 8 half +
+    // e; its 2-byte scalar stores ran 2-4x slower). gfx12 WMMA rows and fp32 MFMA rows already
+    // are such runs.
+    constexpr bool W11 = __is_base_of(K1Wmma11, Atom);
+    constexpr bool PAIRS = EP != 0 && !W11 && Atom::ACC == 4 && sizeof(TO) == 2 && FN % 2 == 0;
+    constexpr bool UNWEAVE = EP != 0 && W11;
+    auto bRow = [](int j, int m) {
+        if constexpr(PAIRS)
+            return (j / 2) * 32 + 8 * (m >> 2) + 4 * (j & 1) + (m & 3);
+        else if constexpr(UNWEAVE)
+            return j * 16 + 8 * (m & 1) + (m >> 1);
+        else
+            return j * 16 + m;
+    };
     constexpr int BCH = KPL * static_cast<int>(sizeof(T)) / static_cast<int>(sizeof(RawB));
 
-    __shared__ __attribute__((
-        aligned(16))) char lds[WIN_BYTES + W_BYTES + WM * WQ * WN * SLOT * sizeof(TO)];
+    // EP 1 stores from registers: no epilogue slots.
+    __shared__ __attribute__((aligned(
+        16))) char lds[WIN_BYTES + W_BYTES + (EP == 0 ? WM * WQ * WN * SLOT * sizeof(TO) : 0)];
     T* win = reinterpret_cast<T*>(lds);
     T* wl = reinterpret_cast<T*>(lds + WIN_BYTES);
 
@@ -224,7 +248,7 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
 #pragma unroll
         for(int j = 0; j < FN; ++j)
         {
-            const T* p = wl + (wn * FN * DIM + j * DIM + lane % DIM) * KPS + st * KA + kb;
+            const T* p = wl + (wn * FN * DIM + bRow(j, lane % DIM)) * KPS + st * KA + kb;
             RawB raw[BCH];
 #pragma unroll
             for(int q = 0; q < BCH; ++q)
@@ -277,14 +301,74 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
                 }
                 af = __builtin_bit_cast(Frag, av);
             }
+            if constexpr(EP == 0)
+            {
 #pragma unroll
-            for(int j = 0; j < FN; ++j)
-                acc[i][j] = Atom::mma(af, bf[j], acc[i][j]);
+                for(int j = 0; j < FN; ++j)
+                    acc[i][j] = Atom::mma(af, bf[j], acc[i][j]);
+            }
+            else
+            {
+                // Transposed tile: D[channel][pixel], so a lane's accumulators are output
+                // channels of one pixel (the operands share the lane layout).
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    acc[i][j] = Atom::mma(bf[j], af, acc[i][j]);
+            }
             // One A fragment live at a time.
             __builtin_amdgcn_sched_barrier(0);
         }
     }
 
+    if constexpr(EP != 0)
+    {
+        // Straight from registers: lane holds channels bRow(j, dRow(lane, e)) of pixel
+        // lane % 16. Where a store group's channels are adjacent (VW of them over G fragments)
+        // and the output is channels-fastest and aligned, one vector store per group.
+        constexpr int ACC = Atom::ACC;
+        constexpr int G = PAIRS ? 2 : 1;
+        constexpr int VW = PAIRS || UNWEAVE ? 8 : ACC;
+        constexpr bool RUN = !W11 || UNWEAVE;
+        typedef TO VO __attribute__((ext_vector_type(VW)));
+        TO* y = static_cast<TO*>(a.y) + img * a.ys[0] + od * a.ys[2];
+        const bool vec = RUN && a.ys[1] == 1 && a.ys[3] % VW == 0 && a.ys[4] % VW == 0
+                         && (reinterpret_cast<unsigned long long>(y) % (VW * sizeof(TO))) == 0;
+        const int ow = ow0 + wq * DIM + lane % DIM;
+        const int kw = nb + wn * FN * DIM;
+#pragma unroll
+        for(int i = 0; i < FM; ++i)
+        {
+            const int oh = oh0 + wm * FM + i;
+            if(oh >= a.ho || ow >= a.wo)
+                continue;
+            TO* yp = y + oh * a.ys[3] + ow * a.ys[4];
+#pragma unroll
+            for(int gs = 0; gs < FN / G; ++gs)
+            {
+                const int k0 = kw + bRow(gs * G, Atom::dRow(lane, 0));
+                if(vec && k0 + VW <= a.k)
+                {
+                    VO v;
+#pragma unroll
+                    for(int t = 0; t < VW; ++t)
+                        v[t] = K1Elem<TO>::store(acc[i][gs * G + t / ACC][t % ACC]);
+                    *reinterpret_cast<VO*>(yp + k0) = v;
+                }
+                else
+                {
+#pragma unroll
+                    for(int t = 0; t < G * ACC; ++t)
+                    {
+                        const int j = gs * G + t / ACC;
+                        const int kk = kw + bRow(j, Atom::dRow(lane, t % ACC));
+                        if(kk < a.k)
+                            yp[kk * a.ys[1]] = K1Elem<TO>::store(acc[i][j][t % ACC]);
+                    }
+                }
+            }
+        }
+        return;
+    }
     // Epilogue, per wave: each output row of the wave's fragments goes through the wave's own
     // LDS slot as [n][16 columns] in TO; lanes then store it in the output's layout (columns
     // fastest when the output's width stride is 1, channels fastest otherwise).

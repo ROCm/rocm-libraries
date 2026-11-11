@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "id": "02134409-467d-5459-8042-f3bbc9ba796b",
+  "name": "hipkernel:CONV_SMALLC_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_smallc_bwd.graph_match"
+  },
+  "metadata": "b76b27e5-6b1a-503c-8d4d-49348c685a47",
+  "knobs": [
+    "atom_id",
+    "wave",
+    "ka",
+    "cmax",
+    "kd",
+    "r",
+    "s",
+    "sd",
+    "sh",
+    "sw",
+    "dd",
+    "dh",
+    "dw",
+    "fm",
+    "fn",
+    "wm",
+    "wq",
+    "wn",
+    "ep"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}
