@@ -576,7 +576,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
             page_id2 = k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start);
         }
         PageIds page_id3{};
-        // Raw ids read before PV, validated into the queue value after PV.
+        // Raw ids read before PV, completed into the queue value after PV.
         PageIds page_id3_raw{};
         // For P>=64 the async j+3 queue keeps SCALAR semantics: owned[0] carries one
         // physical id (shared by the tile for P>=128, the wave's page for P64). P16 uses the

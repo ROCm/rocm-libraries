@@ -59,7 +59,7 @@ struct FmhaPageTileSinkTiles
     index_t resume_origin;
 };
 
-// One owned fragment's validated page metadata.
+// One owned fragment's page metadata.
 struct FmhaBatchPrefillPageFragmentId
 {
     index_t physical_page = 0;
