@@ -28,6 +28,8 @@ tier 1  CPU  asm A/B, one result per config (TensileLite --cpu-only, baseline vs
                different  -> pattern check, then tier 2 for that config
 tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
              BEFORE it, read projects/hipblaslt/harness/PROFILING.md
+             first check that the kernel under test gives correct results (see PROFILING.md),
+             then compare perf
              a difference of at least one SD (run-to-run noise) needs a human check
 ```
 

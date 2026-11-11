@@ -33,8 +33,14 @@ handle. Do not remove several components at once.
 - build the baseline and the candidate in separate worktrees, each with its own venv, so the two
   rocisa bindings do not shadow each other (see the `worktree-venv` skill in `skills/`). Rebuild the
   candidate after the last edit (see the "fresh binding" note in the StinkyTofu HARNESS.md).
-- if anything is normalized before comparing (paths, timestamps), list exactly what, and show a
-  diff proving nothing else was removed.
+- the labels in the generated asm contain random hashes, so two runs of identical code differ in
+  label names. Normalize the labels before comparing: in each file, rename every distinct label to a
+  sequential name in order of first appearance. A raw diff that differs only in labels is not a real
+  difference.
+- list exactly what is normalized (labels, and anything else such as paths or timestamps), and show a
+  diff proving nothing else was removed or changed.
+- as a check, compare the baseline against a second run of itself for one YAML. After normalizing, it
+  must be identical. If it is not, the comparison is not trustworthy yet.
 - on any difference, show the diff. Do not call it "equivalent" unless the developer agrees.
 ```
 

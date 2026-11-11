@@ -40,7 +40,11 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
 ```text
 1. tier 1 first (CPU). Run tier 2 only for configs where tier 1 found a difference
    and no confirmed bad pattern.
-2. correctness before performance. A kernel that gives wrong results has no meaningful perf number.
+2. correctness of the kernel under test before its performance. Run the candidate kernel with the
+   client's validation on (`NumElementsToValidate` in the YAML; the perf YAMLs already validate the
+   winner with `NumElementsToValidateWinner`). This checks the kernel being tested, not the whole CI.
+   A kernel that gives wrong results has no meaningful perf number. Keep validation off for the timed
+   runs.
 3. benchmark the set together, not one case: a change must not regress the cases that already
    work well while improving the target case.
 4. print the plan or the reason behind a result before concluding from it.
