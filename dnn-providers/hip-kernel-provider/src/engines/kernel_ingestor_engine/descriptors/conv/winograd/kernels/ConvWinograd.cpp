@@ -15,7 +15,8 @@
 //   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
 //                        F(3,2) (stride 2 by phases; multipass, fused VALU and cooperative)
 //   multipass:  CONV_WINO_GEMM_BM, _BN, _BK          the batched-GEMM tile
-//   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN    K-block, tile-block, chunk, micro-tile
+//   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN, _PFD  K-block, tile-block, chunk, micro-tile,
+//               prefetch depth (1 or 2 input chunks ahead)
 //   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12         K-block, waves, gfx12 operand layout
 //   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
 //                  wave, fp16 packed input-transform math, gfx12 operand layout
@@ -75,6 +76,10 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a)
 
 #elif CONV_WINO_VARIANT == 1
 
+#ifndef CONV_WINO_PFD
+#define CONV_WINO_PFD 1
+#endif
+
 #define CONV_WINO_DOT2 __is_same(CONV_WINO_T, _Float16)
 #define CONV_WINO_CFG       \
     K5F2Cfg<CONV_WINO_T,    \
@@ -102,7 +107,8 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) ConvWinog
                  CONV_WINO_CCV,
                  CONV_WINO_TM,
                  CONV_WINO_TN,
-                 false>(a);
+                 false,
+                 CONV_WINO_PFD>(a);
 }
 
 #elif CONV_WINO_VARIANT == 2

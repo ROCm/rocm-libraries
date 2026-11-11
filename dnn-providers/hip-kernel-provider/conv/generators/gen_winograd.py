@@ -205,9 +205,10 @@ def sreg(variants):
 
 
 # m = 3 is F(3,2): stride 2 by phases (2x2 sub-filters over 4x the channels); the others stride 1.
-def fused(blocks, ms=(2, 3)):
+# pf = 1 loads input chunks two ahead (two register sets).
+def fused(blocks, ms=(2, 3), pf=0):
     return [
-        C("fused", m, bk=bk, bt=bt, ccv=ccv, tm=tm, tn=tn)
+        C("fused", m, bk=bk, bt=bt, ccv=ccv, tm=tm, tn=tn, pf=pf)
         for m in ms
         for bk, bt, ccv, tm, tn in blocks
     ]
@@ -223,11 +224,15 @@ F32_BLOCKS = [
     (24, 64, 4, 12, 8),
     (24, 32, 4, 12, 4),
 ]
+# Prefetch depth 2 (RDNA fp32: maskrcnn c256 200² / 14², ssd300 c128 150², stride-2 c128 200²:
+# 5-13% on gfx1201, 2-10% on gfx1101).
+F32_PF_BLOCKS = [(64, 32, 4, 8, 8)]
 F16_BLOCKS = [(64, 32, 2, 8, 8), (32, 32, 8, 8, 4), (16, 32, 2, 8, 4)]
 BF16_BLOCKS = [(64, 32, 4, 8, 8), (32, 32, 8, 8, 4), (16, 32, 4, 8, 4)]
 CATALOG = {
     "FLOAT": sreg([0])
     + fused(F32_BLOCKS)
+    + fused(F32_PF_BLOCKS, pf=1)
     + multipass((4, 2, 3), "none")
     + multipass((4, 2, 3), "llc"),
     "HALF": coop(COOP_F16)
@@ -258,7 +263,7 @@ def label(c):
     if c["variant"] == "multipass":
         return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
     if c["variant"] == "fused":
-        return f"fused.f{c['m']}.nchw.{c['bk']}x{c['bt']}c{c['ccv']}t{c['tm']}{c['tn']}"
+        return f"fused.f{c['m']}.nchw.{c['bk']}x{c['bt']}c{c['ccv']}t{c['tm']}{c['tn']}{'.pf1' if c['pf'] else ''}"
     if c["variant"] == "wreg":
         return f"wreg.f2.nchw.{c['arch']}.{c['bk']}g{c['bt'] // 16}b{c['bins']}{'h' if c['f16math'] else 'f'}"
     if c["variant"] == "coop":

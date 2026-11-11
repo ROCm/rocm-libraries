@@ -91,7 +91,9 @@ struct Config
     int waves = 0; ///< fused WMMA waves per workgroup (register / cooperative: derived, checked)
     int bins = 0; ///< register WMMA: bins of a transform row per wave (4 or 2)
     bool f16Math = false; ///< register / cooperative, fp16: the input transform in packed fp16 math
-    int pf = 0; ///< cooperative: 1 loads the next item's first chunk behind the epilogue
+    /// 1: prefetch further (cooperative: the next item's first chunk behind the epilogue; fused
+    /// VALU: two input chunks ahead).
+    int pf = 0;
 };
 
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.
