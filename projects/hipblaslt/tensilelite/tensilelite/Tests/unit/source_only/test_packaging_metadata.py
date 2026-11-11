@@ -4,10 +4,12 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
+import os
 import re
 import runpy
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 

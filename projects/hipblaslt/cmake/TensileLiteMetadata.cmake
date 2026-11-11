@@ -13,6 +13,7 @@ function(hipblaslt_configure_tensilelite_metadata source_root output_dir)
         "-DOUTPUT_DIR=${output_dir}"
         "-DBUILD_ROCM_ROOT=${HIPBLASLT_BUILD_ROCM_ROOT}"
         "-DSOURCE_REVISION_OVERRIDE=${TENSILELITE_SOURCE_REVISION}"
+        "-DROCM_IDENTITY=${HIPBLASLT_BUILD_ROCM_VERSION}"
         -P "${_generator}")
     execute_process(COMMAND ${_command} COMMAND_ERROR_IS_FATAL ANY)
     set(TENSILELITE_METADATA_FILE "${output_dir}/metadata.json" PARENT_SCOPE)

@@ -8,8 +8,12 @@ if(SOURCE_REVISION_OVERRIDE)
     set(_python_command "${CMAKE_COMMAND}" -E env
         "TENSILELITE_SOURCE_REVISION=${SOURCE_REVISION_OVERRIDE}" "${PYTHON_EXECUTABLE}")
 endif()
+set(_identity_args)
+if(ROCM_IDENTITY)
+    set(_identity_args --rocm-identity "${ROCM_IDENTITY}")
+endif()
 execute_process(
-    COMMAND ${_python_command} "${SOURCE_ROOT}/release_metadata.py" metadata
+    COMMAND ${_python_command} "${SOURCE_ROOT}/release_metadata.py" metadata ${_identity_args}
     OUTPUT_VARIABLE _metadata
     OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY
