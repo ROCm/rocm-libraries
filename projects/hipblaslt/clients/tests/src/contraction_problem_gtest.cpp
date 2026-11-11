@@ -156,7 +156,17 @@ namespace
         auto tb = gemm(false, true, 128, 256, 64);
         auto nn = gemm(false, false, 128, 256, 64);
 
-        std::vector<ContractionProblemGemm> probs{base, gsu, ws, act, tb, nn, halfGemm()};
+        // Fields that were added to compare() after the equality operator was written; a
+        // drift between compare() and operator== for any such field fails this test.
+        auto dsa = halfGemm();
+        dsa.setParams().setDeviceScalarAlpha(true);
+        auto world = halfGemm();
+        world.setWorld(4);
+
+        EXPECT_FALSE(base == dsa);
+        EXPECT_FALSE(base == world);
+
+        std::vector<ContractionProblemGemm> probs{base, gsu, ws, act, tb, nn, dsa, world, halfGemm()};
         for(auto const& x : probs)
             for(auto const& y : probs)
                 EXPECT_EQ(x == y, Comparison<ContractionProblemGemm>::compare(x, y) == 0);

@@ -206,6 +206,9 @@ namespace TensileLite
         }
     };
 
+    // NOTE: any field added to Comparison<ContractionProblemGemm>::compare above must also be
+    // added here, and vice versa. The two must accept exactly the same pairs.
+    //
     // Equality for the solution caches. Accepts exactly the pairs where
     // Comparison<ContractionProblemGemm>::compare(lhs, rhs) == 0, but checks each field once with
     // ==, cheap scalars first, then tensors, and the operationIdentifier string last. The
@@ -239,7 +242,7 @@ namespace TensileLite
                && lhs.swizzleTensorB() == rhs.swizzleTensorB()
                && lhs.fusedGemmA2A() == rhs.fusedGemmA2A()
                && lhs.fusedA2AExtent() == rhs.fusedA2AExtent()
-               && lhs.fusedA2AWorld() == rhs.fusedA2AWorld()
+               && lhs.world() == rhs.world()
                && lhs.mxBlockA() == rhs.mxBlockA()
                && lhs.mxBlockB() == rhs.mxBlockB()
                && lhs.mxBlockFreeA() == rhs.mxBlockFreeA()
@@ -260,6 +263,7 @@ namespace TensileLite
                && lhs.scaleBlockSizeA() == rhs.scaleBlockSizeA()
                && lhs.scaleZeroPointA() == rhs.scaleZeroPointA()
                && lhs.int4EncodingA() == rhs.int4EncodingA()
+               && lhs.getParams().deviceScalarAlpha() == rhs.getParams().deviceScalarAlpha()
                && lhs.a() == rhs.a() && lhs.b() == rhs.b() && lhs.c() == rhs.c()
                && lhs.d() == rhs.d() && lhs.e() == rhs.e()
                && lhs.operationIdentifier() == rhs.operationIdentifier();
