@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "5121c0a4-6bca-4409-875b-35ca0532d36a",
+  "name": "hipkernel:hip_conv_fwd_fma_igemm_rdna",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.hip_conv_fwd_fma_igemm_rdna.graph_match"
+  },
+  "metadata": "d74910ca-3b89-405c-a097-e4081d265470",
+  "sort_kernel_catalog": {
+    "default": "c23365da-5c1e-4550-abc8-cdee9ba54b18"
+  }
+}

@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HKP_TEST_HIP_CONV_FWD_RDNA)
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HKP_TEST_HIP_CONV_FWD_FMA_IGEMM_RDNA)
 
 #include <algorithm>
 #include <cstdint>
@@ -23,7 +23,7 @@
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "IngestorIntegrationSupport.hpp"
 
-// ---- hipkernel:hip_conv_fwd_rdna on the GPU ----
+// ---- hipkernel:hip_conv_fwd_fma_igemm_rdna on the GPU ----
 //
 // Each case pins the engine, builds one conv-forward graph, runs it on the device and
 // checks it against the CPU reference graph executor. The cases cover 1-D (rank 3, and as
@@ -42,7 +42,7 @@ using namespace hipdnn_frontend::graph;
 namespace
 {
 
-constexpr const char* ENGINE_NAME = "hipkernel:hip_conv_fwd_rdna";
+constexpr const char* ENGINE_NAME = "hipkernel:hip_conv_fwd_fma_igemm_rdna";
 
 /// Spatial vectors have one entry per spatial dimension, outermost first.
 struct ConvCase
@@ -210,12 +210,12 @@ const std::vector<ConvCase>& cases()
 
 } // namespace
 
-class IntegrationGpuHipConvFwdRdna
+class IntegrationGpuHipConvFwdFmaIgemmRdna
     : public test_utilities::IntegrationGraphVerificationHarness<float, ConvCase>
 {
 protected:
     hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
-        "hip-conv-fwd-rdna", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
+        "hip-conv-fwd-fma-igemm-rdna", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 
     static int64_t engineId()
     {
@@ -223,7 +223,7 @@ protected:
     }
 };
 
-TEST_P(IntegrationGpuHipConvFwdRdna, MatchesTheCpuReference)
+TEST_P(IntegrationGpuHipConvFwdFmaIgemmRdna, MatchesTheCpuReference)
 {
     const auto& convCase = GetParam();
     std::shared_ptr<TensorAttributes> y;
@@ -257,7 +257,7 @@ TEST_P(IntegrationGpuHipConvFwdRdna, MatchesTheCpuReference)
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuHipConvFwdRdna,
+                         IntegrationGpuHipConvFwdFmaIgemmRdna,
                          ::testing::ValuesIn(cases()),
                          [](const ::testing::TestParamInfo<ConvCase>& info) {
                              return info.param.name;
@@ -378,7 +378,7 @@ bool savesThisCase(const ConvCase& convCase)
 // The engine reports plan serialization, and a plan saved in either form, loaded into a fresh
 // handle, launches the same kernel on the same geometry: its output is bit-identical to the
 // output of the plan it was saved from.
-TEST_P(IntegrationGpuHipConvFwdRdna, SavedPlanReproducesTheOutput)
+TEST_P(IntegrationGpuHipConvFwdFmaIgemmRdna, SavedPlanReproducesTheOutput)
 {
     const auto& convCase = GetParam();
     if(!savesThisCase(convCase))
@@ -427,7 +427,7 @@ TEST_P(IntegrationGpuHipConvFwdRdna, SavedPlanReproducesTheOutput)
     }
 }
 
-TEST_P(IntegrationGpuHipConvFwdRdna, DeclinesNarrowGroups)
+TEST_P(IntegrationGpuHipConvFwdFmaIgemmRdna, DeclinesNarrowGroups)
 {
     const auto& base = GetParam();
     if(base.name != "F32Pad1")
@@ -450,4 +450,4 @@ TEST_P(IntegrationGpuHipConvFwdRdna, DeclinesNarrowGroups)
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 
-#endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HKP_TEST_HIP_CONV_FWD_RDNA
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HKP_TEST_HIP_CONV_FWD_FMA_IGEMM_RDNA

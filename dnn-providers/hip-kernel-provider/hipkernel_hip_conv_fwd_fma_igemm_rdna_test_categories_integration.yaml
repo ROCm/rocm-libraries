@@ -1,9 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hip-kernel-provider hipkernel:hip_conv_fwd_rdna external integration test categories.
+# hip-kernel-provider hipkernel:hip_conv_fwd_fma_igemm_rdna external integration test categories.
 #
-# Pinned to hipkernel:hip_conv_fwd_rdna via --test-engine. Selects the shared
+# Pinned to hipkernel:hip_conv_fwd_fma_igemm_rdna via --test-engine. Selects the shared
 # integration-test-bundles/<tier>/ConvolutionFwd/Default sweeps. Engine pinning and support
 # claims do the rest: a claimed case the engine declines fails its lane, an unclaimed one it
 # declines (depthwise, narrow groups) skips, and an unclaimed one it accepts runs and is

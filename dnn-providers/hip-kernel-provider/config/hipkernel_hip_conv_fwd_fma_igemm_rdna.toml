@@ -1,4 +1,4 @@
-# Integration test configuration for hipkernel:hip_conv_fwd_rdna
+# Integration test configuration for hipkernel:hip_conv_fwd_fma_igemm_rdna
 # Filters use GTest-style globs: * matches any sequence of characters
 
 [meta]

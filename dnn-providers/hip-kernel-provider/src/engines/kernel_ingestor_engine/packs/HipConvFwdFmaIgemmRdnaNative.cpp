@@ -33,12 +33,12 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
-#include "engines/kernel_ingestor_engine/packs/HipConvFwdRdnaLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/HipConvFwdFmaIgemmRdnaLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
- * @file HipConvFwdRdnaNative.cpp
- * @brief The native half of `hipkernel:hip_conv_fwd_rdna` (descriptors/hip/conv_rdna/):
+ * @file HipConvFwdFmaIgemmRdnaNative.cpp
+ * @brief The native half of `hipkernel:hip_conv_fwd_fma_igemm_rdna` (descriptors/hip/conv_rdna/):
  *        matching, scoring, dispatch, and the function that registers them.
  *
  * The engine serves a graph of exactly one conv-forward node on RDNA (gfx11-generic,
@@ -61,13 +61,15 @@ using conv_rdna::ConvProblem;
 using conv_rdna::Layout;
 
 // The contract with conv_fwd_rdna.*.json.
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.hip_conv_fwd_rdna.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.hip_conv_fwd_rdna.kernel_match";
-constexpr std::string_view SCORE_SYMBOL = "hipkernel.hip_conv_fwd_rdna.score";
-constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.hip_conv_fwd_rdna.dispatch";
+constexpr std::string_view GRAPH_MATCHER_SYMBOL
+    = "hipkernel.hip_conv_fwd_fma_igemm_rdna.graph_match";
+constexpr std::string_view KERNEL_MATCHER_SYMBOL
+    = "hipkernel.hip_conv_fwd_fma_igemm_rdna.kernel_match";
+constexpr std::string_view SCORE_SYMBOL = "hipkernel.hip_conv_fwd_fma_igemm_rdna.score";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch";
 
-// The names of the saved launch values (HipConvFwdRdnaLaunchValues.hpp).
-constexpr std::string_view DISPATCH_SYMBOL_V1 = HIP_CONV_FWD_RDNA_DISPATCH_SYMBOL_V1;
+// The names of the saved launch values (HipConvFwdFmaIgemmRdnaLaunchValues.hpp).
+constexpr std::string_view DISPATCH_SYMBOL_V1 = HIP_CONV_FWD_FMA_IGEMM_RDNA_DISPATCH_SYMBOL_V1;
 constexpr std::string_view X_UID_VALUE = "x.uid";
 constexpr std::string_view W_UID_VALUE = "w.uid";
 constexpr std::string_view Y_UID_VALUE = "y.uid";
@@ -103,8 +105,8 @@ constexpr int64_t MIN_OUT_CHANNELS_PER_GROUP = 16;
 constexpr int64_t MAX_GRID_X_BLOCKS = 0x7fffffff / FMA_BLOCK_SIZE;
 constexpr int64_t MAX_GRID_Y = 0xffff;
 
-using ConvBinding = HipConvFwdRdnaBinding;
-using LaunchInputs = HipConvFwdRdnaLaunchInputs;
+using ConvBinding = HipConvFwdFmaIgemmRdnaBinding;
+using LaunchInputs = HipConvFwdFmaIgemmRdnaLaunchInputs;
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -250,7 +252,7 @@ ConvBinding convBinding(const BoundTokens& bound)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "hip_conv_fwd_rdna dispatch is missing bound token '" + std::string(token)
+                "hip_conv_fwd_fma_igemm_rdna dispatch is missing bound token '" + std::string(token)
                     + "', or it does not hold a tensor uid");
         }
         return *value;
@@ -262,10 +264,12 @@ ConvBinding convBinding(const BoundTokens& bound)
 // Dispatch
 // ---------------------------------------------------------------------------
 
-class PreparedHipConvFwdRdna : public IngestorPreparedDispatch
+class PreparedHipConvFwdFmaIgemmRdna : public IngestorPreparedDispatch
 {
 public:
-    PreparedHipConvFwdRdna(IngestorKernelCode code, ConvBinding binding, ConvProblem problem)
+    PreparedHipConvFwdFmaIgemmRdna(IngestorKernelCode code,
+                                   ConvBinding binding,
+                                   ConvProblem problem)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -333,10 +337,10 @@ std::unique_ptr<PreparedDispatch>
     code.setGridSize(static_cast<unsigned int>(fmaGridXBlocks(problem)),
                      static_cast<unsigned int>(fmaGridY(problem)),
                      1);
-    return std::make_unique<PreparedHipConvFwdRdna>(std::move(code), binding, problem);
+    return std::make_unique<PreparedHipConvFwdFmaIgemmRdna>(std::move(code), binding, problem);
 }
 
-/// @see hipConvFwdRdnaLaunchValues
+/// @see hipConvFwdFmaIgemmRdnaLaunchValues
 MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& problem)
 {
     MetadataValues values{{std::string(X_UID_VALUE), binding.x},
@@ -358,7 +362,7 @@ MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& probl
     return values;
 }
 
-/// @see readHipConvFwdRdnaLaunchInputs
+/// @see readHipConvFwdFmaIgemmRdnaLaunchInputs
 LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
 {
     requireLaunchContract(inputs, DISPATCH_SYMBOL_V1);
@@ -409,12 +413,12 @@ LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
     return launch;
 }
 
-class HipConvFwdRdnaDispatchHandler
+class HipConvFwdFmaIgemmRdnaDispatchHandler
     : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
-    HipConvFwdRdnaDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
-                                  const compilation::KpackKernelLoader& kpackLoader)
+    HipConvFwdFmaIgemmRdnaDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                                          const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
         , _kpackLoader(kpackLoader)
     {
@@ -439,7 +443,7 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "hip_conv_fwd_rdna prepare() got a graph its matcher does not admit");
+                "hip_conv_fwd_fma_igemm_rdna prepare() got a graph its matcher does not admit");
         }
         const auto& problem = matched->problem;
         const int channelsLast = problem.layout == Layout::CHANNELS_LAST ? 1 : 0;
@@ -469,7 +473,7 @@ public:
     std::optional<SavedLaunchInputs>
         saveLaunchInputs(const PreparedDispatch& prepared) const override
     {
-        const auto& conv = dynamic_cast<const PreparedHipConvFwdRdna&>(prepared);
+        const auto& conv = dynamic_cast<const PreparedHipConvFwdFmaIgemmRdna&>(prepared);
         return SavedLaunchInputs{std::string(DISPATCH_SYMBOL_V1),
                                  launchValues(conv.binding(), conv.problem())};
     }
@@ -485,7 +489,7 @@ public:
                 uint32_t numDeviceBuffers,
                 void* /*workspace*/) const override
     {
-        const auto& conv = dynamic_cast<const PreparedHipConvFwdRdna&>(prepared);
+        const auto& conv = dynamic_cast<const PreparedHipConvFwdFmaIgemmRdna&>(prepared);
         const auto& binding = conv.binding();
         const auto& p = conv.problem();
 
@@ -531,39 +535,42 @@ private:
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
-const HipConvFwdRdnaDispatchHandler& dispatchHandler()
+const HipConvFwdFmaIgemmRdnaDispatchHandler& dispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const compilation::KpackKernelLoader s_kpackLoader(hipConvFwdRdnaKpackModuleCache());
-    static const HipConvFwdRdnaDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
+    static const compilation::KpackKernelLoader s_kpackLoader(
+        hipConvFwdFmaIgemmRdnaKpackModuleCache());
+    static const HipConvFwdFmaIgemmRdnaDispatchHandler s_dispatchHandler(s_kernelCompiler,
+                                                                         s_kpackLoader);
     return s_dispatchHandler;
 }
 
 } // namespace
 
-MetadataValues hipConvFwdRdnaLaunchValues(const HipConvFwdRdnaBinding& binding,
-                                          const conv_rdna::ConvProblem& problem)
+MetadataValues hipConvFwdFmaIgemmRdnaLaunchValues(const HipConvFwdFmaIgemmRdnaBinding& binding,
+                                                  const conv_rdna::ConvProblem& problem)
 {
     return launchValues(binding, problem);
 }
 
-HipConvFwdRdnaLaunchInputs readHipConvFwdRdnaLaunchInputs(const SavedLaunchInputs& inputs)
+HipConvFwdFmaIgemmRdnaLaunchInputs
+    readHipConvFwdFmaIgemmRdnaLaunchInputs(const SavedLaunchInputs& inputs)
 {
     return readLaunchInputs(inputs);
 }
 
-compilation::KpackModuleCache& hipConvFwdRdnaKpackModuleCache()
+compilation::KpackModuleCache& hipConvFwdFmaIgemmRdnaKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
     return s_moduleCache;
 }
 
-void resetHipConvFwdRdnaModuleCache()
+void resetHipConvFwdFmaIgemmRdnaModuleCache()
 {
-    hipConvFwdRdnaKpackModuleCache().clear();
+    hipConvFwdFmaIgemmRdnaKpackModuleCache().clear();
 }
 
-void registerHipConvFwdRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
+void registerHipConvFwdFmaIgemmRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
