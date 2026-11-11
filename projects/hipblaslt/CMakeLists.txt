@@ -1097,7 +1097,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
 
-# Install ROCm-versioned wheels and installed tests for artifact-based testing.
+# Install the tensilelite wheel and installed tests for artifact-based testing.
 # Also stages, for FFM gfx1250 codegen:
 #   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
 #   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
@@ -1109,22 +1109,11 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # TheRock runs pytest with this artifact root on PYTHONPATH. Extract the
-    # validated pure-Python wheel so its packages are importable there while
-    # retaining the wheel file for installation tests.
-    install(CODE "
-        execute_process(
-            COMMAND \"${Python3_EXECUTABLE}\"
-                \"${_tensilelite_src}/scripts/install_release_wheels.py\"
-                --destination \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}\"
-                \"${_tensilelite_canonical_wheel}\"
-            RESULT_VARIABLE _tensilelite_wheel_install_result
-        )
-        if(NOT _tensilelite_wheel_install_result EQUAL 0)
-            message(FATAL_ERROR \"Failed to install TensileLite wheels into the test artifact\")
-        endif()
-    " COMPONENT tests)
-
+    # The wheel is installed, not unpacked: the tests import tensilelite from
+    # the installed wheel only, never from a copy in this artifact root, which
+    # would shadow it on PYTHONPATH. The tests below live under
+    # tensilelite/Tests without an __init__.py at tensilelite/, so they never
+    # form a tensilelite package of their own.
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite/Tests"
