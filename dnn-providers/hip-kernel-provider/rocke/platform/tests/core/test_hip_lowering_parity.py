@@ -8,7 +8,10 @@ target: every native MFMA and WMMA atom in each target's MMA catalog, the inline
 template and constraints refusals, and the s_waitcnt refusal on a target
 without the monolithic instruction. Each case lowers one small kernel through the
 Python lowerer and, through the rocke_engine binding, the C++ one, and compares
-the text or the error.
+the text or the error. The last cases test the rocke.tests.engines HIP helpers
+themselves: given a C++ outcome that disagrees with the Python one, each helper
+fails. They replace the C++ outcome, but the helpers check that the C++ HIP
+lowering can run before anything else, so they skip where every other case does.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from rocke.core.ir import (
     type_bits,
 )
 from rocke.core.ir_serialize import serialize
+from rocke.tests import engines
 from rocke.tests.engines import (
     HipRefusal,
     hip_outcomes_of_both_engines,
@@ -65,15 +69,22 @@ def _waitcnt_kernel(op: str) -> IRBuilder:
     return builder
 
 
+# The waitcnt kernel lowers on gfx942 and is refused on gfx1250, with this text.
+_SPLIT_COUNTER_REFUSAL = HipRefusal(
+    "NotImplementedError",
+    "s_waitcnt is not available on gfx1250: the target replaced it with split "
+    "wait counters, which the HIP lowering does not emit; lower through the LLVM "
+    "path",
+)
+
+
 @pytest.mark.parametrize("op", ["s_waitcnt", "sync_lds_only"])
 def test_waitcnt_is_refused_where_the_target_has_split_wait_counters(op):
     _assert_both_refuse(
         _waitcnt_kernel(op),
         "gfx1250",
         NotImplementedError,
-        "s_waitcnt is not available on gfx1250: the target replaced it with "
-        "split wait counters, which the HIP lowering does not emit; lower "
-        "through the LLVM path",
+        _SPLIT_COUNTER_REFUSAL.message,
     )
 
 
@@ -394,3 +405,87 @@ def _inline_asm_kernel(**attr_changes) -> IRBuilder:
 )
 def test_malformed_inline_asm_is_refused_the_same_way(attr_changes, error, message):
     _assert_both_refuse(_inline_asm_kernel(**attr_changes), "gfx942", error, message)
+
+
+def _report_cpp_outcome(monkeypatch, outcome: str | HipRefusal) -> None:
+    """Make the C++ HIP lowering report ``outcome`` for every kernel, so the
+    helpers below see a C++ engine that disagrees with the Python one."""
+    monkeypatch.setattr(
+        engines, "native_hip_outcomes", lambda kernels: [outcome] * len(kernels)
+    )
+
+
+def _lower_with_cpp_engine(kernel, arch):
+    return engines.lower_hip_with_engine(kernel, arch, engine="cpp")
+
+
+def _reject_on_cpp(kernel, arch):
+    engines.assert_engine_rejects_hip(
+        kernel,
+        arch,
+        engine="cpp",
+        error_type=NotImplementedError,
+        message=_SPLIT_COUNTER_REFUSAL.message,
+    )
+
+
+def _reject_on_both(kernel, arch):
+    engines.assert_both_engines_reject_hip(
+        kernel, arch, NotImplementedError, _SPLIT_COUNTER_REFUSAL.message
+    )
+
+
+@pytest.mark.parametrize(
+    "lower", [_lower_with_cpp_engine, engines.lower_hip_with_both_engines]
+)
+@pytest.mark.parametrize(
+    "cpp_outcome",
+    ["// other source\n", _SPLIT_COUNTER_REFUSAL],
+    ids=["other-source", "refusal"],
+)
+def test_the_lowering_helpers_fail_when_cpp_disagrees(monkeypatch, lower, cpp_outcome):
+    kernel = _waitcnt_kernel("s_waitcnt").kernel
+    _report_cpp_outcome(monkeypatch, cpp_outcome)
+    with pytest.raises(AssertionError, match="differently from the Python engine"):
+        lower(kernel, "gfx942")
+
+
+@pytest.mark.parametrize(
+    "lower", [_lower_with_cpp_engine, engines.lower_hip_with_both_engines]
+)
+def test_the_lowering_helpers_pass_when_cpp_agrees(monkeypatch, lower):
+    """The control for the test above: the same replacement, reporting the
+    Python engine's source, passes."""
+    kernel = _waitcnt_kernel("s_waitcnt").kernel
+    python_hip = engines.python_hip_outcome(serialize(kernel), "gfx942")
+    _report_cpp_outcome(monkeypatch, python_hip)
+    assert lower(kernel, "gfx942") == python_hip
+
+
+@pytest.mark.parametrize("reject", [_reject_on_cpp, _reject_on_both])
+@pytest.mark.parametrize(
+    "cpp_outcome",
+    [
+        "// the C++ engine lowered it\n",
+        HipRefusal("NotImplementedError", "another message"),
+    ],
+    ids=["lowered", "other-message"],
+)
+def test_the_refusal_helpers_fail_when_cpp_disagrees(monkeypatch, reject, cpp_outcome):
+    _report_cpp_outcome(monkeypatch, cpp_outcome)
+    with pytest.raises(AssertionError, match=r"C\+\+ engine lowered|another message"):
+        reject(_waitcnt_kernel("s_waitcnt").kernel, "gfx1250")
+
+
+def test_the_engine_refusal_helper_compares_the_cpp_status(monkeypatch):
+    """assert_engine_rejects_hip requires the status ``error_type`` maps to;
+    assert_both_engines_reject_hip compares the message alone."""
+    kernel = _waitcnt_kernel("s_waitcnt").kernel
+    _report_cpp_outcome(
+        monkeypatch, HipRefusal("ValueError", _SPLIT_COUNTER_REFUSAL.message)
+    )
+    with pytest.raises(AssertionError, match="ValueError"):
+        _reject_on_cpp(kernel, "gfx1250")
+    _reject_on_both(kernel, "gfx1250")
+    _report_cpp_outcome(monkeypatch, _SPLIT_COUNTER_REFUSAL)
+    _reject_on_cpp(kernel, "gfx1250")
