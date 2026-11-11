@@ -75,18 +75,22 @@ int main()
     delete[] arr;
 
     // malloc(0)/calloc(0, 0) are legally allowed to return nullptr, but must
-    // never crash or abort the process, nor fail with ENOMEM.
-    errno   = 0;
+    // never crash or abort the process, nor fail with ENOMEM. errno is
+    // accessed through a volatile because compilers may assume malloc/calloc
+    // leave it unchanged, and they are only interposed after optimization.
+    volatile int& error = errno;
+
+    error   = 0;
     void* m = publish(std::malloc(0));
-    if (!m && errno == ENOMEM)
+    if (!m && error == ENOMEM)
     {
       return EXIT_FAILURE;
     }
     std::free(m);
 
-    errno   = 0;
+    error   = 0;
     void* c = publish(std::calloc(0, 0));
-    if (!c && errno == ENOMEM)
+    if (!c && error == ENOMEM)
     {
       return EXIT_FAILURE;
     }
