@@ -48,6 +48,7 @@ struct K5Args
     int mode;
     int xh, xw; // stride 2: the original x (forward) or dx (backward data) extents
     int xph, xpw; // stride 2: the original top / left padding
+    int order; // cooperative kernel item order: 0 K blocks fastest, 1 tile blocks fastest
 };
 
 /// Pass 3 of the multipass engine: C[b] (m x n, fp32) = A[b] (m x k) * B[b] (k x n), row-major.

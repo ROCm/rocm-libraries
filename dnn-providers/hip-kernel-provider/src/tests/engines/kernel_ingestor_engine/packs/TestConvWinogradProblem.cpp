@@ -1013,6 +1013,33 @@ TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
     EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
 }
 
+TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
+{
+    // On RDNA a group's U of 4 MiB and up (16 positions x K x C x 2 bytes) is re-read per tile
+    // block when K blocks run fastest: the plan switches to tile blocks fastest.
+    for(const auto& [channels, order] : {std::pair<int64_t, int>{256, 1}, {240, 0}})
+    {
+        auto shape = baseShape();
+        shape.dataType = DataType::HALF;
+        shape.c = channels;
+        shape.k = 512;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+        const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+        ASSERT_TRUE(problem.has_value());
+        const auto config = conv_winograd::configOf(kernelOf(coop("gfx11", 1), "HALF"));
+        ASSERT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
+        ASSERT_TRUE(plan.has_value());
+        EXPECT_EQ(plan->args.order, order) << channels;
+        // CDNA keeps K blocks fastest.
+        const auto cdna = conv_winograd::configOf(kernelOf(coop("gfx9", 1), "HALF"));
+        ASSERT_TRUE(cdna.has_value());
+        const auto cdnaPlan = conv_winograd::planFor(*problem, *cdna, countedDevice());
+        ASSERT_TRUE(cdnaPlan.has_value());
+        EXPECT_EQ(cdnaPlan->args.order, 0) << channels;
+    }
+}
+
 TEST(TestConvWinogradPlan, FusedSlicesStayClearOfTheOutOfRangeOffset)
 {
     // A padding column adds K5_OOB (2^30) to an offset formed from the tile's start, which is
