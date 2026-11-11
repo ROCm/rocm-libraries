@@ -521,6 +521,7 @@ def make_traits(
         LGKMCNT_0_ONLY=0xC07F,
         RETURN_LSE=bool(return_lse),
         XCD_SWIZZLE=bool(xcd_swizzle),
+        DS_READ_TR_OP=False,
     )
 
 
