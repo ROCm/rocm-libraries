@@ -484,6 +484,10 @@ EXTRA_TILES = {
     ("mfma32x16", ("3x3pk",)): [(128, 64, 4, 2, 64), (64, 128, 2, 4, 64)],
     ("mfma32x16", ("3x3s2pk",)): [(128, 64, 4, 2, 64), (128, 64, 4, 2, 32)],
     ("wmma", ("3x3pk",)): [(64, 64, 4, 2, 64), (128, 32, 4, 2, 32)],
+    # 32 x 32 rings, measured on resnext50 c1024 g32 14^2 (fp16 n128): gfx950 294 against
+    # 361 us, gfx1201 953 against 1052.
+    ("mfma32x16", ("3x3g32",)): [(32, 32, 1, 1, 32)],
+    ("wmma12", ("3x3g32",)): [(32, 32, 2, 2, 32)],
     # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
     ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
@@ -555,9 +559,11 @@ FILTERS = [
     # layers), on the tiles measured best on gfx950 and gfx1201 (EXTRA_TILES).
     ("3x3pk", 3, 1, 1, 1, 7, [], [0], [CF]),
     ("3x3s2pk", 3, 2, 1, 1, 7, [], [0], [CF]),
+    # 32 x 32 rings for 32-channel groups (ResNeXt c1024 g32 14^2; EXTRA_TILES).
+    ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
 ]
 # Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
-MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk"}
+MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk", "3x3g32"}
 BASE = {
     "3x3",
     "1x1",
