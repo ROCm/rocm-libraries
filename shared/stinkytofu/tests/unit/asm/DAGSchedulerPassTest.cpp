@@ -2778,6 +2778,80 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_BarrierResetReusesLoopHeadDecisi
     EXPECT_TRUE(sawSecondDs);
 }
 
+// The loop head has no DS consumer, so it admits queue fill. A later barrier reset has a close DS
+// consumer and a deliberately unreachable safety margin, so a new gate calculation would reject
+// it; instead, the reset reuses the admitted loop policy and keeps its filler behind the fill.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_BarrierResetReusesEnabledLoopHeadDecision) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 17; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i,
+                                    /*src0Start=*/1000 + 16 * i);
+
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    for (int i = 0; i < 17; ++i)
+        signal->addSrcReg(StinkyRegister("v", /*index=*/3000 + 16 * i, /*size=*/8));
+    wait->addDestReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+
+    std::vector<StinkyInstruction*> secondDsLoads;
+    for (int i = 0; i < 4; ++i) {
+        StinkyInstruction* ds =
+            createMovableDsLoad(/*destReg=*/800 + 4 * i, /*addrReg=*/84, /*ldsToken=*/3 + i);
+        ds->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+        secondDsLoads.push_back(ds);
+    }
+    StinkyInstruction* filler =
+        createVAddInBlock(bb, arch, /*destReg=*/900, /*src0Reg=*/904, /*src1Reg=*/908);
+    filler->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    for (int i = 0; i < 17; ++i) {
+        const int src = i == 12 ? 800 : 5000 + 16 * i;
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + 16 * i, src);
+        wmma->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    }
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 1000;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    int secondResetWmmas = 0;
+    int wmmasBeforeFiller = 0;
+    bool afterWait = false;
+    bool sawSecondStage = false;
+    bool sawFiller = false;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) {
+            afterWait = true;
+            continue;
+        }
+        if (std::find(secondDsLoads.begin(), secondDsLoads.end(), inst) != secondDsLoads.end()) {
+            if (!sawSecondStage) {
+                sawSecondStage = true;
+                EXPECT_TRUE(afterWait);
+                EXPECT_EQ(secondResetWmmas, 1);
+            }
+            continue;
+        }
+        if (inst == filler) {
+            sawFiller = true;
+            EXPECT_EQ(wmmasBeforeFiller, 7);
+            continue;
+        }
+        if (afterWait && isMatrixInstruction(*inst)) {
+            ++secondResetWmmas;
+            ++wmmasBeforeFiller;
+        }
+    }
+    EXPECT_TRUE(sawSecondStage);
+    EXPECT_TRUE(sawFiller);
+}
+
 // Tail size does not override an admitted loop-head policy: the queue fills before the unrelated
 // DS even though only three WMMAs remain after the predicted nine-WMMA burst.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_AdmittedShortTailFillsTheQueue) {
