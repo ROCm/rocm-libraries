@@ -343,7 +343,11 @@ and by both engines is green in both. The **emitted-IR validity gate**,
 question: it lowers every case in the representative corpus
 ([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
 the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
-hsaco.
+hsaco. Library families keep their representative cases beside their own golden
+(convolution: [`library/tests/test_conv_ir_golden.py`](library/tests/test_conv_ir_golden.py));
+`--cases <file>` points this gate, and the arch-domain gate below, at such a
+corpus, and [`library/tests/run_all.py`](library/tests/run_all.py) runs both over
+every library corpus.
 
 Three design points, each of them load-bearing:
 
@@ -520,8 +524,9 @@ and selected library host/GPU suites. Build-tree C++ test registration is
 orchestrated by
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
 [concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
-under `platform/tests/cmake/`. Installed Python and library CTest registration
-remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+under `platform/tests/cmake/`. Installed Python CTest registration remains in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), which includes the library
+suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.cmake). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
