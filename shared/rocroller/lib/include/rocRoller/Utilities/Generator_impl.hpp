@@ -87,11 +87,7 @@ namespace rocRoller
         // Thread-safety is not necessary (RR generates within a single thread); and
         // conditionally swapping improves performance.
         if(m_exception)
-        {
-            std::exception_ptr exc = nullptr;
-            std::swap(exc, m_exception);
-            std::rethrow_exception(exc);
-        }
+            GeneratorDetail::RethrowException(m_exception);
     }
 
     template <std::movable T>

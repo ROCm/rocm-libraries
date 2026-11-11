@@ -28,6 +28,7 @@ add_executable(GPUArchitectureGenerator
     "${PROJECT_SOURCE_DIR}/lib/source/Error.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Logging.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Scheduler.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Generator.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Settings.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Utils.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp"
