@@ -560,11 +560,16 @@ namespace precond_ut
     // Incomplete LDL^H of the lower triangle: A ~ L * D * L^H with a unit lower
     // L (strictly lower part stored) and a real D stored on the diagonal.
     // boost_tol < 0 disables the numeric boost; otherwise d_i with |d_i| <= boost_tol
-    // is replaced by boost_val.
+    // is replaced by |boost_val| with the sign of d_i (+|boost_val| for d_i = 0).
+    // `pivots` (optional) receives every d_i before the boost.
     template <typename T>
-    std::vector<T>
-        host_ildlt0(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    std::vector<T> host_ildlt0(const csr_matrix<T>& a,
+                               double               boost_tol = -1.0,
+                               double               boost_val = 0.0,
+                               std::vector<double>* pivots    = nullptr)
     {
+        if(pivots != nullptr)
+            pivots->assign(static_cast<size_t>(a.n), 0.0);
         std::vector<std::complex<double>> v(a.val.size());
         for(size_t i = 0; i < v.size(); ++i)
             v[i] = to_cd(a.val[i]);
@@ -599,7 +604,10 @@ namespace precond_ut
                 diag_sum += std::norm(v[j]) * d_c;
             }
             const double d = v[diag[i]].real() - diag_sum;
-            v[diag[i]]     = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boost_val : d;
+            if(pivots != nullptr)
+                (*pivots)[i] = d;
+            const double boosted = (d < 0.0) ? -std::abs(boost_val) : std::abs(boost_val);
+            v[diag[i]]           = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boosted : d;
         }
         std::vector<T> out(v.size());
         for(size_t i = 0; i < v.size(); ++i)
@@ -1057,17 +1065,17 @@ namespace precond_ut
 
     struct run_options
     {
-        rocsparse_analysis_policy policy       = rocsparse_analysis_policy_reuse;
-        bool                      boost        = false;
-        double                    boost_tol    = 0.0;
-        double                    boost_val    = 1.0;
-        bool boost_tol_float                   = false; // the boost tolerance is passed as a float
-        bool boost_device  = false; // boost tolerance and value in device memory
-        bool set_boost_tol = true; // false: enabled without a tolerance
-        bool set_boost_val = true; // false: enabled without a value
-        bool set_sing_tol  = false;
-        double                    sing_tol     = 0.0;
-        bool                      tol_after    = false; // set the tolerance after the analysis
+        rocsparse_analysis_policy policy    = rocsparse_analysis_policy_reuse;
+        bool                      boost     = false;
+        double                    boost_tol = 0.0;
+        double                    boost_val = 1.0;
+        bool   boost_tol_float              = false; // the boost tolerance is passed as a float
+        bool   boost_device                 = false; // boost tolerance and value in device memory
+        bool   set_boost_tol = true; // false: the boost is enabled without a tolerance
+        bool   set_boost_val = true; // false: the boost is enabled without a value
+        bool   set_sing_tol  = false;
+        double sing_tol      = 0.0;
+        bool   tol_after     = false; // set the tolerance after the analysis
         size_t device_memory = 0; // > 0: size of the internal buffer of the handle
     };
 
@@ -1131,6 +1139,7 @@ namespace precond_ut
         ASSERT_EQ((set_value<K>(handle, descr, In::policy, &opt.policy, sizeof(opt.policy))),
                   rocsparse_status_success);
 
+<<<<<<< HEAD
         const int32_t boost_enable = opt.boost ? 1 : 0;
         const double  boost_tol    = opt.boost_tol;
         const T       boost_val    = make_value<T>(opt.boost_val, 0.0);

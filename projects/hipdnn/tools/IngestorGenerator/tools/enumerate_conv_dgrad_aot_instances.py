@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE gfx950 backward-data conv AOT instance lists the hipkernel pack ships.
 
-The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is rocKE's own
+The catalog is rocKE's own
 registered instance list (``dispatch/grouped_convolution_instances/gfx950_dgrad.json``,
 read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
 exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
@@ -47,14 +47,14 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-import enumerate_conv_aot_instances as _fwd  # noqa: E402
+import conv_aot_common as _common  # noqa: E402
 
-ARCH = _fwd.ARCH
-DTYPES = _fwd.DTYPES
+ARCH = _common.ARCH
+DTYPES = _common.DTYPES
 
 #: File name of one dtype's instance list.
 INSTANCE_LIST = "gfx950_conv_dgrad_aot_{dtype}.instances.json"
-DEFAULT_OUTPUT_DIR = _fwd.DEFAULT_OUTPUT_DIR
+DEFAULT_OUTPUT_DIR = _common.DEFAULT_OUTPUT_DIR
 #: Known-bug exclusions: instances rocKE registers that this pack must not ship,
 #: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
 #: file means no exclusions.
@@ -62,13 +62,13 @@ EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_dgrad_aot.excludes.json"
 #: The family order of the written lists.
 FAMILIES = ("implicit", "direct", "helper")
 
-_bind_rocke = _fwd._bind_rocke
-read_rocke_catalog = _fwd.read_rocke_catalog
-read_excludes = _fwd.read_excludes
-stable_hash = _fwd.stable_hash
-compact_identity = _fwd.compact_identity
-write_instances = _fwd.write_instances
-identity_label = _fwd.identity_label
+_bind_rocke = _common.bind_rocke
+read_rocke_catalog = _common.read_rocke_catalog
+read_excludes = _common.read_excludes
+stable_hash = _common.stable_hash
+compact_identity = _common.compact_identity
+write_instances = _common.write_instances
+identity_label = _common.identity_label
 
 
 def _converter():

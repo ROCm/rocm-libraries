@@ -546,10 +546,14 @@ inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::strin
     {
         return UhdAdapter::CUSTOM_LIBRARY;
     }
+    if(text == "linear_data")
+    {
+        return UhdAdapter::LINEAR_DATA;
+    }
     // `onnx` (RFC 0019 §7) is rejected by name: makeUhdAdapter cannot build it, so a
     // descriptor naming it would silently rank by declared order.
     fail("unknown or unsupported UHD adapter '" + text + "' in " + where
-         + " (expected static_order, native, tree_data, table or custom_library)");
+         + " (expected static_order, native, tree_data, table, linear_data or custom_library)");
 }
 
 inline MatchScope matchScopeFromString(const std::string& text, const std::string& where)
@@ -588,13 +592,17 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
 }
 
 /// Behavior notes are authored as names and mapped here to their transport values. An
-/// unknown name is a parse error: reject, never reinterpret. One entry is all this
-/// change needs; add further ones when a descriptor needs them.
+/// unknown name is a parse error: reject, never reinterpret. Add further entries when a
+/// descriptor needs them.
 inline int32_t behaviorNoteFromString(const std::string& text, const std::string& where)
 {
     if(text == "runtime_compilation")
     {
         return HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+    }
+    if(text == "supports_graph_capture")
+    {
+        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE;
     }
     fail("unknown behavior note '" + text + "' in " + where);
 }
@@ -1015,8 +1023,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
             readValue(*found, entry.key());
         }
     };
-    // RFC 0019 §3.1: a scoring role maps an arch to one UHD per metric, so the value is
-    // a list; a single id reads as a one-element list.
+    // RFC 0019 §3.1: every role maps an arch to a list of UHDs -- the scoring roles one per
+    // metric, the candidate generators for the JIT spaces that will consume them. A single id
+    // reads as a one-element list.
     const auto readList = [](const char* key,
                              std::map<std::string, std::vector<DescriptorId>>& into,
                              const std::string& label) {
@@ -1081,14 +1090,10 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
              readList("sort_kernel_catalog", engine.sortKernelCatalog, where));
     readRole(
         root, "predict_engine", where, readList("predict_engine", engine.predictEngine, where));
-    // Single-valued: a candidate generator produces the set a ranker then scores, so it has
-    // no metric to key a list on (RFC 0019 §3.1).
     readRole(root,
              "predict_applicable_kernels",
              where,
-             [&engine, &where](const nlohmann::json& role, const std::string& arch) {
-                 engine.predictApplicableKernels.emplace(arch, requireId(role, arch, where));
-             });
+             readList("predict_applicable_kernels", engine.predictApplicableKernels, where));
 
     if(slotted)
     {
@@ -3476,14 +3481,18 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             continue;
         }
         // Validated for its diagnostics only; nothing consumes a candidate generator yet.
-        for(const auto& [arch, id] : engine.predictApplicableKernels)
+        for(const auto& [arch, ids] : engine.predictApplicableKernels)
         {
-            const auto* model = detail::findDescriptor(catalog.heuristics, id);
-            const auto reason = model == nullptr ? std::string("missing or invalid UHD descriptor")
-                                                 : provenanceError(*model, arch, nullptr);
-            if(!reason.empty())
+            for(const auto& id : ids)
             {
-                disabled("predict_applicable_kernels", arch, id, reason);
+                const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                const auto reason = model == nullptr
+                                        ? std::string("missing or invalid UHD descriptor")
+                                        : provenanceError(*model, arch, nullptr);
+                if(!reason.empty())
+                {
+                    disabled("predict_applicable_kernels", arch, id, reason);
+                }
             }
         }
         detail::refreshDefaultRanker(set);
