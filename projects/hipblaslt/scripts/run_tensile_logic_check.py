@@ -13,6 +13,8 @@
 # must be dict format, and a solution that had a SolutionUID must keep one. The
 # single-file checks (dict structure, LibraryType folder) report only the errors
 # that the change adds to an existing file, and every error in a new one.
+# --policy-checks adds the tuning-policy checks (library-type marker in the
+# file name, ExactLogic performance) to that comparison. The logic-corpus lane does not pass it yet.
 # If the current Python is missing deps (e.g. joblib), the script will re-run itself
 # with .venv/bin/python (Unix) or .venv\Scripts\python.exe (Windows) if that venv exists.
 # Requires: a full build first so rocisa exists under build/tensilelite/rocisa
@@ -200,12 +202,13 @@ def _base_revision_text(repo_root: Path, rel: str) -> str | None:
     return proc.stdout.decode("utf-8", errors="replace")
 
 
-def _check_logic_changes(root: Path, list_file: Path) -> None:
+def _check_logic_changes(root: Path, list_file: Path, policy: bool = False) -> None:
     """Compare the changed logic files in ``list_file`` with ``HEAD^``.
 
     Args:
         root: hipBLASLt project directory.
         list_file: Changed paths, one per line.
+        policy: Also run the tuning-policy checks.
 
     Returns:
         None.
@@ -230,7 +233,7 @@ def _check_logic_changes(root: Path, list_file: Path) -> None:
             "compared with their base revision. Fetch the parent commit."
         )
     errors = check_changed_logic(
-        repo_root, list_file, lambda rel: _base_revision_text(repo_root, rel)
+        repo_root, list_file, lambda rel: _base_revision_text(repo_root, rel), policy
     )
     if errors:
         print("\n".join(errors), file=sys.stderr)
@@ -240,11 +243,13 @@ def _check_logic_changes(root: Path, list_file: Path) -> None:
 def main() -> None:
     root = _find_hipblaslt_root()
     build_dir = root / "build"
+    policy = "--policy-checks" in sys.argv
+    sys.argv = [arg for arg in sys.argv if arg != "--policy-checks"]
     lib_logic_path, changed_files, passthrough = _parse_argv(root)
     _ensure_paths(root, build_dir, lib_logic_path)
 
     if changed_files:
-        _check_logic_changes(root, Path(changed_files))
+        _check_logic_changes(root, Path(changed_files), policy)
         archs = _changed_architectures(root, Path(changed_files))
         if archs is None:
             print("The changes can affect every architecture; checking everything.")

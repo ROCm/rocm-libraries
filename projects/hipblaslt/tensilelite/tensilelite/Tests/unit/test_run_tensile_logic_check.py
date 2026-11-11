@@ -268,7 +268,10 @@ def test_check_logic_changes_skips_git_without_logic_files(script, project, tmp_
     assert calls == []
 
 
-def test_main_compares_changed_logic_before_scoping(script, monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("extra,policy", [([], False), (["--policy-checks"], True)])
+def test_main_compares_changed_logic_before_scoping(
+    script, monkeypatch, tmp_path, capsys, extra, policy
+):
     """``main`` runs the base-revision comparison on a ``--changed-files`` run.
 
     Args:
@@ -276,19 +279,23 @@ def test_main_compares_changed_logic_before_scoping(script, monkeypatch, tmp_pat
         monkeypatch: Pytest monkeypatch fixture.
         tmp_path: Pytest temporary directory.
         capsys: Pytest output capture.
+        extra: Extra script arguments.
+        policy: Whether the policy checks are expected.
 
     Returns:
         None.
 
     Raises:
-        AssertionError: If the comparison is skipped.
+        AssertionError: If the comparison is skipped or the flag is misread.
     """
     listFile = _changed(tmp_path, "README.md")
     compared = []
-    monkeypatch.setattr(sys, "argv", ["run_tensile_logic_check.py", f"--changed-files={listFile}"])
+    argv = ["run_tensile_logic_check.py", *extra, f"--changed-files={listFile}"]
+    monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.setattr(script, "_ensure_paths", lambda *args: None)
-    monkeypatch.setattr(script, "_check_logic_changes", lambda root, path: compared.append(path))
+    monkeypatch.setattr(script, "_check_logic_changes", lambda *args: compared.append(args[1:]))
     monkeypatch.setattr(script, "_changed_architectures", lambda root, path: set())
     script.main()
-    assert compared == [listFile]
+    assert compared == [(listFile, policy)]
+    assert "--policy-checks" not in sys.argv
     assert "nothing to check" in capsys.readouterr().out
