@@ -29,8 +29,9 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
 ```text
 - compare old and new only in the same time window, on the same GPU, at the same clocks
 - rebuild the baseline from the commit you compare against, and record its hash
-- repeat each measurement and compute the SD of the run-to-run noise for that benchmark
-  (the values are machine-specific: database `entries/`)
+- repeat each measurement and compute the SD of the run-to-run noise for that benchmark on that machine.
+  Measure it fresh. If the database has a noise entry for this benchmark and machine, use it only as a
+  rough guide to how many repeats you need.
 - a perf difference of at least one SD needs a human check. Below one SD it is noise.
 - record the fields listed at the top of this file with every result
 ```
