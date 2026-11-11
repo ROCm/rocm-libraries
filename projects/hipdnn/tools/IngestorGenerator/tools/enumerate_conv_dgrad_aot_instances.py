@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE backward-data conv AOT instance lists a hipkernel dgrad pack ships.
 
-One tool for both dgrad engines, chosen by ``--arch`` (gfx950 by default, or
-gfx1250). The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is
-rocKE's own registered instance list of the architecture
-(``dispatch/grouped_convolution_instances/<arch>_dgrad.json``, read with
-:func:`read_rocke_catalog`) -- rocKE is the only source of "what instances exist";
-this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
+One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
+``--arch`` (gfx950 by default, or gfx1250). The dgrad sibling of
+``enumerate_conv_aot_instances.py``. The catalog is rocKE's own registered instance
+list of the architecture (``dispatch/grouped_convolution_instances/<arch>_dgrad.json``,
+read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
+exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
 absent) names instances rocKE registers that the pack must not ship (for example a
 rocKE kernel known to compute wrong results), each with a reason -- the one
 legitimate thing hand curation used to do beyond mirroring rocKE.
@@ -54,8 +54,8 @@ if str(_HERE) not in sys.path:
 
 import enumerate_conv_aot_instances as _fwd  # noqa: E402
 
-#: The architectures with a dgrad engine, and the default one.
-ARCHES = ("gfx950", "gfx1250")
+#: The default architecture. The ones with a dgrad engine are the adapter's
+#: ``TARGETS`` (``make_conv_dgrad_aot_config.arches``), read once rocKE is bound.
 ARCH = _fwd.ARCH
 DTYPES = _fwd.DTYPES
 
@@ -232,9 +232,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--arch",
-        choices=ARCHES,
         default=ARCH,
-        help="The engine's architecture (default: %(default)s).",
+        help="The engine's architecture, one of the adapter's TARGETS "
+        "(default: %(default)s).",
     )
     parser.add_argument(
         "--excludes",
@@ -262,6 +262,11 @@ def main(argv=None) -> int:
     if args.excludes is None:
         args.excludes = Path(EXCLUDES.format(arch=arch))
     _bind_rocke(args.rocke_root)
+    if arch not in _converter().arches():
+        parser.error(
+            f"argument --arch: invalid choice: {arch!r} "
+            f"(choose from {', '.join(sorted(_converter().arches()))})"
+        )
 
     rocke_catalog = read_rocke_catalog(arch)
     excludes = read_excludes(args.excludes)

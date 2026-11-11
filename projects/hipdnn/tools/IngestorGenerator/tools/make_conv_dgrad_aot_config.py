@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Turn rocKE AOT backward-data conv instances into a dgrad AOT engine config.
 
-One tool for both dgrad engines, chosen by ``--arch`` (:data:`ENGINES`):
-``hipkernel:Gfx950ConvDgradAot`` (the default) and ``hipkernel:Gfx1250ConvDgradAot``.
+One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
+``--arch`` (:func:`arches`): ``hipkernel:Gfx950ConvDgradAot`` (the default) and
+``hipkernel:Gfx1250ConvDgradAot``.
 The dgrad sibling of ``make_conv_aot_config.py``: same input (JSON lists of rocKE
 ``KernelIdentity`` dicts, or objects carrying one under ``"identity"``), same output
 (a packaged-dialect generator config), same ``--stabilize-ids`` step. It reuses that
@@ -51,20 +52,18 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import launch_surface  # noqa: E402
 import make_conv_aot_config as _fwd  # noqa: E402
 
-#: Per architecture, the shipped dgrad engine (its own product engine: ids are uuid5
-#: of instance_id) and the adapter's typed builder its kernels are built by. The
-#: adapter's ``TARGETS`` names the same engines; a test holds the two together.
-ENGINES = {
-    "gfx950": ("hipkernel:Gfx950ConvDgradAot", "build_gfx950_conv_dgrad_aot"),
-    "gfx1250": ("hipkernel:Gfx1250ConvDgradAot", "build_gfx1250_conv_dgrad_aot"),
-}
-#: The default architecture, and its engine and builder.
+#: The default architecture. Its engine, like every other's, is the adapter's
+#: ``TARGETS[arch].engine`` (:func:`product_engine`), read once rocKE is bound.
 DEFAULT_ARCH = "gfx950"
-PRODUCT_ENGINE, ADAPTER_BUILDER = ENGINES[DEFAULT_ARCH]
-#: The rocKE adapter every kernel of either bundle is built by.
+#: The rocKE adapter every kernel of every dgrad bundle is built by.
 ADAPTER_SOURCE = "builders/common/convolution_backward_data.py"
+#: The in-repo rocKE tree, the default ``--rocke-root``.
+DEFAULT_ROCKE_ROOT = (
+    launch_surface.find_repo_root(_HERE) / "dnn-providers/hip-kernel-provider/rocke"
+)
 
 #: Identity fields the packaged dgrad launch takes from an implicit-GEMM identity.
 _CARRIED = (
@@ -157,12 +156,46 @@ DIRECT_FIELDS = {
 }
 
 
+def arches() -> tuple:
+    """The architectures with a packaged dgrad engine: the adapter's ``TARGETS``, in
+    its order. rocKE must already be bound (:func:`_bind_rocke`)."""
+    from builders.common.convolution_backward_data import TARGETS
+
+    return tuple(TARGETS)
+
+
+def _target(arch: str):
+    """The adapter's ``TARGETS[arch]``; a ValueError for an arch it does not package."""
+    from builders.common.convolution_backward_data import SPEC_CLASSES, TARGETS
+
+    if arch not in TARGETS or arch not in SPEC_CLASSES:
+        raise ValueError(f"no packaged dgrad engine for arch {arch!r}")
+    return TARGETS[arch]
+
+
+def product_engine(arch: str = DEFAULT_ARCH) -> str:
+    """``arch``'s shipped dgrad engine, its own product engine (ids are uuid5 of
+    instance_id): the adapter's ``TARGETS[arch].engine``."""
+    return _target(arch).engine
+
+
+def adapter_builder(arch: str = DEFAULT_ARCH) -> str:
+    """The adapter's typed builder ``arch``'s kernels are built by,
+    ``build_<arch>_conv_dgrad_aot``; a ValueError when the adapter lacks it."""
+    import builders.common.convolution_backward_data as adapter
+
+    _target(arch)
+    name = f"build_{arch}_conv_dgrad_aot"
+    if not callable(getattr(adapter, name, None)):
+        raise ValueError(f"the adapter has no builder {name} for arch {arch!r}")
+    return name
+
+
 def _spec_class(arch: str):
     """The adapter's spec class of ``arch``'s engine (``SPEC_CLASSES``)."""
     from builders.common.convolution_backward_data import SPEC_CLASSES
 
-    if arch not in SPEC_CLASSES or arch not in ENGINES:
-        raise ValueError(f"no packaged dgrad engine for arch {arch!r}")
+    _target(arch)
     return SPEC_CLASSES[arch]
 
 
@@ -335,7 +368,7 @@ def kernel_uuid(
 ) -> str:
     """:func:`make_conv_aot_config.kernel_uuid` with ``arch``'s engine as the
     product (and, by default, as ``engine_name``)."""
-    product = ENGINES[arch][0]
+    product = product_engine(arch)
     return _fwd.kernel_uuid(instance_id, engine_name or product, product)
 
 
@@ -344,7 +377,7 @@ def stabilize_ids(
 ) -> int:
     """:func:`make_conv_aot_config.stabilize_ids` with ``arch``'s engine as the
     product (and, by default, as ``engine_name``)."""
-    product = ENGINES[arch][0]
+    product = product_engine(arch)
     return _fwd.stabilize_ids(kdp_path, engine_name or product, product)
 
 
@@ -369,10 +402,10 @@ def instance_spec(identity_dict: dict):
     from benchmarks.common.kernel_cache import KernelIdentity
 
     identity = KernelIdentity.from_dict(identity_dict)
-    if identity.arch not in ENGINES:
+    if identity.arch not in arches():
         return None, (
             f"no packaged dgrad engine for arch {identity.arch!r} "
-            f"(packaged: {sorted(ENGINES)})"
+            f"(packaged: {sorted(arches())})"
         )
     if identity.is_direct:
         return _direct_instance_spec(identity)
@@ -559,17 +592,19 @@ def build_config(
     implicit-GEMM instances are one variant, and each direct or helper variant its
     own, stating DIRECT_FIELDS and its knobs and leaving the others to their
     builder_default. ``engine_name`` (by default the architecture's product engine,
-    :data:`ENGINES`) other than that product engine borrows its native symbols;
+    :func:`product_engine`) other than that product engine borrows its native symbols;
     ``native_symbols_from_slug`` carries the product engine's own ``slug_override``
     through when it has one, as ``make_conv_aot_config.build_config`` does -- this
     tool has no way to read that engine's config otherwise.
     """
-    arches = {spec.ARCH for spec in specs}
-    if len(arches) != 1:
-        raise ValueError(f"one engine's catalog is one architecture's, got {arches}")
-    (arch,) = arches
-    product_engine, builder = ENGINES[arch]
-    engine_name = engine_name or product_engine
+    spec_arches = {spec.ARCH for spec in specs}
+    if len(spec_arches) != 1:
+        raise ValueError(
+            f"one engine's catalog is one architecture's, got {spec_arches}"
+        )
+    (arch,) = spec_arches
+    product, builder = product_engine(arch), adapter_builder(arch)
+    engine_name = engine_name or product
     metadata = list(DIRECT_SPEC_ORDER + tuple(_direct_knob_fields(arch)))
     shards = collections.defaultdict(list)
     for spec in specs:
@@ -618,8 +653,8 @@ def build_config(
         "knobs": list(engine_knobs(arch)),
         "heuristic": "native",
     }
-    if engine_name != product_engine:
-        engine["native_symbols_from"] = product_engine
+    if engine_name != product:
+        engine["native_symbols_from"] = product
         if native_symbols_from_slug is not None:
             engine["native_symbols_from_slug"] = native_symbols_from_slug
     return {
@@ -644,7 +679,10 @@ def build_config(
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--rocke-root", type=Path, help="rocKE tree (platform/, library/)."
+        "--rocke-root",
+        type=Path,
+        default=DEFAULT_ROCKE_ROOT,
+        help="rocKE tree (platform/, library/; default: the in-repo tree).",
     )
     parser.add_argument(
         "--instances",
@@ -655,10 +693,9 @@ def main(argv=None) -> int:
     parser.add_argument("--output", type=Path, help="Generator config to write.")
     parser.add_argument(
         "--arch",
-        choices=sorted(ENGINES),
         default=DEFAULT_ARCH,
-        help="The engine's architecture; every instance must be one of its "
-        "(default: %(default)s).",
+        help="The engine's architecture, one of the adapter's TARGETS; every "
+        "instance must be one of its (default: %(default)s).",
     )
     parser.add_argument(
         "--skip-unsupported",
@@ -696,16 +733,23 @@ def main(argv=None) -> int:
         help="Rewrite each generated .kdp.json's kernel UUIDs from instance_id, then exit.",
     )
     args = parser.parse_args(argv)
-    args.engine_name = args.engine_name or ENGINES[args.arch][0]
+    # The engines and arches are the adapter's TARGETS, so rocKE is bound first,
+    # --stabilize-ids included.
+    _bind_rocke(args.rocke_root)
+    if args.arch not in arches():
+        parser.error(
+            f"argument --arch: invalid choice: {args.arch!r} "
+            f"(choose from {', '.join(sorted(arches()))})"
+        )
+    args.engine_name = args.engine_name or product_engine(args.arch)
 
     if args.stabilize_ids:
         for kdp in args.stabilize_ids:
             count = stabilize_ids(kdp, args.engine_name, args.arch)
             print(f"{kdp}: stabilized {count} kernel id(s)")
         return 0
-    if not (args.rocke_root and args.instances and args.output):
-        parser.error("--rocke-root, --instances and --output are required")
-    _bind_rocke(args.rocke_root)
+    if not (args.instances and args.output):
+        parser.error("--instances and --output are required")
 
     entries = []
     for path in args.instances:

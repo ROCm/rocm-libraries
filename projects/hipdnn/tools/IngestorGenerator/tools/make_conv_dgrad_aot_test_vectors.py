@@ -43,11 +43,18 @@ if str(_HERE) not in sys.path:
 import make_conv_dgrad_aot_config as _cfg  # noqa: E402
 
 _SEED = 950
-#: The C++ namespace of each engine's vectors: both headers go into one test binary.
-_NAMESPACES = {
-    "gfx950": "dgrad_test_vectors",
-    "gfx1250": "gfx1250_dgrad_test_vectors",
-}
+#: The C++ namespace of an engine's vectors is ``<arch>_dgrad_test_vectors``: every
+#: header goes into one test binary. gfx950's shipped headers predate that and keep the
+#: legacy name; renaming it would mean renaming the C++ namespace, so only it is listed.
+_LEGACY_NAMESPACES = {"gfx950": "dgrad_test_vectors"}
+
+
+def namespace(arch: str) -> str:
+    """The C++ namespace of ``arch``'s vectors; a ValueError unless ``arch`` is one of
+    the adapter's ``TARGETS`` (so a legacy entry cannot outlive its engine)."""
+    if arch not in _cfg.arches():
+        raise ValueError(f"no packaged dgrad engine for arch {arch!r}")
+    return _LEGACY_NAMESPACES.get(arch, f"{arch}_dgrad_test_vectors")
 
 
 def _problem(**kw):
@@ -273,7 +280,7 @@ def render(specs, problems) -> str:
     from builders.common.convolution_backward_data import conv_dgrad_aot_plan
 
     (arch,) = {spec.ARCH for spec in specs}
-    namespace = _NAMESPACES[arch]
+    cpp_namespace = namespace(arch)
     string_fields = _string_fields(arch)
     by_dtype = {
         dtype: [s for s in specs if s.dtype == dtype] for dtype in ("fp16", "bf16")
@@ -321,7 +328,7 @@ def render(specs, problems) -> str:
         "#include <cstdint>",
         "#include <vector>",
         "",
-        f"namespace hip_kernel_provider::kernel_ingestor_engine::{namespace}",
+        f"namespace hip_kernel_provider::kernel_ingestor_engine::{cpp_namespace}",
         "{",
         "",
         "/// N, C, K, Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW, groups.",
@@ -406,7 +413,7 @@ def render(specs, problems) -> str:
         "    return s_plans;",
         "}",
         "",
-        f"}} // namespace hip_kernel_provider::kernel_ingestor_engine::{namespace}",
+        f"}} // namespace hip_kernel_provider::kernel_ingestor_engine::{cpp_namespace}",
         "",
     ]
     return "\n".join(out)
