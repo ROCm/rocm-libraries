@@ -148,7 +148,7 @@ def test_one_padding_accepts_a_matching_column_padding():
 
 
 def _describe(eng, spec, arch):
-    from rocke.core.backend import conv_direct_grouped_wgrad_wmma_spec_to_dict
+    from kernels.conv.engine_bridge import conv_direct_grouped_wgrad_wmma_spec_to_dict
 
     return eng.conv_direct_grouped_wgrad_wmma_describe(
         conv_direct_grouped_wgrad_wmma_spec_to_dict(spec), arch
@@ -160,7 +160,7 @@ def test_engines_agree_on_specs():
     valid spec, grid and fold contract (partitions, workspace, taps,
     channels), over the AOT grid and every rejected spec, on gfx1250 and on
     gfx950 (which refuses all of them)."""
-    eng = pytest.importorskip("rocke_engine")
+    eng = pytest.importorskip("rocke_library_engine")
     grid_specs = _grid_specs()
     assert len(grid_specs) == 2 * 4 * 72
     rejected = _rejected_specs()
@@ -194,8 +194,8 @@ def test_engines_agree_on_specs():
 def test_binding_rejects_bad_input():
     """A missing, mistyped or partial problem raises instead of reading as
     the zero default; a rejected spec does not lower."""
-    eng = pytest.importorskip("rocke_engine")
-    from rocke.core.backend import conv_direct_grouped_wgrad_wmma_spec_to_dict
+    eng = pytest.importorskip("rocke_library_engine")
+    from kernels.conv.engine_bridge import conv_direct_grouped_wgrad_wmma_spec_to_dict
 
     good = conv_direct_grouped_wgrad_wmma_spec_to_dict(
         GroupedWgradWmmaSpec(problem=_problem())
@@ -231,8 +231,8 @@ def test_binding_rejects_bad_input():
     ],
 )
 def test_engines_serialize_the_same_ir(pkw, knobs):
-    eng = pytest.importorskip("rocke_engine")
-    from rocke.core.backend import conv_direct_grouped_wgrad_wmma_spec_to_dict
+    eng = pytest.importorskip("rocke_library_engine")
+    from kernels.conv.engine_bridge import conv_direct_grouped_wgrad_wmma_spec_to_dict
     from rocke.core.ir_serialize import serialize
 
     spec = GroupedWgradWmmaSpec(problem=_problem(**pkw), **knobs)

@@ -170,7 +170,7 @@ class TestWgradWmmaSpec(unittest.TestCase):
 
 
 class TestWgradWmmaEngines(unittest.TestCase):
-    """The C++ engine against Python (skipped without ``rocke_engine``)."""
+    """The C++ engine against Python (skipped without ``rocke_library_engine``)."""
 
     def _aot_specs(self):
         from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _knob_grid
@@ -201,8 +201,8 @@ class TestWgradWmmaEngines(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """Validity, reason, kernel name, launch geometry and LDS size agree
         over every cell of the AOT grid and a set of rejected specs."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_wgrad_wmma_spec_to_dict
 
         specs = self._aot_specs()
         n_grid = len(specs)
@@ -264,8 +264,8 @@ class TestWgradWmmaEngines(unittest.TestCase):
         self.assertEqual(n_ok, n_grid + 6)
 
     def test_serialized_ir_matches(self):
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_wgrad_wmma_spec_to_dict
         from rocke.core.ir_serialize import serialize
 
         specs = self._aot_specs()[:2] + [
@@ -291,8 +291,8 @@ class TestWgradWmmaEngines(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec has no launch geometry and refuses to lower with
         Python's message; a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_wgrad_wmma_spec_to_dict
 
         spec = DirectWgradWmmaSpec(problem=_problem(), tiles_k=3)
         sd = conv_direct_wgrad_wmma_spec_to_dict(spec)

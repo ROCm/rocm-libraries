@@ -5,7 +5,7 @@
 The spec validator's reasons, the n_split clamp, the per-axis padding the
 cache's problem gate takes for this variant only, and the cross-engine
 agreement of the validator, kernel name, grid, LDS size and serialized IR
-(the ``rocke_engine`` binding; skipped when it is not importable). The GPU
+(the ``rocke_library_engine`` binding; skipped when it is not importable). The GPU
 numerics live in ``test_direct_conv_correctness.py``.
 
 Run:
@@ -180,8 +180,8 @@ class TestDwWgradWmmaEngines(unittest.TestCase):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid (the 1x31 per-axis rows included) and the
         rejected and extra specs above, on gfx1250 and gfx950."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dw_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dw_wgrad_wmma_spec_to_dict
 
         specs = _aot_specs()
         for pkw, knobs, _ in _REJECTED:
@@ -203,8 +203,8 @@ class TestDwWgradWmmaEngines(unittest.TestCase):
                     self.assertEqual(tuple(grid), spec.grid())
 
     def test_engines_serialize_the_same_ir(self):
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dw_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dw_wgrad_wmma_spec_to_dict
         from rocke.core.ir_serialize import serialize
 
         for pkw, knobs in (
@@ -224,8 +224,8 @@ class TestDwWgradWmmaEngines(unittest.TestCase):
             self.assertEqual(got, want, spec.kernel_name())
 
     def test_engines_refuse_to_build_the_same_specs(self):
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dw_wgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dw_wgrad_wmma_spec_to_dict
 
         for pkw, knobs, why in _REJECTED[:3]:
             spec = DwWgradWmmaSpec(problem=_problem(**pkw), **knobs)
