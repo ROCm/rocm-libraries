@@ -7,16 +7,17 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_spec.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_tuning.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_tuning.hpp"
 
 namespace ck_tile {
 
 /**
- * @brief The GEMM traits of a GemmPipelineAgBgCrCompTDMV4 instance: RCR TileGemmUniversalTraits
- *        plus the shape-dependent code paths rocKE derives from its compile-time M, N and K.
+ * @brief The GEMM traits of a MxGemmPipelineAgBgCrCompTDMScheduled instance: RCR
+ * TileGemmUniversalTraits plus the shape-dependent code paths rocKE derives from its compile-time
+ * M, N and K.
  *
  * EdgeM / EdgeN (kPadM / kPadN): the last M (N) tile is partial, its TDM rows clipped and its D
  * vectors masked. WideA / WideB / WideD (LargeTensors if any): A's, B's or D's byte offsets pass
@@ -36,23 +37,23 @@ template <bool EdgeM_         = false,
           index_t OddTiles_   = -1,
           index_t TailSteps_  = 0,
           index_t StoreWidth_ = 1>
-struct MxTdmV4GemmTraits : TileGemmUniversalTraits<EdgeM_,
-                                                   EdgeN_,
-                                                   false,
-                                                   true,
-                                                   tensor_layout::gemm::RowMajor,
-                                                   tensor_layout::gemm::ColumnMajor,
-                                                   tensor_layout::gemm::RowMajor,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   1,
-                                                   false,
-                                                   16,
-                                                   DataCachePrefetchKind::None,
-                                                   DataCachePrefetchKind::None,
-                                                   false,
-                                                   WideA_ || WideB_ || WideD_>
+struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
+                                                          EdgeN_,
+                                                          false,
+                                                          true,
+                                                          tensor_layout::gemm::RowMajor,
+                                                          tensor_layout::gemm::ColumnMajor,
+                                                          tensor_layout::gemm::RowMajor,
+                                                          false,
+                                                          false,
+                                                          false,
+                                                          1,
+                                                          false,
+                                                          16,
+                                                          DataCachePrefetchKind::None,
+                                                          DataCachePrefetchKind::None,
+                                                          false,
+                                                          WideA_ || WideB_ || WideD_>
 {
     static constexpr bool kEdgeM         = EdgeM_;
     static constexpr bool kEdgeN         = EdgeN_;
@@ -66,7 +67,7 @@ struct MxTdmV4GemmTraits : TileGemmUniversalTraits<EdgeM_,
 };
 
 /**
- * @brief Problem of GemmPipelineAgBgCrCompTDMV4: D = alpha * A @ B^T + beta * C.
+ * @brief Problem of MxGemmPipelineAgBgCrCompTDMScheduled: D = alpha * A @ B^T + beta * C.
  *
  * A is M x K and B is N x K, both K-contiguous (RCR); C and D are M x N row-major. A and B are
  * pk_fp4_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in the K-major
@@ -78,80 +79,84 @@ struct MxTdmV4GemmTraits : TileGemmUniversalTraits<EdgeM_,
  *
  * An MxGemmPipelineProblem with float accumulators, PassThrough element functions and E8M0
  * scales per 32 K values, plus ODataType; kBlockSize follows its convention (warps x
- * get_warp_size()). Traits is an MxTdmV4GemmTraits.
+ * get_warp_size()). Traits is an MxTdmScheduledGemmTraits.
  */
 template <typename ADataType_,
           typename BDataType_,
           typename ODataType_,
           typename BlockGemmShape_,
-          typename Traits_ = MxTdmV4GemmTraits<>>
-struct MxGemmTdmV4Problem
+          typename Traits_ = MxTdmScheduledGemmTraits<>>
+struct MxGemmTdmScheduledProblem
     : MxGemmPipelineProblem<ADataType_, BDataType_, float, BlockGemmShape_, Traits_>
 {
     using ODataType   = remove_cvref_t<ODataType_>;
     using AccDataType = float;
 
-    static_assert(
-        std::is_same_v<typename MxGemmTdmV4Problem::ALayout, tensor_layout::gemm::RowMajor> &&
-            std::is_same_v<typename MxGemmTdmV4Problem::BLayout,
-                           tensor_layout::gemm::ColumnMajor> &&
-            std::is_same_v<typename MxGemmTdmV4Problem::CLayout, tensor_layout::gemm::RowMajor>,
-        "comp_tdm_v4: A and B are K-contiguous and C row-major (RCR)");
+    static_assert(std::is_same_v<typename MxGemmTdmScheduledProblem::ALayout,
+                                 tensor_layout::gemm::RowMajor> &&
+                      std::is_same_v<typename MxGemmTdmScheduledProblem::BLayout,
+                                     tensor_layout::gemm::ColumnMajor> &&
+                      std::is_same_v<typename MxGemmTdmScheduledProblem::CLayout,
+                                     tensor_layout::gemm::RowMajor>,
+                  "comp_tdm_scheduled: A and B are K-contiguous and C row-major (RCR)");
 };
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
-/// The MxTdmV4Dtype of an A or B type; an out-of-range value (rejected as "dtype") otherwise.
+/// The MxTdmScheduledDtype of an A or B type; an out-of-range value (rejected as "dtype")
+/// otherwise.
 template <typename T>
-CK_TILE_HOST_DEVICE constexpr MxTdmV4Dtype dtype_of()
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledDtype dtype_of()
 {
     if constexpr(std::is_same_v<T, pk_fp4_t>)
-        return MxTdmV4Dtype::Fp4;
+        return MxTdmScheduledDtype::Fp4;
     else if constexpr(std::is_same_v<T, fp8_t>)
-        return MxTdmV4Dtype::Fp8;
+        return MxTdmScheduledDtype::Fp8;
     else if constexpr(std::is_same_v<T, bf8_t>)
-        return MxTdmV4Dtype::Bf8;
+        return MxTdmScheduledDtype::Bf8;
     else
-        return static_cast<MxTdmV4Dtype>(-1);
+        return static_cast<MxTdmScheduledDtype>(-1);
 }
 
-/// The MxTdmV4OutDtype of C and D; an out-of-range value (rejected as "out_dtype") otherwise.
+/// The MxTdmScheduledOutDtype of C and D; an out-of-range value (rejected as "out_dtype")
+/// otherwise.
 template <typename T>
-CK_TILE_HOST_DEVICE constexpr MxTdmV4OutDtype out_dtype_of()
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledOutDtype out_dtype_of()
 {
     if constexpr(std::is_same_v<T, fp8_t>)
-        return MxTdmV4OutDtype::Fp8E4M3;
+        return MxTdmScheduledOutDtype::Fp8E4M3;
     else if constexpr(std::is_same_v<T, half_t>)
-        return MxTdmV4OutDtype::Fp16;
+        return MxTdmScheduledOutDtype::Fp16;
     else if constexpr(std::is_same_v<T, bf16_t>)
-        return MxTdmV4OutDtype::Bf16;
+        return MxTdmScheduledOutDtype::Bf16;
     else
-        return static_cast<MxTdmV4OutDtype>(-1);
+        return static_cast<MxTdmScheduledOutDtype>(-1);
 }
 
 /// Instantiating this with a reason other than Ok fails, and the compiler names the reason.
-template <MxTdmV4Reason R>
+template <MxTdmScheduledReason R>
 struct InvalidTuning;
 template <>
-struct InvalidTuning<MxTdmV4Reason::Ok>
+struct InvalidTuning<MxTdmScheduledReason::Ok>
 {
     static constexpr bool value = true;
 };
 
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /**
- * @brief Policy of GemmPipelineAgBgCrCompTDMV4: the tuning (see MxTdmV4DefaultTuning) and
- *        everything derived from it and the Problem's tile, at compile time.
+ * @brief Policy of MxGemmPipelineAgBgCrCompTDMScheduled: the tuning (see
+ * MxTdmScheduledDefaultTuning) and everything derived from it and the Problem's tile, at compile
+ * time.
  */
-template <typename Tuning = MxTdmV4DefaultTuning>
-struct GemmPipelineAgBgCrCompTDMV4Policy
+template <typename Tuning = MxTdmScheduledDefaultTuning>
+struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 {
     using TuningType = Tuning;
 
     /// The compile-time part of the spec: M, N and K are 0.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Spec GetSpec()
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledSpec GetSpec()
     {
         using Shape              = typename Problem::BlockGemmShape;
         using WarpTile           = typename Shape::WarpTile;
@@ -159,20 +164,21 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
         constexpr index_t atom_m = WarpTile::at(number<0>{});
         constexpr index_t atom_n = WarpTile::at(number<1>{});
         constexpr index_t atom_k = WarpTile::at(number<2>{});
-        constexpr bool warp_k_ok = Warps::at(number<2>{}) == 1 && atom_k == mx_tdm_v4::kAtomK;
+        constexpr bool warp_k_ok =
+            Warps::at(number<2>{}) == 1 && atom_k == mx_tdm_scheduled::kAtomK;
 
-        MxTdmV4Spec s{};
-        s.out                    = mx_tdm_v4::out_dtype_of<typename Problem::ODataType>();
+        MxTdmScheduledSpec s{};
+        s.out                    = mx_tdm_scheduled::out_dtype_of<typename Problem::ODataType>();
         s.tile_m                 = Shape::kM;
         s.tile_n                 = Shape::kN;
         s.tile_k                 = Shape::kK;
         s.warp_m                 = warp_k_ok ? Warps::at(number<0>{}) : 0;
         s.warp_n                 = warp_k_ok ? Warps::at(number<1>{}) : 0;
-        s.mma                    = (atom_m == 32 && atom_n == 16)   ? MxTdmV4Mma::M32N16
-                                   : (atom_m == 16 && atom_n == 16) ? MxTdmV4Mma::M16N16
-                                                                    : static_cast<MxTdmV4Mma>(-1);
-        s.a_dtype                = mx_tdm_v4::dtype_of<typename Problem::ADataType>();
-        s.b_dtype                = mx_tdm_v4::dtype_of<typename Problem::BDataType>();
+        s.mma                    = (atom_m == 32 && atom_n == 16)   ? MxTdmScheduledMma::M32N16
+                                   : (atom_m == 16 && atom_n == 16) ? MxTdmScheduledMma::M16N16
+                                                                    : static_cast<MxTdmScheduledMma>(-1);
+        s.a_dtype                = mx_tdm_scheduled::dtype_of<typename Problem::ADataType>();
+        s.b_dtype                = mx_tdm_scheduled::dtype_of<typename Problem::BDataType>();
         s.cluster_x              = Tuning::kClusterDimX;
         s.cluster_y              = Tuning::kClusterDimY;
         s.cluster_z              = Tuning::kClusterDimZ;
@@ -187,27 +193,27 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
 
     /// The spec of one problem, for the run-time checks.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Spec
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledSpec
     GetSpec(long_index_t M, long_index_t N, long_index_t K)
     {
-        MxTdmV4Spec s = GetSpec<Problem>();
-        s.M           = M;
-        s.N           = N;
-        s.K           = K;
+        MxTdmScheduledSpec s = GetSpec<Problem>();
+        s.M                  = M;
+        s.N                  = N;
+        s.K                  = K;
         return s;
     }
 
     /// The first compile-time rule the Problem and tuning break, or Ok.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Reason GetReason()
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledReason GetReason()
     {
-        return mx_tdm_v4_validate(GetSpec<Problem>(), false);
+        return mx_tdm_scheduled_validate(GetSpec<Problem>(), false);
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmV4LdsLayout GetLdsLayout()
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledLdsLayout GetLdsLayout()
     {
-        return mx_tdm_v4_lds_layout(GetSpec<Problem>());
+        return mx_tdm_scheduled_lds_layout(GetSpec<Problem>());
     }
 
     /// Bytes of LDS: both buffers.
@@ -221,14 +227,16 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetDscntWait(index_t i)
     {
-        return mx_tdm_v4::min_i(GetSpec<Problem>().dscnt_wait(i), mx_tdm_v4::kDscntMax);
+        return mx_tdm_scheduled::min_i(GetSpec<Problem>().dscnt_wait(i),
+                                       mx_tdm_scheduled::kDscntMax);
     }
 
     /// Reads of the other buffer left in flight at the cluster late wait, clamped.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
     {
-        return mx_tdm_v4::min_i(GetSpec<Problem>().late_pending_reads(), mx_tdm_v4::kDscntMax);
+        return mx_tdm_scheduled::min_i(GetSpec<Problem>().late_pending_reads(),
+                                       mx_tdm_scheduled::kDscntMax);
     }
 
     template <typename Problem>
@@ -300,7 +308,8 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
     {
-        return mx_tdm_v4::min_i(GetSpec<Problem>().reads_per_step(), mx_tdm_v4::kDscntMax);
+        return mx_tdm_scheduled::min_i(GetSpec<Problem>().reads_per_step(),
+                                       mx_tdm_scheduled::kDscntMax);
     }
 
     /// Whether the next K step's fragments are read while this one's WMMAs run.
@@ -338,9 +347,9 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
 
     /// The LDS placement of A's or B's data or scales.
     template <typename Problem, bool IsA, bool IsScale = false>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Operand GetLdsOperand()
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledOperand GetLdsOperand()
     {
-        constexpr MxTdmV4LdsLayout l = GetLdsLayout<Problem>();
+        constexpr MxTdmScheduledLdsLayout l = GetLdsLayout<Problem>();
         if constexpr(IsScale)
             return IsA ? l.a_scale : l.b_scale;
         else
@@ -352,7 +361,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr bool GetLdsPadEnable()
     {
-        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, IsScale>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
         return (IsScale || op.iterate_rows == 0) && op.pad_bytes > 0;
     }
 
@@ -360,7 +369,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr TDMLdsPaddingConfig GetLdsPaddingConfig()
     {
-        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, IsScale>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
         if constexpr(GetLdsPadEnable<Problem, IsA, IsScale>())
             return make_tdm_lds_padding_config(op.block_bytes, op.pad_bytes);
         else
@@ -370,18 +379,18 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
     /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (as
     /// MRow / NRow), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte words,
-    /// is mx_tdm_v4_row_offset's less the operand's base.
+    /// is mx_tdm_scheduled_row_offset's less the operand's base.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
     {
-        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
-        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t row_bytes = GetLdsRowBytes<Problem>();
-        constexpr index_t warps     = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t rows      = warps * atom * repeats;
-        constexpr index_t words     = row_bytes / 4;
+        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t row_bytes        = GetLdsRowBytes<Problem>();
+        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t rows             = warps * atom * repeats;
+        constexpr index_t words            = row_bytes / 4;
         // A component's rows split into (outer, inner) runs: iterate-mode blocks, padded blocks
         // of whole rows, or one run (rows padded within, or unpadded).
         constexpr bool iterate         = op.iterate_rows > 0;
@@ -398,7 +407,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
                                              : row_bytes;
         static_assert(rows % op.rows == 0 && op.rows % inner == 0 && row_bytes % 4 == 0 &&
                           op.stride % 4 == 0 && outer_stride % 4 == 0 && row_stride % 4 == 0,
-                      "comp_tdm_v4: the LDS layout is not a whole number of words per run");
+                      "comp_tdm_scheduled: the LDS layout is not a whole number of words per run");
         constexpr auto naive  = make_naive_tensor_descriptor(make_tuple(number<rows / op.rows>{},
                                                                        number<op.rows / inner>{},
                                                                        number<inner>{},
@@ -479,32 +488,34 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowOffset(index_t t)
     {
-        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
-        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        const index_t wave          = t / (repeats * atom);
-        const index_t r             = t / atom % repeats;
-        const index_t l             = t % atom;
-        const index_t row           = wave * atom * repeats + l * repeats + r;
-        return (mx_tdm_v4_row_offset<index_t>(op, GetLdsRowBytes<Problem>(), row) - op.base) / 4;
+        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        const index_t wave                 = t / (repeats * atom);
+        const index_t r                    = t / atom % repeats;
+        const index_t l                    = t % atom;
+        const index_t row                  = wave * atom * repeats + l * repeats + r;
+        return (mx_tdm_scheduled_row_offset<index_t>(op, GetLdsRowBytes<Problem>(), row) -
+                op.base) /
+               4;
     }
 
     /// Whether a fragment read can take its repeat and half offsets as constants: for every
     /// lane's first row, moving by a repeat r and a half h adds the offset of (r, h) from row 0.
-    /// Also spot-checks MakeLdsBlockDescriptor against mx_tdm_v4_row_offset (a full check is
+    /// Also spot-checks MakeLdsBlockDescriptor against mx_tdm_scheduled_row_offset (a full check is
     /// past the constexpr step limit).
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr bool IsLdsReadLinear()
     {
-        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
-        constexpr index_t warps   = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom    = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t halves  = GetFragmentHalves<Problem, IsA>();
-        constexpr index_t rows    = warps * repeats * atom;
-        constexpr auto desc       = MakeLdsBlockDescriptor<Problem, IsA>();
-        const auto offset         = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t halves       = GetFragmentHalves<Problem, IsA>();
+        constexpr index_t rows         = warps * repeats * atom;
+        constexpr auto desc            = MakeLdsBlockDescriptor<Problem, IsA>();
+        const auto offset              = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
         for(const index_t t : {index_t{1}, atom - 1, atom, rows / 2 + 1, rows - 1})
             if(desc.calculate_offset(make_multi_index(t, 0)) != offset(t))
                 return false;
@@ -529,18 +540,19 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleDescriptor()
     {
-        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
-        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, true>();
-        constexpr index_t warps     = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t comps     = warps * atom * repeats / op.rows;
-        constexpr index_t steps     = GetKSteps<Problem>();
-        constexpr index_t run       = steps * op.rows;
-        constexpr index_t block     = op.pad_bytes > 0 ? op.block_bytes / 4 : run;
-        static_assert(warps * atom * repeats % op.rows == 0 && run % block == 0 &&
-                          op.stride % 4 == 0 && (op.block_bytes + op.pad_bytes) % 4 == 0,
-                      "comp_tdm_v4: the scale layout is not a whole number of padded blocks");
+        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, true>();
+        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t comps            = warps * atom * repeats / op.rows;
+        constexpr index_t steps            = GetKSteps<Problem>();
+        constexpr index_t run              = steps * op.rows;
+        constexpr index_t block            = op.pad_bytes > 0 ? op.block_bytes / 4 : run;
+        static_assert(
+            warps * atom * repeats % op.rows == 0 && run % block == 0 && op.stride % 4 == 0 &&
+                (op.block_bytes + op.pad_bytes) % 4 == 0,
+            "comp_tdm_scheduled: the scale layout is not a whole number of padded blocks");
         constexpr auto naive = make_naive_tensor_descriptor(
             make_tuple(number<comps>{}, number<run / block>{}, number<block>{}),
             make_tuple(number<op.stride / 4>{},
@@ -588,8 +600,8 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleReadDistribution()
     {
-        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
-        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
         if constexpr(GetScaleLanes<Problem, IsA>() == 32)
             return make_static_tile_distribution(
                 tile_distribution_encoding<sequence<>,
@@ -609,20 +621,20 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     }
 
     /// Whether a scale read can take its K step as a constant word offset and its repeats as
-    /// consecutive words, checked against mx_tdm_v4_scale_offset. Also spot-checks
+    /// consecutive words, checked against mx_tdm_scheduled_scale_offset. Also spot-checks
     /// MakeLdsScaleDescriptor.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr bool IsLdsScaleReadLinear()
     {
-        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
-        constexpr index_t warps   = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom    = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t steps   = GetKSteps<Problem>();
-        constexpr auto desc       = MakeLdsScaleDescriptor<Problem, IsA>();
-        const auto offset         = [](index_t step, index_t row) {
-            constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, true>();
-            return (mx_tdm_v4_scale_offset<index_t>(op, step, row) - op.base) / 4;
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t steps        = GetKSteps<Problem>();
+        constexpr auto desc            = MakeLdsScaleDescriptor<Problem, IsA>();
+        const auto offset              = [](index_t step, index_t row) {
+            constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, true>();
+            return (mx_tdm_scheduled_scale_offset<index_t>(op, step, row) - op.base) / 4;
         };
         const index_t step_words = offset(1, 0);
         for(const index_t t : {index_t{1}, atom - 1, atom, warps * atom - 1})
@@ -670,7 +682,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeCBlockTileDistribution()
     {
-        constexpr MxTdmV4Spec s = GetSpec<Problem>();
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
         return make_static_tile_distribution(
             tile_distribution_encoding<
                 sequence<>,
@@ -687,7 +699,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeCStoreTileDistribution()
     {
-        constexpr MxTdmV4Spec s = GetSpec<Problem>();
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
         return make_static_tile_distribution(
             tile_distribution_encoding<
                 sequence<>,
@@ -707,21 +719,21 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
 };
 
 /// rocKE's validate() at compile time: nullptr if Problem and Tuning build, else the reason code
-/// (see mx_tdm_v4_reason_code). The shape rules are the pipeline's GetUnsupportedReason.
-template <typename Problem, typename Tuning = MxTdmV4DefaultTuning>
-CK_TILE_HOST_DEVICE constexpr const char* MxTdmV4Validate()
+/// (see mx_tdm_scheduled_reason_code). The shape rules are the pipeline's GetUnsupportedReason.
+template <typename Problem, typename Tuning = MxTdmScheduledDefaultTuning>
+CK_TILE_HOST_DEVICE constexpr const char* MxTdmScheduledValidate()
 {
-    constexpr MxTdmV4Reason r =
-        GemmPipelineAgBgCrCompTDMV4Policy<Tuning>::template GetReason<Problem>();
-    return r == MxTdmV4Reason::Ok ? nullptr : mx_tdm_v4_reason_code(r);
+    constexpr MxTdmScheduledReason r =
+        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>::template GetReason<Problem>();
+    return r == MxTdmScheduledReason::Ok ? nullptr : mx_tdm_scheduled_reason_code(r);
 }
 
 /// The rocKE name suffix of a tuning: the cluster, then its non-default values (see
-/// mx_tdm_v4_tuning_name), without the parts a CK kernel name already has.
+/// mx_tdm_scheduled_tuning_name), without the parts a CK kernel name already has.
 template <typename Tuning>
-CK_TILE_HOST std::string MxTdmV4TuningName()
+CK_TILE_HOST std::string MxTdmScheduledTuningName()
 {
-    MxTdmV4Spec s{};
+    MxTdmScheduledSpec s{};
     s.cluster_x              = Tuning::kClusterDimX;
     s.cluster_y              = Tuning::kClusterDimY;
     s.cluster_z              = Tuning::kClusterDimZ;
@@ -731,7 +743,7 @@ CK_TILE_HOST std::string MxTdmV4TuningName()
     s.half_plr               = Tuning::kHalfPlr;
     s.half_b_order           = Tuning::kHalfBOrder;
     s.lds_segment_interleave = Tuning::kLdsSegmentInterleave;
-    return mx_tdm_v4_tuning_name(s, false);
+    return mx_tdm_scheduled_tuning_name(s, false);
 }
 
 } // namespace ck_tile

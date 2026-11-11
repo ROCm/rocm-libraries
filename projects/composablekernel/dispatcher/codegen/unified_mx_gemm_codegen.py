@@ -24,9 +24,9 @@ Each header is compiled per-kernel via force-include:
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
 pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue,
-and comp_tdm_v4 (rocKE's mx_gemm: K-major scales, the alpha/beta epilogue). Only
-comp_tdm_v4 takes tuning keys, at the top level of the config (rocKE's knobs and the
-instance's shape traits; mx_tdm_v4.TUNING_DEFAULTS and SHAPE_DEFAULTS).
+and comp_tdm_scheduled (rocKE's mx_gemm: K-major scales, the alpha/beta epilogue). Only
+comp_tdm_scheduled takes tuning keys, at the top level of the config (rocKE's knobs and the
+instance's shape traits; mx_tdm_scheduled.TUNING_DEFAULTS and SHAPE_DEFAULTS).
 Both use intrawave scheduling. The default warp tile is 16x16x128;
 gfx1250 TDM V1/V2 also expose 32x32x128 and FP4 32x16x128. Native pipeline
 compilation determines instruction support; codegen does not distinguish A0/B0.
@@ -61,16 +61,16 @@ for _p in (str(_THIS_DIR), str(_GEMM_DIR), str(_MX_GEMM_DIR)):
 from codegen_common import normalize_gfx_arch  # noqa: E402
 from gemm_validation_utils import (  # noqa: E402
     GEMM_MX_PIPELINES_BY_ARCH,
-    MX_TDM_V4_EPILOGUE,
-    MX_TDM_V4_PIPELINE,
+    MX_TDM_SCHEDULED_EPILOGUE,
+    MX_TDM_SCHEDULED_PIPELINE,
     is_tile_config_valid,
-    load_mx_tdm_v4,
-    mx_tdm_v4_reject_reason,
+    load_mx_tdm_scheduled,
+    mx_tdm_scheduled_reject_reason,
     validate_gemm_mx_warp_tile_combination,
 )
 
-mx_tdm_v4 = load_mx_tdm_v4()
-TUNING_KEYS = (*mx_tdm_v4.TUNING_DEFAULTS, *mx_tdm_v4.SHAPE_DEFAULTS)
+mx_tdm_scheduled = load_mx_tdm_scheduled()
+TUNING_KEYS = (*mx_tdm_scheduled.TUNING_DEFAULTS, *mx_tdm_scheduled.SHAPE_DEFAULTS)
 
 
 def _load_mx_builder():
@@ -102,21 +102,21 @@ VALID_SCHEDULER = "intrawave"
 
 
 def _default_epilogue(pipeline: str) -> str:
-    if pipeline == MX_TDM_V4_PIPELINE:
-        return MX_TDM_V4_EPILOGUE
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
+        return MX_TDM_SCHEDULED_EPILOGUE
     return "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
 
 
 def _tuning_from_cfg(cfg: dict) -> Optional[dict]:
-    """The comp_tdm_v4 tuning of a config (normalized), or None for other pipelines."""
+    """The comp_tdm_scheduled tuning of a config (normalized), or None for other pipelines."""
     given = {k: cfg[k] for k in TUNING_KEYS if k in cfg}
-    if cfg.get("pipeline") != MX_TDM_V4_PIPELINE:
+    if cfg.get("pipeline") != MX_TDM_SCHEDULED_PIPELINE:
         if given:
             raise ValueError(
-                f"tuning keys {sorted(given)} are only for {MX_TDM_V4_PIPELINE}"
+                f"tuning keys {sorted(given)} are only for {MX_TDM_SCHEDULED_PIPELINE}"
             )
         return None
-    return mx_tdm_v4.normalize_tuning(given)
+    return mx_tdm_scheduled.normalize_tuning(given)
 
 
 _REQUIRED_TILE_KEYS = (
@@ -190,10 +190,12 @@ def _validate(cfg: dict) -> None:
                 "gfx1250 MX GEMM does not support persistent execution or K padding"
             )
     tuning = _tuning_from_cfg(cfg)
-    if pipeline == MX_TDM_V4_PIPELINE:
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
         if cfg.get("pad_m") or cfg.get("pad_n"):
-            raise ValueError(f"{MX_TDM_V4_PIPELINE} takes no padding (edge=true)")
-        reason = mx_tdm_v4_reject_reason(
+            raise ValueError(
+                f"{MX_TDM_SCHEDULED_PIPELINE} takes no padding (edge=true)"
+            )
+        reason = mx_tdm_scheduled_reject_reason(
             *(tc[key] for key in _REQUIRED_TILE_KEYS),
             datatype,
             datatype,

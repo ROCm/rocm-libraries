@@ -400,7 +400,7 @@ GEMM_MX_PIPELINES_BY_ARCH = {
     "gfx1250": (
         "comp_tdm",
         "comp_tdm_v2",
-        "comp_tdm_v4",
+        "comp_tdm_scheduled",
         "comp_async",
         "comp_async_eight_waves",
         "weight_preshuffle",
@@ -412,20 +412,20 @@ GEMM_MX_PIPELINES = list(
     )
 )
 # rocKE's mx_gemm: K-major scales, the alpha/beta epilogue and its own tuning knobs.
-MX_TDM_V4_PIPELINE = "comp_tdm_v4"
-MX_TDM_V4_EPILOGUE = "alphabeta"
+MX_TDM_SCHEDULED_PIPELINE = "comp_tdm_scheduled"
+MX_TDM_SCHEDULED_EPILOGUE = "alphabeta"
 
 
-def load_mx_tdm_v4():
-    """The mx_gemm/mx_tdm_v4.py module (the Python form of the comp_tdm_v4 spec)."""
+def load_mx_tdm_scheduled():
+    """The mx_gemm/mx_tdm_scheduled.py module (the Python form of the comp_tdm_scheduled spec)."""
     import importlib.util
     import os
     import sys
 
-    name = "mx_tdm_v4"
+    name = "mx_tdm_scheduled"
     if name not in sys.modules:
         path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "mx_gemm", "mx_tdm_v4.py"
+            os.path.dirname(os.path.abspath(__file__)), "mx_gemm", "mx_tdm_scheduled.py"
         )
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
@@ -434,7 +434,7 @@ def load_mx_tdm_v4():
     return sys.modules[name]
 
 
-def mx_tdm_v4_reject_reason(
+def mx_tdm_scheduled_reject_reason(
     tile_m: int,
     tile_n: int,
     tile_k: int,
@@ -450,14 +450,18 @@ def mx_tdm_v4_reject_reason(
     gpu_target: str,
     tuning=None,
 ) -> str:
-    """Why a comp_tdm_v4 instance is invalid ("" if valid). With tuning None, why the tile is
+    """Why a comp_tdm_scheduled instance is invalid ("" if valid). With tuning None, why the tile is
     invalid under every schedule (the tuning_config product is checked per instance later)."""
     if _base_gfx_arch(gpu_target) != "gfx1250":
-        return f"{MX_TDM_V4_PIPELINE} requires gfx1250"
-    v4 = load_mx_tdm_v4()
-    out = v4.TE_OUT_DTYPES.get(c_datatype)
-    if out is None or a_datatype not in v4.MX_DTYPES or b_datatype not in v4.MX_DTYPES:
-        return f"{MX_TDM_V4_PIPELINE} does not support {a_datatype}x{b_datatype}->{c_datatype}"
+        return f"{MX_TDM_SCHEDULED_PIPELINE} requires gfx1250"
+    sched = load_mx_tdm_scheduled()
+    out = sched.TE_OUT_DTYPES.get(c_datatype)
+    if (
+        out is None
+        or a_datatype not in sched.MX_DTYPES
+        or b_datatype not in sched.MX_DTYPES
+    ):
+        return f"{MX_TDM_SCHEDULED_PIPELINE} does not support {a_datatype}x{b_datatype}->{c_datatype}"
     tile = {
         "tile_m": tile_m,
         "tile_n": tile_n,
@@ -469,18 +473,18 @@ def mx_tdm_v4_reject_reason(
         "warp_tile_n": warp_tile_n,
         "warp_tile_k": warp_tile_k,
     }
-    candidates = [tuning] if tuning is not None else v4.schedule_tunings()
+    candidates = [tuning] if tuning is not None else sched.schedule_tunings()
     first = None
     for candidate in candidates:
         try:
-            spec = v4.spec_from_tile(tile, candidate, a_datatype, b_datatype, out)
-            reason = v4.validate_instance(spec, candidate)
+            spec = sched.spec_from_tile(tile, candidate, a_datatype, b_datatype, out)
+            reason = sched.validate_instance(spec, candidate)
         except ValueError as e:
             return str(e)
         if reason == "ok":
             return ""
         first = first or reason
-    return f"{MX_TDM_V4_PIPELINE}: {first}"
+    return f"{MX_TDM_SCHEDULED_PIPELINE}: {first}"
 
 
 GEMM_BQUANT_PIPELINES = ["compv3"]
@@ -780,8 +784,8 @@ def is_trait_combination_valid(
                 and not persistent_or_preshuffle_quant
             )
             or (
-                pipeline == MX_TDM_V4_PIPELINE
-                and epilogue == MX_TDM_V4_EPILOGUE
+                pipeline == MX_TDM_SCHEDULED_PIPELINE
+                and epilogue == MX_TDM_SCHEDULED_EPILOGUE
                 and not persistent_or_preshuffle_quant
                 and not any((pad_m, pad_n, pad_k))
             )
@@ -1461,9 +1465,9 @@ def is_tile_config_valid(
     if warp_tile_m <= 0 or warp_tile_n <= 0 or warp_tile_k <= 0:
         return False
 
-    if pipeline == MX_TDM_V4_PIPELINE:
-        # The v4 spec owns its wave groups, atoms and LDS layout.
-        reason = mx_tdm_v4_reject_reason(
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
+        # The comp_tdm_scheduled spec owns its wave groups, atoms and LDS layout.
+        reason = mx_tdm_scheduled_reject_reason(
             tile_m,
             tile_n,
             tile_k,
@@ -1479,7 +1483,7 @@ def is_tile_config_valid(
             gpu_target,
         )
         if reason:
-            logging.debug(f"comp_tdm_v4 validation failed: {reason}")
+            logging.debug(f"comp_tdm_scheduled validation failed: {reason}")
         return not reason
 
     # Check that warp tiles fit within block tiles
@@ -2257,8 +2261,8 @@ def validate_gemm_mx(
     if layout.lower() != "rcr":
         return False, "MX GEMM currently supports only rcr layout"
 
-    if pipeline == MX_TDM_V4_PIPELINE:
-        reason = mx_tdm_v4_reject_reason(
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
+        reason = mx_tdm_scheduled_reject_reason(
             tile_m,
             tile_n,
             tile_k,

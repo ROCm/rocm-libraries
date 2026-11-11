@@ -375,7 +375,7 @@ struct MxGemmKernel
     template <typename T>
     using has_alpha_beta = decltype(T::kAlphaBeta);
 
-    /// The pipeline reads K-major scales, [ceil(K / 128)][MN] int32 packs (comp_tdm_v4): the
+    /// The pipeline reads K-major scales, [ceil(K / 128)][MN] int32 packs (comp_tdm_scheduled): the
     /// scale windows view that layout, and the A pointers are not shifted to the M tile.
     static constexpr bool kKMajorScales = []() {
         if constexpr(is_detected<has_k_major_scales, MxGemmPipeline>{})

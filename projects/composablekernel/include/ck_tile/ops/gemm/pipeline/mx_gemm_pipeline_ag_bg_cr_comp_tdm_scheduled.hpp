@@ -6,12 +6,12 @@
 #include <type_traits>
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_policy.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
 namespace ck_tile {
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
 // The GL2 prefetch's cache policy: th:TH_LOAD_NT | scope:SCOPE_SE (the enum has it on gfx12 only).
 #if defined(__gfx12__)
@@ -26,7 +26,7 @@ CK_TILE_DEVICE void fence()
     sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
 }
 
-/// The MxTdmV4GemmTraits values rocKE derives from `spec`'s shape, as host values.
+/// The MxTdmScheduledGemmTraits values rocKE derives from `spec`'s shape, as host values.
 struct ShapeTraits
 {
     bool edge_m;
@@ -39,7 +39,7 @@ struct ShapeTraits
     index_t store_width;
 };
 
-CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmV4Spec& s)
+CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmScheduledSpec& s)
 {
     return {s.edge_m(),
             s.edge_n(),
@@ -50,7 +50,7 @@ CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmV4Spec& s)
             s.tail_steps(),
             s.store_width()};
 }
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /**
  * @brief MX GEMM main loop for gfx1250 after rocKE's mx_gemm (instances/gfx1250/mx_gemm.py at
@@ -65,13 +65,13 @@ CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmV4Spec& s)
  * step).
  *
  * rocKE's M, N and K are compile-time; here they are run time and the Problem's traits
- * (MxTdmV4GemmTraits) carry what rocKE
+ * (MxTdmScheduledGemmTraits) carry what rocKE
  * derives from them (edges, wide offsets, a K tail). The loop runs tile pairs, one per buffer; an
  * odd tile count runs its last full tile after the loop (rocKE peels it before the loop; the
  * buffers the tiles use are the same) and the K tail tile picks its K step count at run time.
  */
-template <typename Problem_, typename Policy_ = GemmPipelineAgBgCrCompTDMV4Policy<>>
-struct GemmPipelineAgBgCrCompTDMV4
+template <typename Problem_, typename Policy_ = MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>>
+struct MxGemmPipelineAgBgCrCompTDMScheduled
 {
     using Problem   = remove_cvref_t<Problem_>;
     using Policy    = remove_cvref_t<Policy_>;
@@ -93,8 +93,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     using AElementWise   = remove_cvref_t<typename Problem::AElementWise>;
     using BElementWise   = remove_cvref_t<typename Problem::BElementWise>;
 
-    static_assert(mx_tdm_v4::InvalidTuning<Policy::template GetReason<Problem>()>::value,
-                  "comp_tdm_v4: the Problem and tuning break a rule of rocKE's validate()");
+    static_assert(mx_tdm_scheduled::InvalidTuning<Policy::template GetReason<Problem>()>::value,
+                  "comp_tdm_scheduled: the Problem and tuning break a rule of rocKE's validate()");
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr index_t BlockSize      = Problem::kBlockSize;
@@ -179,7 +179,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         Policy::template MakeCBlockTileDistribution<Problem>()));
     using AccRegs    = thread_buffer<CVec, kNumAcc>;
     static_assert(CBlockTile::get_thread_buffer_size() == kNumAcc * kCFragLen,
-                  "comp_tdm_v4: the C block tile holds the C fragments of every repeat");
+                  "comp_tdm_scheduled: the C block tile holds the C fragments of every repeat");
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
@@ -188,18 +188,19 @@ struct GemmPipelineAgBgCrCompTDMV4
 
     CK_TILE_HOST static std::string GetName()
     {
-        return std::string("pipeline_AgBgCrCompTDMV4") + MxTdmV4TuningName<Tuning>();
+        return std::string("pipeline_AgBgCrCompTDMScheduled") + MxTdmScheduledTuningName<Tuning>();
     }
 
     /// The name of an MxGemmKernel of this pipeline: data types, tile, tuning and traits.
     [[nodiscard]] CK_TILE_HOST static std::string GetKernelName()
     {
-        constexpr MxTdmV4Spec spec = Policy::template GetSpec<Problem>();
-        std::string name = std::string("mx_gemm_tdm_v4_mx") + mx_tdm_v4_dtype_name(spec.a_dtype);
+        constexpr MxTdmScheduledSpec spec = Policy::template GetSpec<Problem>();
+        std::string name =
+            std::string("mx_gemm_tdm_scheduled_mx") + mx_tdm_scheduled_dtype_name(spec.a_dtype);
         if(spec.b_dtype != spec.a_dtype)
-            name += mx_tdm_v4_dtype_name(spec.b_dtype);
+            name += mx_tdm_scheduled_dtype_name(spec.b_dtype);
         name += "_t" + std::to_string(spec.tile_m) + "x" + std::to_string(spec.tile_n) + "x" +
-                std::to_string(spec.tile_k) + mx_tdm_v4_tuning_name(spec);
+                std::to_string(spec.tile_k) + mx_tdm_scheduled_tuning_name(spec);
         if(Traits::kEdgeM || Traits::kEdgeN)
             name += "_edge";
         if(Traits::kWideA || Traits::kWideB || Traits::kWideD)
@@ -215,11 +216,11 @@ struct GemmPipelineAgBgCrCompTDMV4
     /// full spec, or a shape path the traits lack.
     CK_TILE_HOST static const char* GetUnsupportedReason(index_t M, index_t N, index_t K)
     {
-        const MxTdmV4Spec spec     = Policy::template GetSpec<Problem>(M, N, K);
-        const MxTdmV4Reason reason = mx_tdm_v4_validate(spec);
-        if(reason != MxTdmV4Reason::Ok)
-            return mx_tdm_v4_reason_message(reason);
-        const mx_tdm_v4::ShapeTraits need = mx_tdm_v4::shape_traits(spec);
+        const MxTdmScheduledSpec spec     = Policy::template GetSpec<Problem>(M, N, K);
+        const MxTdmScheduledReason reason = mx_tdm_scheduled_validate(spec);
+        if(reason != MxTdmScheduledReason::Ok)
+            return mx_tdm_scheduled_reason_message(reason);
+        const mx_tdm_scheduled::ShapeTraits need = mx_tdm_scheduled::shape_traits(spec);
         if(need.edge_m && !Traits::kEdgeM)
             return "M is not a multiple of tile_m: needs an EdgeM instance";
         if(need.edge_n && !Traits::kEdgeN)
@@ -240,7 +241,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     }
 
     /// Whether A's or B's fragments are read through a tile window (see
-    /// GemmPipelineAgBgCrCompTDMV4Policy::IsLdsReadLinear); otherwise RowFragment reads them.
+    /// MxGemmPipelineAgBgCrCompTDMScheduledPolicy::IsLdsReadLinear); otherwise RowFragment reads
+    /// them.
     static constexpr bool kTileReadB = Policy::template IsLdsReadLinear<Problem, false>();
 
     /// Wave 0's window on A's or B's fragment of one K step at repeat 0 of buffer 0. The wave
@@ -261,7 +263,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     using BLdsWindow = decltype(MakeLdsWindow<false>(nullptr));
 
     /// Whether A's or B's scales are read through a tile window (see
-    /// GemmPipelineAgBgCrCompTDMV4Policy::IsLdsScaleReadLinear); otherwise ScaleWords reads them.
+    /// MxGemmPipelineAgBgCrCompTDMScheduledPolicy::IsLdsScaleReadLinear); otherwise ScaleWords
+    /// reads them.
     static constexpr bool kTileReadAScale = Policy::template IsLdsScaleReadLinear<Problem, true>();
     static constexpr bool kTileReadBScale = Policy::template IsLdsScaleReadLinear<Problem, false>();
 
@@ -319,7 +322,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                                                float,
                                                kAtomM,
                                                kAtomN,
-                                               mx_tdm_v4::kAtomK,
+                                               mx_tdm_scheduled::kAtomK,
                                                false>;
         using AVec        = typename WarpGemm::WarpGemmAttribute::AVecType;
         using BVec        = typename WarpGemm::WarpGemmAttribute::BVecType;
@@ -401,7 +404,7 @@ struct GemmPipelineAgBgCrCompTDMV4
               N(Lengths(b_dram)[number<0>{}]),
               K(Lengths(a_dram)[number<1>{}]),
               tid(get_thread_id()),
-              lane(integer_modulo_nonnegative<mx_tdm_v4::kWave>(tid)),
+              lane(integer_modulo_nonnegative<mx_tdm_scheduled::kWave>(tid)),
               lane_col(integer_modulo_nonnegative<16>(lane)),
               lane_half(integer_divide_nonnegative<16>(lane)),
               // Wave-uniform, so the TDM descriptors built from it stay scalar.
@@ -414,8 +417,8 @@ struct GemmPipelineAgBgCrCompTDMV4
               smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
-              k_atoms(integer_divide_nonnegative<mx_tdm_v4::kAtomK>(
-                  Traits::kHasTail ? K + mx_tdm_v4::kAtomK - 1 : K)),
+              k_atoms(integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(
+                  Traits::kHasTail ? K + mx_tdm_scheduled::kAtomK - 1 : K)),
               a_scale_stride(opaque_scalar(M * 4)),
               b_scale_stride(opaque_scalar(N * 4)),
               b_window(MakeLdsWindow<false>(smem_)),
@@ -524,14 +527,14 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
-            constexpr MxTdmV4Operand L  = Policy::template GetLdsOperand<Problem, IsA>();
-            constexpr bool edge         = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            constexpr bool wide         = IsA ? Traits::kWideA : Traits::kWideB;
-            constexpr bool iterate      = L.iterate_rows > 0;
-            constexpr index_t tile_rows = iterate ? L.iterate_rows : L.rows;
-            const index_t block         = IsA ? block_m : block_n;
-            const uint8_t* base         = IsA ? a_data : b_data;
-            const index_t row0          = block + component * L.rows;
+            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr bool edge               = IsA ? Traits::kEdgeM : Traits::kEdgeN;
+            constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
+            constexpr bool iterate            = L.iterate_rows > 0;
+            constexpr index_t tile_rows       = iterate ? L.iterate_rows : L.rows;
+            const index_t block               = IsA ? block_m : block_n;
+            const uint8_t* base               = IsA ? a_data : b_data;
+            const index_t row0                = block + component * L.rows;
             const uint8_t* global =
                 wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
             const index_t rows_left = RowsLeft<IsA>(row0);
@@ -568,15 +571,16 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups ScaleDescriptor(index_t component) const
         {
-            constexpr MxTdmV4Operand L = Policy::template GetLdsOperand<Problem, IsA, true>();
-            constexpr bool edge        = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            const index_t block        = IsA ? block_m : block_n;
-            const index_t extent       = IsA ? M : N;
-            const uint8_t* base        = IsA ? a_scales : b_scales;
-            const index_t row_stride   = extent * 4;
-            const index_t mn0          = block + component * L.rows;
-            const index_t col0         = mn0 * 4;
-            const index_t bytes_left   = edge ? RowsLeft<IsA>(mn0) * 4 : row_stride - col0;
+            constexpr MxTdmScheduledOperand L =
+                Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr bool edge      = IsA ? Traits::kEdgeM : Traits::kEdgeN;
+            const index_t block      = IsA ? block_m : block_n;
+            const index_t extent     = IsA ? M : N;
+            const uint8_t* base      = IsA ? a_scales : b_scales;
+            const index_t row_stride = extent * 4;
+            const index_t mn0        = block + component * L.rows;
+            const index_t col0       = mn0 * 4;
+            const index_t bytes_left = edge ? RowsLeft<IsA>(mn0) * 4 : row_stride - col0;
 
             return Groups(base + col0,
                           smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
@@ -617,7 +621,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                               0};
             d.g1.tensorDim0(static_cast<uint32_t>(remaining_k));
             amd_tdm_load(d.g0, d.g1, d.g2);
-            const index_t k_step     = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k0);
+            const index_t k_step     = integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
             TDMGroups s              = scale;
             s.g0 = TDM_GROUP0{scale_lds + static_cast<uint32_t>(BufferBase(parity)),
@@ -651,7 +655,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             if constexpr(kGl2Distance != 0)
             {
-                constexpr index_t line = mx_tdm_v4::kGl2LineBytes;
+                constexpr index_t line = mx_tdm_scheduled::kGl2LineBytes;
                 k_ahead                = k_ahead < K ? k_ahead : K - kTileK;
                 const index_t k_byte   = integer_divide_nonnegative<kKPerByte>(k_ahead);
                 constexpr index_t data_lines =
@@ -677,7 +681,8 @@ struct GemmPipelineAgBgCrCompTDMV4
                     kHasCluster ? (cluster_wx + cluster_wy * kClusterX) * kThreads + tid : tid;
                 // A partial last tile has fewer K steps than the k_steps rows prefetched for it;
                 // a partial M/N tile has lines past the end.
-                const index_t k_step = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k_ahead);
+                const index_t k_step =
+                    integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(k_ahead);
 
                 const auto address = [&](auto cat, index_t index) -> const uint8_t* {
                     constexpr index_t kCat = decltype(cat)::value;
@@ -745,7 +750,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                             first = false;
                         }
                     });
-                    amd_global_prefetch<mx_tdm_v4::kGl2PrefetchCoherence>(pointer);
+                    amd_global_prefetch<mx_tdm_scheduled::kGl2PrefetchCoherence>(pointer);
                 });
             }
             else
@@ -763,7 +768,7 @@ struct GemmPipelineAgBgCrCompTDMV4
 
         CK_TILE_DEVICE index_t LaneK(index_t step) const
         {
-            return step * kStepBytes + lane_half * mx_tdm_v4::kChunkBytes;
+            return step * kStepBytes + lane_half * mx_tdm_scheduled::kChunkBytes;
         }
 
         CK_TILE_DEVICE RowFrag RowFragment(index_t buffer,
@@ -771,14 +776,15 @@ struct GemmPipelineAgBgCrCompTDMV4
                                            index_t row,
                                            index_t lane_k) const
         {
-            constexpr MxTdmV4Operand a_lds = Policy::template GetLdsOperand<Problem, true>();
-            constexpr MxTdmV4Operand b_lds = Policy::template GetLdsOperand<Problem, false>();
-            const uint32_t urow            = static_cast<uint32_t>(row);
+            constexpr MxTdmScheduledOperand a_lds = Policy::template GetLdsOperand<Problem, true>();
+            constexpr MxTdmScheduledOperand b_lds =
+                Policy::template GetLdsOperand<Problem, false>();
+            const uint32_t urow = static_cast<uint32_t>(row);
             const index_t base =
                 buffer +
                 static_cast<index_t>(
-                    is_a ? mx_tdm_v4_row_offset<uint32_t>(a_lds, kLdsRowBytes, urow)
-                         : mx_tdm_v4_row_offset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
+                    is_a ? mx_tdm_scheduled_row_offset<uint32_t>(a_lds, kLdsRowBytes, urow)
+                         : mx_tdm_scheduled_row_offset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
                 lane_k;
             constexpr index_t o0 = Policy::template GetChunkOffset<Problem>(0);
             constexpr index_t o1 = Policy::template GetChunkOffset<Problem>(1);
@@ -897,9 +903,12 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA, index_t Count>
         CK_TILE_DEVICE void LdsScaleWords(int32_t (&out)[Count], index_t buffer, index_t step) const
         {
-            constexpr MxTdmV4Operand op = Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr MxTdmScheduledOperand op =
+                Policy::template GetLdsOperand<Problem, IsA, true>();
             constexpr index_t step_words =
-                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(op, 1u, 0u) - op.base) / 4;
+                static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(op, 1u, 0u) -
+                                     op.base) /
+                4;
             const auto& window = [&]() -> const auto& {
                 if constexpr(IsA)
                     return as_window;
@@ -921,14 +930,15 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
             else
             {
-                constexpr MxTdmV4Operand as_lds =
+                constexpr MxTdmScheduledOperand as_lds =
                     Policy::template GetLdsOperand<Problem, true, true>();
                 const index_t a_lane = kMma32 ? lane : lane_col;
                 ScaleWords<kRm>(h.as,
-                                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                                             as_lds,
-                                             static_cast<uint32_t>(step),
-                                             static_cast<uint32_t>(MRow(0, a_lane)))));
+                                buffer +
+                                    static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
+                                        as_lds,
+                                        static_cast<uint32_t>(step),
+                                        static_cast<uint32_t>(MRow(0, a_lane)))));
             }
             if constexpr(kTileReadBScale)
             {
@@ -936,13 +946,14 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
             else
             {
-                constexpr MxTdmV4Operand bs_lds =
+                constexpr MxTdmScheduledOperand bs_lds =
                     Policy::template GetLdsOperand<Problem, false, true>();
                 ScaleWords<kRn>(h.bs,
-                                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                                             bs_lds,
-                                             static_cast<uint32_t>(step),
-                                             static_cast<uint32_t>(NRow(0, lane_col)))));
+                                buffer +
+                                    static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
+                                        bs_lds,
+                                        static_cast<uint32_t>(step),
+                                        static_cast<uint32_t>(NRow(0, lane_col)))));
             }
             static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
             return h;
@@ -969,9 +980,9 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             if constexpr(kHasCluster)
             {
-                mx_tdm_v4::fence();
+                mx_tdm_scheduled::fence();
                 cluster_barrier_signal_wave0(wave);
-                mx_tdm_v4::fence();
+                mx_tdm_scheduled::fence();
             }
         }
 
@@ -979,20 +990,20 @@ struct GemmPipelineAgBgCrCompTDMV4
         CK_TILE_DEVICE void Refill(index_t k0) const
         {
             PrefetchAhead<StaticParity>(k0);
-            mx_tdm_v4::fence();
+            mx_tdm_scheduled::fence();
             if constexpr(kLocalPrefetch)
             {
                 // Tile k+1 is read next, from this point: it is the only TDM load in flight, and
                 // the barrier below publishes it.
                 s_wait_tensorcnt<0>();
                 s_barrier();
-                mx_tdm_v4::fence();
+                mx_tdm_scheduled::fence();
             }
         }
 
         CK_TILE_DEVICE void Late(index_t k0, index_t parity) const
         {
-            mx_tdm_v4::fence();
+            mx_tdm_scheduled::fence();
             if constexpr(kHasCluster)
                 cluster_barrier_wait();
             // No wave drained its reads of this buffer before the signal; the workgroup barrier
@@ -1000,7 +1011,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             s_wait_dscnt_pinned<kLatePending>();
             s_barrier();
             Issue(ClampK(k0 + 2 * kTileK), parity);
-            mx_tdm_v4::fence();
+            mx_tdm_scheduled::fence();
         }
 
         CK_TILE_DEVICE static void WaitNextTile()
@@ -1253,7 +1264,8 @@ struct GemmPipelineAgBgCrCompTDMV4
                 // The K tail is one more tile: its TDM loads are clipped at K and only its first
                 // tail_steps K steps are read. With the tile parity unknown at compile time the
                 // GL2 prefetch takes it as even, which only changes which lines are hinted.
-                static_assert(Traits::kTailSteps < kKSteps, "comp_tdm_v4: tail steps < k_steps");
+                static_assert(Traits::kTailSteps < kKSteps,
+                              "comp_tdm_scheduled: tail steps < k_steps");
                 constexpr index_t kTailParity = kOdd < 0 ? 0 : kOdd;
                 Tile<Traits::kTailSteps, kTailParity>(
                     acc,
@@ -1291,12 +1303,12 @@ struct GemmPipelineAgBgCrCompTDMV4
     {
         static_assert(std::is_same_v<AElementFunction, element_wise::PassThrough> &&
                           std::is_same_v<BElementFunction, element_wise::PassThrough>,
-                      "comp_tdm_v4 reads A and B as stored");
+                      "comp_tdm_scheduled reads A and B as stored");
         static_assert(std::tuple_size_v<AsDramBlockWindowTmp> == 1 &&
                           std::tuple_size_v<BsDramBlockWindowTmp> == 1 &&
                           std::tuple_size_v<ScaleADramBlockWindowTmp> == 1 &&
                           std::tuple_size_v<ScaleBDramBlockWindowTmp> == 1,
-                      "comp_tdm_v4 runs single A and B tensors");
+                      "comp_tdm_scheduled runs single A and B tensors");
         CBlockTile c_block_tile;
 #if defined(__gfx125__)
         Run run(a_dram_block_window_tmp[number<0>{}],

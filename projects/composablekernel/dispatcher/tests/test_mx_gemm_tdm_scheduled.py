@@ -3,7 +3,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests of comp_tdm_v4 (rocKE's mx_gemm) in tile_engine and the dispatcher.
+"""CPU-only tests of comp_tdm_scheduled (rocKE's mx_gemm) in tile_engine and the dispatcher.
 
 The tuning token, the tile_engine listing and generation, the dispatcher codegen and the
 rocKE conversion. No GPU or hipcc is required.
@@ -29,7 +29,7 @@ import mx_gemm_utils as mx  # noqa: E402
 import rocke_spec_to_ck as conv  # noqa: E402
 import unified_mx_gemm_codegen as codegen  # noqa: E402
 
-v4 = vu.load_mx_tdm_v4()
+sched = vu.load_mx_tdm_scheduled()
 BUILDER = _MX / "mx_gemm_instance_builder.py"
 TILE = {
     "tile_m": 256,
@@ -46,7 +46,7 @@ TILE = {
 
 class TestTuning(unittest.TestCase):
     def test_token_round_trip(self):
-        tunings = v4.expand_tuning_config(
+        tunings = sched.expand_tuning_config(
             {
                 "cluster_dim": {"values": [[4, 4], [2, 1, 1]]},
                 "cluster_signal_wmmas": {"values": [None, 3]},
@@ -58,17 +58,19 @@ class TestTuning(unittest.TestCase):
         )
         self.assertEqual(len(tunings), 64)
         for t in tunings:
-            token = v4.encode_tuning(t)
+            token = sched.encode_tuning(t)
             self.assertNotRegex(token, r"[\s;|\"'$]")
-            self.assertEqual(v4.decode_tuning(token), t)
+            self.assertEqual(sched.decode_tuning(token), t)
 
     def test_unknown_key(self):
         with self.assertRaises(ValueError):
-            v4.normalize_tuning({"gl2": 4})
+            sched.normalize_tuning({"gl2": 4})
 
     def test_instance_rules(self):
         def reason(t):
-            return v4.validate_instance(v4.spec_from_tile(TILE, t, out_dtype="fp16"), t)
+            return sched.validate_instance(
+                sched.spec_from_tile(TILE, t, out_dtype="fp16"), t
+            )
 
         self.assertEqual(reason({}), "ok")
         self.assertEqual(reason({"local_prefetch": 0}), "half_plr_b")
@@ -83,50 +85,54 @@ class TestTuning(unittest.TestCase):
             "half_b_order": "late",
             "lds_segment_interleave": False,
         }
-        spec = v4.spec_from_tile(TILE, t, out_dtype="fp16")
+        spec = sched.spec_from_tile(TILE, t, out_dtype="fp16")
         self.assertEqual(
-            v4.cpp_tuning_type(t),
-            "ck_tile::MxTdmV4TuningT<2, 2, 4, -1, 1, ck_tile::MxTdmV4HalfPlr::B, "
-            "ck_tile::MxTdmV4HalfBOrder::Late, false>",
+            sched.cpp_tuning_type(t),
+            "ck_tile::MxTdmScheduledTuningT<2, 2, 4, -1, 1, ck_tile::MxTdmScheduledHalfPlr::B, "
+            "ck_tile::MxTdmScheduledHalfBOrder::Late, false>",
         )
         self.assertEqual(
-            v4.cpp_kernel_traits(
+            sched.cpp_kernel_traits(
                 spec, {"edge": False, "odd_tiles": 0, "tail_steps": 2}
             ),
-            "ck_tile::MxTdmV4GemmTraits<false, false, false, false, false, 0, 2, 8>",
+            "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, 2, 8>",
         )
         self.assertEqual(
-            v4.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
+            sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
             "_c2x2_hblate_lsi0_noedge_tail2",
         )
 
     def test_instance_runs_problem(self):
-        tile = v4.tile_from_spec(v4.MxTdmV4Spec())
-        spec = v4.spec_from_tile(tile, {}, M=1000, N=1000, K=4096, out_dtype="fp16")
-        self.assertEqual(v4.instance_unsupported_reason(spec, {}), "")
-        self.assertEqual(v4.instance_unsupported_reason(spec, {"edge": False}), "edge")
+        tile = sched.tile_from_spec(sched.MxTdmScheduledSpec())
+        spec = sched.spec_from_tile(tile, {}, M=1000, N=1000, K=4096, out_dtype="fp16")
+        self.assertEqual(sched.instance_unsupported_reason(spec, {}), "")
         self.assertEqual(
-            v4.instance_unsupported_reason(spec, {"odd_tiles": 1}), "odd_tiles"
+            sched.instance_unsupported_reason(spec, {"edge": False}), "edge"
+        )
+        self.assertEqual(
+            sched.instance_unsupported_reason(spec, {"odd_tiles": 1}), "odd_tiles"
         )
         tail = dataclasses.replace(spec, K=4096 + 256)
-        self.assertEqual(v4.instance_unsupported_reason(tail, {}), "tail_steps")
-        self.assertEqual(v4.instance_unsupported_reason(tail, {"tail_steps": 2}), "")
+        self.assertEqual(sched.instance_unsupported_reason(tail, {}), "tail_steps")
+        self.assertEqual(sched.instance_unsupported_reason(tail, {"tail_steps": 2}), "")
 
 
 class TestValidationUtils(unittest.TestCase):
     def test_registered_for_gfx1250_only(self):
-        self.assertIn("comp_tdm_v4", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx1250"])
-        self.assertNotIn("comp_tdm_v4", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx950"])
+        self.assertIn("comp_tdm_scheduled", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx1250"])
+        self.assertNotIn("comp_tdm_scheduled", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx950"])
         self.assertIn(
             "gfx1250",
-            vu.mx_tdm_v4_reject_reason(*TILE.values(), "fp4", "fp4", "fp16", "gfx950"),
+            vu.mx_tdm_scheduled_reject_reason(
+                *TILE.values(), "fp4", "fp4", "fp16", "gfx950"
+            ),
         )
 
     def test_traits(self):
         ok = vu.is_trait_combination_valid
         self.assertTrue(
             ok(
-                "comp_tdm_v4",
+                "comp_tdm_scheduled",
                 "alphabeta",
                 "intrawave",
                 False,
@@ -139,7 +145,7 @@ class TestValidationUtils(unittest.TestCase):
         )
         self.assertFalse(
             ok(
-                "comp_tdm_v4",
+                "comp_tdm_scheduled",
                 "tdm",
                 "intrawave",
                 False,
@@ -152,7 +158,7 @@ class TestValidationUtils(unittest.TestCase):
         )
         self.assertFalse(
             ok(
-                "comp_tdm_v4",
+                "comp_tdm_scheduled",
                 "alphabeta",
                 "intrawave",
                 True,
@@ -165,7 +171,7 @@ class TestValidationUtils(unittest.TestCase):
         )
         self.assertFalse(
             ok(
-                "comp_tdm_v4",
+                "comp_tdm_scheduled",
                 "alphabeta",
                 "intrawave",
                 False,
@@ -184,7 +190,14 @@ class TestValidationUtils(unittest.TestCase):
         def valid(**tile):
             dims = [{**TILE, **tile}[k] for k in TILE]
             return vu.is_tile_config_valid(
-                *dims, "fp4", "fp4", "fp16", "comp_tdm_v4", "rcr", "gfx1250", "mx_gemm"
+                *dims,
+                "fp4",
+                "fp4",
+                "fp16",
+                "comp_tdm_scheduled",
+                "rcr",
+                "gfx1250",
+                "mx_gemm",
             )
 
         self.assertTrue(valid())
@@ -196,10 +209,12 @@ class TestValidationUtils(unittest.TestCase):
         dims = [{**TILE, "tile_n": 64, "warp_m": 1, "warp_n": 4}[k] for k in TILE]
         self.assertIn(
             "half_plr_b",
-            vu.mx_tdm_v4_reject_reason(*dims, "fp4", "fp4", "fp16", "gfx1250", {}),
+            vu.mx_tdm_scheduled_reject_reason(
+                *dims, "fp4", "fp4", "fp16", "gfx1250", {}
+            ),
         )
         self.assertEqual(
-            vu.mx_tdm_v4_reject_reason(
+            vu.mx_tdm_scheduled_reject_reason(
                 *dims, "fp4", "fp4", "fp16", "gfx1250", {"half_plr": "none"}
             ),
             "",
@@ -208,7 +223,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(valid(warp_tile_n=32))
         self.assertFalse(valid(warp_k=2))
         ok, reason = vu.validate_gemm_mx(
-            *TILE.values(), "fp4", "fp4", "fp16", "comp_tdm_v4", "rcr", "gfx1250"
+            *TILE.values(), "fp4", "fp4", "fp16", "comp_tdm_scheduled", "rcr", "gfx1250"
         )
         self.assertTrue(ok, reason)
 
@@ -230,9 +245,14 @@ class TestTileEngine(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def _config(
-        self, tuning_config=None, pipelines=("comp_tdm_v4",), epilogues=("alphabeta",)
+        self,
+        tuning_config=None,
+        pipelines=("comp_tdm_scheduled",),
+        epilogues=("alphabeta",),
     ):
-        config = json.loads((_MX / "configs" / "comp_tdm_v4_gfx1250.json").read_text())
+        config = json.loads(
+            (_MX / "configs" / "comp_tdm_scheduled_gfx1250.json").read_text()
+        )
         config["trait_config"]["pipeline"]["values"] = list(pipelines)
         config["trait_config"]["epilogue"]["values"] = list(epilogues)
         if tuning_config is None:
@@ -264,19 +284,19 @@ class TestTileEngine(unittest.TestCase):
         return [line.split("|") for line in lines]
 
     def test_shipped_config(self):
-        rows = self._list(_MX / "configs" / "comp_tdm_v4_gfx1250.json")
+        rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
         self.assertEqual(len(rows), 20)
         names = [r[0] for r in rows]
         self.assertEqual(len(set(names)), len(names))
         for name, tile, trait, token, suffix in rows:
             self.assertEqual(
-                trait, "comp_tdm_v4_alphabeta_intrawave_False_False_False_False"
+                trait, "comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False"
             )
             self.assertEqual(name, f"mx_gemm_fp4_rcr_{trait}_{tile}{suffix}")
-            tuning = v4.decode_tuning(token)
-            spec = v4.spec_from_tile(conv_tile(tile), tuning, out_dtype="fp16")
-            self.assertEqual(v4.validate_instance(spec, tuning), "ok")
-            self.assertEqual(v4.instance_name_suffix(spec, tuning), suffix)
+            tuning = sched.decode_tuning(token)
+            spec = sched.spec_from_tile(conv_tile(tile), tuning, out_dtype="fp16")
+            self.assertEqual(sched.validate_instance(spec, tuning), "ok")
+            self.assertEqual(sched.instance_name_suffix(spec, tuning), suffix)
 
     def test_tunings_filtered(self):
         rows = self._list(
@@ -287,21 +307,25 @@ class TestTileEngine(unittest.TestCase):
                 }
             )
         )
-        tunings = {v4.encode_tuning(v4.decode_tuning(r[3])) for r in rows}
+        tunings = {sched.encode_tuning(sched.decode_tuning(r[3])) for r in rows}
         for t in tunings:
-            t = v4.decode_tuning(t)
+            t = sched.decode_tuning(t)
             self.assertFalse(t["local_prefetch"] == 0 and t["half_plr"] == "b")
         self.assertEqual(len(tunings), 3)
 
     def test_mixed_pipelines(self):
-        config = self._config(None, ("comp_tdm", "comp_tdm_v4"), ("tdm", "alphabeta"))
+        config = self._config(
+            None, ("comp_tdm", "comp_tdm_scheduled"), ("tdm", "alphabeta")
+        )
         rows = self._list(config)
         self.assertTrue(any(len(r) == 3 and "_comp_tdm_tdm_" in r[0] for r in rows))
-        self.assertTrue(all(len(r) == 5 for r in rows if "_comp_tdm_v4_" in r[0]))
+        self.assertTrue(
+            all(len(r) == 5 for r in rows if "_comp_tdm_scheduled_" in r[0])
+        )
         self.assertTrue(all(r[4] == "_c4x4" for r in rows if len(r) == 5))
 
     def test_gen_single(self):
-        rows = self._list(_MX / "configs" / "comp_tdm_v4_gfx1250.json")
+        rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
         name, tile, trait, token, suffix = next(r for r in rows if "hblate" in r[4])
         _builder(
             "--working_path",
@@ -311,7 +335,7 @@ class TestTileEngine(unittest.TestCase):
             "--layout",
             "rcr",
             "--config_json",
-            str(_MX / "configs" / "comp_tdm_v4_gfx1250.json"),
+            str(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json"),
             "--gpu_target",
             "gfx1250",
             "--gen_single",
@@ -329,7 +353,7 @@ class TestTileEngine(unittest.TestCase):
         ).read_text()
         self.assertIn(f'KERNEL_NAME = "{name}"', header)
         self.assertIn("static constexpr bool KMajorScales = true;", header)
-        self.assertIn("ck_tile::MxTdmV4HalfBOrder::Late", header)
+        self.assertIn("ck_tile::MxTdmScheduledHalfBOrder::Late", header)
         self.assertIn("ck_tile::GemmTile2DNMajorPartitioner", header)
         self.assertIn("Kernel::MakeKernelArgs(host_args)", header)
         self.assertIn("using CDataType = ck_tile::fp16_t;", header)
@@ -344,7 +368,7 @@ class TestTileEngine(unittest.TestCase):
                 "--layout",
                 "rcr",
                 "--config_json",
-                str(_MX / "configs" / "comp_tdm_v4_gfx1250.json"),
+                str(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json"),
                 "--gpu_target",
                 "gfx1250",
                 "--gen_single",
@@ -353,9 +377,9 @@ class TestTileEngine(unittest.TestCase):
                 "--tile_config",
                 "256x256x512_2x2x1_32x16x128",
                 "--trait_combo",
-                "comp_tdm_v4_alphabeta_intrawave_False_False_False_False",
+                "comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False",
                 "--tuning",
-                v4.encode_tuning({"local_prefetch": 0}),
+                sched.encode_tuning({"local_prefetch": 0}),
             )
 
 
@@ -374,7 +398,7 @@ def _cfg(**extra):
         "datatype": "fp4",
         "layout": "rcr",
         "gpu_target": "gfx1250",
-        "pipeline": "comp_tdm_v4",
+        "pipeline": "comp_tdm_scheduled",
         "tile_config": dict(TILE),
         **extra,
     }
@@ -382,7 +406,7 @@ def _cfg(**extra):
 
 class TestDispatcher(unittest.TestCase):
     def test_names(self):
-        base = "mx_gemm_fp4_rcr_comp_tdm_v4_alphabeta_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
+        base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
         self.assertEqual(codegen.kernel_name(_cfg()), base + "_c4x4")
         self.assertEqual(
             codegen.kernel_name(
@@ -394,7 +418,7 @@ class TestDispatcher(unittest.TestCase):
     def test_rejects(self):
         with self.assertRaisesRegex(ValueError, "half_plr_b"):
             codegen.kernel_name(_cfg(local_prefetch=0))
-        with self.assertRaisesRegex(ValueError, "only for comp_tdm_v4"):
+        with self.assertRaisesRegex(ValueError, "only for comp_tdm_scheduled"):
             codegen.kernel_name(_cfg(pipeline="comp_tdm", cluster_dim=[2, 2]))
         with self.assertRaisesRegex(ValueError, "epilogue"):
             codegen.kernel_name(_cfg(epilogue="tdm"))
@@ -406,14 +430,14 @@ class TestDispatcher(unittest.TestCase):
             path = codegen.generate_kernel(Path(out), _cfg(cluster_dim=[2, 2]))
             header = path.read_text()
         self.assertTrue(path.name.endswith("_c2x2.hpp"))
-        self.assertIn("ck_tile::MxTdmV4TuningT<2, 2, 4, -1, 1", header)
+        self.assertIn("ck_tile::MxTdmScheduledTuningT<2, 2, 4, -1, 1", header)
         self.assertIn("KMajorScales = true", header)
 
     def test_kernel_config(self):
         cfg = mx.MxGemmKernelConfig(
             datatype="fp4",
             gpu_target="gfx1250",
-            pipeline="comp_tdm_v4",
+            pipeline="comp_tdm_scheduled",
             tile_m=256,
             tile_n=256,
             tile_k=512,
@@ -450,7 +474,9 @@ class TestRockeConversion(unittest.TestCase):
             check=True,
         )
         config = json.loads(r.stdout)
-        self.assertEqual(config["trait_config"]["pipeline"]["values"], ["comp_tdm_v4"])
+        self.assertEqual(
+            config["trait_config"]["pipeline"]["values"], ["comp_tdm_scheduled"]
+        )
         self.assertEqual(config["tuning_config"]["cluster_dim"]["values"], [[4, 4, 1]])
 
 

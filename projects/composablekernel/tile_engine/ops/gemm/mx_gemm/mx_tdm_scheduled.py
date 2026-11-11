@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""comp_tdm_v4 (the rocKE gfx1250 mx_gemm kernel) in Python: spec, validator, names, tuning.
+"""comp_tdm_scheduled (the rocKE gfx1250 mx_gemm kernel) in Python: spec, validator, names, tuning.
 
-A port of include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_spec.hpp, itself
+A port of include/ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp, itself
 a port of rocKE's MxGemmSpec (instances/gfx1250/mx_gemm.py at b32989439dc).
 
 Field names and defaults are rocKE's. The tuning knobs (TUNING_DEFAULTS) are what tile_engine's
@@ -52,7 +52,7 @@ TUNING_DEFAULTS: Dict[str, object] = {
     "lds_segment_interleave": True,
 }
 
-#: Shape-dependent code paths of a CK instance (the Problem's MxTdmV4GemmTraits). rocKE derives
+#: Shape-dependent code paths of a CK instance (the Problem's MxTdmScheduledGemmTraits). rocKE derives
 #: them from its compile-time M, N and K; a CK instance fixes them and runs every problem they
 #: cover. The defaults run any M and N and any tile count with no K tail; store_width 0 means the
 #: widest the tile allows.
@@ -64,7 +64,7 @@ SHAPE_DEFAULTS: Dict[str, object] = {
     "store_width": 0,
 }
 
-# The short reason codes, in validate()'s order (MxTdmV4Reason).
+# The short reason codes, in validate()'s order (MxTdmScheduledReason).
 REASONS = (
     "ok",
     "shape_positive",
@@ -131,7 +131,7 @@ class Pad:
 
 @dataclass(frozen=True)
 class Operand:
-    """One operand's place in an LDS buffer (MxTdmV4Operand)."""
+    """One operand's place in an LDS buffer (MxTdmScheduledOperand)."""
 
     rows: int = 0
     base: int = 0
@@ -192,8 +192,8 @@ def _place(
 
 
 @dataclass(frozen=True)
-class MxTdmV4Spec:
-    """One v4 kernel: problem, tile and tuning, with rocKE's field names and defaults."""
+class MxTdmScheduledSpec:
+    """One comp_tdm_scheduled kernel: problem, tile and tuning, with rocKE's field names and defaults."""
 
     M: int = 0
     N: int = 0
@@ -215,7 +215,7 @@ class MxTdmV4Spec:
     b_dtype: str = "fp4"
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "MxTdmV4Spec":
+    def from_dict(cls, d: Dict) -> "MxTdmScheduledSpec":
         fields = dict(d)
         for key in ("wave_group", "cluster_dim"):
             if key in fields:
@@ -687,7 +687,7 @@ class MxTdmV4Spec:
 
     # Names.
     def tuning_name(self, with_shape_parts: bool = True) -> str:
-        """rocKE's name after the tile: cluster, then each non-default value (MxTdmV4TuningName)."""
+        """rocKE's name after the tile: cluster, then each non-default value (MxTdmScheduledTuningName)."""
         cx, cy, _ = self.cluster_dim
         name = f"_c{cx}x{cy}"
         if with_shape_parts and self.out_dtype != "fp8e4m3":
@@ -735,7 +735,7 @@ _FLAG = re.compile(
 )
 
 
-def parse_kernel_name(name: str) -> Tuple[str, MxTdmV4Spec]:
+def parse_kernel_name(name: str) -> Tuple[str, MxTdmScheduledSpec]:
     """(prefix, spec) of a rocKE kernel name; M, N and K are 0 when the name has none."""
     m = _NAME.match(name)
     if not m:
@@ -779,7 +779,7 @@ def parse_kernel_name(name: str) -> Tuple[str, MxTdmV4Spec]:
             fields["mma"] = "16x16"
     if hblate:
         fields["half_b_order"] = "late"
-    return m["prefix"], MxTdmV4Spec(**fields)
+    return m["prefix"], MxTdmScheduledSpec(**fields)
 
 
 # tile_engine / dispatcher configs.
@@ -790,7 +790,7 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
     tuning = dict(tuning or {})
     unknown = set(tuning) - set(TUNING_DEFAULTS) - set(SHAPE_DEFAULTS)
     if unknown:
-        raise ValueError(f"unknown comp_tdm_v4 tuning keys: {sorted(unknown)}")
+        raise ValueError(f"unknown comp_tdm_scheduled tuning keys: {sorted(unknown)}")
     out = dict(TUNING_DEFAULTS)
     out.update(SHAPE_DEFAULTS)
     out.update(tuning)
@@ -898,20 +898,22 @@ def spec_from_tile(
     M: int = 0,
     N: int = 0,
     K: int = 0,
-) -> MxTdmV4Spec:
+) -> MxTdmScheduledSpec:
     """The spec of a tile_engine tile config with a tuning (M, N, K 0: the instance alone)."""
     t = normalize_tuning(tuning)
     if tile_config.get("warp_k", 1) != 1:
-        raise ValueError("comp_tdm_v4 needs warp_k 1")
+        raise ValueError("comp_tdm_scheduled needs warp_k 1")
     if (
         tile_config.get("warp_tile_n", 16) != 16
         or tile_config.get("warp_tile_k", 128) != 128
     ):
-        raise ValueError("comp_tdm_v4 needs a warp tile of 32x16x128 or 16x16x128")
+        raise ValueError(
+            "comp_tdm_scheduled needs a warp tile of 32x16x128 or 16x16x128"
+        )
     mma = {32: "32x16", 16: "16x16"}.get(tile_config.get("warp_tile_m"))
     if mma is None:
-        raise ValueError("comp_tdm_v4 needs warp_tile_m 32 or 16")
-    return MxTdmV4Spec(
+        raise ValueError("comp_tdm_scheduled needs warp_tile_m 32 or 16")
+    return MxTdmScheduledSpec(
         M=M,
         N=N,
         K=K,
@@ -933,7 +935,7 @@ def spec_from_tile(
     )
 
 
-def tile_from_spec(spec: MxTdmV4Spec) -> Dict[str, int]:
+def tile_from_spec(spec: MxTdmScheduledSpec) -> Dict[str, int]:
     """The tile_engine tile config of a spec."""
     return {
         "tile_m": spec.tile_m,
@@ -948,14 +950,14 @@ def tile_from_spec(spec: MxTdmV4Spec) -> Dict[str, int]:
     }
 
 
-def instance_store_width(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> int:
+def instance_store_width(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> int:
     t = normalize_tuning(tuning)
     width = int(t["store_width"]) or spec.max_store_width
     return width
 
 
-def instance_name_suffix(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """What a v4 instance adds to the tile_engine kernel name: rocKE's tuning suffix without the
+def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
+    """What a comp_tdm_scheduled instance adds to the tile_engine kernel name: rocKE's tuning suffix without the
     parts the name already carries, then the shape traits that are not the defaults."""
     t = normalize_tuning(tuning)
     suffix = spec.tuning_name(with_shape_parts=False)
@@ -972,8 +974,8 @@ def instance_name_suffix(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
     return suffix
 
 
-def validate_instance(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """ "ok" if the tile and tuning make a v4 instance (the compile-time rules plus the traits)."""
+def validate_instance(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
+    """ "ok" if the tile and tuning make a comp_tdm_scheduled instance (the compile-time rules plus the traits)."""
     reason = spec.validate(check_shape=False)
     if reason != "ok":
         return reason
@@ -993,8 +995,10 @@ def validate_instance(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
     return "ok"
 
 
-def instance_unsupported_reason(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """MxGemmKernel::GetUnsupportedReason of the v4 instance on spec's M, N and K: "" if it
+def instance_unsupported_reason(
+    spec: MxTdmScheduledSpec, tuning: Optional[Dict]
+) -> str:
+    """MxGemmKernel::GetUnsupportedReason of the comp_tdm_scheduled instance on spec's M, N and K: "" if it
     runs them, else the rocKE reason code or the shape trait it lacks."""
     reason = spec.validate()
     if reason != "ok":
@@ -1014,7 +1018,7 @@ def instance_unsupported_reason(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> st
 
 
 def cpp_tuning_type(tuning: Optional[Dict]) -> str:
-    """The MxTdmV4TuningT<...> spelling of a tuning."""
+    """The MxTdmScheduledTuningT<...> spelling of a tuning."""
     t = normalize_tuning(tuning)
     cx, cy, _ = t["cluster_dim"]
     signal = -1 if t["cluster_signal_wmmas"] is None else t["cluster_signal_wmmas"]
@@ -1022,25 +1026,25 @@ def cpp_tuning_type(tuning: Optional[Dict]) -> str:
     order = "Late" if t["half_b_order"] == "late" else "Ahead"
     lsi = "true" if t["lds_segment_interleave"] else "false"
     return (
-        f"ck_tile::MxTdmV4TuningT<{cx}, {cy}, {t['gl2_prefetch_distance']}, {signal}, "
-        f"{t['local_prefetch']}, ck_tile::MxTdmV4HalfPlr::{plr}, "
-        f"ck_tile::MxTdmV4HalfBOrder::{order}, {lsi}>"
+        f"ck_tile::MxTdmScheduledTuningT<{cx}, {cy}, {t['gl2_prefetch_distance']}, {signal}, "
+        f"{t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, "
+        f"ck_tile::MxTdmScheduledHalfBOrder::{order}, {lsi}>"
     )
 
 
-def cpp_kernel_traits(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """The MxTdmV4GemmTraits<...> spelling of a tuning's shape traits."""
+def cpp_kernel_traits(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
+    """The MxTdmScheduledGemmTraits<...> spelling of a tuning's shape traits."""
     t = normalize_tuning(tuning)
     edge = "true" if t["edge"] else "false"
     wide = "true" if t["wide"] else "false"
     return (
-        f"ck_tile::MxTdmV4GemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
+        f"ck_tile::MxTdmScheduledGemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
         f"{t['odd_tiles']}, {t['tail_steps']}, {instance_store_width(spec, t)}>"
     )
 
 
 def te_tuning_from_spec(
-    spec: MxTdmV4Spec, shape_traits: bool = False
+    spec: MxTdmScheduledSpec, shape_traits: bool = False
 ) -> Dict[str, object]:
     """The tuning dict of a spec; with shape_traits, the traits its M, N and K need exactly."""
     t: Dict[str, object] = {k: getattr(spec, k) for k in TUNING_DEFAULTS}
@@ -1074,7 +1078,7 @@ def tuning_config_section(
 
 
 __all__ = [
-    "MxTdmV4Spec",
+    "MxTdmScheduledSpec",
     "LdsLayout",
     "Operand",
     "Pad",

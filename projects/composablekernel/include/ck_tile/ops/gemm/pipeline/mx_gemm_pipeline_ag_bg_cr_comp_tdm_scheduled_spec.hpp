@@ -6,13 +6,13 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_tuning.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_tuning.hpp"
 
 /**
  * @file
- * The shape and tuning of one GemmPipelineAgBgCrCompTDMV4 instance as plain values, with the rules
- * that derive the rest of it: validation, LDS layout, read and wait counts, store widths. A port
- * of rocKE's gfx1250 MxGemmSpec (instances/gfx1250/mx_gemm.py at commit b32989439dc).
+ * The shape and tuning of one MxGemmPipelineAgBgCrCompTDMScheduled instance as plain values, with
+ * the rules that derive the rest of it: validation, LDS layout, read and wait counts, store widths.
+ * A port of rocKE's gfx1250 MxGemmSpec (instances/gfx1250/mx_gemm.py at commit b32989439dc).
  *
  * Everything is constexpr so the policy evaluates it at compile time from the Problem and the
  * tuning, and the host test can call it on plain specs.
@@ -20,14 +20,14 @@
 
 namespace ck_tile {
 
-enum class MxTdmV4Dtype : int
+enum class MxTdmScheduledDtype : int
 {
     Fp4 = 0,
     Fp8 = 1,
     Bf8 = 2
 };
 
-enum class MxTdmV4OutDtype : int
+enum class MxTdmScheduledOutDtype : int
 {
     Fp8E4M3 = 0,
     Fp16    = 1,
@@ -35,14 +35,14 @@ enum class MxTdmV4OutDtype : int
 };
 
 /// The scaled WMMA atom: 32x16x128 (FP4 only) or 16x16x128.
-enum class MxTdmV4Mma : int
+enum class MxTdmScheduledMma : int
 {
     M32N16 = 0,
     M16N16 = 1
 };
 
 /// Why a spec does not build, in the order rocKE's validate() checks. Ok when it builds.
-enum class MxTdmV4Reason : int
+enum class MxTdmScheduledReason : int
 {
     Ok,
     ShapePositive,
@@ -76,93 +76,96 @@ enum class MxTdmV4Reason : int
 };
 
 /// The short code of a reason, as in the Python validator.
-CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_v4_reason_code(MxTdmV4Reason r)
+CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmScheduledReason r)
 {
     switch(r)
     {
-    case MxTdmV4Reason::Ok: return "ok";
-    case MxTdmV4Reason::ShapePositive: return "shape_positive";
-    case MxTdmV4Reason::KScaleBlock: return "k_scale_block";
-    case MxTdmV4Reason::OutDtype: return "out_dtype";
-    case MxTdmV4Reason::TileMN: return "tile_mn";
-    case MxTdmV4Reason::Dtype: return "dtype";
-    case MxTdmV4Reason::DtypeWidth: return "dtype_width";
-    case MxTdmV4Reason::TileK: return "tile_k";
-    case MxTdmV4Reason::WaveGroup: return "wave_group";
-    case MxTdmV4Reason::Mma: return "mma";
-    case MxTdmV4Reason::TileAtoms: return "tile_atoms";
-    case MxTdmV4Reason::ScaleSpan: return "scale_span";
-    case MxTdmV4Reason::KShort: return "k_short";
-    case MxTdmV4Reason::LocalPrefetch: return "local_prefetch";
-    case MxTdmV4Reason::HalfPlr: return "half_plr";
-    case MxTdmV4Reason::HalfPlrB: return "half_plr_b";
-    case MxTdmV4Reason::HalfBOrder: return "half_b_order";
-    case MxTdmV4Reason::HalfBLate: return "half_b_late";
-    case MxTdmV4Reason::SignalWmmas: return "signal_wmmas";
-    case MxTdmV4Reason::Gl2Distance: return "gl2_distance";
-    case MxTdmV4Reason::ClusterDim: return "cluster_dim";
-    case MxTdmV4Reason::ClusterSize: return "cluster_size";
-    case MxTdmV4Reason::ClusterGrid: return "cluster_grid";
-    case MxTdmV4Reason::LdsPad: return "lds_pad";
-    case MxTdmV4Reason::Accumulators: return "accumulators";
-    case MxTdmV4Reason::LsiRepeat: return "lsi_repeat";
-    case MxTdmV4Reason::LsiBaselineSplit: return "lsi_baseline_split";
-    case MxTdmV4Reason::LsiCapacity: return "lsi_capacity";
-    case MxTdmV4Reason::LdsCapacity: return "lds_capacity";
+    case MxTdmScheduledReason::Ok: return "ok";
+    case MxTdmScheduledReason::ShapePositive: return "shape_positive";
+    case MxTdmScheduledReason::KScaleBlock: return "k_scale_block";
+    case MxTdmScheduledReason::OutDtype: return "out_dtype";
+    case MxTdmScheduledReason::TileMN: return "tile_mn";
+    case MxTdmScheduledReason::Dtype: return "dtype";
+    case MxTdmScheduledReason::DtypeWidth: return "dtype_width";
+    case MxTdmScheduledReason::TileK: return "tile_k";
+    case MxTdmScheduledReason::WaveGroup: return "wave_group";
+    case MxTdmScheduledReason::Mma: return "mma";
+    case MxTdmScheduledReason::TileAtoms: return "tile_atoms";
+    case MxTdmScheduledReason::ScaleSpan: return "scale_span";
+    case MxTdmScheduledReason::KShort: return "k_short";
+    case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch";
+    case MxTdmScheduledReason::HalfPlr: return "half_plr";
+    case MxTdmScheduledReason::HalfPlrB: return "half_plr_b";
+    case MxTdmScheduledReason::HalfBOrder: return "half_b_order";
+    case MxTdmScheduledReason::HalfBLate: return "half_b_late";
+    case MxTdmScheduledReason::SignalWmmas: return "signal_wmmas";
+    case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
+    case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
+    case MxTdmScheduledReason::ClusterSize: return "cluster_size";
+    case MxTdmScheduledReason::ClusterGrid: return "cluster_grid";
+    case MxTdmScheduledReason::LdsPad: return "lds_pad";
+    case MxTdmScheduledReason::Accumulators: return "accumulators";
+    case MxTdmScheduledReason::LsiRepeat: return "lsi_repeat";
+    case MxTdmScheduledReason::LsiBaselineSplit: return "lsi_baseline_split";
+    case MxTdmScheduledReason::LsiCapacity: return "lsi_capacity";
+    case MxTdmScheduledReason::LdsCapacity: return "lds_capacity";
     }
     return "unknown";
 }
 
 /// rocKE's message for a reason, without the values it formats in.
-CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_v4_reason_message(MxTdmV4Reason r)
+CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmScheduledReason r)
 {
     switch(r)
     {
-    case MxTdmV4Reason::Ok: return "ok";
-    case MxTdmV4Reason::ShapePositive: return "M, N and K must be positive";
-    case MxTdmV4Reason::KScaleBlock:
+    case MxTdmScheduledReason::Ok: return "ok";
+    case MxTdmScheduledReason::ShapePositive: return "M, N and K must be positive";
+    case MxTdmScheduledReason::KScaleBlock:
         return "K must be a multiple of 32: each E8M0 scale covers 32 K values";
-    case MxTdmV4Reason::OutDtype: return "out_dtype must be one of fp8e4m3, fp16, bf16";
-    case MxTdmV4Reason::TileMN: return "tile_m and tile_n must be in 16, 32, 64, 128, 256";
-    case MxTdmV4Reason::Dtype: return "a_dtype and b_dtype must be in fp4, fp8, bf8";
-    case MxTdmV4Reason::DtypeWidth:
+    case MxTdmScheduledReason::OutDtype: return "out_dtype must be one of fp8e4m3, fp16, bf16";
+    case MxTdmScheduledReason::TileMN: return "tile_m and tile_n must be in 16, 32, 64, 128, 256";
+    case MxTdmScheduledReason::Dtype: return "a_dtype and b_dtype must be in fp4, fp8, bf8";
+    case MxTdmScheduledReason::DtypeWidth:
         return "a_dtype and b_dtype must have the same width (no FP4 x 8-bit)";
-    case MxTdmV4Reason::TileK:
+    case MxTdmScheduledReason::TileK:
         return "tile_k must be in 128, 256, 512, 1024 for fp4 and 128, 256 for 8-bit types";
-    case MxTdmV4Reason::WaveGroup: return "wave_group must be 2x2, 4x1 or 1x4 (4 waves)";
-    case MxTdmV4Reason::Mma: return "mma must be 32x16 or 16x16 for fp4 and 16x16 for 8-bit";
-    case MxTdmV4Reason::TileAtoms: return "the tile must hold whole WMMA atoms per wave";
-    case MxTdmV4Reason::ScaleSpan:
+    case MxTdmScheduledReason::WaveGroup: return "wave_group must be 2x2, 4x1 or 1x4 (4 waves)";
+    case MxTdmScheduledReason::Mma: return "mma must be 32x16 or 16x16 for fp4 and 16x16 for 8-bit";
+    case MxTdmScheduledReason::TileAtoms: return "the tile must hold whole WMMA atoms per wave";
+    case MxTdmScheduledReason::ScaleSpan:
         return "A and B scale bytes must each be at most 2^31 (i32 offsets)";
-    case MxTdmV4Reason::KShort: return "K must hold at least one full tile";
-    case MxTdmV4Reason::LocalPrefetch: return "local_prefetch must be 0 or 1";
-    case MxTdmV4Reason::HalfPlr: return "half_plr must be 'b' or 'none'";
-    case MxTdmV4Reason::HalfPlrB:
+    case MxTdmScheduledReason::KShort: return "K must hold at least one full tile";
+    case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch must be 0 or 1";
+    case MxTdmScheduledReason::HalfPlr: return "half_plr must be 'b' or 'none'";
+    case MxTdmScheduledReason::HalfPlrB:
         return "half_plr 'b' needs local_prefetch 1 and an even wave_repeat_n";
-    case MxTdmV4Reason::HalfBOrder: return "half_b_order must be 'ahead' or 'late'";
-    case MxTdmV4Reason::HalfBLate: return "half_b_order 'late' needs half_plr 'b'";
-    case MxTdmV4Reason::SignalWmmas: return "cluster_signal_wmmas must be in 0..signal_limit";
-    case MxTdmV4Reason::Gl2Distance: return "gl2_prefetch_distance must be 0 (off) or 2..8 tiles";
-    case MxTdmV4Reason::ClusterDim: return "cluster_dim must be a positive (x, y, z) triple";
-    case MxTdmV4Reason::ClusterSize: return "cluster_dim must be 2D with at most 16 workgroups";
-    case MxTdmV4Reason::ClusterGrid: return "the grid must be divisible by cluster_dim";
-    case MxTdmV4Reason::LdsPad: return "an LDS pad does not encode as TDM padding";
-    case MxTdmV4Reason::Accumulators: return "the accumulators per lane exceed 1024 VGPRs";
-    case MxTdmV4Reason::LsiRepeat:
+    case MxTdmScheduledReason::HalfBOrder: return "half_b_order must be 'ahead' or 'late'";
+    case MxTdmScheduledReason::HalfBLate: return "half_b_order 'late' needs half_plr 'b'";
+    case MxTdmScheduledReason::SignalWmmas:
+        return "cluster_signal_wmmas must be in 0..signal_limit";
+    case MxTdmScheduledReason::Gl2Distance:
+        return "gl2_prefetch_distance must be 0 (off) or 2..8 tiles";
+    case MxTdmScheduledReason::ClusterDim: return "cluster_dim must be a positive (x, y, z) triple";
+    case MxTdmScheduledReason::ClusterSize:
+        return "cluster_dim must be 2D with at most 16 workgroups";
+    case MxTdmScheduledReason::ClusterGrid: return "the grid must be divisible by cluster_dim";
+    case MxTdmScheduledReason::LdsPad: return "an LDS pad does not encode as TDM padding";
+    case MxTdmScheduledReason::Accumulators: return "the accumulators per lane exceed 1024 VGPRs";
+    case MxTdmScheduledReason::LsiRepeat:
         return "segment interleave needs the split operand's wave repeat to cover its wave's rows";
-    case MxTdmV4Reason::LsiBaselineSplit:
+    case MxTdmScheduledReason::LsiBaselineSplit:
         return "segment interleave: the baseline layout already splits B's components across "
                "segments";
-    case MxTdmV4Reason::LsiCapacity:
+    case MxTdmScheduledReason::LsiCapacity:
         return "segment interleave: the aligned layout needs more LDS than fits";
-    case MxTdmV4Reason::LdsCapacity: return "LDS bytes exceed the 327680 B of gfx1250";
+    case MxTdmScheduledReason::LdsCapacity: return "LDS bytes exceed the 327680 B of gfx1250";
     }
     return "unknown";
 }
 
 /// pad_bytes of LDS padding after every block_bytes written (TensileLite LdsPad and
 /// LdsBlockSizePerPad, in bytes).
-struct MxTdmV4LdsPad
+struct MxTdmScheduledLdsPad
 {
     index_t pad_bytes   = 0;
     index_t block_bytes = 0;
@@ -173,7 +176,7 @@ struct MxTdmV4LdsPad
 /// One operand's place in an LDS buffer: two TDM components (one per wave pair) of rows rows,
 /// component c at base + c * stride. Data pads above 1024 B are TDM iterate mode: iterate_rows
 /// rows per iteration, iterations iterate_stride apart (0 when not iterating).
-struct MxTdmV4Operand
+struct MxTdmScheduledOperand
 {
     index_t rows           = 0;
     index_t base           = 0;
@@ -183,26 +186,29 @@ struct MxTdmV4Operand
     index_t iterate_rows   = 0;
     index_t iterate_stride = 0;
 
-    CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsPad pad() const { return {pad_bytes, block_bytes}; }
+    CK_TILE_HOST_DEVICE constexpr MxTdmScheduledLdsPad pad() const
+    {
+        return {pad_bytes, block_bytes};
+    }
 };
 
 /// The two LDS buffers. Buffer 1 starts buffer_stride after buffer 0; buffer_bytes is where buffer
 /// 0's last region ends. reason is not Ok when segment interleave does not apply.
-struct MxTdmV4LdsLayout
+struct MxTdmScheduledLdsLayout
 {
-    MxTdmV4Reason reason = MxTdmV4Reason::Ok;
-    index_t row_bytes    = 0;
-    index_t k_steps      = 0;
-    MxTdmV4Operand a{};
-    MxTdmV4Operand b{};
-    MxTdmV4Operand a_scale{};
-    MxTdmV4Operand b_scale{};
+    MxTdmScheduledReason reason = MxTdmScheduledReason::Ok;
+    index_t row_bytes           = 0;
+    index_t k_steps             = 0;
+    MxTdmScheduledOperand a{};
+    MxTdmScheduledOperand b{};
+    MxTdmScheduledOperand a_scale{};
+    MxTdmScheduledOperand b_scale{};
     index_t buffer_bytes  = 0;
     index_t buffer_stride = 0;
     index_t lds_bytes     = 0;
 };
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
 inline constexpr index_t kAtomK            = 128;
 inline constexpr index_t kWave             = 32;
@@ -253,80 +259,84 @@ CK_TILE_HOST_DEVICE constexpr long_index_t pow2_ceil(long_index_t v)
 CK_TILE_HOST_DEVICE constexpr index_t min_i(index_t a, index_t b) { return a < b ? a : b; }
 CK_TILE_HOST_DEVICE constexpr index_t max_i(index_t a, index_t b) { return a > b ? a : b; }
 
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /**
- * @brief One v4 kernel: problem, tile and tuning. Fields follow rocKE's MxGemmSpec; M, N and K
- *        are 0 where only the compile-time part is known (see mx_tdm_v4_validate's check_shape).
+ * @brief One comp_tdm_scheduled kernel: problem, tile and tuning. Fields follow rocKE's MxGemmSpec;
+ * M, N and K are 0 where only the compile-time part is known (see mx_tdm_scheduled_validate's
+ * check_shape).
  */
-struct MxTdmV4Spec
+struct MxTdmScheduledSpec
 {
-    long_index_t M                 = 0;
-    long_index_t N                 = 0;
-    long_index_t K                 = 0;
-    MxTdmV4OutDtype out            = MxTdmV4OutDtype::Fp8E4M3;
-    index_t tile_m                 = 256;
-    index_t tile_n                 = 256;
-    index_t tile_k                 = 512;
-    index_t warp_m                 = 2;
-    index_t warp_n                 = 2;
-    index_t cluster_x              = 4;
-    index_t cluster_y              = 4;
-    index_t cluster_z              = 1;
-    index_t gl2_distance           = 4;
-    index_t signal_wmmas_in        = -1;
-    index_t local_prefetch         = 1;
-    MxTdmV4HalfPlr half_plr        = MxTdmV4HalfPlr::B;
-    MxTdmV4HalfBOrder half_b_order = MxTdmV4HalfBOrder::Ahead;
-    bool lds_segment_interleave    = true;
-    MxTdmV4Mma mma                 = MxTdmV4Mma::M32N16;
-    MxTdmV4Dtype a_dtype           = MxTdmV4Dtype::Fp4;
-    MxTdmV4Dtype b_dtype           = MxTdmV4Dtype::Fp4;
+    long_index_t M                        = 0;
+    long_index_t N                        = 0;
+    long_index_t K                        = 0;
+    MxTdmScheduledOutDtype out            = MxTdmScheduledOutDtype::Fp8E4M3;
+    index_t tile_m                        = 256;
+    index_t tile_n                        = 256;
+    index_t tile_k                        = 512;
+    index_t warp_m                        = 2;
+    index_t warp_n                        = 2;
+    index_t cluster_x                     = 4;
+    index_t cluster_y                     = 4;
+    index_t cluster_z                     = 1;
+    index_t gl2_distance                  = 4;
+    index_t signal_wmmas_in               = -1;
+    index_t local_prefetch                = 1;
+    MxTdmScheduledHalfPlr half_plr        = MxTdmScheduledHalfPlr::B;
+    MxTdmScheduledHalfBOrder half_b_order = MxTdmScheduledHalfBOrder::Ahead;
+    bool lds_segment_interleave           = true;
+    MxTdmScheduledMma mma                 = MxTdmScheduledMma::M32N16;
+    MxTdmScheduledDtype a_dtype           = MxTdmScheduledDtype::Fp4;
+    MxTdmScheduledDtype b_dtype           = MxTdmScheduledDtype::Fp4;
 
     // The WMMA atom.
     CK_TILE_HOST_DEVICE constexpr index_t atom_m() const
     {
-        return mma == MxTdmV4Mma::M32N16 ? 32 : 16;
+        return mma == MxTdmScheduledMma::M32N16 ? 32 : 16;
     }
     CK_TILE_HOST_DEVICE constexpr index_t atom_n() const { return 16; }
     /// FP32 accumulators per lane of one atom.
     CK_TILE_HOST_DEVICE constexpr index_t c_frag_len() const
     {
-        return mma == MxTdmV4Mma::M32N16 ? 16 : 8;
+        return mma == MxTdmScheduledMma::M32N16 ? 16 : 8;
     }
     /// A rows per lane of one atom (lane % 16, then + 16).
     CK_TILE_HOST_DEVICE constexpr index_t a_rows() const
     {
-        return mma == MxTdmV4Mma::M32N16 ? 2 : 1;
+        return mma == MxTdmScheduledMma::M32N16 ? 2 : 1;
     }
     /// Words of one A or B operand of the WMMA (FP4 fills 8 of the 16x16 atom's 16).
     CK_TILE_HOST_DEVICE constexpr index_t frag_words() const
     {
-        return mma == MxTdmV4Mma::M32N16 ? 8 : 16;
+        return mma == MxTdmScheduledMma::M32N16 ? 8 : 16;
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t dtype_bits(MxTdmV4Dtype t)
+    CK_TILE_HOST_DEVICE static constexpr index_t dtype_bits(MxTdmScheduledDtype t)
     {
-        return t == MxTdmV4Dtype::Fp4 ? 4 : 8;
+        return t == MxTdmScheduledDtype::Fp4 ? 4 : 8;
     }
     CK_TILE_HOST_DEVICE constexpr index_t elem_bits() const { return dtype_bits(a_dtype); }
     CK_TILE_HOST_DEVICE constexpr index_t k_per_byte() const { return 8 / elem_bits(); }
     /// Bytes of one K step of an A or B row.
     CK_TILE_HOST_DEVICE constexpr index_t step_bytes() const
     {
-        return mx_tdm_v4::kAtomK / k_per_byte();
+        return mx_tdm_scheduled::kAtomK / k_per_byte();
     }
-    CK_TILE_HOST_DEVICE constexpr index_t chunk_bytes() const { return mx_tdm_v4::kChunkBytes; }
+    CK_TILE_HOST_DEVICE constexpr index_t chunk_bytes() const
+    {
+        return mx_tdm_scheduled::kChunkBytes;
+    }
     /// 16 B K chunks each lane reads of one A or B row and K step.
     CK_TILE_HOST_DEVICE constexpr index_t chunks_per_lane() const
     {
-        return step_bytes() / (mx_tdm_v4::kLaneGroups * mx_tdm_v4::kChunkBytes);
+        return step_bytes() / (mx_tdm_scheduled::kLaneGroups * mx_tdm_scheduled::kChunkBytes);
     }
     /// Byte offset, in one K step of a row, of lane group 0's chunk j; lane group g reads
     /// g * chunk_bytes further.
     CK_TILE_HOST_DEVICE constexpr index_t chunk_offset(index_t j) const
     {
-        return j * mx_tdm_v4::kLaneGroups * mx_tdm_v4::kChunkBytes;
+        return j * mx_tdm_scheduled::kLaneGroups * mx_tdm_scheduled::kChunkBytes;
     }
 
     CK_TILE_HOST_DEVICE constexpr index_t wave_repeat_m() const
@@ -339,14 +349,18 @@ struct MxTdmV4Spec
     }
     CK_TILE_HOST_DEVICE constexpr index_t block_size() const
     {
-        return mx_tdm_v4::kWave * mx_tdm_v4::kWaves;
+        return mx_tdm_scheduled::kWave * mx_tdm_scheduled::kWaves;
     }
-    CK_TILE_HOST_DEVICE constexpr index_t k_steps() const { return tile_k / mx_tdm_v4::kAtomK; }
+    CK_TILE_HOST_DEVICE constexpr index_t k_steps() const
+    {
+        return tile_k / mx_tdm_scheduled::kAtomK;
+    }
     /// K steps of the last, partial tile when tile_k does not divide K, counting a partial last
     /// K step when 128 does not divide K.
     CK_TILE_HOST_DEVICE constexpr index_t tail_steps() const
     {
-        return static_cast<index_t>(mx_tdm_v4::ceil_div(K % tile_k, mx_tdm_v4::kAtomK));
+        return static_cast<index_t>(
+            mx_tdm_scheduled::ceil_div(K % tile_k, mx_tdm_scheduled::kAtomK));
     }
     CK_TILE_HOST_DEVICE constexpr bool edge_m() const { return M % tile_m != 0; }
     CK_TILE_HOST_DEVICE constexpr bool edge_n() const { return N % tile_n != 0; }
@@ -355,25 +369,25 @@ struct MxTdmV4Spec
     /// A's byte offsets, whole tiles counted, pass i32: address it in i64.
     CK_TILE_HOST_DEVICE constexpr bool wide_a() const
     {
-        return mx_tdm_v4::round_up(M, tile_m) * packed_k() > mx_tdm_v4::kI32Span;
+        return mx_tdm_scheduled::round_up(M, tile_m) * packed_k() > mx_tdm_scheduled::kI32Span;
     }
     CK_TILE_HOST_DEVICE constexpr bool wide_b() const
     {
-        return mx_tdm_v4::round_up(N, tile_n) * packed_k() > mx_tdm_v4::kI32Span;
+        return mx_tdm_scheduled::round_up(N, tile_n) * packed_k() > mx_tdm_scheduled::kI32Span;
     }
     CK_TILE_HOST_DEVICE constexpr bool wide_d() const
     {
-        return mx_tdm_v4::round_up(M, tile_m) * mx_tdm_v4::round_up(N, tile_n) >
-               mx_tdm_v4::kI32Span;
+        return mx_tdm_scheduled::round_up(M, tile_m) * mx_tdm_scheduled::round_up(N, tile_n) >
+               mx_tdm_scheduled::kI32Span;
     }
     CK_TILE_HOST_DEVICE constexpr index_t out_bytes() const
     {
-        return out == MxTdmV4OutDtype::Fp8E4M3 ? 1 : 2;
+        return out == MxTdmScheduledOutDtype::Fp8E4M3 ? 1 : 2;
     }
     /// Elements per D store and C load at most: 16 B and the N repeat.
     CK_TILE_HOST_DEVICE constexpr index_t max_store_width() const
     {
-        return mx_tdm_v4::min_i(wave_repeat_n(), 16 / out_bytes());
+        return mx_tdm_scheduled::min_i(wave_repeat_n(), 16 / out_bytes());
     }
     /// Elements per D store and C load: at most 16 B and a divisor of N, so a vector is wholly
     /// inside or outside N and stays aligned.
@@ -390,7 +404,7 @@ struct MxTdmV4Spec
     }
     CK_TILE_HOST_DEVICE constexpr bool half_b() const
     {
-        return local_prefetch == 1 && half_plr == MxTdmV4HalfPlr::B;
+        return local_prefetch == 1 && half_plr == MxTdmScheduledHalfPlr::B;
     }
     CK_TILE_HOST_DEVICE constexpr index_t signal_limit() const
     {
@@ -399,8 +413,9 @@ struct MxTdmV4Spec
     }
     CK_TILE_HOST_DEVICE constexpr index_t signal_wmmas() const
     {
-        return signal_wmmas_in >= 0 ? signal_wmmas_in
-                                    : mx_tdm_v4::min_i(mx_tdm_v4::kDefaultSignal, signal_limit());
+        return signal_wmmas_in >= 0
+                   ? signal_wmmas_in
+                   : mx_tdm_scheduled::min_i(mx_tdm_scheduled::kDefaultSignal, signal_limit());
     }
     CK_TILE_HOST_DEVICE constexpr index_t fp8_convert_width() const
     {
@@ -408,11 +423,11 @@ struct MxTdmV4Spec
     }
     CK_TILE_HOST_DEVICE constexpr index_t a_scale_reads() const
     {
-        return mx_tdm_v4::max_i(1, wave_repeat_m() / 4);
+        return mx_tdm_scheduled::max_i(1, wave_repeat_m() / 4);
     }
     CK_TILE_HOST_DEVICE constexpr index_t b_scale_reads() const
     {
-        return mx_tdm_v4::max_i(1, wave_repeat_n() / 4);
+        return mx_tdm_scheduled::max_i(1, wave_repeat_n() / 4);
     }
     /// LDS reads of one K step: scales, then one per K chunk of each A row and B fragment.
     CK_TILE_HOST_DEVICE constexpr index_t reads_per_step() const
@@ -422,7 +437,7 @@ struct MxTdmV4Spec
     }
     CK_TILE_HOST_DEVICE constexpr bool half_b_late() const
     {
-        return half_b() && half_b_order == MxTdmV4HalfBOrder::Late;
+        return half_b() && half_b_order == MxTdmScheduledHalfBOrder::Late;
     }
     /// LDS reads of half of one K step's B fragments.
     CK_TILE_HOST_DEVICE constexpr index_t b_half_reads() const
@@ -456,15 +471,15 @@ struct MxTdmV4Spec
     /// Workgroups along x (N tiles) and y (M tiles).
     CK_TILE_HOST_DEVICE constexpr long_index_t grid_x() const
     {
-        return mx_tdm_v4::ceil_div(N, tile_n);
+        return mx_tdm_scheduled::ceil_div(N, tile_n);
     }
     CK_TILE_HOST_DEVICE constexpr long_index_t grid_y() const
     {
-        return mx_tdm_v4::ceil_div(M, tile_m);
+        return mx_tdm_scheduled::ceil_div(M, tile_m);
     }
 };
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
 /// calcLdsBlockSizePerPad for an UnrollMajorLDS operand: the K row, rounded to a bank cycle,
 /// times VectorWidth once that is longer.
@@ -477,7 +492,7 @@ CK_TILE_HOST_DEVICE constexpr index_t tensile_data_block(index_t k_bytes, index_
 }
 
 /// get_mxs_mt_config(MatrixInstK=128, MXBlock=32, VectorWidth).
-CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsPad tensile_scale_pad(index_t vector_width)
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledLdsPad tensile_scale_pad(index_t vector_width)
 {
     const index_t per_block = (kAtomK / 32) * vector_width;
     if(vector_width < 4 || per_block % 16 || (per_block / 16) & 1)
@@ -487,15 +502,15 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsPad tensile_scale_pad(index_t vector_wid
 
 struct DerivedPads
 {
-    MxTdmV4LdsPad a{};
-    MxTdmV4LdsPad b{};
-    MxTdmV4LdsPad a_scale{};
-    MxTdmV4LdsPad b_scale{};
+    MxTdmScheduledLdsPad a{};
+    MxTdmScheduledLdsPad b{};
+    MxTdmScheduledLdsPad a_scale{};
+    MxTdmScheduledLdsPad b_scale{};
 };
 
 /// TensileLite's padding with its A/B relabeled to rocKE B/A and VectorWidth taken as the
 /// operand's wave repeat.
-CK_TILE_HOST_DEVICE constexpr DerivedPads derived_lds_pads(const MxTdmV4Spec& s)
+CK_TILE_HOST_DEVICE constexpr DerivedPads derived_lds_pads(const MxTdmScheduledSpec& s)
 {
     const index_t k_bytes = s.tile_k / s.k_per_byte();
     const index_t rm      = s.wave_repeat_m();
@@ -514,7 +529,7 @@ struct DataComponent
 };
 
 CK_TILE_HOST_DEVICE constexpr DataComponent
-data_component(index_t rows, index_t row_bytes, MxTdmV4LdsPad pad)
+data_component(index_t rows, index_t row_bytes, MxTdmScheduledLdsPad pad)
 {
     if(pad.on() && pad.block_bytes > kTdmPadPeriodMax)
     {
@@ -530,7 +545,7 @@ data_component(index_t rows, index_t row_bytes, MxTdmV4LdsPad pad)
 
 /// calcLdsNumBytesAB for an operand's scales, padded as one tensor.
 CK_TILE_HOST_DEVICE constexpr index_t
-scale_region_bytes(index_t rows, index_t steps, MxTdmV4LdsPad pad)
+scale_region_bytes(index_t rows, index_t steps, MxTdmScheduledLdsPad pad)
 {
     const index_t size = 2 * rows * steps * 4;
     return pad.on() ? size / pad.block_bytes * (pad.block_bytes + pad.pad_bytes) : size;
@@ -540,14 +555,14 @@ scale_region_bytes(index_t rows, index_t steps, MxTdmV4LdsPad pad)
 /// span (scales included), past the baseline span.
 struct Placement
 {
-    MxTdmV4Reason reason = MxTdmV4Reason::Ok;
-    index_t a_base       = 0;
-    index_t a_stride     = 0;
-    index_t b_base       = 0;
-    index_t b_stride     = 0;
-    index_t scale_base   = 0;
-    bool aligned         = false;
-    index_t span         = 0;
+    MxTdmScheduledReason reason = MxTdmScheduledReason::Ok;
+    index_t a_base              = 0;
+    index_t a_stride            = 0;
+    index_t b_base              = 0;
+    index_t b_stride            = 0;
+    index_t scale_base          = 0;
+    bool aligned                = false;
+    index_t span                = 0;
 };
 
 /// first at 0 with component stride `stride`, the other after first's component 0 with
@@ -588,7 +603,7 @@ CK_TILE_HOST_DEVICE constexpr Placement place(bool first_is_b,
 /// when B0 A0 fit one segment. With the 32x16 atom an A read would cross a component, so A stays
 /// whole: [B0][A0 A1][B1], aligned when that fits one segment. 4x1 and 1x4: only the operand
 /// spanning four waves splits, around the other one.
-CK_TILE_HOST_DEVICE constexpr Placement interleave_placement(const MxTdmV4Spec& s,
+CK_TILE_HOST_DEVICE constexpr Placement interleave_placement(const MxTdmScheduledSpec& s,
                                                              index_t comp_a,
                                                              index_t comp_b,
                                                              index_t data_a,
@@ -612,12 +627,12 @@ CK_TILE_HOST_DEVICE constexpr Placement interleave_placement(const MxTdmV4Spec& 
         const index_t data_act   = active_b ? data_b : data_a;
         if(!coarse(active_b))
         {
-            fail.reason = MxTdmV4Reason::LsiRepeat;
+            fail.reason = MxTdmScheduledReason::LsiRepeat;
             return fail;
         }
         if(active_b && data_b <= seg && comp_b >= seg)
         {
-            fail.reason = MxTdmV4Reason::LsiBaselineSplit;
+            fail.reason = MxTdmScheduledReason::LsiBaselineSplit;
             return fail;
         }
         const index_t stride = comp_act + 2 * comp_share;
@@ -629,7 +644,7 @@ CK_TILE_HOST_DEVICE constexpr Placement interleave_placement(const MxTdmV4Spec& 
     }
     if(!coarse(true))
     {
-        fail.reason = MxTdmV4Reason::LsiRepeat;
+        fail.reason = MxTdmScheduledReason::LsiRepeat;
         return fail;
     }
     const index_t a_cols  = s.atom_m() * s.warp_m * s.wave_repeat_m();
@@ -652,14 +667,15 @@ CK_TILE_HOST_DEVICE constexpr Placement interleave_placement(const MxTdmV4Spec& 
     return place(true, comp_b, pair, pair, 2 * pair);
 }
 
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /// The LDS layout of a spec whose tile, types and wave group are valid (rocKE _lds_placement).
 /// Baseline (segment interleave off) is [B0 B1][B scales][A scales][A0 A1]; segment interleave
 /// places the components so the two LDS read ports read different 64 KiB segments.
-CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV4Spec& s)
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledLdsLayout
+mx_tdm_scheduled_lds_layout(const MxTdmScheduledSpec& s)
 {
-    using namespace mx_tdm_v4;
+    using namespace mx_tdm_scheduled;
     const DerivedPads pads  = derived_lds_pads(s);
     const index_t row_bytes = s.tile_k / s.k_per_byte();
     const index_t steps     = s.k_steps();
@@ -668,7 +684,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV
     const DataComponent a   = data_component(a_rows, row_bytes, pads.a);
     const DataComponent b   = data_component(b_rows, row_bytes, pads.b);
 
-    const auto scale_component = [&](index_t rows, MxTdmV4LdsPad pad) {
+    const auto scale_component = [&](index_t rows, MxTdmScheduledLdsPad pad) {
         const index_t size = steps * rows * 4;
         return size + (pad.on() ? size / pad.block_bytes * pad.pad_bytes : 0);
     };
@@ -689,7 +705,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV
     const index_t natural_stride =
         baseline.a_base + static_cast<index_t>(round_up(2 * a.bytes, align));
 
-    MxTdmV4LdsLayout out{};
+    MxTdmScheduledLdsLayout out{};
     Placement placement = baseline;
     if(s.lds_segment_interleave)
     {
@@ -699,7 +715,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV
                                          a_rows * row_bytes,
                                          b_rows * row_bytes,
                                          b_scale_region + a_scale_region);
-        if(placement.reason != MxTdmV4Reason::Ok)
+        if(placement.reason != MxTdmScheduledReason::Ok)
         {
             out.reason = placement.reason;
             return out;
@@ -713,7 +729,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV
             pow2_ceil(natural_stride > placement.span ? natural_stride : placement.span));
         if(2ll * buffer_stride > kLdsCapacityBytes)
         {
-            out.reason = MxTdmV4Reason::LsiCapacity;
+            out.reason = MxTdmScheduledReason::LsiCapacity;
             return out;
         }
         lds_bytes = max_i(buffer_stride + baseline_span, buffer_stride + placement.span);
@@ -762,7 +778,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4LdsLayout mx_tdm_v4_lds_layout(const MxTdmV
 /// LDS byte offset, in one buffer, of row `row` (0..tile rows) of a data operand.
 template <typename T>
 CK_TILE_HOST_DEVICE constexpr T
-mx_tdm_v4_row_offset(const MxTdmV4Operand& op, index_t row_bytes, T row)
+mx_tdm_scheduled_row_offset(const MxTdmScheduledOperand& op, index_t row_bytes, T row)
 {
     const T component = row / op.rows;
     const T local     = row % op.rows;
@@ -782,7 +798,8 @@ mx_tdm_v4_row_offset(const MxTdmV4Operand& op, index_t row_bytes, T row)
 
 /// LDS byte offset of the four E8M0 scales of row `row` at K step `step`.
 template <typename T>
-CK_TILE_HOST_DEVICE constexpr T mx_tdm_v4_scale_offset(const MxTdmV4Operand& op, T step, T row)
+CK_TILE_HOST_DEVICE constexpr T
+mx_tdm_scheduled_scale_offset(const MxTdmScheduledOperand& op, T step, T row)
 {
     T linear = step * (op.rows * 4) + row % op.rows * 4;
     if(op.pad_bytes > 0)
@@ -790,30 +807,30 @@ CK_TILE_HOST_DEVICE constexpr T mx_tdm_v4_scale_offset(const MxTdmV4Operand& op,
     return op.base + row / op.rows * op.stride + linear;
 }
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
-CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason
-pad_reason(MxTdmV4LdsPad pad, index_t row_bytes, index_t rows, index_t chunk)
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledReason
+pad_reason(MxTdmScheduledLdsPad pad, index_t row_bytes, index_t rows, index_t chunk)
 {
     if(pad.pad_bytes < 0 || pad.block_bytes < 0)
-        return MxTdmV4Reason::LdsPad;
+        return MxTdmScheduledReason::LdsPad;
     if(!pad.on())
-        return MxTdmV4Reason::Ok;
+        return MxTdmScheduledReason::Ok;
     if(pad.pad_bytes % kLdsPadStepBytes || pad.pad_bytes > kTdmPadMaxBytes)
-        return MxTdmV4Reason::LdsPad;
+        return MxTdmScheduledReason::LdsPad;
     const index_t block = pad.block_bytes;
     if(block <= kTdmPadPeriodMax)
     {
         if(block < 8 || !is_pow2(block))
-            return MxTdmV4Reason::LdsPad;
+            return MxTdmScheduledReason::LdsPad;
     }
     else if(row_bytes == 0)
-        return MxTdmV4Reason::LdsPad;
+        return MxTdmScheduledReason::LdsPad;
     else if(block % row_bytes || rows % (block / row_bytes))
-        return MxTdmV4Reason::LdsPad;
+        return MxTdmScheduledReason::LdsPad;
     if(block % chunk)
-        return MxTdmV4Reason::LdsPad;
-    return MxTdmV4Reason::Ok;
+        return MxTdmScheduledReason::LdsPad;
+    return MxTdmScheduledReason::Ok;
 }
 
 CK_TILE_HOST_DEVICE constexpr bool valid_tile_mn(index_t t)
@@ -821,12 +838,13 @@ CK_TILE_HOST_DEVICE constexpr bool valid_tile_mn(index_t t)
     return t == 16 || t == 32 || t == 64 || t == 128 || t == 256;
 }
 
-CK_TILE_HOST_DEVICE constexpr bool valid_dtype(MxTdmV4Dtype t)
+CK_TILE_HOST_DEVICE constexpr bool valid_dtype(MxTdmScheduledDtype t)
 {
-    return t == MxTdmV4Dtype::Fp4 || t == MxTdmV4Dtype::Fp8 || t == MxTdmV4Dtype::Bf8;
+    return t == MxTdmScheduledDtype::Fp4 || t == MxTdmScheduledDtype::Fp8 ||
+           t == MxTdmScheduledDtype::Bf8;
 }
 
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /**
  * @brief rocKE's validate(): Ok if the spec builds, else the first rule it breaks.
@@ -836,11 +854,11 @@ CK_TILE_HOST_DEVICE constexpr bool valid_dtype(MxTdmV4Dtype t)
  *                     compile time, where only the tile and tuning are known; the kernel checks
  *                     them in IsSupportedArgument.
  */
-CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec& s,
-                                                               bool check_shape = true)
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledReason
+mx_tdm_scheduled_validate(const MxTdmScheduledSpec& s, bool check_shape = true)
 {
-    using namespace mx_tdm_v4;
-    using R = MxTdmV4Reason;
+    using namespace mx_tdm_scheduled;
+    using R = MxTdmScheduledReason;
     if(check_shape)
     {
         if(s.M <= 0 || s.N <= 0 || s.K <= 0)
@@ -848,22 +866,22 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec
         if(s.K % kBlockK)
             return R::KScaleBlock;
     }
-    if(!(s.out == MxTdmV4OutDtype::Fp8E4M3 || s.out == MxTdmV4OutDtype::Fp16 ||
-         s.out == MxTdmV4OutDtype::Bf16))
+    if(!(s.out == MxTdmScheduledOutDtype::Fp8E4M3 || s.out == MxTdmScheduledOutDtype::Fp16 ||
+         s.out == MxTdmScheduledOutDtype::Bf16))
         return R::OutDtype;
     if(!valid_tile_mn(s.tile_m) || !valid_tile_mn(s.tile_n))
         return R::TileMN;
     if(!valid_dtype(s.a_dtype) || !valid_dtype(s.b_dtype))
         return R::Dtype;
-    if(MxTdmV4Spec::dtype_bits(s.b_dtype) != s.elem_bits())
+    if(MxTdmScheduledSpec::dtype_bits(s.b_dtype) != s.elem_bits())
         return R::DtypeWidth;
-    const bool fp4 = s.a_dtype == MxTdmV4Dtype::Fp4;
+    const bool fp4 = s.a_dtype == MxTdmScheduledDtype::Fp4;
     if(!(s.tile_k == 128 || s.tile_k == 256 || (fp4 && (s.tile_k == 512 || s.tile_k == 1024))))
         return R::TileK;
     if(!((s.warp_m == 2 && s.warp_n == 2) || (s.warp_m == 4 && s.warp_n == 1) ||
          (s.warp_m == 1 && s.warp_n == 4)))
         return R::WaveGroup;
-    if(!(s.mma == MxTdmV4Mma::M16N16 || (fp4 && s.mma == MxTdmV4Mma::M32N16)))
+    if(!(s.mma == MxTdmScheduledMma::M16N16 || (fp4 && s.mma == MxTdmScheduledMma::M32N16)))
         return R::Mma;
     if(s.tile_m % (s.warp_m * s.atom_m()) || s.tile_n % (s.warp_n * s.atom_n()))
         return R::TileAtoms;
@@ -883,13 +901,14 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec
     }
     if(s.local_prefetch != 0 && s.local_prefetch != 1)
         return R::LocalPrefetch;
-    if(s.half_plr != MxTdmV4HalfPlr::B && s.half_plr != MxTdmV4HalfPlr::None)
+    if(s.half_plr != MxTdmScheduledHalfPlr::B && s.half_plr != MxTdmScheduledHalfPlr::None)
         return R::HalfPlr;
-    if(s.half_plr == MxTdmV4HalfPlr::B && (s.local_prefetch != 1 || rn % 2))
+    if(s.half_plr == MxTdmScheduledHalfPlr::B && (s.local_prefetch != 1 || rn % 2))
         return R::HalfPlrB;
-    if(s.half_b_order != MxTdmV4HalfBOrder::Ahead && s.half_b_order != MxTdmV4HalfBOrder::Late)
+    if(s.half_b_order != MxTdmScheduledHalfBOrder::Ahead &&
+       s.half_b_order != MxTdmScheduledHalfBOrder::Late)
         return R::HalfBOrder;
-    if(s.half_b_order == MxTdmV4HalfBOrder::Late && !s.half_b())
+    if(s.half_b_order == MxTdmScheduledHalfBOrder::Late && !s.half_b())
         return R::HalfBLate;
     if(s.signal_wmmas() < 0 || s.signal_wmmas() > s.signal_limit())
         return R::SignalWmmas;
@@ -905,7 +924,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec
     const index_t row_bytes = s.tile_k / s.k_per_byte();
     struct PadCheck
     {
-        MxTdmV4LdsPad pad;
+        MxTdmScheduledLdsPad pad;
         index_t rows;
         index_t chunk;
         bool data;
@@ -925,7 +944,7 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec
     }
     if(rm * rn * s.c_frag_len() > kVgprs)
         return R::Accumulators;
-    const MxTdmV4LdsLayout layout = mx_tdm_v4_lds_layout(s);
+    const MxTdmScheduledLdsLayout layout = mx_tdm_scheduled_lds_layout(s);
     if(layout.reason != R::Ok)
         return layout.reason;
     if(layout.lds_bytes > kLdsCapacityBytes)
@@ -935,24 +954,24 @@ CK_TILE_HOST_DEVICE constexpr MxTdmV4Reason mx_tdm_v4_validate(const MxTdmV4Spec
 
 // Names (host only).
 
-CK_TILE_HOST const char* mx_tdm_v4_dtype_name(MxTdmV4Dtype t)
+CK_TILE_HOST const char* mx_tdm_scheduled_dtype_name(MxTdmScheduledDtype t)
 {
     switch(t)
     {
-    case MxTdmV4Dtype::Fp4: return "fp4";
-    case MxTdmV4Dtype::Fp8: return "fp8";
-    case MxTdmV4Dtype::Bf8: return "bf8";
+    case MxTdmScheduledDtype::Fp4: return "fp4";
+    case MxTdmScheduledDtype::Fp8: return "fp8";
+    case MxTdmScheduledDtype::Bf8: return "bf8";
     }
     return "unknown";
 }
 
-CK_TILE_HOST const char* mx_tdm_v4_out_dtype_name(MxTdmV4OutDtype t)
+CK_TILE_HOST const char* mx_tdm_scheduled_out_dtype_name(MxTdmScheduledOutDtype t)
 {
     switch(t)
     {
-    case MxTdmV4OutDtype::Fp8E4M3: return "fp8e4m3";
-    case MxTdmV4OutDtype::Fp16: return "fp16";
-    case MxTdmV4OutDtype::Bf16: return "bf16";
+    case MxTdmScheduledOutDtype::Fp8E4M3: return "fp8e4m3";
+    case MxTdmScheduledOutDtype::Fp16: return "fp16";
+    case MxTdmScheduledOutDtype::Bf16: return "bf16";
     }
     return "unknown";
 }
@@ -965,11 +984,12 @@ CK_TILE_HOST const char* mx_tdm_v4_out_dtype_name(MxTdmV4OutDtype t)
  * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
  *                          already carries in its tile and type fields.
  */
-CK_TILE_HOST std::string mx_tdm_v4_tuning_name(const MxTdmV4Spec& s, bool with_shape_parts = true)
+CK_TILE_HOST std::string mx_tdm_scheduled_tuning_name(const MxTdmScheduledSpec& s,
+                                                      bool with_shape_parts = true)
 {
     std::string name = "_c" + std::to_string(s.cluster_x) + "x" + std::to_string(s.cluster_y);
-    if(with_shape_parts && s.out != MxTdmV4OutDtype::Fp8E4M3)
-        name += std::string("_") + mx_tdm_v4_out_dtype_name(s.out);
+    if(with_shape_parts && s.out != MxTdmScheduledOutDtype::Fp8E4M3)
+        name += std::string("_") + mx_tdm_scheduled_out_dtype_name(s.out);
     if(with_shape_parts && !(s.warp_m == 2 && s.warp_n == 2))
         name += "_wg" + std::to_string(s.warp_m) + "x" + std::to_string(s.warp_n);
     if(s.gl2_distance != 4)
@@ -978,27 +998,27 @@ CK_TILE_HOST std::string mx_tdm_v4_tuning_name(const MxTdmV4Spec& s, bool with_s
         name += "_cs" + std::to_string(s.signal_wmmas_in);
     if(s.local_prefetch == 0)
         name += "_lp0";
-    if(s.half_plr == MxTdmV4HalfPlr::None)
+    if(s.half_plr == MxTdmScheduledHalfPlr::None)
         name += "_hplrnone";
     if(s.half_b_late())
         name += "_hblate";
     if(!s.lds_segment_interleave)
         name += "_lsi0";
-    if(with_shape_parts && s.mma == MxTdmV4Mma::M16N16)
+    if(with_shape_parts && s.mma == MxTdmScheduledMma::M16N16)
         name += "_mma16";
     return name;
 }
 
 /// rocKE's MxGemmSpec.kernel_name() for a spec named `prefix`.
-CK_TILE_HOST std::string mx_tdm_v4_kernel_name(const MxTdmV4Spec& s,
-                                               const std::string& prefix = "mx_gemm")
+CK_TILE_HOST std::string mx_tdm_scheduled_kernel_name(const MxTdmScheduledSpec& s,
+                                                      const std::string& prefix = "mx_gemm")
 {
-    std::string tag = std::string("mx") + mx_tdm_v4_dtype_name(s.a_dtype);
+    std::string tag = std::string("mx") + mx_tdm_scheduled_dtype_name(s.a_dtype);
     if(s.b_dtype != s.a_dtype)
-        tag += mx_tdm_v4_dtype_name(s.b_dtype);
+        tag += mx_tdm_scheduled_dtype_name(s.b_dtype);
     return prefix + "_" + tag + "_M" + std::to_string(s.M) + "N" + std::to_string(s.N) + "K" +
            std::to_string(s.K) + "_t" + std::to_string(s.tile_m) + "x" + std::to_string(s.tile_n) +
-           "x" + std::to_string(s.tile_k) + mx_tdm_v4_tuning_name(s);
+           "x" + std::to_string(s.tile_k) + mx_tdm_scheduled_tuning_name(s);
 }
 
 } // namespace ck_tile

@@ -35,7 +35,7 @@
  *
  * The scale pre-shuffle mirrors mx_gemm_profiler.hpp exactly: pack params are
  * derived from SelectedKernel tile dims at compile time (not hardcoded). A
- * SelectedKernel with KMajorScales (comp_tdm_v4) takes K-major scales instead,
+ * SelectedKernel with KMajorScales (comp_tdm_scheduled) takes K-major scales instead,
  * [ceil(K/128)][MN][4], and checks K itself.
  */
 

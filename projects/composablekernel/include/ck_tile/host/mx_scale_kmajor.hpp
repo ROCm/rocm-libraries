@@ -14,12 +14,12 @@
 #include <vector>
 
 #include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_spec.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp"
 
 /**
  * @file
- * Host side of GemmPipelineAgBgCrCompTDMV4 (rocKE's mx_gemm): the K-major E8M0 scale layout,
- * bit-exact element codecs, the output rounding of its epilogue and a reference GEMM.
+ * Host side of MxGemmPipelineAgBgCrCompTDMScheduled (rocKE's mx_gemm): the K-major E8M0 scale
+ * layout, bit-exact element codecs, the output rounding of its epilogue and a reference GEMM.
  *
  * Scales. One E8M0 byte per 32 K values of each A or B row. The natural layout is
  * [rows][ceil(K / 32)]; the kernel reads [ceil(K / 128)][rows][4]: K step s of row r is the int32
@@ -35,15 +35,16 @@ namespace ck_tile {
 /// Bytes of a K-major scale array of `rows` rows.
 CK_TILE_HOST std::size_t mx_scale_kmajor_bytes(index_t rows, long_index_t K)
 {
-    return static_cast<std::size_t>(mx_tdm_v4::ceil_div(K, mx_tdm_v4::kAtomK)) * rows * 4;
+    return static_cast<std::size_t>(mx_tdm_scheduled::ceil_div(K, mx_tdm_scheduled::kAtomK)) *
+           rows * 4;
 }
 
 /// [rows][ceil(K / 32)] (row r at natural + r * row_stride) to [ceil(K / 128)][rows][4].
 CK_TILE_HOST std::vector<uint8_t>
 mx_scale_to_kmajor(const uint8_t* natural, index_t rows, long_index_t K, long_index_t row_stride)
 {
-    const long_index_t groups = mx_tdm_v4::ceil_div(K, mx_tdm_v4::kBlockK);
-    const long_index_t steps  = mx_tdm_v4::ceil_div(K, mx_tdm_v4::kAtomK);
+    const long_index_t groups = mx_tdm_scheduled::ceil_div(K, mx_tdm_scheduled::kBlockK);
+    const long_index_t steps  = mx_tdm_scheduled::ceil_div(K, mx_tdm_scheduled::kAtomK);
     if(row_stride < groups)
         throw std::invalid_argument("mx_scale_to_kmajor: row_stride " + std::to_string(row_stride) +
                                     " < " + std::to_string(groups) + " scale groups");
@@ -91,7 +92,7 @@ CK_TILE_HOST ScaleTensor mx_scale_tensor_to_kmajor(const ScaleTensor& natural,
 CK_TILE_HOST std::vector<uint8_t>
 mx_scale_from_kmajor(const uint8_t* kmajor, index_t rows, long_index_t K)
 {
-    const long_index_t groups = mx_tdm_v4::ceil_div(K, mx_tdm_v4::kBlockK);
+    const long_index_t groups = mx_tdm_scheduled::ceil_div(K, mx_tdm_scheduled::kBlockK);
     std::vector<uint8_t> out(static_cast<std::size_t>(rows * groups));
     for(index_t r = 0; r < rows; ++r)
         for(long_index_t g = 0; g < groups; ++g)
@@ -99,7 +100,7 @@ mx_scale_from_kmajor(const uint8_t* kmajor, index_t rows, long_index_t K)
     return out;
 }
 
-namespace mx_tdm_v4 {
+namespace mx_tdm_scheduled {
 
 CK_TILE_HOST float e8m0_to_float(uint8_t e)
 {
@@ -140,21 +141,21 @@ CK_TILE_HOST float bf8_e5m2_to_float(uint8_t b)
 }
 
 /// Element k of a K-contiguous A or B row.
-CK_TILE_HOST float decode_element(MxTdmV4Dtype t, const uint8_t* row, long_index_t k)
+CK_TILE_HOST float decode_element(MxTdmScheduledDtype t, const uint8_t* row, long_index_t k)
 {
     switch(t)
     {
-    case MxTdmV4Dtype::Fp4: return fp4_e2m1_to_float((row[k / 2] >> (4 * (k % 2))) & 0xF);
-    case MxTdmV4Dtype::Fp8: return fp8_e4m3_to_float(row[k]);
-    case MxTdmV4Dtype::Bf8: return bf8_e5m2_to_float(row[k]);
+    case MxTdmScheduledDtype::Fp4: return fp4_e2m1_to_float((row[k / 2] >> (4 * (k % 2))) & 0xF);
+    case MxTdmScheduledDtype::Fp8: return fp8_e4m3_to_float(row[k]);
+    case MxTdmScheduledDtype::Bf8: return bf8_e5m2_to_float(row[k]);
     }
     throw std::invalid_argument("decode_element: unknown dtype");
 }
 
 /// Bytes of an A or B row of K elements.
-CK_TILE_HOST long_index_t row_bytes(MxTdmV4Dtype t, long_index_t K)
+CK_TILE_HOST long_index_t row_bytes(MxTdmScheduledDtype t, long_index_t K)
 {
-    return t == MxTdmV4Dtype::Fp4 ? (K + 1) / 2 : K;
+    return t == MxTdmScheduledDtype::Fp4 ? (K + 1) / 2 : K;
 }
 
 CK_TILE_HOST uint32_t float_bits(float x)
@@ -252,32 +253,36 @@ CK_TILE_HOST float bf16_bits_to_float(uint16_t h)
 }
 
 /// Bytes of one C or D element.
-CK_TILE_HOST index_t out_bytes(MxTdmV4OutDtype t) { return t == MxTdmV4OutDtype::Fp8E4M3 ? 1 : 2; }
+CK_TILE_HOST index_t out_bytes(MxTdmScheduledOutDtype t)
+{
+    return t == MxTdmScheduledOutDtype::Fp8E4M3 ? 1 : 2;
+}
 
 /// C or D element i of `data` as f32.
-CK_TILE_HOST float load_out(MxTdmV4OutDtype t, const void* data, std::size_t i)
+CK_TILE_HOST float load_out(MxTdmScheduledOutDtype t, const void* data, std::size_t i)
 {
-    if(t == MxTdmV4OutDtype::Fp8E4M3)
+    if(t == MxTdmScheduledOutDtype::Fp8E4M3)
         return fp8_e4m3_to_float(static_cast<const uint8_t*>(data)[i]);
     const uint16_t h = static_cast<const uint16_t*>(data)[i];
-    return t == MxTdmV4OutDtype::Fp16 ? fp16_bits_to_float(h) : bf16_bits_to_float(h);
+    return t == MxTdmScheduledOutDtype::Fp16 ? fp16_bits_to_float(h) : bf16_bits_to_float(h);
 }
 
 /// The epilogue's conversion of a final f32 value (FP8 saturated first) into element i of `data`.
-CK_TILE_HOST void store_out(MxTdmV4OutDtype t, void* data, std::size_t i, float v)
+CK_TILE_HOST void store_out(MxTdmScheduledOutDtype t, void* data, std::size_t i, float v)
 {
-    if(t == MxTdmV4OutDtype::Fp8E4M3)
+    if(t == MxTdmScheduledOutDtype::Fp8E4M3)
         static_cast<uint8_t*>(data)[i] = float_to_fp8_e4m3_rne(saturate_fp8(v));
-    else if(t == MxTdmV4OutDtype::Fp16)
+    else if(t == MxTdmScheduledOutDtype::Fp16)
         static_cast<uint16_t*>(data)[i] = float_to_fp16_rne(v);
     else
         static_cast<uint16_t*>(data)[i] = float_to_bf16_rne(v);
 }
 
-} // namespace mx_tdm_v4
+} // namespace mx_tdm_scheduled
 
 /**
- * @brief D = alpha * A @ B^T + beta * C with K-major scales, as GemmPipelineAgBgCrCompTDMV4.
+ * @brief D = alpha * A @ B^T + beta * C with K-major scales, as
+ * MxGemmPipelineAgBgCrCompTDMScheduled.
  *
  * The products are summed in double and rounded once to f32; with inputs whose f32 sums are
  * exact in any order (rocKE's check inputs) this is the kernel's accumulator bit for bit. Then
@@ -289,33 +294,34 @@ CK_TILE_HOST void store_out(MxTdmV4OutDtype t, void* data, std::size_t i, float 
  * elements apart. With `rows` set only those num_rows rows of D are computed, stored compactly:
  * d's row i is row rows[i] of D.
  */
-CK_TILE_HOST void reference_mx_gemm_tdm_v4(MxTdmV4Dtype a_dtype,
-                                           MxTdmV4Dtype b_dtype,
-                                           MxTdmV4OutDtype out_dtype,
-                                           const uint8_t* a,
-                                           long_index_t lda,
-                                           const uint8_t* b,
-                                           long_index_t ldb,
-                                           const uint8_t* a_scale,
-                                           const uint8_t* b_scale,
-                                           const void* c,
-                                           long_index_t ldc,
-                                           void* d,
-                                           long_index_t ldd,
-                                           index_t M,
-                                           index_t N,
-                                           long_index_t K,
-                                           float alpha,
-                                           float beta,
-                                           unsigned threads    = 0,
-                                           const index_t* rows = nullptr,
-                                           index_t num_rows    = 0)
+CK_TILE_HOST void reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype a_dtype,
+                                                  MxTdmScheduledDtype b_dtype,
+                                                  MxTdmScheduledOutDtype out_dtype,
+                                                  const uint8_t* a,
+                                                  long_index_t lda,
+                                                  const uint8_t* b,
+                                                  long_index_t ldb,
+                                                  const uint8_t* a_scale,
+                                                  const uint8_t* b_scale,
+                                                  const void* c,
+                                                  long_index_t ldc,
+                                                  void* d,
+                                                  long_index_t ldd,
+                                                  index_t M,
+                                                  index_t N,
+                                                  long_index_t K,
+                                                  float alpha,
+                                                  float beta,
+                                                  unsigned threads    = 0,
+                                                  const index_t* rows = nullptr,
+                                                  index_t num_rows    = 0)
 {
     const bool read_c      = !(beta == 0.0f);
     const index_t out_rows = rows ? num_rows : M;
     auto scale             = [](const uint8_t* s, index_t extent, index_t r, long_index_t k) {
-        return mx_tdm_v4::e8m0_to_float(s[((k / mx_tdm_v4::kAtomK) * extent + r) * 4 +
-                                          (k % mx_tdm_v4::kAtomK) / mx_tdm_v4::kBlockK]);
+        return mx_tdm_scheduled::e8m0_to_float(
+            s[((k / mx_tdm_scheduled::kAtomK) * extent + r) * 4 +
+              (k % mx_tdm_scheduled::kAtomK) / mx_tdm_scheduled::kBlockK]);
     };
     auto row = [&](index_t i) {
         const index_t m = rows ? rows[i] : i;
@@ -325,18 +331,18 @@ CK_TILE_HOST void reference_mx_gemm_tdm_v4(MxTdmV4Dtype a_dtype,
             for(long_index_t k = 0; k < K; ++k)
             {
                 const double x =
-                    static_cast<double>(mx_tdm_v4::decode_element(a_dtype, a + m * lda, k)) *
+                    static_cast<double>(mx_tdm_scheduled::decode_element(a_dtype, a + m * lda, k)) *
                     scale(a_scale, M, m, k);
                 const double y =
-                    static_cast<double>(mx_tdm_v4::decode_element(b_dtype, b + n * ldb, k)) *
+                    static_cast<double>(mx_tdm_scheduled::decode_element(b_dtype, b + n * ldb, k)) *
                     scale(b_scale, N, n, k);
                 sum += x * y;
             }
             float v = alpha * static_cast<float>(sum);
             if(read_c)
-                v = v +
-                    beta * mx_tdm_v4::load_out(out_dtype, c, static_cast<std::size_t>(m) * ldc + n);
-            mx_tdm_v4::store_out(out_dtype, d, static_cast<std::size_t>(i) * ldd + n, v);
+                v = v + beta * mx_tdm_scheduled::load_out(
+                                   out_dtype, c, static_cast<std::size_t>(m) * ldc + n);
+            mx_tdm_scheduled::store_out(out_dtype, d, static_cast<std::size_t>(i) * ldd + n, v);
         }
     };
     if(threads == 0)

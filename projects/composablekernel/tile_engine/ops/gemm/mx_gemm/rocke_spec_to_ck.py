@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""rocKE mx_gemm kernels as CK comp_tdm_v4 configs, and back.
+"""rocKE mx_gemm kernels as CK comp_tdm_scheduled configs, and back.
 
 A rocKE kernel (its name, e.g. ``mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4_hblate``,
 or its spec dict) becomes a tile_engine config (one instance: a single value per tile, trait
@@ -25,34 +25,39 @@ import sys
 from typing import Dict, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import mx_tdm_v4  # noqa: E402
-from mx_tdm_v4 import MxTdmV4Spec  # noqa: E402
+import mx_tdm_scheduled  # noqa: E402
+from mx_tdm_scheduled import MxTdmScheduledSpec  # noqa: E402
 
-PIPELINE = "comp_tdm_v4"
+PIPELINE = "comp_tdm_scheduled"
 EPILOGUE = "alphabeta"
 SCHEDULER = "intrawave"
 CK_OUT_DTYPES = ("fp16",)
 
 
-def spec_of(kernel) -> MxTdmV4Spec:
+def spec_of(kernel) -> MxTdmScheduledSpec:
     """A spec from a rocKE kernel name, a spec dict or a spec."""
-    if isinstance(kernel, MxTdmV4Spec):
+    if isinstance(kernel, MxTdmScheduledSpec):
         return kernel
     if isinstance(kernel, str):
-        return mx_tdm_v4.parse_kernel_name(kernel)[1]
-    return MxTdmV4Spec.from_dict(kernel)
+        return mx_tdm_scheduled.parse_kernel_name(kernel)[1]
+    return MxTdmScheduledSpec.from_dict(kernel)
 
 
-def _checked(spec: MxTdmV4Spec, out_dtype: Optional[str]) -> MxTdmV4Spec:
-    if spec.a_dtype != spec.b_dtype or spec.a_dtype not in mx_tdm_v4.TE_DTYPES.values():
+def _checked(spec: MxTdmScheduledSpec, out_dtype: Optional[str]) -> MxTdmScheduledSpec:
+    if (
+        spec.a_dtype != spec.b_dtype
+        or spec.a_dtype not in mx_tdm_scheduled.TE_DTYPES.values()
+    ):
         raise ValueError(
             f"{spec.a_dtype}x{spec.b_dtype}: CK configs take one input type, fp4 or fp8"
         )
     if spec.a_dtype == "bf8":
         raise ValueError("bf8: CK configs take one input type, fp4 or fp8")
     if out_dtype is not None:
-        spec = dataclasses.replace(spec, out_dtype=mx_tdm_v4.TE_OUT_DTYPES[out_dtype])
-    out = {v: k for k, v in mx_tdm_v4.TE_OUT_DTYPES.items()}[spec.out_dtype]
+        spec = dataclasses.replace(
+            spec, out_dtype=mx_tdm_scheduled.TE_OUT_DTYPES[out_dtype]
+        )
+    out = {v: k for k, v in mx_tdm_scheduled.TE_OUT_DTYPES.items()}[spec.out_dtype]
     if out not in CK_OUT_DTYPES:
         raise ValueError(
             f"D type {spec.out_dtype}: CK configs build {CK_OUT_DTYPES}; pass out_dtype"
@@ -63,8 +68,8 @@ def _checked(spec: MxTdmV4Spec, out_dtype: Optional[str]) -> MxTdmV4Spec:
     return spec
 
 
-def _tuning(spec: MxTdmV4Spec, shape_traits: bool) -> Dict[str, object]:
-    t = mx_tdm_v4.te_tuning_from_spec(spec, shape_traits=shape_traits)
+def _tuning(spec: MxTdmScheduledSpec, shape_traits: bool) -> Dict[str, object]:
+    t = mx_tdm_scheduled.te_tuning_from_spec(spec, shape_traits=shape_traits)
     t["cluster_dim"] = list(spec.cluster_dim)
     return t
 
@@ -84,7 +89,7 @@ def to_dispatcher_config(
         "pipeline": PIPELINE,
         "epilogue": EPILOGUE,
         "scheduler": SCHEDULER,
-        "tile_config": mx_tdm_v4.tile_from_spec(spec),
+        "tile_config": mx_tdm_scheduled.tile_from_spec(spec),
         **_tuning(spec, shape_traits),
     }
 
@@ -105,28 +110,30 @@ def to_tile_engine_config(
     }
     return {
         "tile_config": {
-            k: {"values": [v]} for k, v in mx_tdm_v4.tile_from_spec(spec).items()
+            k: {"values": [v]} for k, v in mx_tdm_scheduled.tile_from_spec(spec).items()
         },
         "trait_config": {k: {"values": [v]} for k, v in traits.items()},
-        "tuning_config": mx_tdm_v4.tuning_config_section([_tuning(spec, shape_traits)]),
+        "tuning_config": mx_tdm_scheduled.tuning_config_section(
+            [_tuning(spec, shape_traits)]
+        ),
         "k_block_per_cu": 1,
     }
 
 
 def from_dispatcher_config(
     cfg: Dict, M: int = 0, N: int = 0, K: int = 0, out_dtype: str = "fp16"
-) -> Tuple[MxTdmV4Spec, Dict[str, object]]:
+) -> Tuple[MxTdmScheduledSpec, Dict[str, object]]:
     """The rocKE spec (for M, N, K) and the normalized tuning of a dispatcher config."""
     if cfg.get("pipeline") != PIPELINE:
         raise ValueError(f"not a {PIPELINE} config: pipeline {cfg.get('pipeline')!r}")
-    keys = (*mx_tdm_v4.TUNING_DEFAULTS, *mx_tdm_v4.SHAPE_DEFAULTS)
-    tuning = mx_tdm_v4.normalize_tuning({k: cfg[k] for k in keys if k in cfg})
-    spec = mx_tdm_v4.spec_from_tile(
+    keys = (*mx_tdm_scheduled.TUNING_DEFAULTS, *mx_tdm_scheduled.SHAPE_DEFAULTS)
+    tuning = mx_tdm_scheduled.normalize_tuning({k: cfg[k] for k in keys if k in cfg})
+    spec = mx_tdm_scheduled.spec_from_tile(
         cfg["tile_config"],
         tuning,
         cfg["datatype"],
         cfg["datatype"],
-        mx_tdm_v4.TE_OUT_DTYPES[out_dtype],
+        mx_tdm_scheduled.TE_OUT_DTYPES[out_dtype],
         M,
         N,
         K,
@@ -136,7 +143,7 @@ def from_dispatcher_config(
 
 def from_tile_engine_config(
     config: Dict, M: int = 0, N: int = 0, K: int = 0, datatype: str = "fp4"
-) -> Tuple[MxTdmV4Spec, Dict[str, object]]:
+) -> Tuple[MxTdmScheduledSpec, Dict[str, object]]:
     """The spec and tuning of a single-instance tile_engine config."""
 
     def single(section: Dict, key: str):
@@ -146,7 +153,7 @@ def from_tile_engine_config(
         return values[0]
 
     tile = {k: single(config["tile_config"], k) for k in config["tile_config"]}
-    tunings = mx_tdm_v4.expand_tuning_config(config.get("tuning_config"))
+    tunings = mx_tdm_scheduled.expand_tuning_config(config.get("tuning_config"))
     if len(tunings) != 1:
         raise ValueError(
             f"tuning_config makes {len(tunings)} tunings; one instance has one"

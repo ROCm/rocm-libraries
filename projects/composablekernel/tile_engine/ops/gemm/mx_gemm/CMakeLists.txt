@@ -10,7 +10,7 @@ option(ENABLE_CCACHE_MX_GEMM "Enable ccache for GEMM MX ops compilation" OFF)
 # Store the directory path for use in functions
 set(MX_GEMM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-# Function to create individual MX GEMM targets. comp_tdm_v4 kernels pass two more arguments: the
+# Function to create individual MX GEMM targets. comp_tdm_scheduled kernels pass two more arguments: the
 # tuning token (key=value,...) and the kernel-name suffix it adds.
 function(create_individual_mx_gemm_target datatype layout trait tile_config config_json)
     set(tuning "")
@@ -75,7 +75,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
                 --trait_combo "${trait}"
                 ${tuning_args}
                 --gpu_target "${MX_GEMM_GPU_TARGETS_INDIVIDUAL}"
-        DEPENDS ${MX_GEMM_SOURCE_DIR}/mx_gemm_instance_builder.py ${MX_GEMM_SOURCE_DIR}/mx_tdm_v4.py ${config_json}
+        DEPENDS ${MX_GEMM_SOURCE_DIR}/mx_gemm_instance_builder.py ${MX_GEMM_SOURCE_DIR}/mx_tdm_scheduled.py ${config_json}
         COMMENT "Generating ${instance_header}"
     )
 
@@ -107,8 +107,8 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
         --offload-compress
         -include ${instance_header}
     )
-    if(trait MATCHES "^comp_tdm_v4_")
-        # rocKE's comgr options; the v4 schedule assumes them.
+    if(trait MATCHES "^comp_tdm_scheduled_")
+        # rocKE's comgr options; comp_tdm_scheduled's schedule assumes them.
         target_compile_options(${target_name} PRIVATE
             "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
             "SHELL:-mllvm -enable-misched=false"
@@ -124,7 +124,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     add_dependencies(benchmark_mx_gemm_${datatype}_${layout} ${target_name})
 
     # Add to trait-specific targets
-    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_tdm_v4|comp_async|comp_tdm|weight_preshuffle)_")
+    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_tdm_scheduled|comp_async|comp_tdm|weight_preshuffle)_")
         set(pipeline "${CMAKE_MATCH_1}")
         string(REGEX REPLACE "^${pipeline}_" "" trait_tail "${trait}")
         string(REPLACE "_" ";" trait_parts ${trait_tail})
@@ -342,7 +342,7 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all MX GEMM kernels
-    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2;comp_tdm_v4")
+    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2;comp_tdm_scheduled")
     set(MX_GEMM_EPILOGUES "cshuffle;tdm;alphabeta")
     set(MX_GEMM_SCHEDULERS "intrawave")
 

@@ -26,8 +26,8 @@ def _import_gemm_kernel_builder():
 
 GemmKernelBuilder, _validation_utils = _import_gemm_kernel_builder()
 GEMM_MX_PIPELINES_BY_ARCH = _validation_utils.GEMM_MX_PIPELINES_BY_ARCH
-V4_PIPELINE = _validation_utils.MX_TDM_V4_PIPELINE
-mx_tdm_v4 = _validation_utils.load_mx_tdm_v4()
+V4_PIPELINE = _validation_utils.MX_TDM_SCHEDULED_PIPELINE
+mx_tdm_scheduled = _validation_utils.load_mx_tdm_scheduled()
 
 
 def _parse_tile_config(tile_str):
@@ -90,24 +90,24 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             and not (arch == "gfx1250" and (combo[5] or combo[6]))  # pad_k, persistent
         ]
 
-    # comp_tdm_v4 (rocKE's mx_gemm) carries a tuning besides its tile and traits: rocKE's
+    # comp_tdm_scheduled (rocKE's mx_gemm) carries a tuning besides its tile and traits: rocKE's
     # schedule knobs and the shape traits of the instance, from the optional "tuning_config"
     # section (the product of its values; rocKE's defaults when absent). Other pipelines take no
     # tuning.
 
     def _v4_tunings(self):
-        return mx_tdm_v4.expand_tuning_config(self.config.get("tuning_config"))
+        return mx_tdm_scheduled.expand_tuning_config(self.config.get("tuning_config"))
 
     def _v4_spec(self, tile_config, tuning):
-        out = mx_tdm_v4.TE_OUT_DTYPES[self._c_datatype()]
-        return mx_tdm_v4.spec_from_tile(
+        out = mx_tdm_scheduled.TE_OUT_DTYPES[self._c_datatype()]
+        return mx_tdm_scheduled.spec_from_tile(
             tile_config, tuning, self.datatype, self.datatype, out
         )
 
     def _v4_reject_reason(self, tile_config, tuning):
         keys = ("tile", "warp", "warp_tile")
         dims = [tile_config[f"{k}_{d}"] for k in keys for d in "mnk"]
-        return _validation_utils.mx_tdm_v4_reject_reason(
+        return _validation_utils.mx_tdm_scheduled_reject_reason(
             *dims,
             self.datatype,
             self.datatype,
@@ -117,12 +117,12 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         )
 
     def _v4_name_suffix(self, tile_config, tuning):
-        return mx_tdm_v4.instance_name_suffix(
+        return mx_tdm_scheduled.instance_name_suffix(
             self._v4_spec(tile_config, tuning), tuning
         )
 
     def _get_sampled_kernel_list(self):
-        """The parent's enumeration with every comp_tdm_v4 entry expanded over the valid
+        """The parent's enumeration with every comp_tdm_scheduled entry expanded over the valid
         tunings (key "tuning"; None for other pipelines), then sampled."""
         max_instances, self.max_instances = self.max_instances, None
         try:
@@ -144,7 +144,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         return self._apply_sampling(expanded)
 
     def _list_kernels(self):
-        """Write the kernel list for CMake: name|tile|trait, then for comp_tdm_v4
+        """Write the kernel list for CMake: name|tile|trait, then for comp_tdm_scheduled
         |tuning token|name suffix."""
         kernel_list = self._get_sampled_kernel_list()
         with open(
@@ -163,7 +163,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
                     )
                 )
                 if kernel["tuning"] is not None:
-                    token = mx_tdm_v4.encode_tuning(kernel["tuning"])
+                    token = mx_tdm_scheduled.encode_tuning(kernel["tuning"])
                     suffix = self._v4_name_suffix(
                         kernel["tile_config"], kernel["tuning"]
                     )
@@ -176,12 +176,12 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     ):
         if self._normalize_trait_combo(trait_combo)[0] == V4_PIPELINE:
             return self._generate_v4_instance(tile_config, trait_combo, tuning)
-        if tuning is not None and not mx_tdm_v4.is_default_tuning(tuning):
+        if tuning is not None and not mx_tdm_scheduled.is_default_tuning(tuning):
             raise ValueError(f"only {V4_PIPELINE} takes a tuning")
         return super()._generate_kernel_instance(tile_config, trait_combo, validate)
 
     def _generate_v4_instance(self, tile_config, trait_combo, tuning):
-        tuning = mx_tdm_v4.normalize_tuning(tuning)
+        tuning = mx_tdm_scheduled.normalize_tuning(tuning)
         pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
             self._normalize_trait_combo(trait_combo)
         )
@@ -198,7 +198,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             gpu_target=self.gpu_target,
         ):
             raise ValueError(
-                f"{V4_PIPELINE} needs the {_validation_utils.MX_TDM_V4_EPILOGUE} epilogue, "
+                f"{V4_PIPELINE} needs the {_validation_utils.MX_TDM_SCHEDULED_EPILOGUE} epilogue, "
                 "the intrawave scheduler, no padding and no persistence"
             )
         reason = self._v4_reject_reason(tile_config, tuning)
@@ -207,7 +207,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         spec = self._v4_spec(tile_config, tuning)
         kernel_name = self._format_kernel_name(
             trait_combo, tile_config
-        ) + mx_tdm_v4.instance_name_suffix(spec, tuning)
+        ) + mx_tdm_scheduled.instance_name_suffix(spec, tuning)
         instance_code = self._v4_instance_code(kernel_name, tile_config, spec, tuning)
 
         simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
@@ -235,7 +235,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
 // Kernel name for display
 constexpr const char* KERNEL_NAME = "{kernel_name}";
 
-// rocKE's mx_gemm (GemmPipelineAgBgCrCompTDMV4): K-major scales, D = A * B^T.
+// rocKE's mx_gemm (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, D = A * B^T.
 struct SelectedKernel {{
     static constexpr ck_tile::index_t BlockSize = 128;
     static constexpr ck_tile::index_t TileM = {t["tile_m"]};
@@ -256,10 +256,10 @@ struct SelectedKernel {{
         std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;
     static constexpr bool BPreshuffleLaneInterleavedK = true;
 
-    using Tuning = {mx_tdm_v4.cpp_tuning_type(tuning)};
-    using Traits = {mx_tdm_v4.cpp_kernel_traits(spec, tuning)};
-    using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
-        ck_tile::MxGemmTdmV4Problem<
+    using Tuning = {mx_tdm_scheduled.cpp_tuning_type(tuning)};
+    using Traits = {mx_tdm_scheduled.cpp_kernel_traits(spec, tuning)};
+    using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
+        ck_tile::MxGemmTdmScheduledProblem<
             ADataType,
             BDataType,
             CDataType,
@@ -267,7 +267,7 @@ struct SelectedKernel {{
                                    ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
                                    ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
             Traits>,
-        ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
     using Kernel = ck_tile::MxGemmKernel<
         ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
         Pipeline,
@@ -318,7 +318,7 @@ struct SelectedKernel {{
 """
 
     def _generate_cmake_individual_targets(self, kernel_list):
-        """The generated CMake include, with comp_tdm_v4's tuning token and name suffix."""
+        """The generated CMake include, with comp_tdm_scheduled's tuning token and name suffix."""
         cmake_code = (
             f"# Generated CMake file for individual {self.kernel_name_prefix} targets\n"
         )
@@ -332,7 +332,7 @@ struct SelectedKernel {{
             ]
             if tuning is not None:
                 args += [
-                    mx_tdm_v4.encode_tuning(tuning),
+                    mx_tdm_scheduled.encode_tuning(tuning),
                     self._v4_name_suffix(tile_config, tuning),
                 ]
             quoted = " ".join(f'"{a}"' for a in args)
@@ -493,7 +493,7 @@ def main():
     )
     parser.add_argument(
         "--tuning",
-        help="comp_tdm_v4 tuning token (key=value,...) for single generation",
+        help="comp_tdm_scheduled tuning token (key=value,...) for single generation",
     )
     parser.add_argument(
         "--list_kernels",
@@ -550,7 +550,7 @@ def main():
 
         tile_config = _parse_tile_config(args.tile_config)
         trait_combo = _parse_trait_combo(args.trait_combo)
-        tuning = mx_tdm_v4.decode_tuning(args.tuning) if args.tuning else None
+        tuning = mx_tdm_scheduled.decode_tuning(args.tuning) if args.tuning else None
 
         builder._generate_kernel_instance(
             tile_config, trait_combo, validate=True, tuning=tuning

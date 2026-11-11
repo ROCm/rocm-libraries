@@ -137,7 +137,7 @@ class TestMxGemmGpu(unittest.TestCase):
                 MxGemmKernelConfig(
                     datatype=dtype,
                     gpu_target=self.ARCH,
-                    pipeline="comp_tdm_v4",
+                    pipeline="comp_tdm_scheduled",
                     tile_m=m,
                     tile_n=n,
                     tile_k=256,

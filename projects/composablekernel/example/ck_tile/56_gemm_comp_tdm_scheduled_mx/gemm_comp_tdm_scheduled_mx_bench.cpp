@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// MX GEMM on the comp_tdm_v4 pipeline (the rocKE gfx1250 mx_gemm kernel): D = alpha * A @ B^T +
-// beta * C with K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's tuning
-// knobs; -list prints them, -kernel picks one.
+// MX GEMM on the comp_tdm_scheduled pipeline (the rocKE gfx1250 mx_gemm kernel): D = alpha * A @
+// B^T + beta * C with K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's
+// tuning knobs; -list prints them, -kernel picks one.
 //
 //   verify  rocKE's sparse check inputs, D bit for bit against the host reference (sampled rows
 //           when the problem is large)
@@ -37,11 +37,11 @@ namespace {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
-using ck_tile::MxTdmV4Dtype;
-using ck_tile::MxTdmV4HalfBOrder;
-using ck_tile::MxTdmV4HalfPlr;
-using ck_tile::MxTdmV4OutDtype;
-namespace v4 = ck_tile::mx_tdm_v4;
+using ck_tile::MxTdmScheduledDtype;
+using ck_tile::MxTdmScheduledHalfBOrder;
+using ck_tile::MxTdmScheduledHalfPlr;
+using ck_tile::MxTdmScheduledOutDtype;
+namespace sched = ck_tile::mx_tdm_scheduled;
 
 template <typename A,
           typename B,
@@ -54,15 +54,16 @@ template <typename A,
           index_t AtomM,
           typename Tuning,
           typename Traits>
-using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
-    ck_tile::MxGemmTdmV4Problem<A,
-                                B,
-                                O,
-                                ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                                                       ck_tile::sequence<WarpM, WarpN, 1>,
-                                                       ck_tile::sequence<AtomM, 16, 128>>,
-                                Traits>,
-    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
+using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
+    ck_tile::MxGemmTdmScheduledProblem<
+        A,
+        B,
+        O,
+        ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                               ck_tile::sequence<WarpM, WarpN, 1>,
+                               ck_tile::sequence<AtomM, 16, 128>>,
+        Traits>,
+    ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
 
 template <typename P>
 using KernelOf =
@@ -109,20 +110,20 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
 
 template <index_t CX,
           index_t CY,
-          index_t Gl2             = 4,
-          index_t Signal          = -1,
-          index_t Lp              = 1,
-          MxTdmV4HalfPlr Plr      = MxTdmV4HalfPlr::B,
-          MxTdmV4HalfBOrder Order = MxTdmV4HalfBOrder::Ahead,
-          bool Lsi                = true>
-using Tu = ck_tile::MxTdmV4TuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
+          index_t Gl2                    = 4,
+          index_t Signal                 = -1,
+          index_t Lp                     = 1,
+          MxTdmScheduledHalfPlr Plr      = MxTdmScheduledHalfPlr::B,
+          MxTdmScheduledHalfBOrder Order = MxTdmScheduledHalfBOrder::Ahead,
+          bool Lsi                       = true>
+using Tu = ck_tile::MxTdmScheduledTuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
 
 // Whole tiles, even tile count, no K tail.
 template <index_t StoreWidth>
-using Even = ck_tile::MxTdmV4GemmTraits<false, false, false, false, false, 0, 0, StoreWidth>;
+using Even = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, 0, StoreWidth>;
 // Any M, N (edges), any tile count, no K tail.
 template <index_t StoreWidth>
-using Any = ck_tile::MxTdmV4GemmTraits<true, true, false, false, false, -1, 0, StoreWidth>;
+using Any = ck_tile::MxTdmScheduledGemmTraits<true, true, false, false, false, -1, 0, StoreWidth>;
 
 using ck_tile::bf16_t;
 using ck_tile::bf8_t;
@@ -151,8 +152,8 @@ std::vector<uint8_t> read_file(const std::string& path, std::size_t bytes)
     return data;
 }
 
-/// rocKE's sparse check inputs (see test_mx_gemm_tdm_v4_util.hpp) or random finite ones: FP4 any
-/// code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. With `trig` FP4 A and B are rocKE's
+/// rocKE's sparse check inputs (see test_mx_gemm_tdm_scheduled_util.hpp) or random finite ones: FP4
+/// any code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. With `trig` FP4 A and B are rocKE's
 /// timing data instead (the Tensile client's initArrayTrig): the E2M1 code, rounded to nearest
 /// even, of sin (A) or cos (B) of the element's linear index, K fastest.
 struct Host
@@ -182,7 +183,7 @@ uint8_t e2m1_rne(float x)
     return static_cast<uint8_t>((std::signbit(x) ? 8 : 0) | code);
 }
 
-Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t seed)
+Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, uint32_t seed)
 {
     std::mt19937 rng(seed);
     const long_index_t K = s.K;
@@ -194,18 +195,19 @@ Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t
             steps.insert(x);
     while(static_cast<long_index_t>(steps.size()) < std::min<long_index_t>(12, n_steps))
         steps.insert(static_cast<long_index_t>(rng() % n_steps));
-    auto code = [&](MxTdmV4Dtype t) -> uint8_t {
-        if(t == MxTdmV4Dtype::Fp4)
+    auto code = [&](MxTdmScheduledDtype t) -> uint8_t {
+        if(t == MxTdmScheduledDtype::Fp4)
             return static_cast<uint8_t>(rng() % 16);
         if(!sparse)
             return static_cast<uint8_t>(rng() & 0xBF);
-        const int bits = t == MxTdmV4Dtype::Fp8 ? 3 : 2, bias = t == MxTdmV4Dtype::Fp8 ? 7 : 15;
+        const int bits = t == MxTdmScheduledDtype::Fp8 ? 3 : 2,
+                  bias = t == MxTdmScheduledDtype::Fp8 ? 7 : 15;
         return static_cast<uint8_t>(((rng() % 2) << 7) | ((bias - rng() % 2) << bits) |
                                     (rng() % (1u << bits)));
     };
-    auto operand = [&](MxTdmV4Dtype t, index_t rows, bool use_cos) {
-        const long_index_t rb = v4::row_bytes(t, K);
-        const bool trig_fp4   = trig && !sparse && t == MxTdmV4Dtype::Fp4;
+    auto operand = [&](MxTdmScheduledDtype t, index_t rows, bool use_cos) {
+        const long_index_t rb = sched::row_bytes(t, K);
+        const bool trig_fp4   = trig && !sparse && t == MxTdmScheduledDtype::Fp4;
         std::vector<uint8_t> data(static_cast<std::size_t>(rows) * rb, 0);
         for(index_t r = 0; r < rows; ++r)
         {
@@ -216,7 +218,7 @@ Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t
                     trig_fp4
                             ? e2m1_rne(static_cast<float>(use_cos ? std::cos(index) : std::sin(index)))
                             : code(t);
-                if(t == MxTdmV4Dtype::Fp4)
+                if(t == MxTdmScheduledDtype::Fp4)
                     row[k / 2] |= static_cast<uint8_t>(k % 2 ? x << 4 : x);
                 else
                     row[k] = x;
@@ -235,7 +237,7 @@ Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t
     h.a                       = operand(s.a_dtype, s.M, false);
     h.b                       = operand(s.b_dtype, s.N, true);
     const long_index_t groups = (K + 31) / 32;
-    const bool fp4            = s.a_dtype == MxTdmV4Dtype::Fp4;
+    const bool fp4            = s.a_dtype == MxTdmScheduledDtype::Fp4;
     auto scales               = [&](index_t rows) {
         std::vector<uint8_t> natural(static_cast<std::size_t>(rows) * groups);
         for(auto& x : natural)
@@ -245,10 +247,10 @@ Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t
     };
     h.as = scales(s.M);
     h.bs = scales(s.N);
-    h.c.resize(static_cast<std::size_t>(s.M) * s.N * v4::out_bytes(s.out));
+    h.c.resize(static_cast<std::size_t>(s.M) * s.N * sched::out_bytes(s.out));
     std::uniform_real_distribution<float> uniform(-2.0f, 2.0f);
     for(std::size_t i = 0; i < static_cast<std::size_t>(s.M) * s.N; ++i)
-        v4::store_out(s.out, h.c.data(), i, uniform(rng));
+        sched::store_out(s.out, h.c.data(), i, uniform(rng));
     return h;
 }
 
@@ -291,13 +293,13 @@ int run(const Options& o)
     Host h;
     if(o.mode == "file")
         h = Host{read_file(o.load + "/a.bin",
-                           static_cast<std::size_t>(o.M) * v4::row_bytes(s.a_dtype, o.K)),
+                           static_cast<std::size_t>(o.M) * sched::row_bytes(s.a_dtype, o.K)),
                  read_file(o.load + "/b.bin",
-                           static_cast<std::size_t>(o.N) * v4::row_bytes(s.b_dtype, o.K)),
+                           static_cast<std::size_t>(o.N) * sched::row_bytes(s.b_dtype, o.K)),
                  read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
                  read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K)),
                  read_file(o.load + "/c.bin",
-                           static_cast<std::size_t>(o.M) * o.N * v4::out_bytes(s.out))};
+                           static_cast<std::size_t>(o.M) * o.N * sched::out_bytes(s.out))};
     else
         h = make_inputs(s, o.mode == "verify", o.data == "tensile", o.seed);
 
@@ -367,29 +369,29 @@ int run(const Options& o)
             pick.insert(static_cast<index_t>(rng() % o.M));
         rows.assign(pick.begin(), pick.end());
     }
-    const index_t ob = v4::out_bytes(s.out);
+    const index_t ob = sched::out_bytes(s.out);
     std::vector<uint8_t> want(rows.size() * o.N * ob);
-    ck_tile::reference_mx_gemm_tdm_v4(s.a_dtype,
-                                      s.b_dtype,
-                                      s.out,
-                                      h.a.data(),
-                                      v4::row_bytes(s.a_dtype, o.K),
-                                      h.b.data(),
-                                      v4::row_bytes(s.b_dtype, o.K),
-                                      h.as.data(),
-                                      h.bs.data(),
-                                      h.c.data(),
-                                      o.N,
-                                      want.data(),
-                                      o.N,
-                                      o.M,
-                                      o.N,
-                                      o.K,
-                                      alpha,
-                                      o.beta,
-                                      0,
-                                      rows.data(),
-                                      static_cast<index_t>(rows.size()));
+    ck_tile::reference_mx_gemm_tdm_scheduled(s.a_dtype,
+                                             s.b_dtype,
+                                             s.out,
+                                             h.a.data(),
+                                             sched::row_bytes(s.a_dtype, o.K),
+                                             h.b.data(),
+                                             sched::row_bytes(s.b_dtype, o.K),
+                                             h.as.data(),
+                                             h.bs.data(),
+                                             h.c.data(),
+                                             o.N,
+                                             want.data(),
+                                             o.N,
+                                             o.M,
+                                             o.N,
+                                             o.K,
+                                             alpha,
+                                             o.beta,
+                                             0,
+                                             rows.data(),
+                                             static_cast<index_t>(rows.size()));
     std::size_t bad = 0;
     for(std::size_t i = 0; i < rows.size(); ++i)
         for(index_t n = 0; n < o.N; ++n)
@@ -399,8 +401,8 @@ int run(const Options& o)
                 std::printf("D(%d, %d): got %g, want %g\n",
                             rows[i],
                             n,
-                            v4::load_out(s.out, got.data(), g),
-                            v4::load_out(s.out, want.data(), w));
+                            sched::load_out(s.out, got.data(), g),
+                            sched::load_out(s.out, want.data(), w));
         }
     std::printf("%s: %zu of %zu rows checked, %zu mismatches\n",
                 bad ? "FAIL" : "PASS",
@@ -426,17 +428,18 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
               run<Kernel<pk_fp4_t, pk_fp4_t, bf16_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
             {"maf_hblate",
              {"maf, GL2 distance 2, half-B late",
-              run<Kernel<pk_fp4_t,
-                         pk_fp4_t,
-                         fp8_t,
-                         256,
-                         256,
-                         512,
-                         2,
-                         2,
-                         32,
-                         Tu<4, 4, 2, -1, 1, MxTdmV4HalfPlr::B, MxTdmV4HalfBOrder::Late>,
-                         Even<8>>>}},
+              run<Kernel<
+                  pk_fp4_t,
+                  pk_fp4_t,
+                  fp8_t,
+                  256,
+                  256,
+                  512,
+                  2,
+                  2,
+                  32,
+                  Tu<4, 4, 2, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
+                  Even<8>>>}},
             {"maf_c2x2",
              {"maf on a 2x2 cluster",
               run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<2, 2>, Even<8>>>}},
@@ -454,7 +457,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                          2,
                          2,
                          16,
-                         Tu<4, 4, 4, -1, 1, MxTdmV4HalfPlr::None>,
+                         Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
                          Even<4>>>}},
             {"mab",
              {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
@@ -467,7 +470,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                          4,
                          1,
                          16,
-                         Tu<1, 4, 0, -1, 0, MxTdmV4HalfPlr::None>,
+                         Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
                          Even<1>>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
@@ -480,7 +483,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                          4,
                          1,
                          16,
-                         Tu<1, 4, 0, -1, 0, MxTdmV4HalfPlr::None>,
+                         Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
                          Even<1>>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",

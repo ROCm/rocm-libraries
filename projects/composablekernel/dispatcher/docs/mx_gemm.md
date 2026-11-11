@@ -7,8 +7,8 @@ FP4 stores the even K element in the low nibble and the odd K element in the hig
 nibble, so its input storage is `[M, K/2]` and `[N, K/2]` bytes.
 
 The bridge exposes all five pipeline choices in the native MX GEMM selector, and
-on gfx1250 also `comp_tdm_v4`, the CK backport of rocKE's `mx_gemm` (see
-[comp_tdm_v4](#comp_tdm_v4-rockes-mx_gemm)):
+on gfx1250 also `comp_tdm_scheduled`, the CK backport of rocKE's `mx_gemm` (see
+[comp_tdm_scheduled](#comp_tdm_scheduled-rockes-mx_gemm)):
 
 | Target | Pipeline | Native implementation | Epilogue |
 | --- | --- | --- | --- |
@@ -20,7 +20,7 @@ on gfx1250 also `comp_tdm_v4`, the CK backport of rocKE's `mx_gemm` (see
 | gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
 | gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
 | gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
-| gfx1250 | `comp_tdm_v4` | `GemmPipelineAgBgCrCompTDMV4` (`MxGemmKernel`) | `alphabeta` (`MxAlphaBetaEpilogue`) |
+| gfx1250 | `comp_tdm_scheduled` | `MxGemmPipelineAgBgCrCompTDMScheduled` (`MxGemmKernel`) | `alphabeta` (`MxAlphaBetaEpilogue`) |
 
 The first five are the choices in the native `MxGemmPipelineType` selector.
 CK-Tile also has a separate `MXFlatmmKernel` family, including
@@ -51,11 +51,11 @@ warps on gfx1250.
 The generator and Python configuration validation apply the same architecture,
 tile-distribution, and LDS limits.
 
-The gfx1250 path uses WMMA and supports revision 0; only `comp_tdm_v4` uses
+The gfx1250 path uses WMMA and supports revision 0; only `comp_tdm_scheduled` uses
 cluster launch. M and N may include partial tiles subject to the
 weight-preshuffle N alignment; the host pads their scale buffers before
 reshuffling. K must be divisible by both 128 and the selected block tile K,
-except for `comp_tdm_v4`, whose shape traits decide.
+except for `comp_tdm_scheduled`, whose shape traits decide.
 Split-K, persistent execution, and K padding are not supported by this bridge's
 gfx1250 path.
 
@@ -79,13 +79,13 @@ entry points use the same generated kernel, while their host code chooses the
 architecture's native scale reshuffling helper. Select one GPU architecture per
 Tile Engine build.
 
-## comp_tdm_v4 (rocKE's mx_gemm)
+## comp_tdm_scheduled (rocKE's mx_gemm)
 
-`comp_tdm_v4` is rocKE's gfx1250 `mx_gemm` kernel (rocKE commit `b32989439dc`) in
+`comp_tdm_scheduled` is rocKE's gfx1250 `mx_gemm` kernel (rocKE commit `b32989439dc`) in
 CK-Tile: `D = alpha * A @ B^T + beta * C`, with FP4, FP8 or BF8 inputs and an FP8,
 FP16 or BF16 D. The bridge and Tile Engine build it with one input type (FP4 or
 FP8), an FP16 D, `alpha = 1` and `beta = 0`. Example 56
-(`example/ck_tile/56_gemm_comp_tdm_v4_mx`) and the C++ tests cover the rest.
+(`example/ck_tile/56_gemm_comp_tdm_scheduled_mx`) and the C++ tests cover the rest.
 
 Scales are K-major, `[ceil(K / 128)][MN][4]` E8M0 bytes. The kernel reads the
 scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]`
@@ -98,7 +98,7 @@ says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 instance's shape traits.
 
 rocKE tunes each kernel with schedule knobs that CK-Tile pipelines normally fix.
-`comp_tdm_v4` takes them as a tuning, set per kernel (dispatcher) or as a
+`comp_tdm_scheduled` takes them as a tuning, set per kernel (dispatcher) or as a
 product (Tile Engine). Missing keys take rocKE's defaults:
 
 | Key | Default | Meaning |
@@ -125,14 +125,14 @@ In the dispatcher, put the keys at the top level of the configuration, or in
 `MxGemmKernelConfig(tuning={...})`:
 
 ```python
-MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_v4",
+MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_scheduled",
                    tile_m=256, tile_n=256, tile_k=512, warp_tile_m=32,
                    tuning={"cluster_dim": [2, 2], "half_b_order": "late"})
 ```
 
 In a Tile Engine JSON, add a `tuning_config` section; every combination of its
 values is tried with every tile, and invalid combinations are dropped by rocKE's
-rules (`mx_gemm/mx_tdm_v4.py`):
+rules (`mx_gemm/mx_tdm_scheduled.py`):
 
 ```json
 "tuning_config": {
@@ -245,7 +245,7 @@ used as given.
 | --- | --- |
 | `bridge_ci_config_gfx950.json` | Default on gfx950. Small sweep covering all three gfx950 pipelines. |
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
-| `comp_tdm_v4_gfx1250.json` | `comp_tdm_v4` with a `tuning_config` product (20 FP4 kernels). |
+| `comp_tdm_scheduled_gfx1250.json` | `comp_tdm_scheduled` with a `tuning_config` product (20 FP4 kernels). |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
 | `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (64 kernels per input type). |
@@ -290,7 +290,7 @@ bridge generator:
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
 | `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
 | `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
-| `comp_tdm_v4` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `alphabeta` epilogue; rocKE's rules for each tuning |
+| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `alphabeta` epilogue; rocKE's rules for each tuning |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
 `persistent`. Phase 1 prints `Expanded configs: N`, the number of kernels left
@@ -317,7 +317,7 @@ file with `--problems`:
 }
 ```
 
-K must be a multiple of the block tile K, and of 128 on gfx1250 (`comp_tdm_v4`:
+K must be a multiple of the block tile K, and of 128 on gfx1250 (`comp_tdm_scheduled`:
 see its shape traits). On gfx1250,
 M/N tails are supported even with `pad_m=pad_n=false`; weight preshuffle also
 requires N divisible by 16. gfx950 retains the bridge's scale-packing and native
@@ -410,24 +410,24 @@ no GPU or HIP compiler is needed:
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_cmake.py -v
 ```
 
-The `comp_tdm_v4` suite checks the tuning configuration, the Tile Engine kernel
+The `comp_tdm_scheduled` suite checks the tuning configuration, the Tile Engine kernel
 list and generated headers, the dispatcher generator and the rocKE conversion; it
 needs neither a GPU nor a compiler:
 
 ```bash
-python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_tdm_v4.py -v
+python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_tdm_scheduled.py -v
 ```
 
 All three suites are registered with CTest when dispatcher tests are enabled:
 
 ```bash
-ctest --test-dir build -R '^dispatcher_test_mx_gemm_(bridge|cmake|tdm_v4)$' --output-on-failure
+ctest --test-dir build -R '^dispatcher_test_mx_gemm_(bridge|cmake|tdm_scheduled)$' --output-on-failure
 ```
 
 The GPU suite builds all 16 gfx1250 TDM CI configurations, four larger TDM
 configurations whose LDS allocation exceeds 64 KiB, six configurations covering
 async, eight-wave async, and weight preshuffle in FP4 and FP8, and four TDM
-configurations with the 32 × 32 × 128 warp tile, and two `comp_tdm_v4`
+configurations with the 32 × 32 × 128 warp tile, and two `comp_tdm_scheduled`
 configurations per input type: 34 configurations total. It tests
 partial tiles and one through five and eight K-loop iterations with two seeds,
 varies scales across rows and K blocks, and repeats eight-wave launches to catch

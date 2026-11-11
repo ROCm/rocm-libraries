@@ -6,14 +6,14 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4.hpp"
+#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled.hpp"
 
 namespace ck_tile {
 
 /**
  * @brief Problem of MxAlphaBetaEpilogue: the pipeline whose C block tile it stores and the D store
- *        width in elements, by default the pipeline's MxTdmV4GemmTraits. C is the single D tensor,
- *        row-major and of D's type.
+ *        width in elements, by default the pipeline's MxTdmScheduledGemmTraits. C is the single D
+ * tensor, row-major and of D's type.
  */
 template <typename Pipeline_, index_t StoreWidth_ = remove_cvref_t<Pipeline_>::Traits::kStoreWidth>
 struct MxAlphaBetaEpilogueProblem
@@ -28,8 +28,8 @@ struct MxAlphaBetaEpilogueProblem
 };
 
 /**
- * @brief Epilogue of GemmPipelineAgBgCrCompTDMV4 after rocKE's mx_gemm: D = alpha * acc + beta * C
- *        with C the single Ds tensor; the beta == 0 path never reads C.
+ * @brief Epilogue of MxGemmPipelineAgBgCrCompTDMScheduled after rocKE's mx_gemm: D = alpha * acc +
+ * beta * C with C the single Ds tensor; the beta == 0 path never reads C.
  *
  * The C block tile is shuffled to the store distribution (N repeat innermost), so each thread
  * stores and loads vectors of StoreWidth adjacent columns through the D and C windows; their
@@ -58,10 +58,10 @@ struct MxAlphaBetaEpilogue
     }
     /// The stores go from the accumulators straight to D.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
-    static constexpr MxTdmV4Spec kSpec =
+    static constexpr MxTdmScheduledSpec kSpec =
         Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
-    static constexpr bool kFp8         = kSpec.out == MxTdmV4OutDtype::Fp8E4M3;
-    static constexpr bool kFp16        = kSpec.out == MxTdmV4OutDtype::Fp16;
+    static constexpr bool kFp8         = kSpec.out == MxTdmScheduledOutDtype::Fp8E4M3;
+    static constexpr bool kFp16        = kSpec.out == MxTdmScheduledOutDtype::Fp16;
     static constexpr index_t kOutBytes = kSpec.out_bytes();
     static constexpr index_t kFp8Width = kSpec.fp8_convert_width();
     static constexpr float kFp8Max     = 448.0f;
@@ -70,10 +70,11 @@ struct MxAlphaBetaEpilogue
     static constexpr bool kCheckBounds =
         Pipeline::kPadN || (Pipeline::LargeTensors && Pipeline::kPadM);
 
-    static_assert(kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
-                      Pipeline::kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
-                  "comp_tdm_v4: the D store width must be a power of 2 dividing the N repeat, "
-                  "<= 16 B");
+    static_assert(
+        kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
+            Pipeline::kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
+        "comp_tdm_scheduled: the D store width must be a power of 2 dividing the N repeat, "
+        "<= 16 B");
 
     using Storage = std::conditional_t<kOutBytes == 1, uint8_t, uint16_t>;
     using SVec = std::conditional_t<kStoreWidth == 1, Storage, ext_vector_t<Storage, kStoreWidth>>;

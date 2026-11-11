@@ -278,8 +278,8 @@ class MxGemmKernelConfig:
 
     k_block_per_cu: int = 1
 
-    # comp_tdm_v4 only: rocKE's tuning knobs and the instance's shape traits (keys of
-    # mx_tdm_v4.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take rocKE's defaults).
+    # comp_tdm_scheduled only: rocKE's tuning knobs and the instance's shape traits (keys of
+    # mx_tdm_scheduled.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take rocKE's defaults).
     tuning: Optional[Dict[str, Any]] = None
 
     # cached name so we do not re-shell the codegen repeatedly.
@@ -288,7 +288,7 @@ class MxGemmKernelConfig:
     def to_codegen_config(self) -> dict:
         arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-        if pipeline == "comp_tdm_v4":
+        if pipeline == "comp_tdm_scheduled":
             default_epilogue = "alphabeta"
         elif pipeline in ("comp_tdm", "comp_tdm_v2"):
             default_epilogue = "tdm"
@@ -383,7 +383,7 @@ class MxGemmKernelConfig:
             self.epilogue
             or (
                 "alphabeta"
-                if self.pipeline == "comp_tdm_v4"
+                if self.pipeline == "comp_tdm_scheduled"
                 else "tdm"
                 if (
                     self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")

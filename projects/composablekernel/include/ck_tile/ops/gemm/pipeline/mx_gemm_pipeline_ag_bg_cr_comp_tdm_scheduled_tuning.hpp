@@ -6,9 +6,9 @@
 
 namespace ck_tile {
 
-/// How the K loop of GemmPipelineAgBgCrCompTDMV4 reads B from LDS. B: in two halves, two
+/// How the K loop of MxGemmPipelineAgBgCrCompTDMScheduled reads B from LDS. B: in two halves, two
 /// s_wait_dscnt per K step, B-outer WMMAs (needs local prefetch and an even N repeat). None: whole.
-enum class MxTdmV4HalfPlr : int
+enum class MxTdmScheduledHalfPlr : int
 {
     B    = 0,
     None = 1
@@ -17,20 +17,20 @@ enum class MxTdmV4HalfPlr : int
 /// Where the half-B reads of the next K step go (HalfPlr::B only). Ahead: everything but B's second
 /// half before the first wait; three B half-sets live. Late: scales and A after the first wait, B's
 /// halves one half later; two B half-sets live.
-enum class MxTdmV4HalfBOrder : int
+enum class MxTdmScheduledHalfBOrder : int
 {
     Ahead = 0,
     Late  = 1
 };
 
 /**
- * @brief Tuning of GemmPipelineAgBgCrCompTDMV4: the scheduling choices that are not part of the
- *        tile shape, with the names and defaults of rocKE's gfx1250 MxGemmSpec.
+ * @brief Tuning of MxGemmPipelineAgBgCrCompTDMScheduled: the scheduling choices that are not part
+ * of the tile shape, with the names and defaults of rocKE's gfx1250 MxGemmSpec.
  *
  * The tile (tile_m/n/k), wave group (warp_m/n), WMMA atom (warp tile) and data types come from the
- * pipeline Problem. Derive from this type and override what changes, or use MxTdmV4TuningT.
+ * pipeline Problem. Derive from this type and override what changes, or use MxTdmScheduledTuningT.
  */
-struct MxTdmV4DefaultTuning
+struct MxTdmScheduledDefaultTuning
 {
     /// Workgroups per cluster along grid x (N tiles), y (M tiles) and z. 1x1x1 is no cluster
     /// launch. A tiles are multicast along x, B tiles along y.
@@ -43,32 +43,32 @@ struct MxTdmV4DefaultTuning
     /// clamped to the K step's WMMAs, or half of them with HalfPlr::B).
     static constexpr index_t kClusterSignalWmmas = -1;
     /// 1: K step s + 1 is read from LDS during K step s. 0: each K step reads, drains, computes.
-    static constexpr index_t kLocalPrefetch        = 1;
-    static constexpr MxTdmV4HalfPlr kHalfPlr       = MxTdmV4HalfPlr::B;
-    static constexpr MxTdmV4HalfBOrder kHalfBOrder = MxTdmV4HalfBOrder::Ahead;
+    static constexpr index_t kLocalPrefetch               = 1;
+    static constexpr MxTdmScheduledHalfPlr kHalfPlr       = MxTdmScheduledHalfPlr::B;
+    static constexpr MxTdmScheduledHalfBOrder kHalfBOrder = MxTdmScheduledHalfBOrder::Ahead;
     /// TensileLite's LDSSegmentInterleave 1 (true) or 0 (the baseline region order).
     static constexpr bool kLdsSegmentInterleave = true;
 };
 
-/// MxTdmV4DefaultTuning with every value given, in a fixed order (for generated code).
+/// MxTdmScheduledDefaultTuning with every value given, in a fixed order (for generated code).
 template <index_t ClusterDimX,
           index_t ClusterDimY,
           index_t Gl2PrefetchDistance,
           index_t ClusterSignalWmmas,
           index_t LocalPrefetch,
-          MxTdmV4HalfPlr HalfPlr,
-          MxTdmV4HalfBOrder HalfBOrder,
+          MxTdmScheduledHalfPlr HalfPlr,
+          MxTdmScheduledHalfBOrder HalfBOrder,
           bool LdsSegmentInterleave>
-struct MxTdmV4TuningT : MxTdmV4DefaultTuning
+struct MxTdmScheduledTuningT : MxTdmScheduledDefaultTuning
 {
-    static constexpr index_t kClusterDimX          = ClusterDimX;
-    static constexpr index_t kClusterDimY          = ClusterDimY;
-    static constexpr index_t kGl2PrefetchDistance  = Gl2PrefetchDistance;
-    static constexpr index_t kClusterSignalWmmas   = ClusterSignalWmmas;
-    static constexpr index_t kLocalPrefetch        = LocalPrefetch;
-    static constexpr MxTdmV4HalfPlr kHalfPlr       = HalfPlr;
-    static constexpr MxTdmV4HalfBOrder kHalfBOrder = HalfBOrder;
-    static constexpr bool kLdsSegmentInterleave    = LdsSegmentInterleave;
+    static constexpr index_t kClusterDimX                 = ClusterDimX;
+    static constexpr index_t kClusterDimY                 = ClusterDimY;
+    static constexpr index_t kGl2PrefetchDistance         = Gl2PrefetchDistance;
+    static constexpr index_t kClusterSignalWmmas          = ClusterSignalWmmas;
+    static constexpr index_t kLocalPrefetch               = LocalPrefetch;
+    static constexpr MxTdmScheduledHalfPlr kHalfPlr       = HalfPlr;
+    static constexpr MxTdmScheduledHalfBOrder kHalfBOrder = HalfBOrder;
+    static constexpr bool kLdsSegmentInterleave           = LdsSegmentInterleave;
 };
 
 } // namespace ck_tile
