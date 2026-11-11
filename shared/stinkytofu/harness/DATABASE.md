@@ -35,16 +35,36 @@ One Markdown file per entry, with frontmatter:
 name: <short-slug>
 kind: pattern | insight | finding | threshold | procedure | memory
 status: candidate | confirmed     # not used by memories
+certainty: verified | measured | hypothesis   # for patterns, findings, insights
 source: <page URL, repo file path, PR or issue number, experiment id, or person; may be empty for a memory>
 source_revision: <the page's revision number when the entry was written, if the source is a page>
 confirmed_by: <name>              # set by a human, together with status
 last_verified: <date>
 scope: <target or kernel family this applies to>
 ---
-What it is, how to detect it (for patterns), why it matters, and the evidence.
+> **Claim:** <one sentence a person can agree or disagree with>
+> **Certainty:** <same as the field>. **Evidence:** <what, where, when, how many runs>
+> **Not checked:** <the biggest gap>
+> **Next test:** <one line, for measured and hypothesis>
+> **To confirm:** read this card. If the claim, the evidence, and "not checked" are right, set
+> `status: confirmed` and `confirmed_by: <name>`.
+
+<details: how to detect it, why it matters, what was ruled out, how to apply>
 ```
 
-`index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <status>`.
+**The review card.** The first lines of the body are a short card, so a person can decide in under a
+minute whether the entry is worth noting down. Everything after it is detail for whoever uses the entry.
+
+**Certainty** says how sure the claim is. It is set by whoever writes the entry, and a person can change it.
+- `verified`: a fix, an independent source (the hardware docs, the code), or a repeated test confirms it.
+- `measured`: seen in our runs, but the cause is not proven.
+- `hypothesis`: an explanation or a rule that has not been tested yet. Treat it as a place to start.
+
+Certainty is not status. `status` says whether a person reviewed the entry. `certainty` says how sure the
+claim is. A reviewed entry can still be a hypothesis.
+
+`index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <certainty> | <status>`.
+Use `-` for the certainty of a procedure or a memory.
 **Entries from a page.** When you are about to use an entry that has `source_revision`, check the
 page's revision number (the count of saved edits, not a release number) with whatever access you have.
 `source` gives the page address. Use the site in that address, not your default site. The check
