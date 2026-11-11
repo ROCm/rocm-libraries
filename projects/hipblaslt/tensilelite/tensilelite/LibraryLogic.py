@@ -29,6 +29,7 @@ from . import SolutionSelectionLibrary
 from .Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
+from .Common.DataType import DataType
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
 from .Common.TimingInstrumentation import timing_context
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
@@ -40,14 +41,11 @@ from sys import stdout
 import array
 import csv
 import os
-import re
 import time
 import math
 
 # rocRoller turns workgroup mapping off below this K (solution_selection.cpp).
 _ROCROLLER_WGM_K = 4096
-_CUSTOM_TILE_RE = re.compile(r"WGT_(\d+)x(\d+)x(\d+)")
-_SIX_BIT_PAIR_RE = re.compile(r"(?:FP6|BF6)_(?:FP6|BF6)")
 # Sizes rocRoller distinguishes for these MX tiles. GridBased snaps a query up
 # to the next table M, so each of these must be its own exact row when the
 # winning tile changes.
@@ -91,25 +89,39 @@ def isCustomKernelSolution(solution) -> bool:
 
 
 def customKernelTile(solution):
-  """(macroM, macroN, macroK, usesWorkgroupMapping) from a rocRoller custom kernel."""
-  name = _solutionField(solution, "CustomKernelName") or ""
+  """(macroM, macroN, macroK, usesWorkgroupMapping) from a rocRoller custom kernel.
+
+  Read from its CustomKernel block: the macrotile, and whether the kernel
+  takes an RR_WorkgroupMapping kernarg.
+  """
   custom = _solutionField(solution, "CustomKernel")
-  if not name and isinstance(custom, dict):
-    name = custom.get("name") or ""
-  match = _CUSTOM_TILE_RE.search(name)
-  if match:
-    macroM, macroN, macroK = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-  elif isinstance(custom, dict) and custom.get("macrotile"):
-    macroM, macroN, macroK = (int(x) for x in custom["macrotile"][:3])
-  else:
+  if not isinstance(custom, dict) or not custom.get("macrotile"):
     return None
-  return (macroM, macroN, macroK, "_WGM" in name)
+  macroM, macroN, macroK = (int(x) for x in custom["macrotile"][:3])
+  usesWgm = any(
+    isinstance(arg, dict) and arg.get("semantic") == "RR_WorkgroupMapping"
+    for arg in custom.get("args") or [])
+  return (macroM, macroN, macroK, usesWgm)
+
+
+def _isSixBitType(problemType, key) -> bool:
+  value = problemType.get(key)
+  if value is None:
+    value = problemType.get("DataType")
+  if value is None:
+    return False
+  try:
+    return DataType(value).is6bitFloat()
+  except (KeyError, RuntimeError):
+    return False
 
 
 def _sixBitPair(solutions) -> bool:
+  """Whether some solution's ProblemType has FP6 or BF6 on both operands."""
   for solution in solutions:
-    name = _solutionField(solution, "CustomKernelName") or ""
-    if _SIX_BIT_PAIR_RE.search(name):
+    problemType = _solutionField(solution, "ProblemType")
+    if hasattr(problemType, "get") and _isSixBitType(problemType, "DataTypeA") \
+        and _isSixBitType(problemType, "DataTypeB"):
       return True
   return False
 
