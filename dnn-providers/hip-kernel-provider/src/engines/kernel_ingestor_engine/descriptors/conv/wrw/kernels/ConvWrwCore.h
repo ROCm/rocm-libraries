@@ -1651,6 +1651,11 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         const bool trackStart = mc == 0;
         const unsigned rows
             = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R) & phaseRows;
+        // A step whose x row lies in the padding only moves the ring: its window is zeros
+        // (a third of the steps of a 3-row filter at dilation 36 on 128 rows).
+        const int ihC = sh > 1 ? sh * (m - q0) + p : rho - a.ph + m * a.dh;
+        const int idC = od * a.sd + t * a.dd - a.pd;
+        const bool xIn = idC >= 0 && idC < a.di && ihC >= 0 && ihC < a.hi;
         mc = mc + 1 == M ? 0 : mc + 1;
         advance();
         issue(K3Int<0>{}, it + 1 < end, it + 1 >= begin);
@@ -1688,7 +1693,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         // multiplies' register live ranges apart from the loads' and stores'.
         const T* bBase = Tiles::TR ? Bs + wc * WTC + k3TrLane<Atom, LDB>(lane)
                                    : Bs + (wc * WTC + lane % DIM) * LDB + kb;
-        if(it >= begin)
+        if(it >= begin && xIn)
             k3MultiplyRows<Atom, T, R, S, SW, DW, FK, FC, BC, LDB, KK, TRB, Tiles::PH>(
                 acc, ring, bBase, rows);
         __builtin_amdgcn_sched_barrier(0);
@@ -2091,10 +2096,14 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
     while(it < end)
     {
         const bool trackStart = mc == 0;
+        // A step whose x row lies in the padding only moves the ring (its window is zeros).
+        const int ihC = rho - a.ph + m * a.dh;
+        const int idC = od * a.sd + t * a.dd - a.pd;
+        const bool xIn = idC >= 0 && idC < a.di && ihC >= 0 && ihC < a.hi;
         mc = mc + 1 == M ? 0 : mc + 1;
         advance();
         issue(it + 1 < end, it + 1 >= begin);
-        if(it >= begin)
+        if(it >= begin && xIn)
         {
             const T* Bs = ldsB + xb * Tiles::B_ELEMS + tc * TC;
 #pragma unroll 2
@@ -2965,7 +2974,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
 #pragma unroll
                 for(int x = 0; x < FK; ++x)
                     ring[0][kk][x] = k3FragAt<Atom, T, 0>(aBase + x * DIM * LDA + kk * KA);
-            if(it >= begin)
+            if(it >= begin && st[J].xOk)
                 k3MultiplyRows<Atom, T, R, S, 1, DW, FK, FC, BC, LDB, KK>(
                     acc, ring, Bs + (wc * WTC + lane % DIM) * LDB + kb, st[J].rows);
             // All waves are done with this slot before it is refilled (NS - 1 steps later the
@@ -3141,6 +3150,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
         }
     };
     unsigned rowsOf[NS];
+    bool xInOf[NS]; // the step's x row is in the image (else its window is zeros)
     // Issues the cursor's step into slot I.
     auto issue = [&](auto sc, bool live, bool math) {
         constexpr int I = decltype(sc)::value;
@@ -3157,6 +3167,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
         const int yRow = od * ys2 + oh * ys3 + q0 * ys4;
         const int xRow = id * xs2 + ih * xs3 + iw0 * xs4;
         rowsOf[I] = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R);
+        xInOf[I] = xOk;
 #if K3_HAS_DMA
         const __amdgpu_buffer_rsrc_t yr = __builtin_amdgcn_make_buffer_rsrc(
             const_cast<T*>(static_cast<const T*>(a.dy)) + nn * a.yImage,
@@ -3220,6 +3231,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
             constexpr int NEXT = (J + NS - 1) % NS;
             advance();
             const unsigned rows = rowsOf[J];
+            const bool xIn = xInOf[J];
             issue(K3Int<NEXT>{}, it + NS - 1 < end, it + NS - 1 >= begin);
             const bool trackStart = mc == 0;
             mc = mc + 1 == M ? 0 : mc + 1;
@@ -3237,7 +3249,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
 #pragma unroll
                 for(int x = 0; x < FK; ++x)
                     ring[0][kk][x] = k3FragTr<Atom, T, LDA>(As + aLane + kk * KA * LDA + x * DIM);
-            if(it >= begin)
+            if(it >= begin && xIn)
                 k3MultiplyRows<Atom, T, R, S, 1, DW, FK, FC, BC, LDB, KK, 1, G::WIN>(
                     acc, ring, Bs + bLane, rows);
             ++it;

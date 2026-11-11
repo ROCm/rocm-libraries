@@ -18,6 +18,10 @@
 //                    1 = register tile: compile-time CONV_DW_KD x CONV_DW_KH x CONV_DW_KW (KD 1
 //                        for 1-D and 2-D), every tap's sum in registers, dy read once per
 //                        position
+//                    2 = matrix core (ConvDepthwiseHankelWrw.h): 16-bit channels-last, unit
+//                        stride and dilation, compile-time CONV_DW_KH x CONV_DW_KW, on 4x4x4
+//                        MFMA; CONV_DW_Q columns a tile, CONV_DW_G rows a step, CONV_DW_NWG
+//                        16-channel groups a wave
 //   CONV_DW_FLIP     1 reflects the filter (true convolution)
 
 #include "ConvDepthwiseValuWrwArgs.h"
@@ -235,9 +239,17 @@ __device__ inline void accumulateStrips(float (&sum)[TAPS],
 
 } // namespace
 
+#if CONV_DW_VARIANT == 2
+#include "ConvDepthwiseHankelWrw.h"
+#endif
+
 extern "C" __global__ void __launch_bounds__(BLOCK)
     ConvDepthwiseValuWrwPartial(ConvDepthwiseValuWrwArgs a)
 {
+#if CONV_DW_VARIANT == 2
+    static_assert(hankel::THREADS == BLOCK, "one block size");
+    hankel::partial<__is_same(ElementType, __bf16)>(a);
+#else
     const auto* x = static_cast<const ElementType*>(a.x);
     const auto* dy = static_cast<const ElementType*>(a.dy);
     const int tid = static_cast<int>(threadIdx.x);
@@ -413,6 +425,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     }
 #endif
 #endif
+#endif // CONV_DW_VARIANT == 2
 }
 
 /// dw[c, tap] = the partitions' sums in partition order, rounded once; reflected for true
@@ -426,8 +439,25 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         return;
     }
+    // Partition order; 16 loads in flight a thread (one at a time left a fold of a few
+    // hundred partitions waiting on memory latency per partition).
     float total = 0.0f;
-    for(int p = 0; p < a.partitions; ++p)
+    int p = 0;
+    for(; p + 16 <= a.partitions; p += 16)
+    {
+        float v[16];
+#pragma unroll
+        for(int j = 0; j < 16; ++j)
+        {
+            v[j] = a.partial[(long)(p + j) * count + index];
+        }
+#pragma unroll
+        for(int j = 0; j < 16; ++j)
+        {
+            total += v[j];
+        }
+    }
+    for(; p < a.partitions; ++p)
     {
         total += a.partial[(long)p * count + index];
     }

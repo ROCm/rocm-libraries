@@ -13,10 +13,13 @@ def w(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-FIELDS = ["dtype", "layout", "variant", "kd", "kh", "kw"]
+FIELDS = ["dtype", "layout", "variant", "kd", "kh", "kw", "q", "g", "nwg", "bpc"]
 STRINGS = {"dtype", "layout", "variant"}
-CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0)] + [
-    dict(variant="tile", kd=kd, kh=kh, kw=kw)
+# The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
+# wave, bpc blocks per dispatch unit) are 0 for the VALU variants.
+NO_MMA = dict(q=0, g=0, nwg=0, bpc=0)
+CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA)] + [
+    dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA)
     for kd, kh, kw in (
         (1, 3, 3),
         (1, 5, 5),
@@ -25,6 +28,24 @@ CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0)] + [
         (1, 1, 31),
         (3, 3, 3),
     )
+]
+# Matrix core (gfx908 fp16, gfx90a / gfx942 / gfx950 fp16 and bf16; channels-last 16-bit, unit
+# stride): the schedules that won somewhere on gfx950's ConvNeXt / EfficientNet / MobileNet
+# shapes (q, g, nwg, bpc).
+HANKEL_SCHEDULES = (
+    (32, 1, 1, 2),
+    (32, 2, 1, 2),
+    (32, 1, 1, 4),
+    (32, 2, 1, 4),
+    (32, 1, 2, 2),
+    (16, 2, 1, 2),
+    (16, 2, 2, 1),
+    (16, 1, 2, 2),
+)
+HANKEL = [
+    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc)
+    for k in (3, 5, 7)
+    for q, g, nwg, bpc in HANKEL_SCHEDULES
 ]
 
 kmd, umd, udd, ued = U("kmd"), U("umd"), U("udd"), U("ued")
@@ -66,7 +87,7 @@ w(
         "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
         "graph_match": {"native": "hipkernel.conv_depthwise_valu_wrw.graph_match"},
         "metadata": kmd,
-        "knobs": ["variant"],
+        "knobs": ["variant", "q", "g", "nwg", "bpc"],
         "behavior_notes": ["runtime_compilation"],
     },
 )
@@ -95,6 +116,24 @@ for layout in ("NHWC", "NCHW"):
                     "priority": 0,
                 }
             )
+for c in HANKEL:
+    for dtype, dt in (("HALF", "f16"), ("BFLOAT16", "bf16")):
+        tag = f"hankel_k{c['kh']}x{c['kw']}.q{c['q']}g{c['g']}w{c['nwg']}b{c['bpc']}"
+        name = f"conv_depthwise_valu_wrw.{dt}.nhwc.{tag}"
+        kernels.append(
+            {
+                "version": "1.0",
+                "id": U(name),
+                "name": name,
+                "kernel_source": {
+                    "kind": "embedded_source",
+                    "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+                    "entry_point": "ConvDepthwiseValuWrwPartial",
+                },
+                "metadata": {"dtype": dtype, "layout": "NHWC", **c},
+                "priority": 0,
+            }
+        )
 # Floors first across both layouts.
 kernels.sort(key=lambda k: k["metadata"]["variant"] != "floor")
 w(
