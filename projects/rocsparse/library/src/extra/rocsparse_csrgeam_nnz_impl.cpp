@@ -525,14 +525,14 @@ namespace rocsparse
         // Quick return if possible
         if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
         {
-            // rocsparse_spgeam analysis is documented to run before C exists.
-            // The nonzero count is stored on the descriptor; do not write nnz_C
-            // when the caller has not supplied C.
+            // rocsparse_spgeam analysis is documented to run before C exists,
+            // so the nonzero count is stored on the descriptor.
             if(called_from_spgeam && descr != nullptr)
             {
                 descr->nnz_C = 0;
             }
 
+            // nnz_C is null when the caller has not supplied C.
             if(nnz_C != nullptr)
             {
                 // spgeam passes &mat_C->nnz, a host field, even in device pointer mode.
@@ -556,32 +556,9 @@ namespace rocsparse
                     && descr->csr_row_ptr_C != nullptr)
             {
                 // The descriptor row pointer is base 0. Fill it so a later
-                // symbolic or numeric compute copies a valid empty pattern into C.
-                switch(descr->indextype)
-                {
-                case rocsparse_indextype_i32:
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::valset(handle,
-                                          m + 1,
-                                          static_cast<int32_t>(rocsparse_index_base_zero),
-                                          static_cast<int32_t*>(descr->csr_row_ptr_C)));
-                    break;
-                }
-                case rocsparse_indextype_i64:
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::valset(handle,
-                                          m + 1,
-                                          static_cast<int64_t>(rocsparse_index_base_zero),
-                                          static_cast<int64_t*>(descr->csr_row_ptr_C)));
-                    break;
-                }
-                default:
-                {
-                    return rocsparse_status_internal_error;
-                }
-                }
+                // compute or symbolic compute copies a valid empty pattern into C.
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                    handle, m + 1, int64_t(0), descr->indextype, descr->csr_row_ptr_C));
             }
             return rocsparse_status_success;
         }
