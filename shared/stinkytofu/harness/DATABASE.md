@@ -22,7 +22,8 @@ $HARNESS_DB/
   entries/       patterns, findings, and measurements (including noise per benchmark and machine).
                  One file each: source, status, confirmed_by, last_verified.
   memories/      what past runs learned about the code, the workflow, and the machines
-  config/        host names, ssh aliases, leak-patterns. Humans only; agents do not change it.
+  config/        host names, ssh aliases, leak-patterns. Humans write it. Agents may read it, and
+                 do not change it.
 ```
 
 ## Entry format
@@ -46,7 +47,8 @@ What it is, how to detect it (for patterns), why it matters, and the evidence.
 `index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <status>`.
 **Entries from a page.** When you are about to use an entry that has `source_revision`, check the
 page's revision number (the count of saved edits, not a release number) with whatever access you have.
-`source` gives the page address.
+`source` gives the page address. Use the site in that address, not your default site. The check
+applies when you follow an entry. When you only mention a `candidate`, it is optional.
 - Same revision: use the entry as it is and say nothing.
 - Higher revision: read the page now and compare it with the entry's facts. List what is changed, new,
   or removed. Tell the developer, and recommend either "a fact in the entry changed, update it" or "the
@@ -61,14 +63,16 @@ not copy it into the entry. A memory (what a run learned) may have no source. An
 stale.
 
 An entry's `status` is `candidate` (a hit warns the developer) or `confirmed` (a hit rejects
-the candidate before it costs GPU time). Only a human sets `confirmed`.
+the candidate before it costs GPU time). Only a human sets `confirmed`. A `confirmed` entry with a
+person's name in `confirmed_by` counts wherever the database lives. If the database is a git repo, its
+pull request is the review.
 
 - **Read:** use the index and load entries on demand. Never load the whole database.
 - **Write:** agents never edit the main branch. When a task taught you something that may be worth
   keeping, tell the developer and ask whether to note it down, not after every run. If they agree,
   work on a branch and open a PR in the database repo with status `candidate`. A human reviews and
-  merges it. In a local directory that is not a reviewed repo, write the entry file with
-  `status: candidate` and add its line to `index.md`.
+  merges it. If the database is a plain directory, write the entry file with `status: candidate` and
+  add its line to `index.md`.
 - **Refine:** an entry whose `scope` matches the target can add to a public guideline on the same
   point, for example a fuller version of a procedure. Follow the entry where it adds detail, and tell
   the developer you are using it. Only a `confirmed` entry is followed. A `candidate` entry is
@@ -77,10 +81,8 @@ the candidate before it costs GPU time). Only a human sets `confirmed`.
   confidentiality.
 - **Promote:** a human may turn a confirmed entry into a doc or a rule. An agent does not edit docs or
   rules to record what it learned.
-- **Local database:** `$HARNESS_DB` may point at any directory with this layout, for personal use. The
-  harness never creates one. Entries in a directory that is not the reviewed shared repo stay
-  `candidate`. Only an entry that went through the shared repo's review can be `confirmed`, so a
-  local database never makes the pattern check reject anything.
+- **Any directory works:** `$HARNESS_DB` may point at any directory with this layout. The harness never
+  creates one.
 - **Sync:** engineers pull the database repo. One file per entry keeps merges conflict-free.
 - **Not available or opted out:** the framework works without the database. It only loses the
   pattern check and the stored noise values, so measure the noise (SD) fresh from repeated

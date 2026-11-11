@@ -53,11 +53,14 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
 ## SQTT capture
 
 ```text
-1. Use the profiler that ships with ROCm (rocprofv3 --att, with the rocprof-trace-decoder).
-   See the ROCprofiler-SDK "Using thread trace" docs. Capture one kernel, with the same shape as
-   the benchmark case, narrowed with the kernel and iteration options.
+1. Use the profiler that ships with ROCm (rocprofv3 --att, with the rocprof-trace-decoder). See the
+   ROCprofiler-SDK "Using thread trace" docs:
+   https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-thread-trace.html
+   Capture one kernel, with the same shape as the benchmark case, narrowed with
+   `--kernel-include-regex` and `--kernel-iteration-range`.
 2. If the profiler or the decoder is missing, or does not support your target, get it from its
-   source repository. The public source is ROCm/rocm-systems on GitHub. If the developer or the
+   source repository. The public source is ROCm/rocm-systems on GitHub
+   (`projects/rocprof-trace-decoder`). If the developer or the
    database names a different source, use that one. If neither does, stop and ask.
 3. View the result with ROCprof Compute Viewer.
 4. Setup that depends on the target or the machine, and the analysis (what to look for and what
