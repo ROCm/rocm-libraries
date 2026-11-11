@@ -3,6 +3,15 @@
 
 # ROCm Version Identity Investigation
 
+> **Outcome (2026-11-11):** see Q121–Q125 and Q134 in
+> `PythonBuildGrillingDecisions.md`. TheRock-built prefixes now provide their
+> full identity through `share/therock/therock_manifest.json`
+> (`rocm_package_version`); only pre-TheRock prefixes are base-only. The wheel
+> build reads no `.info/version` or `ROCM_PATH`: only TheRock stamps a ROCm
+> identity, and other builds are `+g<sha>`. The client is paired with the package
+> by source commit, not by version, and records the ROCm it was built against.
+> The findings below are kept as evidence.
+
 Status: Final two-adapter runtime model accepted. The implemented runtime
 now uses Python SDK package identity plus core tool trampolines, and conventional
 prefixes use root-relative tools plus a base-only `.info/version` identity.

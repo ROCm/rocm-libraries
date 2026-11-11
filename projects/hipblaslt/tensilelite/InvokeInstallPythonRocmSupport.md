@@ -23,8 +23,7 @@ empty-`ROCM_PATH` failure, and each configure.
 
 **Not implemented yet:** the Python SDK build model (`rocm_sdk_core` detection,
 venv-script tools, `rocm-sdk path --root/--cmake`, the core/devel base-version
-check and its devel-payload diagnostic), the `TENSILELITE_ROCM_VERSION` CMake
-companion for full nightly identities, `ROCmCMakeBuildTools_DIR`, GPU
+check and its devel-payload diagnostic), `ROCmCMakeBuildTools_DIR`, GPU
 auto-detection through the selected environment, the `VIRTUAL_ENV` guard, and
 the two integration lanes.
 
@@ -139,8 +138,12 @@ The Python SDK implementation must:
 The conventional-prefix model preserves the existing selection order:
 
 1. Select the root from `--rocm-path`, `ROCM_PATH`, or `/opt/rocm`.
-2. Read the distribution identity from `<root>/.info/version`.
-3. Resolve compilers from the selected root.
+2. Resolve compilers from the selected root.
+
+*Revised 2026-11-11 (Q121, Q134 in `PythonBuildGrillingDecisions.md`):* invoke
+passes no ROCm identity to the package build, which is versioned `+g<sha>`; the
+client records the selected root's identity as its build ROCm
+(`tensilelite-client --build-rocm`).
 
 The selected conventional root must also be authoritative at every native CMake
 configure. Pass it explicitly as `-DROCM_PATH=<root>` and pass its resolved CMake

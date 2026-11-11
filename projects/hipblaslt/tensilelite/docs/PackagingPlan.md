@@ -25,10 +25,12 @@ C++ host ABI.
 ### Python distributions
 
 - `tensilelite` is a pure Python generator wheel versioned as
-  `<component>+rocm<release>`.
-- `tensilelite-tensile-compat` is an optional, exactly matched command-wrapper
-  wheel available for the defined migration window.
-- TensileLite and its compatibility wheel require Python 3.10 or newer.
+  `<component>+g<sha>[.dirty]` for a build from a checkout, and as
+  `<component>+rocm<identity>` or `<component>+devrocm<identity>` only when
+  TheRock passes its package version (Q121 and Q125 in
+  `PythonBuildGrillingDecisions.md`, 2026-11-11).
+- There is no compatibility wheel (Q133, 2026-11-11).
+- TensileLite requires Python 3.10 or newer.
 - A properly packaged, importable `rocisa` is an external prerequisite.
 
 ### Public imports and commands
@@ -101,8 +103,9 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
 
 ## Phase 4: Packaging Metadata and Contents
 
-1. Make PEP 517 metadata derive the target ROCm release exclusively from the
-   selected root's `.info/version`.
+1. *Revised 2026-11-11 (Q121, Q123):* PEP 517 metadata reads no ROCm
+   installation. It derives the local version from the source commit, or from
+   TheRock's package version when TheRock passes one.
 2. Emit the TensileLite distribution version and declare `rocisa` without
    choosing rocisa's versioning policy.
 3. Keep the generator compatibility constant independent from distribution
@@ -163,21 +166,19 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
 
 ## Phase 6: Compatibility and Downstream Migration
 
-1. Add `tensilelite-tensile-compat` with exact dependency on the matching
-   canonical wheel.
-2. Provide warning wrappers for existing legacy commands, including:
-   - `Tensile`;
-   - `TensileCreateLibrary`;
-   - `TensileLogic`;
-   - benchmark, merge, retune, update, summation, and logic-conversion tools;
-   - `TensileVerifyStinkyElfText`;
-   - `TensileGetPath`.
-3. Print the removal release once per process on stderr and preserve delegated
-   arguments and exit status.
-4. Do not add any `Tensile` import package to the compatibility wheel.
-5. Update GEKO and other in-repo callers to resolve installed commands/APIs
+*Revised 2026-11-11 (Q133 in
+[PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md)): no
+compatibility package is published.*
+
+1. Remove the legacy `Tensile*` console scripts without a compatibility wheel;
+   the `tensilelite` command family (`tensilelite run`,
+   `tensilelite create-library`, `tensilelite logic`, ...) is the only command
+   surface.
+2. Do not add any `Tensile` import package.
+3. Update GEKO and other in-repo callers to resolve installed commands/APIs
    rather than `tensilelite/Tensile/bin` paths.
-6. Update README, tox, pytest, coverage, pre-commit, and test-category paths.
+4. Update README, tox, pytest, coverage, pre-commit, and test-category paths,
+   and document the replacement subcommand for each legacy command.
 
 ## Test and Acceptance Plan
 
@@ -200,7 +201,7 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
   `.info/version`, exact matches, and release mismatches.
 - Test missing/broken rocisa imports and missing clients while treating rocisa's
   internal loader diagnostics as opaque dependency failures.
-- Verify `import Tensile` fails with both canonical and compatibility wheels.
+- Verify `import Tensile` fails with the wheel.
 
 ### CLI and resources
 
