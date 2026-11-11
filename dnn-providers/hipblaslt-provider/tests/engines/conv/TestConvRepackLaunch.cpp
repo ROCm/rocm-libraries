@@ -243,14 +243,26 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     g.prePadding[1] = g.prePadding[2] = 0;
     g.stride[1] = g.stride[2] = 2;
     auto args = col2im(g);
-    // Channels-first: runs along width, as wide as every row start keeps aligned (rows of 28:
-    // 8 bytes of fp16, 16 of fp32).
+    // Channels-first: runs along (height, width), which dx packs together: 16 bytes though rows
+    // of 28 fp16 are only 8-byte aligned.
     auto launch = col2imLaunch(args, "Half", 2);
-    EXPECT_EQ(launch.entry, "Col2ImDisjointWidth2V4");
-    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 7 + 255) / 256);
+    EXPECT_EQ(launch.entry, "Col2ImDisjointWidth2V8");
+    EXPECT_EQ(args.launch.rows, 1);
+    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 28 / 8 + 255) / 256);
     launch = col2imLaunch(args, "Float", 4);
     EXPECT_EQ(launch.entry, "Col2ImDisjointWidth4V4");
-    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 7 + 255) / 256);
+    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 28 / 4 + 255) / 256);
+    // Padded rows (a pitch of 30): runs within a row, as wide as every row start keeps aligned
+    // (4 bytes).
+    auto padded = g;
+    padded.xStrides[3] = 30;
+    padded.xStrides[1] = 28 * 30;
+    padded.xStrides[0] = 64 * 28 * 30;
+    auto paddedArgs = col2im(padded);
+    launch = col2imLaunch(paddedArgs, "Half", 2);
+    EXPECT_EQ(launch.entry, "Col2ImDisjointWidth2V2");
+    EXPECT_EQ(paddedArgs.launch.rows, 0);
+    EXPECT_EQ(launch.grid, (8u * 64 * 28 * 14 + 255) / 256);
 
     // Channels-last: runs along (width, channels), which dx packs together.
     auto last = geometry(8, 64, 28, 28, true);

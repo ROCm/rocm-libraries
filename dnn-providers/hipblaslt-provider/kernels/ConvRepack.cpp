@@ -354,23 +354,27 @@ __device__ inline void storeRun(Bits* x, const Bits (&values)[V], int count, boo
 }
 
 /// Disjoint col2im into a width-contiguous dx (channels-first): one thread per run of V dx
-/// elements along width, 32-bit indices (the host checks every offset fits). The depth and height
-/// sources are found once per run, the width ones stepped along it without dividing. Writes
-/// every dx element once -- a column entry or 0 -- and reads each column entry once; moves bytes,
-/// so the result is the generic kernel's bit for bit.
+/// elements along width, or, when dx packs (height, width) (args.launch.rows = 1), along both --
+/// so rows of any width still make whole runs. 32-bit indices (the host checks every offset
+/// fits). Depth and height sources are found once per run row, width ones stepped along it
+/// without dividing. Writes every dx element once -- a column entry or 0 -- and reads each column
+/// entry once; moves bytes, so the result is the generic kernel's bit for bit.
 template <typename Bits, int V>
 __device__ void col2imDisjointWidth(const Col2ImArgs& args)
 {
     const ConvColumnGeometry& g = args.geometry;
     const auto* col = reinterpret_cast<const Bits*>(args.col);
     auto* x = static_cast<Bits*>(args.x);
+    const bool fused = args.launch.rows != 0;
     const int id = static_cast<int>(g.input[0]);
     const int ih = static_cast<int>(g.input[1]);
     const int iw = static_cast<int>(g.input[2]);
     const int cg = static_cast<int>(g.cPerGroup);
     const int channels = static_cast<int>(g.groups) * cg;
-    const int runs = (iw + V - 1) / V;
-    const int total = static_cast<int>(g.n) * channels * id * ih * runs;
+    const int lines = fused ? 1 : ih;
+    const int length = fused ? ih * iw : iw;
+    const int runs = (length + V - 1) / V;
+    const int total = static_cast<int>(g.n) * channels * id * lines * runs;
     const int index = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x)
                       + static_cast<int>(threadIdx.x);
     if(index >= total)
@@ -380,35 +384,41 @@ __device__ void col2imDisjointWidth(const Col2ImArgs& args)
     int rest = index;
     const int run = rest % runs;
     rest /= runs;
-    const int iy = rest % ih;
-    rest /= ih;
+    const int line = rest % lines;
+    rest /= lines;
     const int iz = rest % id;
     rest /= id;
     const int c = rest % channels;
     const int n = rest / channels;
 
-    int oz = 0;
-    int ez = 0;
-    int oy = 0;
-    int ey = 0;
-    const bool rowRead = disjointSource(g, 0, iz, oz, ez) && disjointSource(g, 1, iy, oy, ey);
     const DisjointColumns columns(g);
     const int group = c / cg;
     const int kw = static_cast<int>(g.filter[2]);
     const int ow = static_cast<int>(g.output[2]);
     const int stride = static_cast<int>(g.stride[2]);
     const int dilation = static_cast<int>(g.dilation[2]);
-    // Element (ez, ey, 0) at output (oz, oy, 0) of this image and channel.
-    const int rowIndex = columns.base(g, n, group, c - group * cg)
-                         + (ez * static_cast<int>(g.filter[1]) + ey) * kw * columns.elementStep
-                         + (oz * static_cast<int>(g.output[1]) + oy) * ow * columns.outputStep;
+    const int pad = static_cast<int>(g.prePadding[2]);
+    int oz = 0;
+    int ez = 0;
+    const bool planeRead = disjointSource(g, 0, iz, oz, ez);
+    // Element (ez, 0, 0) at output (oz, 0, 0) of this image and channel.
+    const int planeIndex = columns.base(g, n, group, c - group * cg)
+                           + ez * static_cast<int>(g.filter[1]) * kw * columns.elementStep
+                           + oz * static_cast<int>(g.output[1]) * ow * columns.outputStep;
 
-    const int ix0 = run * V;
-    const int count = iw - ix0 < V ? iw - ix0 : V;
-    // The first element's source along width, then stepped: offset < 0 is the leading padding.
-    const int s0 = ix0 + static_cast<int>(g.prePadding[2]);
-    int ox = s0 >= 0 ? s0 / stride : 0;
-    int offset = s0 >= 0 ? s0 - ox * stride : s0;
+    const int f0 = run * V;
+    const int count = length - f0 < V ? length - f0 : V;
+    int iy = fused ? f0 / iw : line;
+    int ix = fused ? f0 - iy * iw : f0;
+    // The row's source along height, and the first element's along width, then stepped:
+    // offset < 0 is the leading padding.
+    int oy = 0;
+    int ey = 0;
+    bool rowRead = planeRead && disjointSource(g, 1, iy, oy, ey);
+    int rowIndex = planeIndex + ey * kw * columns.elementStep + oy * ow * columns.outputStep;
+    int s = ix + pad;
+    int ox = s >= 0 ? s / stride : 0;
+    int offset = s >= 0 ? s - ox * stride : s;
     Bits values[V];
 #pragma unroll
     for(int j = 0; j < V; ++j)
@@ -435,10 +445,20 @@ __device__ void col2imDisjointWidth(const Col2ImArgs& args)
             offset = 0;
             ++ox;
         }
+        if(++ix == iw && j + 1 < count)
+        {
+            // Fused runs: on to the next row's first element.
+            ix = 0;
+            ++iy;
+            rowRead = planeRead && disjointSource(g, 1, iy, oy, ey);
+            rowIndex = planeIndex + ey * kw * columns.elementStep + oy * ow * columns.outputStep;
+            ox = pad >= 0 ? pad / stride : 0;
+            offset = pad >= 0 ? pad - ox * stride : pad;
+        }
     }
     const int target = n * static_cast<int>(g.xStrides[0]) + c * static_cast<int>(g.xStrides[1])
-                       + iz * static_cast<int>(g.xStrides[2]) + iy * static_cast<int>(g.xStrides[3])
-                       + ix0;
+                       + iz * static_cast<int>(g.xStrides[2])
+                       + (fused ? f0 : line * static_cast<int>(g.xStrides[3]) + f0);
     storeRun<Bits, V>(x + target, values, count, count == V);
 }
 
