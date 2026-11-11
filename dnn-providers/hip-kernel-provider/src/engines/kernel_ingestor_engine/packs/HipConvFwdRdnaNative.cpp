@@ -42,7 +42,7 @@
  *
  * The engine serves a graph of exactly one conv-forward node on RDNA (gfx11-generic,
  * gfx12-generic). Its kernels use no matrix instructions. Kernel family `fma_igemm` is an
- * FMA implicit GEMM (kernels/MIOpenConv3dFwdFmaHip.cpp) for 2-D and 3-D problems, packed
+ * FMA implicit GEMM (kernels/ConvFwdFmaIgemm.cpp) for 2-D and 3-D problems, packed
  * NC(D)HW or N(D)HWC, FLOAT / HALF / BFLOAT16, any stride, dilation and padding, and groups
  * with at least MIN_OUT_CHANNELS_PER_GROUP output channels each. The matcher refuses
  * everything else, so another engine gets the plan.
@@ -96,7 +96,7 @@ constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
 
-// Must match MIOpenConv3dFwdFmaHip.cpp.
+// Must match kernels/ConvFwdFmaIgemm.cpp.
 constexpr int64_t FMA_TILE_M = 128;
 constexpr unsigned int FMA_BLOCK_SIZE = 256;
 // Fewer output channels per group leave most of the (at least 32-wide) channel tile idle;
@@ -301,14 +301,14 @@ private:
     ConvProblem _problem;
 };
 
-/// The kernel's CONV3D_DTYPE for a dtype.
+/// The kernel's CONV_DTYPE for a dtype.
 int fmaDtypeCode(data_objects::DataType dtype)
 {
     return dtype == data_objects::DataType::FLOAT ? 0
                                                   : (dtype == data_objects::DataType::HALF ? 1 : 2);
 }
 
-/// Mirrors the argument list of MIOpenConv3dFwdFmaHip and the launch() below one for one.
+/// Mirrors the argument list of ConvFwdFmaIgemm and the launch() below one for one.
 const std::vector<KernelArgument>& fmaKernelSignature()
 {
     static const KernelArgument s_buffer{
@@ -429,7 +429,7 @@ public:
     {
     }
 
-    /// Channels-first weights are read in place (CONV3D_WEI_KCZYX) and channels-last ones
+    /// Channels-first weights are read in place (CONV_WEI_KCZYX) and channels-last ones
     /// are K x taps x C already, so nothing is transposed.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
@@ -455,9 +455,9 @@ public:
 
         // Same defines as the UKD's build, for a kernel compiled at run time.
         compilation::KernelCompileOptions options(matched->x, context.deviceProperties.gcnArchName);
-        options.add("CONV3D_DTYPE", fmaDtypeCode(problem.dtype));
-        options.add("CONV3D_NDHWC", channelsLast);
-        options.add("CONV3D_WEI_KCZYX", 1 - channelsLast);
+        options.add("CONV_DTYPE", fmaDtypeCode(problem.dtype));
+        options.add("CONV_CHANNELS_LAST", channelsLast);
+        options.add("CONV_WEI_KCZYX", 1 - channelsLast);
         options.add("TILE_N", static_cast<int>(fmaTileN(problem)));
 
         auto code = buildIngestorKernelCode(

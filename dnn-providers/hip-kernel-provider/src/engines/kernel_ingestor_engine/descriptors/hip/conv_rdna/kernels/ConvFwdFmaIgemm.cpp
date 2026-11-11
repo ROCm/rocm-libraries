@@ -1,35 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
-#endif
 
-// Forward 3D convolution as an implicit GEMM on plain FMA (no WMMA / MFMA), so it runs on every
-// RDNA target including the ones without matrix instructions (gfx101X, gfx103X).
+// Forward convolution as an implicit GEMM on plain FMA (no WMMA / MFMA), so it runs on every
+// RDNA target including the ones without matrix instructions. Derived from MIOpen's
+// MIOpenConv3dFwdFmaHip.cpp. The kernel is 3D; 2D problems run with depth 1 and 1D problems as
+// 2D with height 1.
 //
 // GEMM view, per group g:
 //   M = N * Do * Ho * Wo (output positions), N_gemm = K / groups, K_gemm = Z * Y * X * C / groups
@@ -42,28 +19,24 @@
 // issued before the FMAs of the current one and land in the other half of a double-buffered LDS
 // tile, so each iteration needs one barrier.
 //
-// By default the weights are read as K x (Z * Y * X) x (C / groups), so the channels of one filter
-// tap are contiguous. That is the NDHWC weight layout as is. NCDHW weights are
-// K x (C / groups) x (Z * Y * X): the 3D solver first transposes them into the workspace with
-// MIOpenConv3dFwdFmaHipWeiToKzyxc (with a 1x1x1 filter both layouts coincide and the transpose is
-// skipped). With CONV3D_WEI_KCZYX the kernel reads the NCDHW weights in place instead (the channels
-// of one tap are `taps` apart), so no workspace is needed; the 2D solver
-// (ConvHipImplicitGemmFma2dFwd) runs the kernel that way with depth 1.
+// Weights are read in their own layout, so no workspace is needed: channels-last weights are
+// K x (Z * Y * X) x (C / groups), channels-first weights are K x (C / groups) x (Z * Y * X) and
+// are read with the channels of one tap `taps` apart (CONV_WEI_KCZYX).
 //
-// Compile-time parameters (set by the solver):
-//   CONV3D_DTYPE      0 = fp32, 1 = fp16, 2 = bf16
-//   CONV3D_NDHWC      0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
-//   CONV3D_WEI_KCZYX  0 = weights K x taps x (C / groups), 1 = K x (C / groups) x taps
-//   TILE_N            output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
+// Compile-time parameters (one set per UKD):
+//   CONV_DTYPE          0 = fp32, 1 = fp16, 2 = bf16
+//   CONV_CHANNELS_LAST  0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+//   CONV_WEI_KCZYX      0 = weights K x taps x (C / groups), 1 = K x (C / groups) x taps
+//   TILE_N              output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
 
-#ifndef CONV3D_DTYPE
-#define CONV3D_DTYPE 0
+#ifndef CONV_DTYPE
+#define CONV_DTYPE 0
 #endif
-#ifndef CONV3D_NDHWC
-#define CONV3D_NDHWC 0
+#ifndef CONV_CHANNELS_LAST
+#define CONV_CHANNELS_LAST 0
 #endif
-#ifndef CONV3D_WEI_KCZYX
-#define CONV3D_WEI_KCZYX 0
+#ifndef CONV_WEI_KCZYX
+#define CONV_WEI_KCZYX 0
 #endif
 #ifndef TILE_N
 #define TILE_N 128
@@ -78,7 +51,7 @@
 #define LOAD_A (TILE_M * TILE_C / BLOCK_SIZE)
 #define LOAD_B (TILE_N * TILE_C / BLOCK_SIZE)
 
-#if CONV3D_DTYPE == 0
+#if CONV_DTYPE == 0
 typedef float data_t;
 __device__ static inline float to_float(data_t v)
 {
@@ -88,7 +61,7 @@ __device__ static inline data_t from_float(float v)
 {
     return v;
 }
-#elif CONV3D_DTYPE == 1
+#elif CONV_DTYPE == 1
 typedef _Float16 data_t;
 __device__ static inline float to_float(data_t v)
 {
@@ -115,31 +88,31 @@ __device__ static inline data_t from_float(float v)
 #endif
 
 extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
-    MIOpenConv3dFwdFmaHip(const data_t* __restrict__ in,
-                          const data_t* __restrict__ wei,
-                          data_t* __restrict__ out,
-                          int N,
-                          int C,
-                          int Di,
-                          int Hi,
-                          int Wi,
-                          int K,
-                          int Z,
-                          int Y,
-                          int X,
-                          int Do,
-                          int Ho,
-                          int Wo,
-                          int sd,
-                          int sh,
-                          int sw,
-                          int pd,
-                          int ph,
-                          int pw,
-                          int dd,
-                          int dh,
-                          int dw,
-                          int groups)
+    ConvFwdFmaIgemm(const data_t* __restrict__ in,
+                    const data_t* __restrict__ wei,
+                    data_t* __restrict__ out,
+                    int N,
+                    int C,
+                    int Di,
+                    int Hi,
+                    int Wi,
+                    int K,
+                    int Z,
+                    int Y,
+                    int X,
+                    int Do,
+                    int Ho,
+                    int Wo,
+                    int sd,
+                    int sh,
+                    int sw,
+                    int pd,
+                    int ph,
+                    int pw,
+                    int dd,
+                    int dh,
+                    int dw,
+                    int groups)
 {
     __shared__ float as[2][TILE_C][TILE_M + 4];
     __shared__ float bs[2][TILE_C][TILE_N + 4];
@@ -159,7 +132,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     // A row (output position) staged by this thread. NCDHW: consecutive threads take consecutive
     // positions so the loads coalesce along W; NDHWC: consecutive threads take consecutive
     // channels of one position.
-#if CONV3D_NDHWC
+#if CONV_CHANNELS_LAST
     const int a_row = tid / (TILE_C / LOAD_A);
     const int a_col = (tid % (TILE_C / LOAD_A)) * LOAD_A;
 #else
@@ -182,7 +155,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const int di0 = aod * sd - pd;
     const int hi0 = aoh * sh - ph;
     const int wi0 = aow * sw - pw;
-#if CONV3D_NDHWC
+#if CONV_CHANNELS_LAST
     const data_t* in_n = in + static_cast<long>(an) * sp_in * C + static_cast<long>(g) * Cg;
     const long in_cstride = 1;
 #else
@@ -198,7 +171,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     // Both weight layouts hold taps * Cg values per output channel; they differ only inside it.
     const data_t* wei_k
         = wei + (static_cast<long>(g) * Kg + (bk_ok ? bk : 0)) * static_cast<long>(taps) * Cg;
-#if CONV3D_WEI_KCZYX
+#if CONV_WEI_KCZYX
     const long wei_cstride = taps;
 #else
     const long wei_cstride = 1;
@@ -207,7 +180,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     // Register tile owned by this thread, strided by TILE / MICRO so that each store instruction
     // writes consecutive addresses. Consecutive threads step along the dimension that is
     // contiguous in the output: K for NDHWK, the output position for NKDHW.
-#if CONV3D_NDHWC
+#if CONV_CHANNELS_LAST
     const int tn = tid % (TILE_N / MICRO_N);
     const int tm = tid / (TILE_N / MICRO_N);
 #else
@@ -241,12 +214,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         // Out-of-range rows read the clamped offset 0 and are replaced by 0 with a select, so
         // the loads do not branch.
         const long a_sp = a_ok ? (static_cast<long>(di) * Hi + hi) * Wi + wi : 0;
-#if CONV3D_NDHWC
+#if CONV_CHANNELS_LAST
         const data_t* a_ptr = in_n + a_sp * C;
 #else
         const data_t* a_ptr = in_n + a_sp;
 #endif
-#if CONV3D_WEI_KCZYX
+#if CONV_WEI_KCZYX
         const data_t* b_ptr = wei_k + tap;
 #else
         const data_t* b_ptr = wei_k + static_cast<long>(tap) * Cg;
@@ -316,7 +289,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         const long m = m0 + tm + i * (TILE_M / MICRO_M);
         if(m >= M)
             continue;
-#if CONV3D_NDHWC
+#if CONV_CHANNELS_LAST
         data_t* out_m = out + m * K + static_cast<long>(g) * Kg;
         const long out_kstride = 1;
 #else
@@ -330,21 +303,5 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
             if(k < Kg)
                 out_m[k * out_kstride] = from_float(acc[i][j]);
         }
-    }
-}
-
-// KCZYX -> KZYXC weight transpose for the NCDHW path. w is K x Cg x taps, wt is K x taps x Cg.
-extern "C" __global__ void __launch_bounds__(BLOCK_SIZE) MIOpenConv3dFwdFmaHipWeiToKzyxc(
-    const data_t* __restrict__ w, data_t* __restrict__ wt, int K, int Cg, int taps)
-{
-    const long total = static_cast<long>(K) * Cg * taps;
-    for(long idx = static_cast<long>(blockIdx.x) * BLOCK_SIZE + threadIdx.x; idx < total;
-        idx += static_cast<long>(gridDim.x) * BLOCK_SIZE)
-    {
-        const long t = idx % taps;
-        const long kc = idx / taps;
-        const long c = kc % Cg;
-        const long k = kc / Cg;
-        wt[(k * taps + t) * Cg + c] = w[idx];
     }
 }
