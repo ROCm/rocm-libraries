@@ -38,9 +38,10 @@ identities (or `X.Y.Z` on an older install). A `+g<commit>` wheel makes no ROCm
 claim and is not compared. `rocisa` is a separately prepared Python dependency;
 TensileLite requires it to be importable but does not prescribe its layout.
 
-At present the Python-SDK path and the strict wheel/ROCm comparison are
-implemented but gated off until TheRock forwards the required package identity
-and SDK payload.
+At present the Python-SDK path is implemented but gated off until a published
+`rocm-sdk-core` nightly ships the tool console scripts it needs
+(`clang-offload-bundler`); until then a pip-installed SDK is reached through
+`ROCM_PATH`.
 
 
 ## Supported interface
