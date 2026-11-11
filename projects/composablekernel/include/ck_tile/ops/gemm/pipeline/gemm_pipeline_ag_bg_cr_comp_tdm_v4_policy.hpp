@@ -256,6 +256,23 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
                 sequence<4, 2, 1, 3>>{});
     }
 
+    /// The C block tile's elements with the N repeat innermost: (rm, slot / 8, slot % 8, rn), so
+    /// a thread's adjacent columns are adjacent in its buffer, as D is stored and C loaded.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeCStoreTileDistribution()
+    {
+        constexpr MxTdmV4Spec s = GetSpec<Problem>();
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<s.warp_m, s.atom_m() / 16, 2, 8, s.wave_repeat_m()>,
+                      sequence<s.warp_n, s.atom_n(), s.wave_repeat_n()>>,
+                tuple<sequence<1, 2>, sequence<1, 2>>,
+                tuple<sequence<0, 0>, sequence<2, 1>>,
+                sequence<1, 1, 1, 2>,
+                sequence<4, 1, 3, 2>>{});
+    }
+
     /// The cluster the kernel must be launched with: (x, y, z) = (N tiles, M tiles, 1).
     CK_TILE_HOST_DEVICE static constexpr bool HasCluster()
     {

@@ -351,18 +351,19 @@ struct tile_window_with_static_distribution
         });
     }
 
+    /// i_access >= 0 loads only that access of the window's space-filling curve.
     template <typename DistributedTensor,
-              index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true,
-              bool static_move_ys         = false>
+              index_t i_access           = -1,
+              bool oob_conditional_check = true,
+              bool static_move_ys        = false>
     CK_TILE_DEVICE void load(DistributedTensor& dst_tensor,
-                             number<i_access_unsupport_>          = {},
+                             number<i_access>                     = {},
                              bool_constant<oob_conditional_check> = {},
                              bool_constant<static_move_ys>        = {}) const
     {
         load_with_offset(0,
                          dst_tensor,
-                         number<i_access_unsupport_>{},
+                         number<i_access>{},
                          bool_constant<oob_conditional_check>{},
                          bool_constant<static_move_ys>{});
     }
@@ -448,20 +449,22 @@ struct tile_window_with_static_distribution
 
     template <typename DataType,
               typename StaticTileDistribution,
-              index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true,
-              bool static_move_ys         = false,
+              index_t i_access           = -1,
+              bool oob_conditional_check = true,
+              bool static_move_ys        = false,
               typename offset_t>
     CK_TILE_DEVICE void load_with_offset( //
         offset_t offset,
         static_distributed_tensor<DataType, StaticTileDistribution>& dst_tensor,
-        number<i_access_unsupport_>          = {},
+        number<i_access>                     = {},
         bool_constant<oob_conditional_check> = {},
         bool_constant<static_move_ys>        = {}) const
     {
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
+
+        static_assert(i_access < Traits::NumAccess);
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 
@@ -495,6 +498,8 @@ struct tile_window_with_static_distribution
 
                 static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                     constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                    if constexpr(i_access >= 0 && iAccess != i_access)
+                        return;
 
                     // data index [y0, y1, ...]
                     constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -554,52 +559,56 @@ struct tile_window_with_static_distribution
                 static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                     constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                    constexpr auto idx_ys_offset = [&]() {
-                        constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
-                        constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
-                            StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
-                            container_concat(array<index_t, Base::NDimP>{0},
-                                             to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
-                        return adapter_ys_offset.get_bottom_index();
-                    }();
-                    const auto ys_offset = [&]() {
-                        if constexpr(static_move_ys)
-                        {
-                            const auto coord_ys_offset = make_tensor_coordinate(
-                                this->get_bottom_tensor_view().get_tensor_descriptor(),
-                                idx_ys_offset);
-                            return coord_ys_offset.get_offset();
-                        }
-                        else
-                            return 0;
-                    }();
+                    if constexpr(i_access < 0 || iAccess == i_access)
+                    {
+                        constexpr auto idx_ys_offset = [&]() {
+                            constexpr auto idx_off_ys =
+                                SFC_Ys::get_step_between(number<0>{}, iAccess);
+                            constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
+                                StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                                container_concat(array<index_t, Base::NDimP>{0},
+                                                 to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
+                            return adapter_ys_offset.get_bottom_index();
+                        }();
+                        const auto ys_offset = [&]() {
+                            if constexpr(static_move_ys)
+                            {
+                                const auto coord_ys_offset = make_tensor_coordinate(
+                                    this->get_bottom_tensor_view().get_tensor_descriptor(),
+                                    idx_ys_offset);
+                                return coord_ys_offset.get_offset();
+                            }
+                            else
+                                return 0;
+                        }();
 
-                    // data index [y0, y1, ...]
-                    constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                        // data index [y0, y1, ...]
+                        constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
-                    // read from bottom tensor
-                    const vector_t vec_value =
-                        this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
-                            bottom_tensor_thread_coord,
-                            linear_off + ys_offset,
-                            bool_constant<oob_conditional_check>{});
-                    // write into distributed tensor
-                    static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                        constexpr auto idx_ys = generate_tuple(
-                            [&](auto jj) {
-                                return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                                : idx_ys_start[jj];
-                            },
-                            number<Base::NDimY>{});
+                        // read from bottom tensor
+                        const vector_t vec_value = this->get_bottom_tensor_view()
+                                                       .template get_vectorized_elements<vector_t>(
+                                                           bottom_tensor_thread_coord,
+                                                           linear_off + ys_offset,
+                                                           bool_constant<oob_conditional_check>{});
+                        // write into distributed tensor
+                        static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                            constexpr auto idx_ys = generate_tuple(
+                                [&](auto jj) {
+                                    return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
+                                                                    : idx_ys_start[jj];
+                                },
+                                number<Base::NDimY>{});
 
-                        constexpr index_t d =
-                            tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                            Traits::PackedSize;
+                            constexpr index_t d =
+                                tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
+                                Traits::PackedSize;
 
-                        dst_tensor.get_thread_buffer().template at<d>() =
-                            vec_value
-                                .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
-                    });
+                            dst_tensor.get_thread_buffer().template at<d>() =
+                                vec_value.template get_as<
+                                    typename Base::DataType>()[j / Traits::PackedSize];
+                        });
+                    }
                     // move thread coordinate
                     if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))
                     {
@@ -1632,12 +1641,11 @@ struct tile_window_with_static_distribution
         });
     }
 
-    template <index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true,
-              bool static_move_ys         = false>
+    /// i_access >= 0 stores only that access of the window's space-filling curve.
+    template <index_t i_access = -1, bool oob_conditional_check = true, bool static_move_ys = false>
     CK_TILE_DEVICE void store(const static_distributed_tensor<typename Base::DataType,
                                                               typename Base::TileDstr>& dstr_tensor,
-                              number<i_access_unsupport_>          = {},
+                              number<i_access>                     = {},
                               bool_constant<oob_conditional_check> = {},
                               bool_constant<static_move_ys>        = {}) const
     {
@@ -1645,6 +1653,8 @@ struct tile_window_with_static_distribution
 
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
+
+        static_assert(i_access < Traits::NumAccess);
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 
@@ -1656,56 +1666,61 @@ struct tile_window_with_static_distribution
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                constexpr auto idx_ys_offset = [&]() {
-                    constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
-                    constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
-                        StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
-                        container_concat(array<index_t, Base::NDimP>{0},
-                                         to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
-                    return adapter_ys_offset.get_bottom_index();
-                }();
-                const auto ys_offset = [&]() {
-                    if constexpr(static_move_ys)
-                    {
-                        const auto coord_ys_offset = make_tensor_coordinate(
-                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
-                        return coord_ys_offset.get_offset();
-                    }
-                    else
-                        return 0;
-                }();
+                if constexpr(i_access < 0 || iAccess == i_access)
+                {
+                    constexpr auto idx_ys_offset = [&]() {
+                        constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                        constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
+                            StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                            container_concat(array<index_t, Base::NDimP>{0},
+                                             to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
+                        return adapter_ys_offset.get_bottom_index();
+                    }();
+                    const auto ys_offset = [&]() {
+                        if constexpr(static_move_ys)
+                        {
+                            const auto coord_ys_offset = make_tensor_coordinate(
+                                this->get_bottom_tensor_view().get_tensor_descriptor(),
+                                idx_ys_offset);
+                            return coord_ys_offset.get_offset();
+                        }
+                        else
+                            return 0;
+                    }();
 
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                    // data index [y0, y1, ...]
+                    constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
-                // read from distributed tensor
-                // vector_type_t vec;
-                vector_t vec_value;
+                    // read from distributed tensor
+                    // vector_type_t vec;
+                    vector_t vec_value;
 
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
+                    static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                        constexpr auto idx_ys = generate_tuple(
+                            [&](auto jj) {
+                                return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
+                                                                : idx_ys_start[jj];
+                            },
+                            number<Base::NDimY>{});
 
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
+                        constexpr index_t d =
+                            tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
+                            Traits::PackedSize;
 
-                    vec_value.template get_as<typename Base::DataType>()(j / Traits::PackedSize) =
-                        dstr_tensor.get_thread_buffer().template at<d>();
-                });
+                        vec_value.template get_as<typename Base::DataType>()(j /
+                                                                             Traits::PackedSize) =
+                            dstr_tensor.get_thread_buffer().template at<d>();
+                    });
 
-                // const vector_t vec_value = vec.template get_as<vector_t>().template at<0>();
+                    // const vector_t vec_value = vec.template get_as<vector_t>().template at<0>();
 
-                // write into bottom tensor
-                this->get_bottom_tensor_view().template set_vectorized_elements<vector_t>(
-                    bottom_tensor_thread_coord,
-                    ys_offset,
-                    vec_value,
-                    bool_constant<oob_conditional_check>{});
+                    // write into bottom tensor
+                    this->get_bottom_tensor_view().template set_vectorized_elements<vector_t>(
+                        bottom_tensor_thread_coord,
+                        ys_offset,
+                        vec_value,
+                        bool_constant<oob_conditional_check>{});
+                }
 
                 // move thread coordinate
                 if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))

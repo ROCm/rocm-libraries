@@ -198,6 +198,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     static constexpr bool kKMajorScales = true;
     /// Runs k_batch == 1 only.
     static constexpr bool kSupportsSplitK = false;
+    /// kPadM / kPadN (EdgeM / EdgeN) are false only when the tiles divide M / N.
+    static constexpr bool kExactPadMN = true;
     /// The cluster multicast takes grid x as N tiles and grid y as M tiles
     /// (GemmTile2DNMajorPartitioner).
     static constexpr bool kGridXWalksN = true;

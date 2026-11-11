@@ -547,6 +547,17 @@ struct UniversalGemmKernel
     }();
 
     template <typename T>
+    using has_exact_pad_mn = decltype(T::kExactPadMN);
+    /// True for a pipeline whose kPadM / kPadN are false only when its tiles divide M / N: the D
+    /// and E views then pad M and N only as kPadM and kPadN say.
+    static constexpr bool kPipelineExactPadMN = []() {
+        if constexpr(is_detected<has_exact_pad_mn, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kExactPadMN);
+        else
+            return false;
+    }();
+
+    template <typename T>
     using has_tdm_split_k = decltype(T::kSupportsTdmSplitK);
     /// True for a TDM pipeline tested with split-K (comp_tdm_v3). With a split-K-capable epilogue
     /// (CShuffle) only such a pipeline may run k_batch > 1; the other TDM pipelines reject it
@@ -1381,8 +1392,10 @@ struct UniversalGemmKernel
         // row-major D, so force the contiguous (N) pad: a partial N tile then reads zeros instead
         // of running past the row end into the next row. Rows past M are already outside the
         // buffer range and read as zero. Only TDM kernels with Ds are affected.
-        constexpr bool kTdmD  = has_skip_check_valid_launch_params::value && NumDTensor > 0;
+        constexpr bool kTdmD =
+            has_skip_check_valid_launch_params::value && NumDTensor > 0 && !kPipelineExactPadMN;
         constexpr bool kPadDN = GemmPipeline::kPadN || kTdmD;
+        constexpr bool kPadDM = kDGlobalLoad && (!kPipelineExactPadMN || GemmPipeline::kPadM);
 
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
@@ -1402,11 +1415,10 @@ struct UniversalGemmKernel
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
                 {
-                    return pad_tensor_view(
-                        ds_tensor_view[i],
-                        make_tuple(number<TilePartitioner::MPerBlock>{},
-                                   number<TilePartitioner::NPerBlock>{}),
-                        MakeBlockPadSequence<kDGlobalLoad, true, kPadDN, false>());
+                    return pad_tensor_view(ds_tensor_view[i],
+                                           make_tuple(number<TilePartitioner::MPerBlock>{},
+                                                      number<TilePartitioner::NPerBlock>{}),
+                                           MakeBlockPadSequence<kPadDM, true, kPadDN, false>());
                 }
                 else
                 {
@@ -1481,7 +1493,9 @@ struct UniversalGemmKernel
             std::is_same_v<EDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
 
         // The 64-bit global path is likewise unmasked, so it needs the same guard.
-        constexpr bool pad_leading_dim = pad_not_contiguous_dim || kCGlobalLoad;
+        constexpr bool pad_leading_dim =
+            pad_not_contiguous_dim ||
+            (kCGlobalLoad && (!kPipelineExactPadMN || GemmPipeline::kPadM));
 
         // Step 2: Create padded view
         const auto& e_pad_view = [&]() {

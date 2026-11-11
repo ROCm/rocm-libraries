@@ -8,23 +8,14 @@
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4.hpp"
 
-// D and C are stored and loaded as kStoreWidth-element vectors through their element pointers.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundefined-reinterpret-cast"
-
 namespace ck_tile {
 
 /**
- * @brief Problem of MxAlphaBetaEpilogue: the pipeline whose accumulators it stores, the D store
- *        width in elements and the shape traits of the stores (EdgeM / EdgeN mask partial tiles,
- *        WideD addresses rows in i64), by default the pipeline's MxTdmV4GemmTraits. C is the
- *        single D tensor, row-major and of D's type.
+ * @brief Problem of MxAlphaBetaEpilogue: the pipeline whose C block tile it stores and the D store
+ *        width in elements, by default the pipeline's MxTdmV4GemmTraits. C is the single D tensor,
+ *        row-major and of D's type.
  */
-template <typename Pipeline_,
-          index_t StoreWidth_ = remove_cvref_t<Pipeline_>::Traits::kStoreWidth,
-          bool EdgeM_         = remove_cvref_t<Pipeline_>::Traits::kEdgeM,
-          bool EdgeN_         = remove_cvref_t<Pipeline_>::Traits::kEdgeN,
-          bool WideD_         = remove_cvref_t<Pipeline_>::Traits::kWideD>
+template <typename Pipeline_, index_t StoreWidth_ = remove_cvref_t<Pipeline_>::Traits::kStoreWidth>
 struct MxAlphaBetaEpilogueProblem
 {
     using Pipeline   = remove_cvref_t<Pipeline_>;
@@ -34,20 +25,16 @@ struct MxAlphaBetaEpilogueProblem
     using ELayout    = tensor_layout::gemm::RowMajor;
 
     static constexpr index_t kStoreWidth = StoreWidth_;
-    static constexpr bool kEdgeM         = EdgeM_;
-    static constexpr bool kEdgeN         = EdgeN_;
-    static constexpr bool kWideD         = WideD_;
 };
 
 /**
  * @brief Epilogue of GemmPipelineAgBgCrCompTDMV4 after rocKE's mx_gemm: D = alpha * acc + beta * C
- *        stored as one vector of StoreWidth columns per accumulator slot; the beta == 0 path never
- *        reads C.
+ *        with C the single Ds tensor; the beta == 0 path never reads C.
  *
- * FP8 saturates as hipBLASLt (+-inf to NaN, NaN kept, finite values clamped to +-448); FP16 and
- * BF16 round to nearest even without clamping. C and D are M x N row-major. With EdgeM / EdgeN
- * each vector is read and written only if its row and columns are inside D (StoreWidth divides N,
- * so a vector is wholly inside or outside); WideD addresses rows in i64.
+ * The C block tile is shuffled to the store distribution (N repeat innermost), so each thread
+ * stores and loads vectors of StoreWidth adjacent columns through the D and C windows; their
+ * padding masks partial tiles. FP8 saturates as hipBLASLt (+-inf to NaN, NaN kept, finite values
+ * clamped to +-448); FP16 and BF16 round to nearest even without clamping.
  */
 template <typename Problem_>
 struct MxAlphaBetaEpilogue
@@ -58,15 +45,8 @@ struct MxAlphaBetaEpilogue
     using DsDataType = typename Problem::DsDataType;
     using DsLayout   = typename Problem::DsLayout;
     using ELayout    = typename Problem::ELayout;
-    using CVec       = typename Pipeline::CVec;
-    /// The C block tile's floats: slot `slot` of repeat (rm, rn) at (rm * kRn + rn) * kCFragLen +
-    /// slot.
-    using CBuffer = remove_cvref_t<decltype(typename Pipeline::CBlockTile{}.get_thread_buffer())>;
 
     static constexpr index_t kStoreWidth = Problem::kStoreWidth;
-    static constexpr bool kEdgeM         = Problem::kEdgeM;
-    static constexpr bool kEdgeN         = Problem::kEdgeN;
-    static constexpr bool kWideD         = Problem::kWideD;
 
     /// D replaces its tile: k_batch > 1 is not supported.
     static constexpr bool SupportsSplitK = false;
@@ -78,23 +58,29 @@ struct MxAlphaBetaEpilogue
     }
     /// The stores go from the accumulators straight to D.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
-    static constexpr index_t kRm       = Pipeline::kRm;
-    static constexpr index_t kRn       = Pipeline::kRn;
-    static constexpr index_t kCFragLen = Pipeline::kCFragLen;
     static constexpr MxTdmV4Spec kSpec = Pipeline::kSpec;
     static constexpr bool kFp8         = kSpec.out == MxTdmV4OutDtype::Fp8E4M3;
     static constexpr bool kFp16        = kSpec.out == MxTdmV4OutDtype::Fp16;
     static constexpr index_t kOutBytes = kSpec.out_bytes();
     static constexpr index_t kFp8Width = kSpec.fp8_convert_width();
     static constexpr float kFp8Max     = 448.0f;
+    /// Rows past M lie past the buffer, which drops or zeroes them; the 64-bit global path and
+    /// columns past N (inside the next row) need the windows' checks.
+    static constexpr bool kCheckBounds =
+        Pipeline::kPadN || (Pipeline::LargeTensors && Pipeline::kPadM);
 
     static_assert(kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
-                      kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
+                      Pipeline::kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
                   "comp_tdm_v4: the D store width must be a power of 2 dividing the N repeat, "
                   "<= 16 B");
 
     using Storage = std::conditional_t<kOutBytes == 1, uint8_t, uint16_t>;
     using SVec = std::conditional_t<kStoreWidth == 1, Storage, ext_vector_t<Storage, kStoreWidth>>;
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeStoreDistribution()
+    {
+        return Pipeline::Policy::template MakeCStoreTileDistribution<typename Pipeline::Problem>();
+    }
 
     CK_TILE_DEVICE static float Saturate(float v)
     {
@@ -158,139 +144,49 @@ struct MxAlphaBetaEpilogue
         return out;
     }
 
-    CK_TILE_DEVICE static float ToFloat(Storage bits)
+    /// Stores `acc` through `out_window` one access at a time, each vector's elements v becoming
+    /// D = Pack(op(v, i)) with i the element's index in the thread buffer, after prepare(access)
+    /// has loaded what op reads; each access's accumulators die at its store.
+    template <typename OutWindow, typename AccTile, typename Prepare, typename Op>
+    CK_TILE_DEVICE static void
+    StoreByAccess(const OutWindow& out_window, const AccTile& acc, Prepare prepare, Op op)
     {
-        if constexpr(kFp8)
-            return type_convert<float>(bit_cast<fp8_t>(bits));
-        else if constexpr(kFp16)
-            return static_cast<float>(__builtin_bit_cast(_Float16, bits));
-        else
-            return static_cast<float>(__builtin_bit_cast(__bf16, bits));
-    }
+        using Traits                  = typename OutWindow::Traits;
+        using SFC_Ys                  = typename Traits::SFC_Ys;
+        constexpr index_t kVector     = Traits::ScalarPerVector;
+        constexpr index_t kVectorDimY = Traits::VectorDimY;
+        constexpr auto ys_to_d        = MakeStoreDistribution().get_ys_to_d_descriptor();
+        static_assert(kVector % kStoreWidth == 0, "D's vectors hold whole store groups");
+        using OVec = array<ODataType, kStoreWidth>;
 
-    CK_TILE_DEVICE static Storage Lane(const SVec& v, index_t i)
-    {
-        if constexpr(kStoreWidth == 1)
-            return v;
-        else
-            return v[i];
-    }
-
-    template <bool ReadC>
-    CK_TILE_DEVICE static void Store(const Storage* c,
-                                     Storage* d,
-                                     index_t M,
-                                     index_t N,
-                                     float alpha,
-                                     float beta,
-                                     const mx_tdm_v4::Coords& co,
-                                     const CBuffer& acc)
-    {
-        // alpha * acc + beta * C rounds twice, as rocKE's (and the host reference's) fmul, fadd.
-#pragma clang fp contract(off)
-        const index_t col = co.block_n + Pipeline::NRow(co, 0, co.lane_col);
-        static_for<0, kRm, 1>{}([&](auto rm_) {
-            constexpr index_t rm = decltype(rm_)::value;
-            static_for<0, kCFragLen, 1>{}([&](auto slot_) {
-                constexpr index_t slot = decltype(slot_)::value;
-                const index_t m_local  = (slot / 8) * 16 + slot % 8 + co.lane_half * 8;
-                const index_t row      = co.block_m + Pipeline::MRow(co, rm, m_local);
-                const Storage* c_row   = c;
-                Storage* d_row         = d;
-                index_t index;
-                if constexpr(kWideD)
-                {
-                    // Row base in i64, the column offset in i32.
-                    const uint64_t row_bytes = static_cast<uint64_t>(static_cast<uint32_t>(row)) *
-                                               static_cast<uint32_t>(N * kOutBytes);
-                    d_row = reinterpret_cast<Storage*>(reinterpret_cast<uint8_t*>(d) + row_bytes);
-                    if constexpr(ReadC)
-                        c_row = reinterpret_cast<const Storage*>(
-                            reinterpret_cast<const uint8_t*>(c) + row_bytes);
-                    index = col;
-                }
-                else
-                {
-                    index = row * N + col;
-                }
-                if constexpr(kEdgeM || kEdgeN)
-                {
-                    StoreMasked<ReadC, rm, slot>(
-                        c_row, d_row, index, row, col, M, N, alpha, beta, acc);
-                }
-                else
-                {
-                    float values[kRn];
-                    static_for<0, kRn, 1>{}([&](auto rn) {
-                        values[rn] = alpha * acc[(rm * kRn + rn) * kCFragLen + slot];
-                    });
-                    if constexpr(ReadC)
-                    {
-                        SVec words[kRn / kStoreWidth];
-                        static_for<0, kRn / kStoreWidth, 1>{}([&](auto chunk) {
-                            words[chunk] = *reinterpret_cast<const SVec*>(
-                                c_row + index + decltype(chunk)::value * kStoreWidth);
-                        });
-                        static_for<0, kRn, 1>{}([&](auto i) {
-                            values[i] = values[i] + beta * ToFloat(Lane(words[i / kStoreWidth],
-                                                                        i % kStoreWidth));
-                        });
-                    }
-                    if constexpr(kFp8)
-                        static_for<0, kRn, 1>{}([&](auto i) { values[i] = Saturate(values[i]); });
-                    static_for<0, kRn / kStoreWidth, 1>{}([&](auto chunk) {
-                        constexpr index_t begin = decltype(chunk)::value * kStoreWidth;
-                        float part[kStoreWidth];
-                        static_for<0, kStoreWidth, 1>{}(
-                            [&](auto i) { part[i] = values[begin + decltype(i)::value]; });
-                        *reinterpret_cast<SVec*>(d_row + index + begin) = Pack(part);
-                    });
-                }
-            });
-        });
-    }
-
-    /// One accumulator slot of a partial tile: each vector of kStoreWidth columns is read and
-    /// written only if its row and columns are in D.
-    template <bool ReadC, index_t Rm, index_t Slot>
-    CK_TILE_DEVICE static void StoreMasked(const Storage* c_row,
-                                           Storage* d_row,
-                                           index_t index,
-                                           index_t row,
-                                           index_t col,
-                                           index_t M,
-                                           index_t N,
-                                           float alpha,
-                                           float beta,
-                                           const CBuffer& acc)
-    {
-#pragma clang fp contract(off)
-        static_for<0, kRn / kStoreWidth, 1>{}([&](auto chunk) {
-            constexpr index_t begin = decltype(chunk)::value * kStoreWidth;
-            bool inside             = true;
-            if constexpr(kEdgeM)
-                inside = row < M;
-            if constexpr(kEdgeN)
-                inside = kEdgeM ? (inside && col + begin < N) : col + begin < N;
-            if(inside)
-            {
-                const index_t at = index + begin;
-                float values[kStoreWidth];
-                static_for<0, kStoreWidth, 1>{}([&](auto i) {
-                    values[i] =
-                        alpha * acc[(Rm * kRn + begin + decltype(i)::value) * kCFragLen + Slot];
+        auto out = make_static_distributed_tensor<ODataType>(MakeStoreDistribution());
+        static_for<0, Traits::NumAccess, 1>{}([&](auto i_access) {
+            prepare(i_access);
+            constexpr auto idx_ys_start = SFC_Ys::get_index(i_access);
+            static_for<0, kVector / kStoreWidth, 1>{}([&](auto group) {
+                float part[kStoreWidth];
+                constexpr index_t first = decltype(group)::value * kStoreWidth;
+                static_for<0, kStoreWidth, 1>{}([&](auto j) {
+                    constexpr auto idx_ys = generate_tuple(
+                        [&](auto jj) {
+                            return jj == kVectorDimY ? (idx_ys_start[jj] + first + j)
+                                                     : idx_ys_start[jj];
+                        },
+                        number<AccTile::StaticTileDistribution::get_num_of_dimension_y()>{});
+                    constexpr index_t at = ys_to_d.calculate_offset(idx_ys);
+                    part[j]              = op(acc.get_thread_buffer()[number<at>{}], number<at>{});
                 });
-                if constexpr(ReadC)
-                {
-                    const SVec words = *reinterpret_cast<const SVec*>(c_row + at);
-                    static_for<0, kStoreWidth, 1>{}(
-                        [&](auto i) { values[i] = values[i] + beta * ToFloat(Lane(words, i)); });
-                }
-                if constexpr(kFp8)
-                    static_for<0, kStoreWidth, 1>{}(
-                        [&](auto i) { values[i] = Saturate(values[i]); });
-                *reinterpret_cast<SVec*>(d_row + at) = Pack(values);
-            }
+                constexpr auto idx_ys_group = generate_tuple(
+                    [&](auto jj) {
+                        return jj == kVectorDimY ? (idx_ys_start[jj] + first) : idx_ys_start[jj];
+                    },
+                    number<AccTile::StaticTileDistribution::get_num_of_dimension_y()>{});
+                constexpr index_t at_group = ys_to_d.calculate_offset(idx_ys_group);
+                static_assert(at_group % kStoreWidth == 0);
+                out.get_thread_buffer().template set_as<OVec>(number<at_group / kStoreWidth>{},
+                                                              bit_cast<OVec>(Pack(part)));
+            });
+            out_window.store(out, i_access, bool_constant<kCheckBounds>{}, bool_constant<true>{});
         });
     }
 
@@ -299,33 +195,51 @@ struct MxAlphaBetaEpilogue
     float beta                       = 0.0f;
     static constexpr bool kAlphaBeta = true;
 
-    /// Stores the C block tile into D's tile window, reading C (Ds[0]) only for beta != 0. The
-    /// windows give the pointers, the unpadded M and N and the tile origin.
+    /// Stores the C block tile through D's tile window, reading C (Ds[0]) only for beta != 0.
     template <typename ODramWindow, typename DsDramWindows>
     CK_TILE_DEVICE void operator()(ODramWindow& out_dram_window,
                                    const typename Pipeline::CBlockTile& c_block_tile,
                                    const DsDramWindows& ds_dram_windows,
                                    void* /*p_smem*/) const
     {
+        // alpha * acc + beta * C rounds twice, as rocKE's (and the host reference's) fmul, fadd.
+#pragma clang fp contract(off)
         static_assert(std::tuple_size_v<DsDramWindows> == 1, "C is the single Ds tensor");
-        const auto& out_view       = out_dram_window.get_bottom_tensor_view();
-        const auto lengths         = detail::tdm_real_lengths(out_view.get_tensor_descriptor());
-        const index_t M            = lengths[number<0>{}];
-        const index_t N            = lengths[number<1>{}];
-        const auto origin          = out_dram_window.get_window_origin();
-        const mx_tdm_v4::Coords co = Pipeline::MakeCoords(origin[number<0>{}], origin[number<1>{}]);
-        const CBuffer& acc         = c_block_tile.get_thread_buffer();
-        const auto* c_bits         = reinterpret_cast<const Storage*>(
-            ds_dram_windows[number<0>{}].get_bottom_tensor_view().get_buffer_view().p_data_);
-        auto* d_bits = reinterpret_cast<Storage*>(out_view.get_buffer_view().p_data_);
+        auto d = make_static_distributed_tensor<float>(MakeStoreDistribution());
+        shuffle_tile(d, c_block_tile);
+        const float a         = alpha;
+        const float b         = beta;
+        const auto out_window = make_tile_window(out_dram_window, MakeStoreDistribution());
+        const auto finish     = [](float v) {
+            if constexpr(kFp8)
+                v = Saturate(v);
+            return v;
+        };
         // GW_B0 / GW_B1.
-        if(beta == 0.0f)
-            Store<false>(c_bits, d_bits, M, N, alpha, beta, co, acc);
+        if(b == 0.0f)
+        {
+            StoreByAccess(out_window, d, [](auto) {}, [&](float v, auto) { return finish(a * v); });
+        }
         else
-            Store<true>(c_bits, d_bits, M, N, alpha, beta, co, acc);
+        {
+            const auto c_window =
+                make_tile_window(ds_dram_windows[number<0>{}], MakeStoreDistribution());
+            static_assert(decltype(c_window)::Traits::NumAccess ==
+                              decltype(out_window)::Traits::NumAccess,
+                          "C loads as D stores");
+            auto c = make_static_distributed_tensor<ODataType>(MakeStoreDistribution());
+            StoreByAccess(
+                out_window,
+                d,
+                [&](auto i_access) {
+                    c_window.load(
+                        c, i_access, bool_constant<kCheckBounds>{}, bool_constant<true>{});
+                },
+                [&](float v, auto at) {
+                    return finish(a * v + b * type_convert<float>(c.get_thread_buffer()[at]));
+                });
+        }
     }
 };
 
 } // namespace ck_tile
-
-#pragma clang diagnostic pop
