@@ -755,7 +755,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             KDataType* __restrict__ k_lds_next_ptr,
                             VDataType* __restrict__ v_lds_next_ptr,
                             VDataType* __restrict__ v_lds_cur_ptr,
-                            auto mx_all_fast) {
+                            auto mx_all_fast,
+                            auto sink_escape) {
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] array<float, 2> qk_lane_max;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -1271,7 +1272,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         (mask.GetWindowY() < mask.GetYTotal() ? mask.GetSink() : 0) - 1 - k0 - lc;
                     [[maybe_unused]] const index_t tr = mask.GetXTotal() - 1 - q0 - lr;
                     auto mask_if                      = [&](auto out) {
-                        if constexpr(kHasSink && FmhaMask::IsMasking)
+                        if constexpr(decltype(sink_escape)::value)
                             TileIndex::SetTileIfConstPart(s_acc, ninf, [&](index_t r, index_t c) {
                                 return out(r, c) && !(c <= ts && r <= tr);
                             });
@@ -1502,8 +1503,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     auto v_lds_cur_ptr  = is_even_loop
                                               ? static_cast<VDataType* __restrict__>(smem_ptrv0)
                                               : static_cast<VDataType* __restrict__>(smem_ptrv1);
-                    mainloop(
-                        k_lds_cur_ptr, k_lds_next_ptr, v_lds_next_ptr, v_lds_cur_ptr, mx_all_fast);
+                    mainloop(k_lds_cur_ptr,
+                             k_lds_next_ptr,
+                             v_lds_next_ptr,
+                             v_lds_cur_ptr,
+                             mx_all_fast,
+                             std::false_type{});
                     if constexpr(kUseCountdownLoop)
                     {
                         even_buffer = !even_buffer;
@@ -1519,6 +1524,31 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 run_loop(std::true_type{});
             else
                 run_loop(std::false_type{});
+        }
+        else if constexpr(Features::kSinkEscapeLoop)
+        {
+            // Only the leading tiles can hold sink keys, so only they run the per-lane escape.
+            const index_t sink_end     = mask.GetWindowY() < mask.GetYTotal() ? mask.GetSink() : 0;
+            const index_t escape_loops = min(integer_divide_ceil(sink_end, kN0), num_total_loop);
+            auto run_tiles             = [&](auto sink_escape, index_t end) {
+                while(i_total_loops < end)
+                {
+                    const bool is_even_loop = i_total_loops % 2 == 0;
+                    mainloop(static_cast<KDataType* __restrict__>(is_even_loop ? smem_ptrk0
+                                                                               : smem_ptrk1),
+                             static_cast<KDataType* __restrict__>(is_even_loop ? smem_ptrk1
+                                                                               : smem_ptrk0),
+                             static_cast<VDataType* __restrict__>(is_even_loop ? smem_ptrv1
+                                                                               : smem_ptrv0),
+                             static_cast<VDataType* __restrict__>(is_even_loop ? smem_ptrv0
+                                                                               : smem_ptrv1),
+                             std::false_type{},
+                             sink_escape);
+                    i_total_loops++;
+                }
+            };
+            run_tiles(std::true_type{}, escape_loops);
+            run_tiles(std::false_type{}, num_total_loop);
         }
         else
         {
@@ -1541,6 +1571,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                          k_lds_next_ptr,
                          v_lds_next_ptr,
                          v_lds_cur_ptr,
+                         std::false_type{},
                          std::false_type{});
                 if constexpr(kUseCountdownLoop)
                 {

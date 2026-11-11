@@ -64,6 +64,9 @@ struct FmhaTdmSchedFp8Features
         std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
         !kUseCountdownLoop && !(Problem::kMergeNumHeadGroupsSeqLenQ && FmhaMask::IsMasking);
 
+    // Sink tiles with a mask run apart, so only they carry the per-lane sink escape.
+    static constexpr bool kSinkEscapeLoop = Problem::kHasSink && FmhaMask::IsMasking && kBandMask;
+
     // ISA tuning only: same values, chosen for register use or the instruction schedule.
     // Merged D192 at two workgroups per CU cannot afford IsOutOfBoundUnsigned's per-row VGPRs.
     static constexpr bool kUnpinnedMaskWidth = Problem::kMergeNumHeadGroupsSeqLenQ &&
