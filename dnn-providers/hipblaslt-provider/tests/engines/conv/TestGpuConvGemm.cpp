@@ -504,7 +504,8 @@ void runCase(ConvCase convCase,
         // Anything else is a failure.
         const auto problem = parseConvProblem(graph.graph(), convCase.direction);
         ASSERT_TRUE(problem.has_value());
-        auto calls = convGemmCalls(*problem);
+        // The plan the builder formed: under the same workspace cap (images or bands).
+        auto calls = convGemmCalls(*problem, cap);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
         bool threw = false;
