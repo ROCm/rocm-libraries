@@ -285,6 +285,25 @@ float calculateConvFpropTolerance(
 }
 
 /**
+ * @brief A place in a fused graph where a value is rounded to a type with fewer bits than float,
+ * which a float-computing reference does not do at that place.
+ *
+ * The rounding of a value v moves it by at most one unit in the last place, eps * |v|, and the
+ * error reaches the graph's output multiplied by the slope of the nodes between the two.
+ */
+struct RoundingPoint
+{
+    /// Machine epsilon of the type the value is rounded to. Finite and not negative.
+    double epsilon = 0.0;
+    /// Typical magnitude of the value rounded (root mean square). Finite and not negative.
+    double magnitude = 0.0;
+    /// Largest factor by which an error in the value reaches the graph's output: 1 through an
+    /// add or subtract, the largest magnitude of the scale through a multiply. Finite and not
+    /// negative.
+    double slope = 1.0;
+};
+
+/**
  * @brief Statistics of a convolution-forward problem that set the size of its rounding error.
  *
  * Everything here is cheap to compute from the graph and the input tensors, before or after the
@@ -302,6 +321,9 @@ struct ConvFpropErrorScale
     /// Product, over the fused multiplies, of the largest |scale| each applies to the convolution
     /// output (1 when there is none).
     double outputScale = 1.0;
+    /// The places between the convolution and the output where a value is rounded to half or
+    /// bfloat16 (none for a graph whose intermediates and pointwise nodes are float).
+    std::vector<RoundingPoint> roundingPoints;
 };
 
 /// An absolute and a relative tolerance, graded per element as |impl - ref| <= atol + rtol*|ref|.
@@ -317,7 +339,8 @@ struct AbsRelTolerance
  *
  *   |impl_i - ref_i| <= rtol * |ref_i| + atol
  *   rtol = 2 * eps
- *   atol = (sqrt(K) * u32 + lambda * eps) * sigma + minNormal
+ *   atol = (sqrt(K) * u32 + lambda * eps) * sigma
+ *          + sum over the rounding points of (slope * eps_p * magnitude) + minNormal
  *   sigma = sqrt(K * mean(x^2) * mean(w^2)) * outputScale
  *
  * - eps is the machine epsilon of the output type, u32 the unit roundoff of float (2^-24),
@@ -329,7 +352,8 @@ struct AbsRelTolerance
  *
  * The terms cover the two roundings of the float result to the output type (rtol), the order of
  * the float summation (sqrt(K) * u32 * sigma), partial results that some half kernels keep in
- * half (lambda * eps * sigma) and flushed denormals (minNormal). The derivation, the calibration
+ * half (lambda * eps * sigma), the roundings of intermediates to half or bfloat16 (the rounding
+ * points; see RoundingPoint) and flushed denormals (minNormal). The derivation, the calibration
  * of lambda and the comparison with calculateConvFpropTolerance() are in tolerances.md in the
  * documentation of the integration tests.
  *
@@ -337,7 +361,7 @@ struct AbsRelTolerance
  * @param scale The problem statistics; see ConvFpropErrorScale.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument if scale.accumulationLength is 0, a mean square is negative or
- * not finite, or outputScale is not finite.
+ * not finite, outputScale is not finite, or a rounding point has a negative or not finite field.
  * @throws std::overflow_error if atol exceeds the largest value of OutputType, or if sigma is not
  * a number (an overflowing product of the mean squares against a zero factor).
  */
@@ -348,16 +372,22 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
                   "calculateConvFpropOutputTolerance models half and bfloat16 outputs only");
 
     const auto validMoment = [](double v) { return std::isfinite(v) && v >= 0.0; };
+    const bool validPoints = std::all_of(
+        scale.roundingPoints.begin(), scale.roundingPoints.end(), [&](const RoundingPoint& p) {
+            return validMoment(p.epsilon) && validMoment(p.magnitude) && validMoment(p.slope);
+        });
     if(scale.accumulationLength == 0 || !validMoment(scale.inputMeanSquare)
-       || !validMoment(scale.weightMeanSquare) || !std::isfinite(scale.outputScale))
+       || !validMoment(scale.weightMeanSquare) || !std::isfinite(scale.outputScale) || !validPoints)
     {
         throw std::invalid_argument("calculateConvFpropOutputTolerance: ConvFpropErrorScale needs "
                                     "a nonzero accumulationLength, finite non-negative mean "
-                                    "squares and a finite outputScale.");
+                                    "squares, a finite outputScale and finite non-negative "
+                                    "rounding points.");
     }
 
     constexpr double OUTPUT_ROUNDING_MARGIN = 2.0;
     constexpr double IO_INTERMEDIATE_LAMBDA = std::is_same_v<OutputType, half> ? 12.0 : 0.0;
+    constexpr double ROUNDING_POINT_MARGIN = 1.0;
     const double floatUnitRoundoff = std::ldexp(1.0, -24);
 
     const auto eps = static_cast<double>(std::numeric_limits<OutputType>::epsilon());
@@ -375,10 +405,16 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
             "(the product of the statistics overflows against a zero factor).");
     }
 
+    double roundingPointError = 0.0;
+    for(const auto& point : scale.roundingPoints)
+    {
+        roundingPointError += point.slope * point.epsilon * point.magnitude;
+    }
+
     AbsRelTolerance tolerance;
     tolerance.rtol = OUTPUT_ROUNDING_MARGIN * eps;
-    tolerance.atol
-        = (std::sqrt(k) * floatUnitRoundoff + IO_INTERMEDIATE_LAMBDA * eps) * sigma + minNormal;
+    tolerance.atol = (std::sqrt(k) * floatUnitRoundoff + IO_INTERMEDIATE_LAMBDA * eps) * sigma
+                     + ROUNDING_POINT_MARGIN * roundingPointError + minNormal;
     hipdnn_test_sdk::utilities::validateToleranceRange<OutputType>(tolerance.atol);
     return tolerance;
 }

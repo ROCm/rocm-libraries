@@ -529,29 +529,67 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
                    AbsRelTolerance{fixedDefault, fixedDefault});
 }
 
-// The model has one rounding, of the final result to the output type. Intermediates stored in
-// the output type, or computed in it, are more roundings: the graph keeps the default.
-TEST_F(TestConvFwdToleranceGradingFixture, IntermediatesInTheOutputTypeKeepTheDefaultTolerance)
+// The Variant3 graph with every intermediate stored in the output type: the convolution's
+// result y, the multiply's result and the add's result are each rounded to it (K = 36, x and w
+// uniform on [-1, 1] so sigma = 2, the scale 0.5, the bias uniform on [-1, 1]). The points are
+// written out here from the model of tolerances.md, not taken from the library: eps * magnitude
+// * slope with y (2 * 0.5: the multiply scales its error), the multiply's result (1) and the
+// add's result (sqrt(1 + 1/3)), which the relu passes on as it is.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       IntermediatesStoredInTheOutputTypeAreGradedWithTheirPoints)
 {
     for(const bool isHalf : {true, false})
     {
-        for(const bool storedNotComputed : {true, false})
-        {
-            Spec spec;
-            spec.isHalf = isHalf;
-            spec.topology = Topology::VARIANT3;
-            const std::string lowPrecision = isHalf ? "half" : "bfloat16";
-            (storedNotComputed ? spec.intermediateType : spec.pointwiseCompute) = lowPrecision;
-            SCOPED_TRACE(lowPrecision + (storedNotComputed ? " stored" : " computed"));
-            const auto bundle = loadBundle(spec);
-            const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-                bundle->graphWrapper(),
-                isHalf ? hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-                       : hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
-            expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                           AbsRelTolerance{fixedDefault, fixedDefault});
-        }
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT3;
+        spec.intermediateType = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.intermediateType);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        auto scale = defaultFillScale(0.5);
+        scale.roundingPoints = {{eps, 2.0, 0.5}, {eps, 1.0, 1.0}, {eps, std::sqrt(4.0 / 3.0), 1.0}};
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
+}
+
+// The same graph with float tensors and pointwise nodes computing in the output type: every
+// operand that is float is converted and rounded, as is every result stored in another type
+// than the node computes in. The scale and the bias are stored in the output type and need no
+// rounding; the graph output is rounded once, by the output type.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       PointwiseNodesComputingInTheOutputTypeAreGradedWithTheirPoints)
+{
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT3;
+        spec.pointwiseCompute = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.pointwiseCompute);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        const double afterAdd = std::sqrt(4.0 / 3.0);
+        auto scale = defaultFillScale(0.5);
+        scale.roundingPoints = {{eps, 2.0, 0.5}, // y, an operand of the multiply
+                                {eps, 1.0, 1.0}, // the multiply's result
+                                {eps, 1.0, 1.0}, // the multiply's result, an operand of the add
+                                {eps, afterAdd, 1.0}, // the add's result
+                                {eps, afterAdd, 1.0}}; // the add's result, an operand of the relu
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
+    }
+}
+
+// An intermediate of a type the model does not know keeps the per-op default for both atol and
+// rtol.
+TEST_F(TestConvFwdToleranceGradingFixture, IntermediateOfAnUnknownTypeKeepsTheDefaultTolerance)
+{
+    Spec spec;
+    spec.topology = Topology::VARIANT3;
+    spec.intermediateType = "int32";
+    const auto bundle = loadBundle(spec);
+    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
+                   AbsRelTolerance{fixedDefault, fixedDefault});
 }
 
 // ── Where the input statistics come from ────────────────────────────────────

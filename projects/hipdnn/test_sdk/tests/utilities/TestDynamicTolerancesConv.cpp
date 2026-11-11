@@ -1425,6 +1425,88 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ConstantsAtAFixedScale)
     EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
 }
 
+// Each rounding point adds slope * eps * magnitude to atol, summed over the points, and leaves
+// rtol alone: the point of a value rounded to bfloat16 at 1.5 reaching the output doubled, and
+// one rounded to half at 0.25 reaching it as it is.
+TYPED_TEST(ConvFpropOutputToleranceFixture, RoundingPointsAddSlopeTimesEpsilonTimesMagnitude)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto without = calculateConvFpropOutputTolerance<T>(s);
+
+    const double bfloat16Eps = std::ldexp(1.0, -7);
+    const double halfEps = std::ldexp(1.0, -10);
+    s.roundingPoints = {{bfloat16Eps, 1.5, 2.0}};
+    const auto one = calculateConvFpropOutputTolerance<T>(s);
+    EXPECT_NEAR(one.atol - without.atol, 2.0 * bfloat16Eps * 1.5, 1e-12);
+    EXPECT_DOUBLE_EQ(one.rtol, without.rtol);
+
+    s.roundingPoints.push_back({halfEps, 0.25, 1.0});
+    const auto two = calculateConvFpropOutputTolerance<T>(s);
+    EXPECT_NEAR(two.atol - without.atol, 2.0 * bfloat16Eps * 1.5 + halfEps * 0.25, 1e-12);
+    EXPECT_DOUBLE_EQ(two.rtol, without.rtol);
+}
+
+// A value rounded to bfloat16 before an add that cancels it: the conv result 1.005 rounds to
+// 1.0078125, and after adding -1 the output is 0.0078125 where the exact result is 0.005. No
+// relative term of the output (0.005) or sum-order term covers the 0.0028 between them; the point
+// of the rounding, at the size of the value rounded, does. A graph that has no such point keeps
+// its band, and fails this. (Half has its lambda term, which is wider than this at this scale, so
+// the test is for the outputs whose atol does not reach that far.)
+TEST(TestConvFpropOutputToleranceRoundingPoints, BfloatRoundingBeforeACancellingAddIsCovered)
+{
+    using T = bfloat16;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 16;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const double sigma = std::sqrt(16.0 / 9.0);
+
+    const double convResult = 1.005;
+    const double rounded = static_cast<double>(
+        static_cast<float>(static_cast<bfloat16>(static_cast<float>(convResult))));
+    ASSERT_EQ(rounded, 1.0078125);
+    const double impl = rounded - 1.0;
+    const double ref = convResult - 1.0;
+
+    EXPECT_FALSE(withinTolerance<float>(impl, ref, calculateConvFpropOutputTolerance<T>(s)));
+
+    s.roundingPoints = {{std::ldexp(1.0, -7), sigma, 1.0}};
+    EXPECT_TRUE(withinTolerance<float>(impl, ref, calculateConvFpropOutputTolerance<T>(s)));
+}
+
+// A rounding point that is not a finite non-negative number is rejected, as the statistics are.
+TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidRoundingPointIsRejected)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale valid;
+    valid.accumulationLength = 144;
+    valid.inputMeanSquare = 1.0 / 3.0;
+    valid.weightMeanSquare = 1.0 / 3.0;
+    valid.roundingPoints = {{std::ldexp(1.0, -7), 1.0, 1.0}};
+    ASSERT_NO_THROW(calculateConvFpropOutputTolerance<T>(valid));
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for(const RoundingPoint& bad : {RoundingPoint{-1.0, 1.0, 1.0},
+                                    RoundingPoint{nan, 1.0, 1.0},
+                                    RoundingPoint{inf, 1.0, 1.0},
+                                    RoundingPoint{0.01, -1.0, 1.0},
+                                    RoundingPoint{0.01, nan, 1.0},
+                                    RoundingPoint{0.01, inf, 1.0},
+                                    RoundingPoint{0.01, 1.0, -1.0},
+                                    RoundingPoint{0.01, 1.0, nan},
+                                    RoundingPoint{0.01, 1.0, inf}})
+    {
+        auto scale = valid;
+        scale.roundingPoints.push_back(bad);
+        EXPECT_THROW(calculateConvFpropOutputTolerance<T>(scale), std::invalid_argument);
+    }
+}
+
 // A fused multiply by a scale scales the typical output, and with it atol; rtol, a fraction of
 // the reference itself, stays. Only the magnitude counts.
 TYPED_TEST(ConvFpropOutputToleranceFixture, OutputScaleWidensAtolNotRtol)
