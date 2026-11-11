@@ -1926,6 +1926,28 @@ def test_subtractive():
     tmp.cleanup()
 
 
+def test_batched_hunks_with_quoted_paths():
+    """The batched hunk diff maps every modified file, including paths git quotes in diff headers."""
+    names = [
+        "plain.txt",
+        "sp ace.txt",
+        'q"uote.txt',
+        "back\\slash.txt",
+        "star*.txt",
+        "\u00fc.txt",
+    ]
+    tmp, repo, base, tip, runs = make_case(
+        {n: lines(6) for n in names},
+        {n: lines(6).replace("line3", "LINE3") for n in names},
+    )
+    rows, by = ledger_rows(repo, base, tip, runs)
+    check(
+        all(len(by.get(n, [])) == 1 and by[n][0]["hunk"] == "-3,1 +3,1" for n in names),
+        "every modified path, quoted or not, gets its own hunk",
+    )
+    tmp.cleanup()
+
+
 def test_generated_exceptions():
     """Deleted, renamed and type-changed generated files, and --exclude-generated paths, are F rows."""
     five = lines(5, "f")
