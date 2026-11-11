@@ -26,6 +26,8 @@
 from rocisa.container import TENSORModifiers
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
+from .TDMFuse import tdmHintDeciders, tdmHintSets
+
 
 def _has_temporal_hint(asm_caps):
     return bool(asm_caps.get("HasTHModifier", False)) if asm_caps else False
@@ -100,6 +102,42 @@ def tdmCacheModifiers(asm_caps, hints, decider=None):
     if (scope, th, nv) == (CacheScope.SCOPE_NONE, TemporalHint.TH_NONE, NonVolatile.NV_NONE):
         return None
     return TENSORModifiers(scope=scope, th=th, nv=nv)
+
+
+_TDM_HINT_KEYS = ("NonTemporal", "TemporalHint", "NonVolatile")
+_SCOPE_BITS = (CacheScope.SCOPE_CU, CacheScope.SCOPE_SE, CacheScope.SCOPE_DEV, CacheScope.SCOPE_SYS)
+
+
+def _tdmHintKeyValues(mods):
+    """(NonTemporal scope bits, TemporalHint, NonVolatile) that decode to ``mods``; zeros for ``None``."""
+    if mods is None:
+        return 0, 0, 0
+    scope = next((bits for bits, s in enumerate(_SCOPE_BITS) if s == mods.scope), 0)
+    th = next((v for v in range(8) if TemporalHint(v) == mods.th), 0)
+    nv = next((v for v in range(2) if NonVolatile(v) == mods.nv), 0)
+    return scope, th, nv
+
+
+def tdmIgnoredHints(state, asm_caps):
+    """The TDM cache-hint keys no tensor_load_to_lds carries as given: ``[(key, value, emitted)]``.
+
+    In a set of tdmHintSets one instruction moves every member, so on an ISA with th:
+    modifiers it carries one NonTemporal scope, TemporalHint and NonVolatile for all of them:
+    the fields tdmCacheModifiers emits for the set. A key is listed when its value differs
+    from that field; NonTemporal is compared on its scope bits, the only ones a TDM load reads.
+    """
+    if not _has_temporal_hint(asm_caps):
+        return []
+    ignored = []
+    for members in tdmHintSets(state):
+        keys = [[state.get(k + tc, 0) for k in _TDM_HINT_KEYS] for tc in members]
+        hints = [(nt, TemporalHint(th), NonVolatile(nv)) for nt, th, nv in keys]
+        emitted = _tdmHintKeyValues(tdmCacheModifiers(asm_caps, hints, tdmHintDeciders(members)))
+        for tc, (nt, th, nv) in zip(members, keys):
+            for k, given, field in zip(_TDM_HINT_KEYS, (nt & 0x3, th, nv), emitted):
+                if given != field:
+                    ignored.append((k + tc, given, field))
+    return ignored
 
 
 def _at_least_device_scope(scope):

@@ -38,6 +38,7 @@ from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 from tensilelite.Components.NonTemporal import (
     _at_least_device_scope,
     _has_temporal_hint,
+    _tdmHintKeyValues,
     decodeNonTemporal,
     forceCoherentNonTemporal,
     tdmCacheModifiers,
@@ -335,3 +336,16 @@ def test_tdm_cache_modifiers_deciders_still_have_to_agree():
     assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=(0, 1, 2))) == _fields(
         tdmCacheModifiers(GFX1250_CAPS, hints))
     assert tdmCacheModifiers(GFX1250_CAPS, hints, decider=()) is None
+
+
+# ---------------------------------------------------------------------------
+# _tdmHintKeyValues - the key values a TENSORModifiers decodes from
+# ---------------------------------------------------------------------------
+def test_tdm_hint_key_values_invert_tdm_cache_modifiers():
+    """Every one-tensor hint maps back to its own keys; no modifiers maps to the zero keys."""
+    assert _tdmHintKeyValues(None) == (0, 0, 0)
+    for nt in range(4):
+        for th in range(7):
+            for nv in range(2):
+                mods = tdmCacheModifiers(GFX1250_CAPS, [(nt, TemporalHint(th), NonVolatile(nv))])
+                assert _tdmHintKeyValues(mods) == (nt, th, nv), (nt, th, nv)
