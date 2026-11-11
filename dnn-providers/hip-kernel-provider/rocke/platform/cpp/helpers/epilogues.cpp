@@ -916,7 +916,11 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                 {
                     rocke_value_t* smem_col = rocke_b_add(b, col, rocke_b_const_i32(b, s));
                     rocke_value_t* smem_idx[2] = {row, smem_col};
-                    rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, smem_idx, 2, 1);
+                    /* Python: b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1) --
+                     * the generic vector load (result name av1), not smem_load_vN_f32
+                     * (av1f32), exactly as the plain store path above. */
+                    rocke_value_t* vf32
+                        = rocke_b_smem_load_vN(b, c_smem, smem_idx, 2, rocke_f32(), 1);
                     rocke_value_t* v = rocke_b_vec_extract(b, vf32, 0);
                     rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
                     rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);

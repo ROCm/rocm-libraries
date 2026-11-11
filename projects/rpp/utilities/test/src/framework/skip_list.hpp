@@ -84,7 +84,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Effects/GaussianNoiseTest.Correctness/HOST_I8toI8_*_FullRoi_1x45x13",
     "Image_Effects/GlitchTest.Correctness/HIP_*_PartialRoi_*",
     "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PLN3_PartialRoi_*",
-    "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PLN3_FullRoi_1x45x13_*",
     "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PKD3_PartialRoi_1x45x13_*",
     "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PLN3_PartialRoi_1x45x13_*",
     "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PKD3_FullRoi_1x45x13_Shift",

@@ -44,7 +44,6 @@ int rocke_dconv16c_issue_dram_load(rocke_dconv_16c_ctx_t* ctx,
                                    int out_cap)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     int count = 0;
     int i;
 
@@ -104,10 +103,8 @@ int rocke_dconv16c_issue_dram_load(rocke_dconv_16c_ctx_t* ctx,
         /* safe_off = b.select(valid, a_off_bytes, oob_sentinel) */
         safe_off = rocke_b_select(b, valid, a_off_bytes, ctx->oob_sentinel);
         /* a_vec = _buf_load_vN(a_rsrc, safe_off, c0, 2) -- dtype-dispatched */
-        if(is_bf16)
-            a_vec = rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
-        else
-            a_vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
+        a_vec = rocke_dconv_load_elems(
+            b, rocke_direct_conv_problem_dtype(&ctx->p), ctx->a_rsrc, safe_off, ctx->c0, 4);
         /* a_vec = b.select(valid, a_vec, io_vec4_zero) */
         a_vec = rocke_b_select(b, valid, a_vec, ctx->io_vec4_zero);
         /* lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4)) */
@@ -202,7 +199,6 @@ rocke_value_t*
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* W_lds_idx;
     rocke_value_t* lds_idx;
-    rocke_value_t* indices[2];
 
     /* W_lds_idx = b.add(
      *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride)),
@@ -222,10 +218,9 @@ rocke_value_t*
         rocke_value_t* inner = rocke_b_add(b, mul_wlds, mul_wave);
         lds_idx = rocke_b_add(b, inner, ctx->ch_lane_k32);
     }
-    /* return b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=8) */
-    indices[0] = ctx->c0;
-    indices[1] = lds_idx;
-    return rocke_b_smem_load_vN(b, lds, indices, 2, ctx->io_type, 8);
+    /* return _smem_load_elems(b, p.dtype, lds, c0, lds_idx, 8) */
+    return rocke_dconv_smem_load_elems(
+        b, rocke_direct_conv_problem_dtype(&ctx->p), lds, ctx->c0, lds_idx, 8);
 }
 
 /* ===================================================================== *
@@ -244,7 +239,6 @@ rocke_value_t* rocke_dconv16c_lds_read_input_s2_k32(rocke_dconv_16c_ctx_t* ctx,
     rocke_value_t* W_lds_idx;
     rocke_value_t* lds_idx;
     rocke_value_t* vec;
-    rocke_value_t* indices[2];
 
     /* W_lds_idx = b.add(
      *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride)),
@@ -265,10 +259,9 @@ rocke_value_t* rocke_dconv16c_lds_read_input_s2_k32(rocke_dconv_16c_ctx_t* ctx,
         rocke_value_t* inner = rocke_b_add(b, mul_wlds, mul_wave);
         lds_idx = rocke_b_add(b, inner, ctx->ch_lane_k32);
     }
-    /* vec = b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=8) */
-    indices[0] = ctx->c0;
-    indices[1] = lds_idx;
-    vec = rocke_b_smem_load_vN(b, lds, indices, 2, ctx->io_type, 8);
+    /* vec = _smem_load_elems(b, p.dtype, lds, c0, lds_idx, 8) */
+    vec = rocke_dconv_smem_load_elems(
+        b, rocke_direct_conv_problem_dtype(&ctx->p), lds, ctx->c0, lds_idx, 8);
     /* return b.select(lane_in_lo_half, vec, fp16x8_zero) */
     return rocke_b_select(b, ctx->lane_in_lo_half, vec, ctx->fp16x8_zero);
 }
@@ -459,7 +452,33 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                 int flat = qt * KH + p_idx;
                 rocke_value_t* acc_in = accs_flat[flat];
 
-                if(ctx->spec->fold_k32)
+                if(rocke_dconv_is_f32_storage(p->dtype))
+                {
+                    /* fp32 storage: the same K-contiguous fragments, issued
+                     * through the catalog's fp32 / TF32 atoms. */
+                    rocke_value_t* as[16];
+                    rocke_value_t* bs[16];
+                    int np = 0;
+                    if(ctx->spec->fold_k32)
+                    {
+                        as[np] = ctx->weights_k32[r_const];
+                        bs[np++] = in_k32[qt];
+                        as[np] = ctx->weights_s2_k32[r_const];
+                        bs[np++] = in_s2[qt];
+                    }
+                    else
+                    {
+                        int s_const;
+                        for(s_const = 0; s_const < KW; ++s_const)
+                        {
+                            as[np] = ctx->weights[r_const * KW + s_const];
+                            bs[np++] = in_s[qt][s_const];
+                        }
+                    }
+                    acc_in
+                        = rocke_dconv_mma_f32_chain(b, ctx->arch, p->dtype, 16, as, bs, np, acc_in);
+                }
+                else if(ctx->spec->fold_k32)
                 {
                     /* CORRECTNESS-CRITICAL: both folded MFMAs are the SAME
                      * width (16x16x32). S=0/1 fold into one wide atom; S=2 is
@@ -547,7 +566,6 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
             rocke_value_t* d_valid;
             rocke_value_t* d_base_bytes;
             rocke_value_t* safe_d_off;
-            rocke_value_t* acc_h;
             const char* off_names[4];
             rocke_value_t* off_vals[4];
 
@@ -585,16 +603,8 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
             safe_d_off = rocke_b_select(b, store_ok, d_base_bytes, ctx->oob_sentinel);
             /* The 4 per-lane output elements are contiguous in NHWK, so one
              * 64-bit vector store replaces four scalar stores. */
-            if(is_bf16)
-            {
-                acc_h = rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush);
-                rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
-            }
-            else
-            {
-                acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc_to_flush);
-                rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
-            }
+            rocke_dconv_store_from_f32(
+                b, p->dtype, ctx->d_rsrc, safe_d_off, ctx->c0, acc_to_flush, 4);
             accs_flat[flat] = ctx->zero_acc;
         }
     }

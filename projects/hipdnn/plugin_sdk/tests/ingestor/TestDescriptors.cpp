@@ -424,7 +424,7 @@ EngineDescriptor populatedEngine()
     engine.heuristicId = testId(0x52);
     engine.sortKernelCatalog = {{"gfx942", {testId(0x53)}}};
     engine.predictEngine = {{"gfx942", {testId(0x54)}}};
-    engine.predictApplicableKernels = {{"gfx942", testId(0x55)}};
+    engine.predictApplicableKernels = {{"gfx942", {testId(0x55)}}};
     engine.metadataSchemaId = testId(0x56);
     engine.knobs = {"tile"};
     engine.behaviorNotes = {3};
@@ -611,7 +611,7 @@ std::vector<EqualityCase> allEqualityCases()
                      "PredictApplicableKernels",
                      true,
                      baseline,
-                     [](auto& v) { v.predictApplicableKernels["gfx950"] = testId(0x5E); }),
+                     [](auto& v) { v.predictApplicableKernels["gfx950"] = {testId(0x5E)}; }),
             fieldRow(type,
                      "MetadataSchemaId",
                      true,

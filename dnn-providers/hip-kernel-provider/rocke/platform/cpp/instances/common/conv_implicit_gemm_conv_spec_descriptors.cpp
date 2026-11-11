@@ -38,6 +38,7 @@
  * only piece still a peer port (no C constructor for the opaque field).
  */
 
+#include "rocke/instance_conv_fwd_split_k_reduce.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
@@ -316,6 +317,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.dtype_b = "fp16";
     s.dtype_d = "fp16";
     s.dtype_acc = "fp32";
+    s.mma_dtype = NULL;
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
@@ -387,7 +389,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *            "unroll": self.unroll_k,
      *            f"gm{group_merge}": group_merge > 1,
      *            "splitk": split_k > 1,
-     *            f"skc{split_k_cluster}": split_k_cluster > 0}) */
+     *            f"skc{split_k_cluster}": split_k_cluster > 0,
+     *            "tf32": self.data.is_tf32}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -397,8 +400,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char gm_buf[24];
     char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[6];
-    int flag_on[6];
+    const char* flag_names[7];
+    int flag_on[7];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -453,8 +456,13 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
     flag_names[5] = skc_buf;
     flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
+    /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
+     * from an fp32 kernel with the same atom shape. Last, and only when set,
+     * so every existing name is unchanged. */
+    flag_names[6] = "tf32";
+    flag_on[6] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 6, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 7, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -545,10 +553,11 @@ bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
 
 /* ---- split-K forward admission ------------------------------------------ *
  *
- * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
- * (mem / wavelet) run over one slice, with an fp32 store into the workspace
- * slab. The paths that drive the K loop differently, remap the grid, merge
- * groups, or take the pointwise fast path are not wired for it. */
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain K loop
+ * (WMMA mem / wavelet; MFMA mem / compv3 / compv4) run over one slice, with an
+ * fp32 store into the workspace slab. The paths that drive the K loop
+ * differently, remap the grid, merge groups, or take the pointwise fast path
+ * are not wired for it. */
 bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                                       const char* family,
                                       const char* arch,
@@ -560,10 +569,41 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
     }
+    /* MFMA pipelines whose K loop is the single scf.for the slice bounds
+     * drive (Python _FWD_SPLIT_K_MFMA_PIPELINES). A NULL pipeline is rejected
+     * like Python's pipeline=None, not read as "mem": the spec default already
+     * supplies "mem", so NULL only comes from a caller that cleared it. */
     if(family == NULL || strcmp(family, "wmma") != 0)
     {
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "split-K forward is WMMA-only (built and tested on wave32)");
+        const char* pl = s->pipeline;
+        if(pl == NULL
+           || (strcmp(pl, "mem") != 0 && strcmp(pl, "compv3") != 0 && strcmp(pl, "compv4") != 0))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward on MFMA runs the plain K loop only "
+                            "(mem, compv3, compv4; got %s)",
+                            pl != NULL ? pl : "None");
+        }
+    }
+    /* The two-stage form folds the slabs through Stage 2 on every family, and
+     * the cluster form folds them in Stage 1 with the same cast, so ask Stage
+     * 2's own validator for the output dtype: fp32 (plain or under mma_dtype
+     * "tf32") stays unsplit. Python: fwd_split_k_reduce_reason. */
+    if(s->split_k > 1)
+    {
+        rocke_fwd_split_k_reduce_spec_t r = rocke_fwd_split_k_reduce_spec_default();
+        char why[256] = {0};
+        r.dtype_d = s->dtype_d;
+        if(!rocke_fwd_split_k_reduce_is_valid_spec(&r, why, sizeof(why)))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward %s: %s",
+                            s->split_k_cluster ? "folds through the cluster"
+                                               : "reduces through Stage 2",
+                            why);
+        }
     }
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
     {
@@ -801,6 +841,61 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
 }
 
 /* ===================================================================== *
+ *  _fwd_tf32_reason(spec, arch=None)
+ *
+ *      why = spec.data.mma_dtype_reason()
+ *      if why: return why
+ *      if not spec.data.is_tf32: return ""
+ *      return _tf32_mfma_reason(spec, arch)
+ *
+ *  The atom, register and LDS-stride rules are the ones every direction
+ *  shares; without an arch the atom is checked against every arch's catalog.
+ * ===================================================================== */
+bool rocke_conv_fwd_tf32_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                const char* arch,
+                                char* reason,
+                                size_t reason_cap)
+{
+    if(rocke_conv_mma_dtype_reason(
+           s->dtype_a, s->dtype_b, s->dtype_d, s->mma_dtype, reason, reason_cap))
+    {
+        return true;
+    }
+    if(!rocke_conv_data_is_tf32(s->mma_dtype))
+    {
+        return false;
+    }
+    rocke_conv_tf32_spec_view_t v;
+    memset(&v, 0, sizeof(v));
+    v.dtype_a = s->dtype_a;
+    v.dtype_b = s->dtype_b;
+    v.dtype_d = s->dtype_d;
+    v.mma_dtype = s->mma_dtype;
+    v.wave_size = s->wave_size;
+    v.tile_m = s->tile_m;
+    v.tile_n = s->tile_n;
+    v.warp_m = s->warp_m;
+    v.warp_n = s->warp_n;
+    v.warp_tile_m = s->warp_tile_m;
+    v.warp_tile_n = s->warp_tile_n;
+    v.warp_tile_k = s->warp_tile_k;
+    /* effective_lds_layout(): its row stride, or the ValueError it raises. */
+    char layout_err[256];
+    rocke_conv_lds_layout_t layout;
+    layout_err[0] = '\0';
+    if(rocke_implicit_gemm_conv_spec_effective_lds_layout(
+           s, &layout, layout_err, sizeof(layout_err)))
+    {
+        v.lds_row_stride = layout.row_stride;
+    }
+    else
+    {
+        v.lds_layout_error = layout_err;
+    }
+    return rocke_conv_tf32_mfma_reason(&v, arch, reason, reason_cap);
+}
+
+/* ===================================================================== *
  *  LdsLayout port   (rocke/helpers/layouts.py lines 66-203)
  *
  *  The conv body / spec validation reach only the policies the spec's
@@ -986,6 +1081,11 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "block_size %d > 1024", block_size);
     }
+    /* _tf32_why = _fwd_tf32_reason(self); if _tf32_why: raise ValueError(_tf32_why) */
+    if(rocke_conv_fwd_tf32_reason(s, NULL, reason, reason_cap))
+    {
+        return false;
+    }
 
     /* layout = self.effective_lds_layout()   (runs layout.validate())
      * if async_dma: layout.validate_for_async()
@@ -1062,6 +1162,17 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
+    /* A NULL pipeline / epilogue (Python None) is a malformed spec, not a
+     * request for the "mem" / "default" defaults: refused before any rule
+     * reads them, as Python is_valid_spec does. */
+    if(s->pipeline == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pipeline must be set (got None)");
+    }
+    if(s->epilogue == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "epilogue must be set (got None)");
+    }
     if(arch == NULL)
     {
         arch = "gfx950";
@@ -1073,6 +1184,12 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     {
         /* Full Python str(KeyError) text, reproduced verbatim. */
         rocke_cspec__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+
+    /* The TF32 gate validate() applies arch-free, here on the arch. */
+    if(rocke_conv_fwd_tf32_reason(s, arch, reason, reason_cap))
+    {
         return false;
     }
 
@@ -1130,11 +1247,15 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                         target->wave_size);
     }
 
-    /* MMA atom must be in the target's catalog for the requested dtype. */
+    /* MMA atom must be in the target's catalog for the requested dtype. The
+     * catalog is asked for the MMA dtype, which differs from the storage dtype
+     * only under TF32 compute (whose atom the gate above already checked). */
     {
         char a_scratch[32], b_scratch[32];
-        const char* a_norm = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
-        const char* b_norm = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
+        const char* mma_a = rocke_conv_data_mma_operand(s->dtype_a, s->mma_dtype);
+        const char* mma_b = rocke_conv_data_mma_operand(s->dtype_b, s->mma_dtype);
+        const char* a_norm = rocke_normalize_dtype(mma_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(mma_b, b_scratch, sizeof(b_scratch));
         mma = rocke_archtarget_mma(target);
         if(!rocke_mma_catalog_has_shape(
                mma, family, a_norm, b_norm, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
@@ -1142,7 +1263,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "unsupported %s warp_tile (%d, %d, %d) on %s",
-                            s->dtype_a ? s->dtype_a : "f16",
+                            mma_a ? mma_a : "f16",
                             s->warp_tile_m,
                             s->warp_tile_n,
                             s->warp_tile_k,
@@ -1151,12 +1272,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     }
 
     /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
-     * Mirrors the Python is_valid_spec LDS check (added on this branch):
+     * Mirrors Python implicit_gemm_lds_bytes / is_valid_spec:
      *   _ab_dtype_bytes = 4 if dtype_a == "fp32" else 2
      *   _a_shape = effective_lds_layout().storage_shape(tile_m) = (tile_m, row_stride)
      *   _b_shape = effective_lds_layout().storage_shape(tile_n) = (tile_n, row_stride)
      *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
-     *   _ab_lds   = _ab_bytes * (2 if double_buffer else 1)
+     *   _double   = async_dma or unroll_k  (the builders' double_buffer; compv4
+     *               alone runs the single-buffer loop and allocates one A/B tile)
+     *   _ab_lds   = _ab_bytes * (2 if _double else 1)
      *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
      *   _total_lds = (ab_lds + c_lds) if cshuffle_no_alias else max(ab_lds, c_lds)
      *               (aliased default overlaps C onto A/B -> max; no-alias gives C
@@ -1183,10 +1306,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
-        double_buf
-            = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
-                  ? 1
-                  : 0;
+        double_buf = (s->async_dma || s->unroll_k) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
@@ -1208,9 +1328,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
-                            "LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
+                            "LDS budget %d bytes (A/B=%s%d, C=%d) > %d cap on %s",
                             total_lds,
-                            ab_lds,
+                            double_buf ? "x2 " : "",
+                            ab_bytes,
                             c_lds,
                             target->lds_capacity_bytes,
                             arch);
@@ -1308,11 +1429,16 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "async_dma: %s has no DRAM->LDS DMA instruction", arch);
         }
-        if(rocke_async_tile_loader_from_tile(
-               s->tile_m, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
-               != ROCKE_OK
-           || rocke_async_tile_loader_from_tile(
-                  s->tile_n, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
+        /* async_tile_loaders(spec, arch): elem_dtype=_ir_dtype(dtype_a / dtype_b),
+         * whose ValueError (an unsupported dtype) the except also catches. */
+        const rocke_type_t* ea = rocke_conv_ir_dtype_lookup(s->dtype_a);
+        const rocke_type_t* eb = rocke_conv_ir_dtype_lookup(s->dtype_b);
+        if(ea == NULL || eb == NULL
+           || rocke_async_tile_loader_from_tile_typed(
+                  s->tile_m, s->tile_k, block_size, s->wave_size, ea, max_dwords, cpg, &al)
+                  != ROCKE_OK
+           || rocke_async_tile_loader_from_tile_typed(
+                  s->tile_n, s->tile_k, block_size, s->wave_size, eb, max_dwords, cpg, &al)
                   != ROCKE_OK)
         {
             ROCKE_SPEC_FAIL(reason,
@@ -1412,12 +1538,18 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
     }
 
     /* op = target.mma.op_for_shape(family=_conv_mma_family(arch),
-     *                              a=spec.data.dtype_a, b=spec.data.dtype_b, c="fp32",
+     *                              a=spec.data.mma_a, b=spec.data.mma_b, c="fp32",
      *                              m=warp_tile_m, n=warp_tile_n, k=warp_tile_k) */
     {
         char a_scratch[32], b_scratch[32];
-        const char* a_norm = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
-        const char* b_norm = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
+        const char* a_norm
+            = rocke_normalize_dtype(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                                    a_scratch,
+                                    sizeof(a_scratch));
+        const char* b_norm
+            = rocke_normalize_dtype(rocke_conv_data_mma_operand(spec->dtype_b, spec->mma_dtype),
+                                    b_scratch,
+                                    sizeof(b_scratch));
         op = rocke_archtarget_op_for_shape(target,
                                            rocke_conv_mma_family(arch),
                                            a_norm,

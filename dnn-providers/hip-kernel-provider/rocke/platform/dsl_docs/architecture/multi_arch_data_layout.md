@@ -349,22 +349,15 @@ becomes rare instead of universal.
 
 ### Resolving a target against the MMA catalog
 
-`ArchTarget` is documented above as carrying the supported MMA/WMMA shapes, so
-the arch↔catalog key relationship is this document's design question. Two
-constraints on the fix:
-
-- **Resolve ONCE into a target object that carries its match keys, and query
-  every registry with that object — never with a raw string.** A raw string
-  with exact membership cannot express a target that resolves under a family
-  umbrella.
-- A **match-key set is arch vocabulary, not kernel-family vocabulary**, so it
-  belongs on the carry side and does not violate the "does not carry" list
-  above. (Worth stating, because the rule reads as forbidding it at a glance.)
-
-The *measured* state of that relationship per target — which targets resolve in
-which registry — is a status finding, not a plan, and is audited in
-`gfx_support_audit.md` under Known issues. This document says what the layering
-should be; that one records where it currently is not.
+The arch registry (`arch_specs.json`) and the tiling MMA catalog
+(`helpers/tiling/traits/data/mma_traits.json`) key on the same target ids. The
+catalog lists real target ids only -- generic targets and their members, never a
+family name such as `gfx11` -- and every id it lists is a registry target
+(enforced by `tests/helpers/tiling/traits/test_mma_catalog_integrity.py`). So a
+target resolves in both registries by its own id, with no family matching and no
+per-target match-key set. The catalog's row rule is in
+`helpers/tiling/traits/README.md` (Targets); the per-target status is audited in
+`gfx_support_audit.md` under Known issues.
 
 ROCm version is a separate axis. `_DATALAYOUT` in `lower_llvm.py` is keyed by
 both gfx and ROCm release. The backend interface threads ROCm version
