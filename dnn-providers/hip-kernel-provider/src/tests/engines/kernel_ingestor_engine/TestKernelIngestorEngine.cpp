@@ -665,6 +665,8 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+        "hipkernel.flydsl_sdpa_head_pad.dispatch",
         "hipkernel.flydsl_sdpa_bwd_merged.dispatch",
         // The split engine is one pack with a handler per slot: the first slot stands for
         // the pack above, the others are probed beside it.

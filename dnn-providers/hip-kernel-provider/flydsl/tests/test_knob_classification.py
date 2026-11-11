@@ -12,7 +12,8 @@ exposes ``TUNING_FIELDS`` plus, for an SDPA backward op, the graph-determined fi
 kernels differ in while serving the same graph (``ALTERNATIVE_KNOBS``); these tests hold
 the shipped UEDs to that and require the generator to refuse a field it cannot classify. A slotted engine (the SDPA backward
 split) is descriptor-only and keeps its knobs per slot, against each slot's own KMD. They
-read only the op-level descriptors in git, so they need no ``dvc pull``.
+read only the op-level descriptors in git, so they need no ``dvc pull``. They also hold the
+``supports_graph_capture`` note to the engines verified capture-safe.
 """
 
 from __future__ import annotations
@@ -178,3 +179,45 @@ def test_a_field_in_two_sets_is_refused(monkeypatch: pytest.MonkeyPatch) -> None
         gen_descriptors._fields_for_op(
             [_entry("sdpa_rdna", "sdpa_rdna_x", {"block_m": 64, "has_bias": 0})]
         )
+
+
+ROCKE_DESCRIPTORS = DESCRIPTORS.parent / "rocKE"
+# Verified on gfx950 (CDNA engines), gfx1152 and gfx1201 (RDNA engines). The note is
+# engine-level (the host dispatch path is arch-independent), so it covers every target an
+# engine ships for.
+CAPTURE_SAFE = {
+    "rmsnorm",
+    "rmsnorm_bwd",
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+    "gfx950_attention_dense",
+    "gfx1151_wmma_attention",
+    "gfx1151_wmma_attention_decode",
+}
+
+
+@pytest.mark.parametrize(
+    "ued_path",
+    UEDS + sorted(ROCKE_DESCRIPTORS.glob("*/*.ued.json")),
+    ids=lambda p: p.parent.name,
+)
+def test_only_verified_engines_claim_graph_capture(ued_path: Path) -> None:
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    claims = "supports_graph_capture" in ued.get("behavior_notes", [])
+    assert claims == (ued_path.parent.name in CAPTURE_SAFE)
+
+
+def test_every_capture_safe_engine_is_a_shipped_ued() -> None:
+    shipped = {
+        p.parent.name for p in UEDS + sorted(ROCKE_DESCRIPTORS.glob("*/*.ued.json"))
+    }
+    assert CAPTURE_SAFE <= shipped
+
+
+def test_the_generator_and_shipped_flydsl_engines_agree_on_graph_capture() -> None:
+    flydsl_safe = {p.parent.name for p in UEDS} & CAPTURE_SAFE
+    assert set(gen_descriptors.GRAPH_CAPTURE_OPS) == flydsl_safe

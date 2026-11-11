@@ -122,11 +122,11 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 810 (90 + 63 + 84 + 72 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
-| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,939 (90 + 63 + 56 + 20 + 24 + 86 + 1,329 + 962 + 309) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,139 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 309) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
 `sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
 inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
@@ -141,7 +141,7 @@ nondeterminism policy below. The rows with separate V heads (`u2`) are their own
 `<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
 
 # The pins of the backward ops: the shipped objects the arch's reference CSV names, copied out of
 # $CONTENT. The directory must not exist (the tool refuses to replace one), so a repeated run removes it first;
@@ -269,6 +269,10 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
   [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
+  # The RNG dump's keep-mask writer (COVERAGE.md §5.10), one object per target.
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  # The head-dim padding copy (COVERAGE.md §7.12), one object per target.
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -288,9 +292,16 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done
+
+# (4) No transcendental result read by the very next VALU op on gfx942/gfx950: the
+#     backend adds the wait state for its own instructions but not for inline asm, so
+#     a finding is an inline-asm hazard (CDNA kernel modification 46). Exit 1 on one.
+$PY tools/check_trans_hazards.py --content-dir $CONTENT
 ```
 
 The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)

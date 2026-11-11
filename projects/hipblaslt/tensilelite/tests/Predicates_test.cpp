@@ -295,3 +295,204 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+// ----------------------------------------------------------------------------
+// GL2PrefetchSAddrOffsetLimitCheck bounds the per-lane offset of a
+// PrefetchGL2SAddr kernel, which lives in one 32-bit VGPR. A lane covers one
+// row of the perpendicular extent (DepthU along K for TLU, MacroTile *
+// ClusterDim along the free dimension otherwise) plus one coalesced element.
+// ----------------------------------------------------------------------------
+
+namespace
+{
+    TensileLite::ContractionProblemGemm gl2Problem(bool             transA,
+                                                   bool             transB,
+                                                   rocisa::DataType type,
+                                                   size_t           m,
+                                                   size_t           n,
+                                                   size_t           k,
+                                                   size_t           lda,
+                                                   size_t           ldb)
+    {
+        using namespace TensileLite;
+        return ContractionProblemGemm::GEMM_Strides(transA,
+                                                    transB,
+                                                    type,
+                                                    type,
+                                                    rocisa::DataType::BFloat16,
+                                                    rocisa::DataType::BFloat16,
+                                                    m,
+                                                    n,
+                                                    k,
+                                                    /*batchSize=*/1,
+                                                    lda,
+                                                    /*aStride=*/-1,
+                                                    ldb,
+                                                    /*bStride=*/-1,
+                                                    /*ldc=*/m,
+                                                    /*cStride=*/-1,
+                                                    /*ldd=*/m,
+                                                    /*dStride=*/-1,
+                                                    /*beta=*/0.0);
+    }
+
+    bool gl2Check(TensileLite::GL2PrefetchSAddrCheckPacket const& packet,
+                  TensileLite::ContractionProblemGemm const&      problem)
+    {
+        return TensileLite::Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck(packet)(
+            problem);
+    }
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_ClusterDimWidensFootprint)
+{
+    using namespace TensileLite;
+    // TN bf16: A's perpendicular extent runs along M with stride lda = K. With
+    // MacroTile0 256 one tile spans 255 * K elements, which fits; a 4-wide cluster
+    // prefetches 1024 rows, which does not. BufferLoadOffsetLimitCheck only
+    // counts the 256 rows of one tile.
+    constexpr size_t k = 2200000;
+    static_assert((1023 * k + 255) * 2 >= 4294967296ull, "cluster footprint overflows");
+    static_assert((255 * k + 255) * 2 < 4294967296ull, "single-tile footprint fits");
+    auto problem = gl2Problem(true, false, rocisa::DataType::BFloat16, 4096, 4096, k, k, k);
+
+    EXPECT_FALSE(gl2Check({false, false, 256, 256, 256 * 4, 256}, problem));
+    EXPECT_TRUE(gl2Check({false, false, 256, 256, 256, 256}, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_FreeEdgeClampsFootprint)
+{
+    using namespace TensileLite;
+    // The kernel clamps the free-dimension rows to the tensor edge, so with only
+    // 512 rows of M the 1024-row cluster footprint costs 511 rows.
+    constexpr size_t k = 2200000;
+    static_assert((511 * k + 255) * 2 < 4294967296ull, "clamped footprint fits");
+    auto problem = gl2Problem(true, false, rocisa::DataType::BFloat16, 512, 4096, k, k, k);
+
+    EXPECT_TRUE(gl2Check({false, false, 256, 256, 256 * 4, 256}, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_TluSpansDepthUEvenPastK)
+{
+    using namespace TensileLite;
+    // NN bf16: A's perpendicular extent runs along K with stride lda = M. The
+    // kernel walks all DepthU rows whatever K is, so K = 64 does not shrink it.
+    constexpr size_t m = 9000000;
+    static_assert((255 * m + 255) * 2 >= 4294967296ull, "DepthU 256 overflows");
+    static_assert((127 * m + 255) * 2 < 4294967296ull, "DepthU 128 fits");
+    auto problem = gl2Problem(false, false, rocisa::DataType::BFloat16, m, 256, 64, m, 64);
+
+    EXPECT_FALSE(gl2Check({true, false, 256, 256, 256, 256}, problem));
+    EXPECT_TRUE(gl2Check({true, false, 128, 256, 256, 256}, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_Fp4ElementCountMustFit)
+{
+    using namespace TensileLite;
+    // The kernel forms the offset in elements before halving it for FP4, so an
+    // element count past 2^32 wraps even when the byte offset would fit.
+    constexpr size_t m = 20000000;
+    static_assert(255 * m + 255 >= 4294967296ull, "element offset overflows");
+    static_assert((255 * m + 255) / 2 < 4294967296ull, "byte offset alone fits");
+    auto problem = gl2Problem(false, false, rocisa::DataType::Float4, m, 256, 64, m, 64);
+
+    EXPECT_FALSE(gl2Check({true, false, 256, 256, 256, 256}, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_ChecksB)
+{
+    using namespace TensileLite;
+    // NT bf16: B is TLU along K with stride ldb = N; A is small.
+    constexpr size_t n = 9000000;
+    auto problem       = gl2Problem(false, true, rocisa::DataType::BFloat16, 256, n, 64, 256, n);
+
+    EXPECT_FALSE(gl2Check({true, true, 256, 256, 256, 256}, problem));
+    EXPECT_TRUE(gl2Check({true, true, 256, 128, 256, 256}, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_ScalesStepByFullFreeSize)
+{
+    using namespace TensileLite;
+    // TN: A is K-contiguous, so its offset stays inside one cluster's 256 rows.
+    // The scales are K-block-major whatever A's layout: DepthU 256 / MIK 128 is
+    // two scale rows of M * mxUnit(128 / 32 = 4) e8s, plus the cluster's 1024.
+    constexpr size_t big   = 1100000000;
+    constexpr size_t small = 1000000000;
+    static_assert(4 * big + 1023 >= 4294967296ull, "scale offset overflows");
+    static_assert(4 * small + 1023 < 4294967296ull, "scale offset fits");
+
+    GL2PrefetchSAddrCheckPacket packet{false, false, 256, 256, 256, 256, 256, 128, 32, 0, 1, 1};
+
+    EXPECT_TRUE(gl2Check({false, false, 256, 256, 256, 256},
+                         gl2Problem(true, false, rocisa::DataType::BFloat16, big, 256, 64, 64, 64)))
+        << "the data offset alone fits";
+    EXPECT_FALSE(gl2Check(
+        packet, gl2Problem(true, false, rocisa::DataType::BFloat16, big, 256, 64, 64, 64)));
+    EXPECT_TRUE(gl2Check(
+        packet, gl2Problem(true, false, rocisa::DataType::BFloat16, small, 256, 64, 64, 64)));
+
+    // A 2D scale tile of 128 rows of M shrinks the pitch 128-fold.
+    packet.mxBlockFreeA = 128;
+    EXPECT_TRUE(gl2Check(
+        packet, gl2Problem(true, false, rocisa::DataType::BFloat16, big, 256, 64, 64, 64)));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_MXSBUsesN)
+{
+    using namespace TensileLite;
+    // NN: B is K-contiguous; its scales step by N.
+    constexpr size_t n = 1100000000;
+    auto problem       = gl2Problem(false, false, rocisa::DataType::BFloat16, 256, n, 64, 256, 64);
+
+    EXPECT_FALSE(gl2Check({true, false, 256, 256, 256, 256, 256, 128, 0, 32, 1, 1}, problem));
+    EXPECT_TRUE(gl2Check({true, false, 256, 256, 256, 256, 256, 128, 32, 0, 1, 1}, problem))
+        << "M is small, so A's scales fit";
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_SparseUsesCompressedStride)
+{
+    using namespace TensileLite;
+    // TT bf16: A's rows step by lda = K dense, but by K / 2 once compressed. B
+    // is TLU with ldb = N, so it stays small.
+    constexpr size_t k = 10000000;
+    static_assert((255 * k + 255) * 2 >= 4294967296ull, "dense stride overflows");
+    static_assert((255 * (k / 2) + 255) * 2 < 4294967296ull, "compressed stride fits");
+    GL2PrefetchSAddrCheckPacket packet{false, true, 256, 256, 256, 256};
+
+    auto problem = gl2Problem(true, true, rocisa::DataType::BFloat16, 4096, 256, k, k, 256);
+    EXPECT_FALSE(gl2Check(packet, problem));
+    problem.setSparse(1, 0);
+    EXPECT_TRUE(gl2Check(packet, problem));
+}
+
+TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_TluMetadataStepsByFreeSize)
+{
+    using namespace TensileLite;
+    // Sparse TN: A is K-contiguous, but MetadataLayout 1 stores the metadata
+    // M-contiguous, so each of its DepthUMetadata rows steps by M bytes.
+    constexpr size_t m = 70000000;
+    constexpr size_t k = 256;
+    static_assert(63 * m + 255 >= 4294967296ull, "DepthUMetadata 64 overflows");
+    static_assert(31 * m + 255 < 4294967296ull, "DepthUMetadata 32 fits");
+
+    GL2PrefetchSAddrCheckPacket packet{
+        false, false, 256, 256, 256, 256, 256, 128, 0, 0, 1, 1, true, true, 64, 256};
+
+    auto tluMeta = gl2Problem(true, false, rocisa::DataType::BFloat16, m, 256, k, k, k);
+    tluMeta.setSparse(1, 1);
+    EXPECT_FALSE(gl2Check(packet, tluMeta));
+    packet.depthUMetadata = 32;
+    EXPECT_TRUE(gl2Check(packet, tluMeta));
+
+    // MetadataLayout 0 keeps the metadata K-contiguous like A.
+    packet.tluMetadata    = false;
+    packet.depthUMetadata = 64;
+    auto kMeta            = gl2Problem(true, false, rocisa::DataType::BFloat16, m, 256, k, k, k);
+    kMeta.setSparse(1, 0);
+    EXPECT_TRUE(gl2Check(packet, kMeta));
+
+    // The metadata is ignored when the problem is dense.
+    packet.tluMetadata = true;
+    EXPECT_TRUE(
+        gl2Check(packet, gl2Problem(true, false, rocisa::DataType::BFloat16, m, 256, k, k, k)));
+}

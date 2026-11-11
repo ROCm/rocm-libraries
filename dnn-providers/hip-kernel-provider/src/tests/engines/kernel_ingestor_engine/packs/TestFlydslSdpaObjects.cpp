@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -50,9 +52,11 @@
  * the graph first: an object that admits no graph built from its metadata would never be
  * selected, which a launch by name would otherwise hide.
  *
- * Two tiers. `OnePerForm` runs one object per (engine, form) -- a form being what changes
- * the code an object runs beyond its head dim -- and is the pre-merge case. `Full/...Every`
- * runs all of them, bucketed objects at two widths; it is the nightly one.
+ * Three tiers. `OnePerForm` runs one object per (engine, form) -- a form being what changes
+ * the code an object runs beyond its head dim -- and is the pre-merge case; on the RDNA
+ * prefill and decode engines and the CDNA generic one it leaves the forms isNightlyForm names
+ * to `Comprehensive/...OnePerNightlyForm`, one object of each, in the comprehensive (nightly)
+ * tier. `Full/...Every` runs all of them, bucketed objects at two widths.
  *
  * `TestFlydslSdpaObjectGraphs` is the host half: for every object every loaded shard
  * carries, on every architecture, the graph this suite would run is one the object's
@@ -167,7 +171,10 @@ RdnaObjectEngine rdnaObjectEngine(ObjectKind kind)
 /// Which of the staged objects a case launches.
 enum class ObjectSelection
 {
+    /// One object per form, but the forms isNightlyForm names: the standard tier.
     ONE_PER_FORM,
+    /// One object per form isNightlyForm names: the comprehensive tier.
+    ONE_PER_NIGHTLY_FORM,
     EVERY
 };
 
@@ -184,7 +191,12 @@ struct ObjectTraits
     /// The bias in the query's dtype (RDNA `bias_q`; every CDNA bias) rather than f32.
     bool biasInQueryType = false;
     bool sink = false;
+    /// The object drops attention probabilities (aiw `has_dropout`).
+    bool dropout = false;
     bool qkMask = false;
+    /// V's width apart from Q/K's (a pair bucket or tier: CDNA modification 40, RDNA prefill
+    /// modification 32); it serves only graphs whose two head dims differ.
+    bool vMask = false;
     int64_t kvAlign = 0;
     bool anyDiagonal = true;
     int64_t hdPair = 0;
@@ -201,7 +213,9 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     traits.causal = intField(kernel, "causal") == 1;
     traits.bias = intField(kernel, "has_bias") == 1;
     traits.sink = intField(kernel, "has_sink") == 1;
+    traits.dropout = intField(kernel, "has_dropout") == 1;
     traits.qkMask = intField(kernel, "qk_mask") == 1;
+    traits.vMask = intField(kernel, "v_mask") == 1;
     traits.kvAlign = intField(kernel, "kv_align");
     traits.anyDiagonal = intField(kernel, "any_diagonal", 1) == 1;
     traits.hdPair = intField(kernel, "hd_pair");
@@ -212,7 +226,9 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     }
     else if(isCdna(kind))
     {
-        traits.biasInQueryType = true;
+        // The strided bias objects (vendored-kernel modification 31) are the CDNA ones that
+        // read an f32 bias; they run one, the others a bias in the query's dtype.
+        traits.biasInQueryType = intField(kernel, "bias_kstrided") == 0;
     }
     else
     {
@@ -230,8 +246,8 @@ bool isBucketed(ObjectKind kind, const ObjectTraits& traits)
 
 /// What changes the code an object runs beyond its head dim: one object of each is the
 /// pre-merge tier.
-using ObjectForm
-    = std::tuple<std::string, bool, bool, bool, bool, bool, bool, int64_t, bool, int64_t, int64_t>;
+using ObjectForm = std::
+    tuple<std::string, bool, bool, bool, bool, bool, bool, int64_t, bool, int64_t, int64_t, bool>;
 
 ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
 {
@@ -247,7 +263,54 @@ ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
             traits.kvAlign,
             traits.anyDiagonal,
             traits.hdPair,
-            traits.dvSplit};
+            traits.dvSplit,
+            traits.vMask};
+}
+
+/// Whether one object per form leaves a CDNA generic-engine form to the comprehensive (nightly)
+/// tier. A form with a V mask, a bias with a sink, on a bucket or read strided as f32, or a V
+/// split across columns runs pre-merge in bf16 without a causal mask, and with a split V only
+/// alone (no bias, bucket or V mask); exact f32 only in its plain non-causal form. The f16 and
+/// causal builds of these features run pre-merge on the other forms and in
+/// TestGpuFlydslSdpaCdnaDispatch.
+bool isNightlyCdnaForm(const ObjectTraits& traits)
+{
+    const bool split = traits.dvSplit > 1;
+    if(traits.dtype == "f32")
+    {
+        return traits.causal || traits.bias || split;
+    }
+    const bool added = traits.vMask
+                       || (traits.bias && (traits.sink || traits.qkMask || !traits.biasInQueryType))
+                       || split;
+    return added
+           && (traits.dtype != "bf16" || traits.causal
+               || (split && (traits.bias || traits.qkMask || traits.vMask)));
+}
+
+/// Whether one object per form leaves @p kernel's form to the comprehensive (nightly) tier. On
+/// the RDNA prefill and decode engines: a bias with a sink, a generic tier or a V head dim of
+/// its own (on prefill, or a split V); the exact f32 and V-mask pair forms; and the generic
+/// tiers that split V four ways. Each of these features also runs in the standard tier, on a
+/// form of its own or in TestGpuFlydslSdpaRdnaDispatch. On the CDNA generic engine,
+/// isNightlyCdnaForm. A function of the form.
+bool isNightlyForm(ObjectKind kind, const KernelDefinition& kernel)
+{
+    if(kind == ObjectKind::CDNA)
+    {
+        return isNightlyCdnaForm(traitsOf(kind, kernel));
+    }
+    if(kind != ObjectKind::RDNA_PREFILL && kind != ObjectKind::RDNA_DECODE)
+    {
+        return false;
+    }
+    const auto traits = traitsOf(kind, kernel);
+    const bool bucketed = isBucketed(kind, traits);
+    const bool mla = traits.headDimV != 0 && traits.headDimV != traits.headDim;
+    const bool splitValue = kind == ObjectKind::RDNA_PREFILL && traits.dvSplit > 1;
+    return traits.dtype == "f32" || traits.vMask
+           || (traits.bias && (traits.sink || bucketed || mla || splitValue))
+           || (bucketed && traits.dvSplit > 2);
 }
 
 /// A head dim inside a bucket of @p bound: about five eighths of it, on the multiple of 8
@@ -289,6 +352,12 @@ std::vector<ShapeAlternatives>
     {
         SdpaGraphSpec spec;
         spec.dataType = traits.dtype == "f16" ? DataType::HALF : DataType::BFLOAT16;
+        if(traits.dtype == "f32")
+        {
+            // Exact f32: the CDNA generic objects' (vendored-kernel modification 35) and
+            // the RDNA prefill objects' (prefill kernel modification 34).
+            spec.dataType = DataType::FLOAT;
+        }
         spec.headDim = width;
         spec.scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(width)));
         spec.stats = SdpaStats::LSE;
@@ -297,9 +366,19 @@ std::vector<ShapeAlternatives>
         {
             spec.valueHeadDim = traits.headDimV;
         }
+        if(traits.vMask)
+        {
+            // A pair object serves only head dims that differ: V half as wide as Q/K at the
+            // bound, and under EVERY, V at the bound over the narrower Q/K inside it.
+            spec.valueHeadDim = width == bound ? std::max<int64_t>(8, bound / 2 / 8 * 8) : bound;
+        }
 
         spec.withSink = traits.sink;
         spec.withBias = traits.bias;
+        if(traits.dropout)
+        {
+            setDropout(spec, 0.2F);
+        }
         if(traits.bias)
         {
             spec.biasDataType = traits.biasInQueryType ? spec.dataType : DataType::FLOAT;
@@ -422,11 +501,13 @@ std::string describe(const SdpaGraphSpec& spec)
            + " Hk=" + std::to_string(spec.kvHeads) + " Sq=" + std::to_string(spec.seqLenQ)
            + " Skv=" + std::to_string(spec.seqLenKv) + " D=" + std::to_string(spec.headDim)
            + " Dv=" + std::to_string(spec.valueHeadDim.value_or(spec.headDim)) + " mask=" + mask
-           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "");
+           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "")
+           + (spec.dropoutProbability.value_or(0.0F) > 0.0F ? " dropout" : "");
 }
 
-/// @p kernels in name order, or one per form when @p selection asks for that: the first of
-/// each in name order, so the choice is the same on every run.
+/// @p kernels in name order, or one per form when @p selection asks for that (the standard
+/// tier's forms or the nightly ones, isNightlyForm): the first of each in name order, so the
+/// choice is the same on every run.
 std::vector<KernelDefinition>
     select(ObjectKind kind, std::vector<KernelDefinition> kernels, ObjectSelection selection)
 {
@@ -437,10 +518,15 @@ std::vector<KernelDefinition>
     {
         return kernels;
     }
+    const bool nightly = selection == ObjectSelection::ONE_PER_NIGHTLY_FORM;
     std::vector<KernelDefinition> chosen;
     std::vector<ObjectForm> seen;
     for(auto& kernel : kernels)
     {
+        if(isNightlyForm(kind, kernel) != nightly)
+        {
+            continue;
+        }
         auto form = formOf(kind, kernel);
         if(std::find(seen.begin(), seen.end(), form) == seen.end())
         {
@@ -466,6 +552,10 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
 
     const auto device = packedArchDeviceProperties();
     const auto kernels = select(kind, staged, selection);
+    if(kernels.empty() && selection == ObjectSelection::ONE_PER_NIGHTLY_FORM)
+    {
+        GTEST_SKIP() << "the standard tier runs every " << engine.op << " form";
+    }
     int launches = 0;
     for(const auto& kernel : kernels)
     {
@@ -495,6 +585,48 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
               << " launches\n";
     ::testing::Test::RecordProperty("objects", static_cast<int>(kernels.size()));
     ::testing::Test::RecordProperty("staged", static_cast<int>(staged.size()));
+}
+
+// ---------------------------------------------------------------------------
+// host: the graph schema the engines claim
+// ---------------------------------------------------------------------------
+
+// Every FlyDSL SDPA engine's UED claims the graph schema its matchers were last reviewed
+// against: each field the schema added up to it is gated where it is read, or by
+// usesUnreadSchemaFields (FlydslSdpaShared.hpp; COVERAGE.md "Graph schema"). The claim is the
+// newest version this SDK defines, so a ragged graph reaches the matchers; an SDK that adds a
+// version fails the first check until its fields are reviewed and both values move together
+// (gen_descriptors.py SDPA_SDK_VERSION).
+TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
+{
+    const hipdnn_data_sdk::utilities::Version reviewed{std::string("1.4.0")};
+    EXPECT_EQ(
+        hipdnn_data_sdk::utilities::Version{
+            std::string(hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION)}
+            .str(),
+        reviewed.str())
+        << "the SDK defines a graph schema the FlyDSL SDPA matchers were not reviewed against";
+    // A packed graph with every 1.x feature: overridable shapes aside, which the matchers
+    // decline themselves, it is within the claim.
+    const auto& packedFloor
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, true, true, true);
+    for(const auto op : {"sdpa_rdna",
+                         "sdpa_rdna_decode",
+                         "sdpa_aiw",
+                         "sdpa_cdna",
+                         "sdpa_cdna_dualwave",
+                         "sdpa_cdna_decode"})
+    {
+        const auto* staged = findLoadedSet(std::string("hipkernel:flydsl_") + op);
+        if(staged == nullptr)
+        {
+            EXPECT_FALSE(flydslShipsAnywhere(op))
+                << "this build ships " << op << " but loaded no objects for it";
+            continue;
+        }
+        EXPECT_EQ(staged->engine.sdkVersion.str(), reviewed.str()) << op;
+        EXPECT_FALSE(staged->engine.sdkVersion < packedFloor) << op;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +678,9 @@ TEST_P(TestFlydslSdpaObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromItsM
         std::cout << "[ objects  ] " << engine.op << " " << arch << ": " << kernels.size()
                   << " objects, "
                   << select(GetParam(), kernels, ObjectSelection::ONE_PER_FORM).size()
-                  << " forms\n";
+                  << " forms + "
+                  << select(GetParam(), kernels, ObjectSelection::ONE_PER_NIGHTLY_FORM).size()
+                  << " nightly forms\n";
     }
 }
 
@@ -613,12 +747,21 @@ TEST_P(TestGpuFlydslSdpaObjects, CdnaDecodeObjectsMatchTheReference)
 
 std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
 {
-    return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
+    if(info.param == ObjectSelection::EVERY)
+    {
+        return "Every";
+    }
+    return info.param == ObjectSelection::ONE_PER_NIGHTLY_FORM ? "OnePerNightlyForm" : "OnePerForm";
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuFlydslSdpaObjects,
                          ::testing::Values(ObjectSelection::ONE_PER_FORM),
+                         selectionName);
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaObjects,
+                         ::testing::Values(ObjectSelection::ONE_PER_NIGHTLY_FORM),
                          selectionName);
 
 INSTANTIATE_TEST_SUITE_P(Full,

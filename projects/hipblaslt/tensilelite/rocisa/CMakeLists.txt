@@ -384,7 +384,7 @@ block()
         # pulls hipBLASLt via find_package rather than add_subdirectory -- import
         # from this install layout. Without these rules import stinkytofu fails
         # there, rocisa/__init__.py silently falls back to native, and the
-        # per-ISA guard in TensileCreateLibrary/Run.py refuses to emit gfx1250
+        # per-ISA guard in create_library/run.py refuses to emit gfx1250
         # kernels. STINKYTOFU_BUILD_PYTHON is on for every GPU family, because
         # TheRock's generic artifact is shared and a family that skips the
         # module removes it for the gfx1250 FFM run.

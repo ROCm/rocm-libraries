@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``tensilelite.TensileLogic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.logic.valid_corpus_consistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
 on the real ``Logic/asm_full`` checkout. ``TensileLogic --check-all`` runs
@@ -48,9 +48,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def vcc(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from tensilelite.TensileLogic import ValidCorpusConsistency
+    from tensilelite.logic import valid_corpus_consistency
 
-    return ValidCorpusConsistency
+    return valid_corpus_consistency
 
 
 def _all_yaml(root: Path):
@@ -397,7 +397,7 @@ def test_sibling_device_names_does_not_merge_chip_id_directory_variants(tmp_path
     # The real, checked-in gfx950 corpus: a chip-ID-specific directory
     # (gfx950_id75a3) sits alongside the default gfx950 tree, and both
     # declare *identical* ScheduleName/ArchitectureName headers (the header
-    # carries no chip-ID information at all -- ValidChipId.py's placement
+    # carries no chip-ID information at all -- valid_chip_id.py's placement
     # rules are what distinguish them). These must not be compared against
     # each other even though (schedule, arch, CUCount) alone would collide.
     _write_header_yaml(
@@ -485,7 +485,7 @@ def test_sibling_device_names_skips_a_file_that_is_entirely_unparseable(tmp_path
 
 
 def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # This is how Run.py scopes the check to a requested --architecture: the
+    # This is how logic/run.py scopes the check to a requested --architecture: the
     # caller passes only the files it already selected, not a fresh
     # unfiltered walk of logic_root. A divergent pair that both live outside
     # that subset must not be reported.
@@ -740,7 +740,7 @@ def test_check_corpus_invariants_reports_the_sibling_finders_violations(tmp_path
 
 
 def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # Mirrors Run.py's usage: only the already --architecture-filtered files
+    # Mirrors logic/run.py's usage: only the already --architecture-filtered files
     # are compared, not a fresh unfiltered walk of logic_root.
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",

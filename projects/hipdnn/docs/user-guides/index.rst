@@ -44,6 +44,7 @@ The public repository for hipDNN is located at `https://github.com/ROCm/rocm-lib
     * :doc:`Get and set engine knob configurations <how-to/get-set-engine-knob>`
     * :doc:`Migrate a cuDNN project to hipDNN <how-to/migrate-cudnn>`
     * :doc:`Use pass-by-value tensors <how-to/pass-by-value-tensors>`
+    * :doc:`Capture hipDNN graphs in a hipGraph <how-to/capture-hipgraph>`
     * :doc:`Inject hipDNN into PyTorch models <how-to/inject-hipdnn-pytorch>`
     * :doc:`Develop plugins <how-to/develop-plugins>`
 
