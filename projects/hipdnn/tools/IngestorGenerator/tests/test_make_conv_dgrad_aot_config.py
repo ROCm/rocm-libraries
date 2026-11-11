@@ -657,3 +657,9 @@ def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(
 def test_dumped_config_loads_back(specs):
     text = tool.dump_config(tool.build_config(specs))
     assert yaml.safe_load(text) == tool.build_config(specs)
+
+
+def test_the_default_rocke_root_is_the_in_repo_tree():
+    """Without --rocke-root the tool binds the rocKE tree beside it."""
+    assert tool.DEFAULT_ROCKE_ROOT.resolve() == _ROCKE.resolve()
+    assert (tool.DEFAULT_ROCKE_ROOT / "library" / "builders").is_dir()

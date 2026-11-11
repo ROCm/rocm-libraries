@@ -421,7 +421,12 @@ def render(specs, problems) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--rocke-root", type=Path, required=True)
+    parser.add_argument(
+        "--rocke-root",
+        type=Path,
+        default=_cfg.DEFAULT_ROCKE_ROOT,
+        help="rocKE tree (platform/, library/); default: the in-repo tree.",
+    )
     parser.add_argument("--instances", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=8)

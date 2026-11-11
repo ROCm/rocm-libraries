@@ -774,6 +774,14 @@ def test_problem_for_request_is_the_dgrad_graph_contract(arch):
 # ---------------------------------------------------------------------------
 
 
+#: Dilations a variant without dilation must refuse: each axis alone and both.
+_DILATIONS = (
+    ("h", {"dilation_h": 2}),
+    ("w", {"dilation_w": 2}),
+    ("hw", {"dilation_h": 2, "dilation_w": 2}),
+)
+
+
 def _guard_cases(arch: str, catalog) -> list:
     """``(label, spec, arch passed, refusal text)`` per per-arch guard of
     :func:`supports_conv_dgrad_aot`: a packaged spec of ``arch`` with one field (or
@@ -849,11 +857,14 @@ def _guard_cases(arch: str, catalog) -> list:
             None,
             "only the runtime-channel pipeline",
         ),
-        (
-            "direct dilation",
-            replace(depthwise, dilation_h=2, dilation_w=2),
-            None,
-            "have no dilation",
+        *(
+            (
+                f"direct dilation {axes}",
+                replace(depthwise, **dilated),
+                None,
+                "have no dilation",
+            )
+            for axes, dilated in _DILATIONS
         ),
         (
             "unused knob",
@@ -879,11 +890,14 @@ def _guard_cases(arch: str, catalog) -> list:
         )
     if wmma is not None:
         cases += [
-            (
-                "WMMA dilation",
-                replace(wmma, dilation_h=0),
-                None,
-                "dilation_h/dilation_w must be positive",
+            *(
+                (
+                    f"WMMA dilation {axis}",
+                    replace(wmma, **{axis: 0}),
+                    None,
+                    "dilation_h/dilation_w must be positive",
+                )
+                for axis in ("dilation_h", "dilation_w")
             ),
             ("WMMA string knob", replace(wmma, sched=0), None, "sched must be a str"),
             (
@@ -900,14 +914,15 @@ def _guard_cases(arch: str, catalog) -> list:
             ),
         ]
     if wmma_undilated is not None:
-        cases.append(
+        cases += [
             (
-                "dilation of an undilated WMMA variant",
-                replace(wmma_undilated, dilation_h=2, dilation_w=2),
+                f"dilation {axes} of an undilated WMMA variant",
+                replace(wmma_undilated, **dilated),
                 None,
                 "have no dilation",
             )
-        )
+            for axes, dilated in _DILATIONS
+        ]
     return cases
 
 

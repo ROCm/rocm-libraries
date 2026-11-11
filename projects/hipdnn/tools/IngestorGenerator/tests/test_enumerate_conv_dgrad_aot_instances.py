@@ -233,3 +233,8 @@ def test_committed_gfx1250_lists_are_what_the_tool_enumerates(
     for dtype in tool.DTYPES:
         name = tool.INSTANCE_LIST.format(arch="gfx1250", dtype=dtype)
         assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype
+
+
+def test_the_default_rocke_root_is_the_in_repo_tree():
+    """Without --rocke-root the tool reads the rocKE tree beside it."""
+    assert tool.DEFAULT_ROCKE_ROOT.resolve() == _ROCKE.resolve()

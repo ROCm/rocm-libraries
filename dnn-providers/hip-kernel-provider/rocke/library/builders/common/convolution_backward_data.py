@@ -612,11 +612,12 @@ def _problem_error(problem: ConvDgradAotProblem) -> str:
 def aot_dgrad_direct_fields_from_knobs(variant: str, knobs: dict, table: dict) -> dict:
     """The instance fields a direct or helper identity's ``knobs`` set.
 
-    ``table`` is the engine's knob table (:attr:`ConvDgradAotSpec.DIRECT_KNOBS`). A variant's knobs are what it *may* set, not what it must:
-    the windowed depthwise pipeline alone has a dot2 and an MFMA mode that take
-    different ones, and the sweep states only the mode's. An unlisted knob is still
-    refused -- it would otherwise be dropped silently and the instance would be
-    packaged for a kernel nobody asked for. An omitted one keeps its KMD default.
+    ``table`` is the engine's knob table (:attr:`ConvDgradAotSpec.DIRECT_KNOBS`). A
+    variant's knobs are what it *may* set, not what it must: the windowed depthwise
+    pipeline alone has a dot2 and an MFMA mode that take different ones, and the sweep
+    states only the mode's. An unlisted knob is still refused -- it would otherwise be
+    dropped silently and the instance would be packaged for a kernel nobody asked for.
+    An omitted one keeps its KMD default.
 
     Raises ``ValueError`` for a knob the variant does not take, or a knob of the
     wrong type.

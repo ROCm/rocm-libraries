@@ -53,6 +53,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import enumerate_conv_aot_instances as _fwd  # noqa: E402
+import launch_surface  # noqa: E402
 
 #: The default architecture. The ones with a dgrad engine are the adapter's
 #: ``TARGETS`` (``make_conv_dgrad_aot_config.arches``), read once rocKE is bound.
@@ -70,6 +71,10 @@ EXCLUDES = str(DEFAULT_OUTPUT_DIR / "{arch}_conv_dgrad_aot.excludes.json")
 FAMILIES = ("implicit", "direct", "helper")
 
 _bind_rocke = _fwd._bind_rocke
+#: The in-repo rocKE tree, the default ``--rocke-root``.
+DEFAULT_ROCKE_ROOT = (
+    launch_surface.find_repo_root(_HERE) / "dnn-providers/hip-kernel-provider/rocke"
+)
 read_excludes = _fwd.read_excludes
 stable_hash = _fwd.stable_hash
 compact_identity = _fwd.compact_identity
@@ -227,8 +232,8 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--rocke-root",
         type=Path,
-        required=True,
-        help="rocKE tree (platform/, library/).",
+        default=DEFAULT_ROCKE_ROOT,
+        help="rocKE tree (platform/, library/); default: the in-repo tree.",
     )
     parser.add_argument(
         "--arch",

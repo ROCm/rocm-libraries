@@ -281,10 +281,10 @@ TEST(TestGfx1250ConvDgradCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
 
 TEST(TestGfx1250ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
 {
-    // One shipped kernel of each variant, pipeline and dtype, on the first served-matrix problem the adapter
-    // serves it on, through prepare(): requireSignatureMatch compares the ABI this pack
-    // marshals (names, kinds, sizes) with what hkp_pack recorded, before any device is
-    // needed; with a gfx1250 device the code object then loads.
+    // One shipped kernel of each variant, pipeline and dtype, on the first served-matrix
+    // problem the adapter serves it on, through prepare(): requireSignatureMatch compares
+    // the ABI this pack marshals (names, kinds, sizes) with what hkp_pack recorded, before
+    // any device is needed; with a gfx1250 device the code object then loads.
     const auto* manager = shippedManager();
     if(manager == nullptr)
     {
