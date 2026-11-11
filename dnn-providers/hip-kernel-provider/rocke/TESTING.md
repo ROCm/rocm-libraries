@@ -335,8 +335,13 @@ Key semantics:
 - **The HIP-source route has its own identity test.** Both engines also lower a
   kernel to HIP source. [`test_hip_source_identity.py`](platform/tests/instances/differential/test_hip_source_identity.py)
   runs every parity emitter in its `target-ir` mode and lowers each Python-built
-  kernel through both HIP lowerers: the text must match, or both must refuse. It
-  runs in the platform pytest pass and skips without `rocke_engine`.
+  kernel through both HIP lowerers: the text must match, or both must refuse
+  with the same error type and message. A config that fails other than by its
+  builder refusing it fails the test. It runs in the developer's differential
+  pytest pass with `rocke_engine`, and in installed host CI as the
+  `rocke_hip_source_identity` CTest, which lowers through the installed
+  `rocke_ir_lower_cli` program (`ROCKE_IR_LOWER_CLI`) because the wheel has no
+  binding.
 
 ### 4.4 Is the emitted IR legal? (the toolchain gate)
 

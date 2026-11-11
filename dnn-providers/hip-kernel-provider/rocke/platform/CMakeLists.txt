@@ -403,11 +403,14 @@ if(ROCKE_INSTALL_TESTS)
     # compiler). The rest of tests/instances/differential needs the C++ build and
     # stays out of the installed tree (see the tests/ install below); these files
     # are the Python-only check: the runner, its batch worker, the golden store
-    # and file, and the CPU-count helper the runner imports from tools/.
+    # and file, and the CPU-count helper the runner imports from tools/. The
+    # HIP source identity gate reuses the runner and worker, and lowers through
+    # the installed rocke_ir_lower_cli (rocke_hip_source_identity below).
     set(_ROCKE_DIFFERENTIAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/differential")
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/test_hip_source_identity.py"
                   "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
@@ -674,6 +677,19 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
 
+    # Both engines lower every parity kernel to the same HIP source. The wheel
+    # has no rocke_engine binding, so the C++ lowering runs through the
+    # installed rocke_ir_lower_cli. One family's emitter run is the per-test item
+    # (the slowest takes about 25 s on a developer host); the whole gate takes
+    # about 3 minutes there.
+    if(TARGET rocke_ir_lower_cli)
+      rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -v -rs --timeout=120)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 900)\n")
+    endif()
+
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
       # directory (which contains the installed rocke package) so `import rocke`
@@ -737,6 +753,10 @@ if(ROCKE_INSTALL_TESTS)
       # is reserved for these entries; the provider categories tier them by
       # that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
+      # The HIP source identity test runs in its own entry,
+      # rocke_hip_source_identity.
+      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
+           instances/differential/test_hip_source_identity.py)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
