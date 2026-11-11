@@ -747,19 +747,28 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) &&
                                         BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1;
     static constexpr index_t kVReadAhead = 2; // fragments in flight ahead of the current one
-    // WMMAs one gemm0 K fragment feeds (MIter x KIter): the work that hides the next read
+    // gemm0 K steps (one WMMA's K) along the head dim
+    static constexpr index_t kGemm0KStep  = BlockFmhaShape::Gemm0WarpTile::at(number<2>{});
+    static constexpr index_t kGemm0KSteps = kK0 / kGemm0KStep;
+    // WMMAs one whole-head-dim gemm0 K fragment feeds (MIter x KIter): the work that hides the
+    // next read
     static constexpr index_t kKFragWmmas = kM0 /
                                            (BlockFmhaShape::Gemm0BlockWarps::at(number<0>{}) *
                                             BlockFmhaShape::Gemm0WarpTile::at(number<0>{})) *
-                                           (kK0 / BlockFmhaShape::Gemm0WarpTile::at(number<2>{}));
-    // fp8 runs gemm0 one 16-row K fragment at a time (Gemm0ByKFragment): kKReadAhead + 1
-    // fragments of K are live instead of the whole tile. Needs one gemm0 K slice and one N warp;
-    // with fewer than 6 WMMAs per fragment the reads are not hidden, so d32-d128 / d256 / d512
-    // keep the whole tile.
-    static constexpr bool kKFragments =
-        is_any_of<KDataType, fp8_t, bf8_t>::value && kK0 == kQKHeaddim &&
-        BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1 && kKFragWmmas >= 6;
-    static constexpr index_t kKReadAhead = 2; // fragments in flight ahead of the current one
+                                           kGemm0KSteps;
+    // fp8 runs gemm0 one K fragment (16 rows x kKFragCols head-dim columns) at a time
+    // (Gemm0ByKFragment): kKReadAhead + 1 fragments of K are live instead of the whole tile.
+    // Needs one gemm0 K slice and one N warp. A fragment spans the whole head dim if its 6+
+    // WMMAs hide the next read (d160 / d192), else one K step (d256 / d512). d32-d128 have one
+    // K step and keep the whole tile.
+    static constexpr bool kKFragments = is_any_of<KDataType, fp8_t, bf8_t>::value &&
+                                        kK0 == kQKHeaddim &&
+                                        BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1 &&
+                                        (kKFragWmmas >= 6 || kGemm0KSteps >= 2);
+    static constexpr index_t kKFragKSteps  = kKFragWmmas >= 6 ? kGemm0KSteps : 1;
+    static constexpr index_t kKFragCols    = kKFragKSteps * kGemm0KStep;
+    static constexpr index_t kKFragsPerRow = kGemm0KSteps / kKFragKSteps; // along the head dim
+    static constexpr index_t kKReadAhead   = 2; // fragments in flight ahead of the current one
     // The prefetched K descale is clamped where the next tile reads it (clamp_k_descale), so the
     // clamp's scalar wait does not have to precede this tile's fenced gemm1.
     static constexpr bool kDeferKDescaleClamp = kVFragments;
@@ -1003,10 +1012,23 @@ struct BlockFmhaPipelineQRKSVSTdm
         move_tile_window(v_frag_window, {0, -kFragN * (kNIter - 1)});
     }
 
+    // Moves k_frag_window from K fragment F to F + 1: along the head dim, then 16 rows down.
+    template <index_t F, typename KFragWindow>
+    CK_TILE_DEVICE static void AdvanceKFragWindow(KFragWindow& k_frag_window, number<F>)
+    {
+        constexpr index_t kFragN =
+            remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>::WarpGemm::kN;
+        if constexpr((F + 1) % kKFragsPerRow != 0)
+            move_tile_window(k_frag_window, {0, kKFragCols});
+        else
+            move_tile_window(k_frag_window, {kFragN, -kKFragCols * (kKFragsPerRow - 1)});
+    }
+
     // gemm0 by K fragment, the counterpart of Gemm1ByVFragment: k_pre holds the first
     // kKReadAhead fragments, read where the whole K tile used to be (k_frag_window left on the
-    // last of them); later fragments are read kKReadAhead ahead of their WMMAs. MX passes its
-    // Q and K scale functors.
+    // last of them); later fragments are read kKReadAhead ahead of their WMMAs. Fragment f is
+    // N iteration f / kKFragsPerRow, K steps from (f % kKFragsPerRow) * kKFragKSteps. MX passes
+    // its Q and K scale functors.
     template <typename SAcc,
               typename QTile,
               typename KFrags,
@@ -1022,9 +1044,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     {
         using Gemm0 = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
         using KFrag = remove_cvref_t<decltype(k_pre[0])>;
-        constexpr index_t kNIter = Gemm0::NIterPerWarp;
-        constexpr index_t kFragN = Gemm0::WarpGemm::kN;
-        static_assert(kNIter > kKReadAhead, "fewer K fragments than the read-ahead");
+        constexpr index_t kNIter  = Gemm0::NIterPerWarp;
+        constexpr index_t kFragN  = Gemm0::WarpGemm::kN;
+        constexpr index_t kNFrags = kNIter * kKFragsPerRow;
+        static_assert(kNFrags > kKReadAhead, "fewer K fragments than the read-ahead");
 
         KFrag k_bufs[kKReadAhead + 1];
         static_for<0, kKReadAhead, 1>{}(
@@ -1032,29 +1055,46 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         // MX: a fragment's K scales (one dword per K128 step) ride the ring too, read just before
         // its K data, so the wait for a fragment leaves the fragments read after it in flight.
-        using KScales = array<int32_t, kMxKSteps>;
+        static_assert(!kMx || kKFragsPerRow == 1 || kGemm0KStep == kScaleBytes * kMxGranularity,
+                      "MX K fragments below the head dim are one K128 step");
+        constexpr index_t kFragMxKSteps = kMxKSteps / kKFragsPerRow;
+        using KScales                   = array<int32_t, kFragMxKSteps>;
         [[maybe_unused]] KScales k_scale_bufs[kKReadAhead + 1];
-        [[maybe_unused]] auto read_k_scales = [&](auto i_n) {
+        [[maybe_unused]] auto read_k_scales = [&](auto i_f) {
+            constexpr index_t f = decltype(i_f)::value;
             KScales scales;
-            static_for<0, kMxKSteps, 1>{}([&](auto i_p) { scales(i_p) = k_scale(i_n, i_p); });
+            static_for<0, kFragMxKSteps, 1>{}([&](auto i_p) {
+                scales(i_p) = k_scale(number<f / kKFragsPerRow>{},
+                                      number<f % kKFragsPerRow * kFragMxKSteps + i_p>{});
+            });
             return scales;
         };
         if constexpr(kMx)
             static_for<0, kKReadAhead, 1>{}(
                 [&](auto i) { k_scale_bufs[decltype(i)::value] = read_k_scales(i); });
 
-        static_for<0, kNIter, 1>{}([&](auto i_n) {
-            constexpr index_t n    = decltype(i_n)::value;
-            constexpr index_t slot = n % (kKReadAhead + 1);
-            if constexpr(n + kKReadAhead < kNIter)
+        static_for<0, kNFrags, 1>{}([&](auto i_f) {
+            constexpr index_t f       = decltype(i_f)::value;
+            constexpr index_t slot    = f % (kKReadAhead + 1);
+            constexpr auto i_n        = number<f / kKFragsPerRow>{};
+            constexpr index_t k_step0 = f % kKFragsPerRow * kKFragKSteps;
+            if constexpr(f + kKReadAhead < kNFrags)
             {
-                constexpr index_t ahead = (n + kKReadAhead) % (kKReadAhead + 1);
+                constexpr index_t ahead = (f + kKReadAhead) % (kKReadAhead + 1);
                 if constexpr(kMx)
-                    k_scale_bufs[ahead] = read_k_scales(number<n + kKReadAhead>{});
-                move_tile_window(k_frag_window, {kFragN, 0});
+                    k_scale_bufs[ahead] = read_k_scales(number<f + kKReadAhead>{});
+                AdvanceKFragWindow(k_frag_window, number<f + kKReadAhead - 1>{});
                 k_bufs[ahead] = load_tile(k_frag_window);
             }
-            if constexpr(kMx)
+            if constexpr(kMx && kKFragsPerRow > 1)
+                Policy::template RunQKMxFragment<Problem, k_step0>(
+                    s_acc,
+                    q_tile,
+                    k_bufs[slot],
+                    i_n,
+                    q_scale,
+                    [s = k_scale_bufs[slot]](auto, auto i_p) { return s[i_p]; });
+            else if constexpr(kMx)
                 Policy::template RunQKMxNIter<Problem>(
                     s_acc,
                     q_tile,
@@ -1064,11 +1104,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                     q_scale,
                     [s = k_scale_bufs[slot]](auto, auto i_p) { return s[i_p]; });
             else
-                Policy::template RunQKFragment<Problem>(s_acc, q_tile, k_bufs[slot], i_n);
+                Policy::template RunQKFragment<Problem, k_step0>(s_acc, q_tile, k_bufs[slot], i_n);
             // A full fence keeps the fragment order, as in Gemm1ByVFragment.
             __builtin_amdgcn_sched_barrier(0);
         });
-        move_tile_window(k_frag_window, {-kFragN * (kNIter - 1), 0});
+        move_tile_window(k_frag_window,
+                         {-kFragN * (kNIter - 1), -kKFragCols * (kKFragsPerRow - 1)});
     }
 
     // The main loop's one fp8 gemm0 entry (Gemm1ByVFragment is gemm1's): by K fragment where
@@ -2216,17 +2257,17 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeVRegTileDistribution<Problem>());
 
         constexpr index_t kKFragN = remove_cvref_t<decltype(gemm_0)>::WarpGemm::kN;
-        auto k_frag_window =
-            make_tile_window(k_lds_read_view,
-                             make_tuple(number<kKFragN>{}, number<kK0>{}),
-                             {0, 0},
-                             Policy::template MakeKRegTileDistribution<Problem, kKFragN>());
+        auto k_frag_window        = make_tile_window(
+            k_lds_read_view,
+            make_tuple(number<kKFragN>{}, number<kKFragCols>{}),
+            {0, 0},
+            Policy::template MakeKRegTileDistribution<Problem, kKFragN, kKFragCols>());
         // The first kKReadAhead K fragments, k_frag_window left on the last of them
         auto load_k_fragments = [&]() {
             array<decltype(load_tile(k_frag_window)), kKReadAhead> frags;
             static_for<0, kKReadAhead, 1>{}([&](auto i) {
                 if constexpr(decltype(i)::value > 0)
-                    move_tile_window(k_frag_window, {kKFragN, 0});
+                    AdvanceKFragWindow(k_frag_window, number<decltype(i)::value - 1>{});
                 frags[decltype(i)::value] = load_tile(k_frag_window);
             });
             return frags;
