@@ -318,10 +318,9 @@ std::optional<StemBwdLaunch>
     }
     else if(config.layout == LAYOUT_CHANNELS_FIRST)
     {
-        // Vectors of aligned columns: dy rows whole vectors (not on space-to-depth, which reads
-        // every other column).
+        // Vectors of aligned columns: dy rows whole vectors.
         if(!problem.dyChannelsFirst || (config.vec != 1 && config.vec != ev)
-           || (config.vec == ev && (a.outSpatial[2] % ev != 0 || config.sd != 0)))
+           || (config.vec == ev && a.outSpatial[2] % ev != 0))
         {
             return std::nullopt;
         }
@@ -381,9 +380,15 @@ std::optional<StemBwdLaunch>
         return std::nullopt;
     }
     // The transformed filter: nb x u v x kp, one 32-bit-addressed buffer; 3-D: kp = taps x kpr;
-    // space-to-depth: kp = sub-pixels x kpr.
-    const int64_t kpr = divUp(a.k, config.kc) * config.kc;
-    const int64_t kp = kpr * std::max<int64_t>(config.ft, 1) * (sd ? phH * phW : 1);
+    // space-to-depth: kp = sub-pixels x kpr. Space-to-depth from channels-first column vectors:
+    // a chunk takes one sub-row and both sub-columns of kc / sd channels, so kp = sub-rows x
+    // chunks of kc / sd channels x kc.
+    // (kc is whole 16-byte units, so sd = 2 divides it.)
+    const bool sdVectors = sd && config.layout == LAYOUT_CHANNELS_FIRST && config.vec > 1;
+    const int64_t chunkChannels = sdVectors ? config.kc / config.sd : config.kc;
+    const int64_t kpr = divUp(a.k, chunkChannels) * chunkChannels;
+    const int64_t kp = sdVectors ? phH * divUp(a.k, chunkChannels) * config.kc
+                                 : kpr * std::max<int64_t>(config.ft, 1) * (sd ? phH * phW : 1);
     const auto bElems = pack_features::checkedProduct({config.nb, config.u, config.v, kp});
     if(kp > INT_LIMIT || !bElems.has_value() || *bElems > INT_LIMIT / eb)
     {

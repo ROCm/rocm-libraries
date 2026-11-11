@@ -786,8 +786,8 @@ std::vector<ConfigRefusal> configRefusals()
          },
          "gfx942",
          [] { return threeDStem(3); }},
-        // Space-to-depth: 2, on stride 1 and no depth taps, its own window, no column vectors,
-        // the columns every (channel, 2 x 2 phase).
+        // Space-to-depth: 2, on stride 1 and no depth taps, its own window, the columns every
+        // (channel, 2 x 2 phase).
         {"SpaceToDepthOnStrideTwo", [](ConfigFields& f) { f.sd = 2; }},
         {"SpaceToDepthOtherThanTwo",
          [](ConfigFields& f) { f.sd = 3; },
@@ -814,15 +814,6 @@ std::vector<ConfigRefusal> configRefusals()
          },
          "gfx942",
          stride1Shape},
-        {"SpaceToDepthColumnVectors",
-         [](ConfigFields& f) { f.vec = 8; },
-         spaceToDepthFields,
-         "gfx942",
-         [] {
-             auto shape = stride1Shape();
-             shape.input = {29, 32}; // dy rows of 32: whole vectors
-             return shape;
-         }},
         {"SpaceToDepthColumnsBelowThePhases",
          [](ConfigFields& f) { f.nb = 11; },
          [] {
@@ -1200,6 +1191,22 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
     EXPECT_EQ(t.u, 2);
     EXPECT_EQ(t.v, 3);
     EXPECT_EQ(t.kp, 4 * 32);
+    // Channels-first column vectors (dy rows of 32): a chunk is one sub-row and both
+    // sub-columns of kc / 2 = 16 channels, so kp = 2 sub-rows x 1 chunk x 32.
+    auto vectors = spaceToDepthFields();
+    vectors.vec = 8;
+    auto wide = stride1Shape();
+    wide.input = {29, 32};
+    const auto columnVectors = launchOf(vectors, wide);
+    ASSERT_TRUE(columnVectors.has_value());
+    EXPECT_EQ(columnVectors->args.kp, 2 * 32);
+    EXPECT_EQ(columnVectors->args.kpr, 16);
+    EXPECT_EQ(columnVectors->transform.kp, 2 * 32);
+    // Rows that are not whole vectors (30) decline it.
+    auto narrow = stride1Shape();
+    narrow.input = {29, 30};
+    EXPECT_FALSE(launchOf(vectors, narrow).has_value());
+
     // Off: the stride's phases, no shift.
     auto plain = spaceToDepthFields();
     plain.sd = 0;
