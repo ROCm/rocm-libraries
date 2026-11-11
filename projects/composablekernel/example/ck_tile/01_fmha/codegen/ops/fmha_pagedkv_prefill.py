@@ -576,32 +576,6 @@ class KernelComponentFactoryBase:
                 ["f"],
                 ["t", "f"],
             ):
-                # qr_pagedkv_tdm_sched is a gfx125-only scheduled-TDM variant of
-                # qr_pagedkv: fp16/bf16, row-major V, no bias / no logits soft cap
-                # / no dropout / no quantization. Its runtime predicate overlaps
-                # the generic qr_pagedkv trait below for the same combo, so it
-                # must be registered (and therefore dispatch-checked) first --
-                # see the "order of List matters" note above. Unsupported
-                # geometries are rejected later in get_fwd_blobs via
-                # KernelComponentFactoryGfx125._QR_PAGEDKV_TDM_SCHED_TILES.
-                #
-                # Mirror the generic qr_pagedkv pipeline's two-variant pattern
-                # (F_skpad "f" then "t") below: with paged KV, args.seqlen_k_ptr
-                # is always non-null (fmha_fwd_runner.hpp sets it whenever
-                # use_kvcache is true), so the F_skpad == "f" skcheck
-                # (seqlen_k_ptr == nullptr && ...) can never pass in batch mode,
-                # and group mode requires F_spad == F_skpad == "t" anyway (see
-                # the mode == "group" filter in get_fwd_blobs below). Without
-                # the F_skpad == "t" variant, no generated instance is ever
-                # dispatched to.
-                if (
-                    dtype in ("fp16", "bf16")
-                    and bias == "no"
-                    and logits == "f"
-                    and squant == "f"
-                ):
-                    pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "f", "f", "f", logits, bias, "f", "t", squant, mask, "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "t", "f", "f", logits, bias, "f", "t", squant, mask, "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr_pagedkv", "row", "t", "f", "f", "f", logits, bias, "f", pagedkv, squant, mask, skip, sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr_pagedkv", "row", "t", "t", "f", "f", logits, bias, "f", pagedkv, squant, mask, skip, sink))  # fmt: skip
         elif dtype in ["fp8", "bf8"]:
@@ -616,6 +590,11 @@ class KernelComponentFactoryBase:
         else:
             assert False
         return pipelines
+
+    @staticmethod
+    def get_pipeline_tile(pipeline, hdim, tile) -> Optional[FmhaFwdTileSize]:
+        """Tile to instantiate `pipeline` with, or None to skip it."""
+        return tile
 
 
 class KernelComponentFactoryGfx9(KernelComponentFactoryBase):
@@ -687,13 +666,40 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
-    # Paged qr_tdm_sched: first release covers (hdim=128, hdim_v=128) only.
+    # Geometries qr_pagedkv_tdm_sched is instantiated for, keyed by (hdim, hdim_v).
     # Field order: bm0, bn0, bk0, bn1, bk1, bk0blocklength, ...
     _QR_PAGEDKV_TDM_SCHED_TILES = {
         (128, 128): (
             FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
         ),
     }  # fmt: skip
+
+    @staticmethod
+    def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdPipeline]:
+        # qr_pagedkv_tdm_sched: fp16/bf16, no bias / logits soft cap / lse / quant. Its
+        # dispatch predicate overlaps qr_pagedkv's for the same traits, so it is listed
+        # first: the generated API checks traits in list order.
+        pipelines = []
+        if dtype in ["fp16", "bf16"]:
+            for mask, sink in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"]
+            ):
+                # Paged KV always sets seqlen_k_ptr, which fails the skpad "f" check in
+                # batch mode, so the skpad "t" variant is the one that dispatches.
+                pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "f", "f", "f", "f", "no", "f", "t", "f", mask, "f", sink))  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "t", "f", "f", "f", "no", "f", "t", "f", mask, "f", sink))  # fmt: skip
+        return pipelines + KernelComponentFactoryBase.get_pipelines(
+            dtype, hdim, mask_impl
+        )
+
+    @classmethod
+    def get_pipeline_tile(cls, pipeline, hdim, tile) -> Optional[FmhaFwdTileSize]:
+        # qr_pagedkv_tdm_sched uses its own tile and only the geometries in the table;
+        # the generic qr_pagedkv instances cover the rest.
+        if pipeline.tag != "qr_pagedkv_tdm_sched":
+            return tile
+        tiles = cls._QR_PAGEDKV_TDM_SCHED_TILES.get((hdim, tile.F_bn1))
+        return tiles[0] if tiles else None
 
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
@@ -747,20 +753,9 @@ def get_fwd_blobs(
             tile = d[hdim_str]
             hdim = int(hdim_str)
             for pipeline in factory.get_pipelines(dtype, hdim, mask_impl):
-                kernel_tile = tile
-                if pipeline.tag == "qr_pagedkv_tdm_sched":
-                    # Compatibility rule: qr_pagedkv_tdm_sched only ships the
-                    # geometries listed in _QR_PAGEDKV_TDM_SCHED_TILES, using
-                    # that table's own tile (not the generic per-hdim tile
-                    # above). Any (hdim, hdim_v) missing from the table is
-                    # rejected here; the generic qr_pagedkv pipeline still
-                    # covers it.
-                    sched_tiles = getattr(
-                        factory, "_QR_PAGEDKV_TDM_SCHED_TILES", {}
-                    ).get((hdim, tile.F_bn1))
-                    if sched_tiles is None:
-                        continue
-                    kernel_tile = sched_tiles[0]
+                kernel_tile = factory.get_pipeline_tile(pipeline, hdim, tile)
+                if kernel_tile is None:
+                    continue
                 # if pipeline.F_pagedkv == "f":
                 #     continue
                 if mode == "group":
