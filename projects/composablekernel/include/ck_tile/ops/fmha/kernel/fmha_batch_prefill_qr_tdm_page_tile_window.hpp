@@ -282,7 +282,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
-    // Read this wave's owned raw ids before PV. No validation happens here.
+    // Read this wave's owned raw ids before PV.
     CK_TILE_DEVICE PageIds load_page_id_from_lds(const PageIds& valid_metadata,
                                                  CK_TILE_LDS_ADDR int32_t* id_slot) const
     {
@@ -299,7 +299,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
-    // Validate and complete the queue value after PV.
+    // Complete the queue value after PV: each owned fragment's id (0 without a valid row), in
+    // an SGPR (see complete_page_id_from_value_scalar).
     CK_TILE_DEVICE PageIds complete_page_id_from_value(const PageIds& valid_metadata,
                                                        const PageIds& raw_ids) const
     {
@@ -310,7 +311,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             const index_t physical_page = raw_ids.owned[kFragment].physical_page;
             if(result.owned[kFragment].valid_rows > 0)
             {
-                result.owned[kFragment].physical_page = physical_page;
+                result.owned[kFragment].physical_page = amd_wave_read_first_lane(physical_page);
             }
             else
             {
@@ -323,7 +324,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     // ---- P>=64 scalar page-id queue ----
     // P>=128: one shared physical page per logical tile. P64: the tile's two page ids, one
     // per slot; each wave reads the one holding its 32-row slice. publish returns the tile's
-    // valid rows; read returns this wave's raw slot id; complete validates it.
+    // valid rows; read returns this wave's raw slot id; complete makes it the queue value.
     CK_TILE_DEVICE index_t prefetch_page_id_to_lds_scalar(index_t tile_index,
                                                           index_t num_total_loop,
                                                           index_t first_origin,
@@ -415,13 +416,17 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return *id_slot;
     }
 
+    // The id was read from LDS into a VGPR; it is the same in every lane. Taken to an SGPR here,
+    // the page address arithmetic of the TDM issue stays on the scalar unit. Left in a VGPR, the
+    // compiler forms the 64-bit page address with VALU and copies it to SGPRs right before each
+    // tensor_load_to_lds, a dependent chain on every K and V issue (P16 and P64 run slower).
     CK_TILE_DEVICE PageIds complete_page_id_from_value_scalar(index_t valid_tokens,
                                                               index_t physical_page) const
     {
         PageIds result{};
         if(valid_tokens <= 0)
             return result;
-        result.owned[0].physical_page = physical_page;
+        result.owned[0].physical_page = amd_wave_read_first_lane(physical_page);
         result.owned[0].valid_rows    = valid_tokens;
         return result;
     }
@@ -771,7 +776,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         constexpr uint16_t box[2] = {static_cast<uint16_t>(raw_box[number<0>{}]),
                                      static_cast<uint16_t>(raw_box[number<1>{}])};
 
-        const index_t valid_tokens = clamp(page_id_.owned[0].valid_rows, index_t{0}, index_t{128});
+        // In an SGPR, as the vectorized path's rows: the i32 clamp selects v_med3_i32, and a VGPR
+        // here would move the page selection and address arithmetic below to VALU.
+        const index_t valid_tokens =
+            amd_wave_read_first_lane(clamp(page_id_.owned[0].valid_rows, index_t{0}, index_t{128}));
         const index_t physical_page =
             valid_tokens > 0 ? page_id_.owned[0].physical_page : index_t{0};
         // P > 128 pages hold several tiles; the tile starts at origin % P inside its page.
