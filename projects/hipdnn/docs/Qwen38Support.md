@@ -69,7 +69,7 @@ Every op above runs on the CPU reference executor. GPU engines today:
 | `softmax`, `topk` | FlyDSL `flydsl_<op>` (gfx90a/942/950), one workgroup per row |
 | `moe_grouped_matmul`, paged/varlen `sdpa` | none yet |
 
-GPU demo: Qwen3.8-27B on gfx942 (MI300X) prefills 24 tokens in 1.8 s and decodes at ~22 ms/token with every op on a GPU engine: `matmul` on hipBLASLt; `rmsnorm`, `sdpa` (`sdpa_cdna`), `gather`, `rope`, `causal_conv1d`, `gdn`, `pointwise` and `topk` on FlyDSL. The KV cache is dense, since FlyDSL SDPA declines paged KV.
+GPU demo ([`samples/qwen38`](../samples/qwen38/README.md)): Qwen3.8-27B on gfx942 (MI300X) prefills 24 tokens in 1.8 s and decodes at ~22 ms/token with every op on a GPU engine: `matmul` on hipBLASLt; `rmsnorm`, `sdpa` (`sdpa_cdna`), `gather`, `rope`, `causal_conv1d`, `gdn`, `pointwise` and `topk` on FlyDSL. The KV cache is dense, since FlyDSL SDPA declines paged KV.
 
 ## FlyDSL kernel coverage
 

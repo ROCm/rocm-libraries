@@ -175,6 +175,16 @@ add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
 
 add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
 
+# Qwen3.8-27B end-to-end demo (POSIX mmap loader, so Linux only). Not a CTest test: it needs the
+# 52 GB checkpoint and a large GPU. run_qwen38.py sits next to the binary in the build and install
+# trees and finds it there by default.
+if(NOT WIN32)
+    add_hipdnn_sample(hipdnn_sample_qwen38 qwen38/Qwen38Demo.cpp)
+    configure_file(qwen38/run_qwen38.py "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/run_qwen38.py"
+                   COPYONLY
+    )
+endif()
+
 # Enable testing and add sample tests
 enable_testing()
 
@@ -357,6 +367,12 @@ endif()
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Register the Qwen3.8 demo (needs the model; not a test)
+if(NOT WIN32)
+    install(TARGETS hipdnn_sample_qwen38 RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(PROGRAMS qwen38/run_qwen38.py DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # Register dynamic backend-loading sample
 add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)

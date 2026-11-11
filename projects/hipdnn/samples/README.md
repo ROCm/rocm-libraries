@@ -455,6 +455,10 @@ Other options: `--large` (larger tensors), `--strategy=stable|average`, and `--i
 
 Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample links only `hipdnn_frontend_dynamic`, not `libhipdnn_backend`. Creating the handle opens the backend at runtime. The sample runs an all-ones 1x1 convolution and checks that each output element equals the input channel count. The target is `hipdnn_sample_dynamic_backend_loading`. It takes no options.
 
+### [**`Qwen38Demo`**](./qwen38/Qwen38Demo.cpp)
+
+Runs the Qwen3.8-27B language model end to end with greedy decoding. Every op of the model is a hipDNN graph node. The sample runs either on the CPU reference executor or on the GPU engines that the loaded providers supply. It needs the 52 GB checkpoint and, for the GPU backend, about 52 GB of GPU memory, so it is not registered as a CTest test. The target is `hipdnn_sample_qwen38` (Linux only), driven by `run_qwen38.py`; see the [Qwen3.8 sample README](./qwen38/README.md).
+
 ## cuDNN Compatibility Shim Samples
 
 Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
