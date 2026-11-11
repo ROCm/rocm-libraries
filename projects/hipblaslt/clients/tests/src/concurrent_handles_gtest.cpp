@@ -12,6 +12,8 @@
 // lazily, one shard per problem type, so the first lookups there load the
 // shards while other threads are already looking up and launching from them.
 
+#include "client_process.hpp"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -472,15 +474,6 @@ namespace
         return true;
     }
 
-    void setEnv(char const* name, char const* value)
-    {
-#ifdef _WIN32
-        _putenv_s(name, value);
-#else
-        setenv(name, value, 1);
-#endif
-    }
-
 #ifdef _WIN32
     int fdOf(FILE* f)
     {
@@ -535,7 +528,7 @@ namespace
     // the kChild* codes.
     [[noreturn]] void runColdChild()
     {
-        setEnv("TENSILE_DB", kPlaceholderLoadBit);
+        hipblaslt_clients::setEnv("TENSILE_DB", kPlaceholderLoadBit, 1);
         hipblaslt_debug_reload();
 
         // Capture what the library prints, to count the shard loads.
