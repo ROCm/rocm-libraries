@@ -48,7 +48,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 148
+      "priority": 120
     },
     {
       "version": "1.0",
@@ -85,7 +85,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 147
+      "priority": 119
     },
     {
       "version": "1.0",
@@ -122,7 +122,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 146
+      "priority": 118
     },
     {
       "version": "1.0",
@@ -159,7 +159,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 145
+      "priority": 117
     }
   ]
 }
