@@ -61,7 +61,8 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
    database names a different source, use that one. If neither does, stop and ask.
 3. View the result with ROCprof Compute Viewer.
 4. Setup that depends on the target or the machine, and the analysis (what to look for and what
-   it means), are in the database (`$HARNESS_DB`).
+   it means), are in the database (`$HARNESS_DB`). If it has a profiling procedure for your target,
+   follow that. It adds detail to steps 1 to 3.
 ```
 
 ## Reporting

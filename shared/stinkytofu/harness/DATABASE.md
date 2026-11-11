@@ -32,9 +32,10 @@ One Markdown file per entry, with frontmatter:
 ```markdown
 ---
 name: <short-slug>
-kind: pattern | insight | finding | threshold | memory
+kind: pattern | insight | finding | threshold | procedure | memory
 status: candidate | confirmed     # not used by memories
-source: <PR or issue number, experiment id, or person>
+source: <PR or issue number, page id, experiment id, or person>
+source_revision: <the page's revision number when the entry was written, if the source is a page>
 confirmed_by: <name>              # set by a human, together with status
 last_verified: <date>
 scope: <target or kernel family this applies to>
@@ -43,6 +44,10 @@ What it is, how to detect it (for patterns), why it matters, and the evidence.
 ```
 
 `index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <status>`.
+When an entry comes from a page that can change, check the page's revision number (the count of saved
+edits, not a release number) when you use the entry. If it is higher than `source_revision`, tell the
+developer what changed and ask whether to update the entry.
+Do not update it on your own. If you cannot reach the page, say so once and use the entry as it is.
 An entry with no `source` is not accepted in review. `last_verified` shows which entries are going
 stale.
 
@@ -55,6 +60,12 @@ the candidate before it costs GPU time). Only a human sets `confirmed`.
   work on a branch and open a PR in the database repo with status `candidate`. A human reviews and
   merges it. In a local directory that is not a reviewed repo, write the entry file with
   `status: candidate` and add its line to `index.md`.
+- **Refine:** an entry whose `scope` matches the target can add to a public guideline on the same
+  point, for example a fuller version of a procedure. Follow the entry where it adds detail, and tell
+  the developer you are using it. Only a `confirmed` entry is followed. A `candidate` entry is
+  mentioned to the developer as a suggestion. If an entry contradicts the guideline instead of adding
+  to it, ask the developer which to follow. An entry never loosens a public rule on safety or
+  confidentiality.
 - **Promote:** a human may turn a confirmed entry into a doc or a rule. An agent does not edit docs or
   rules to record what it learned.
 - **Local database:** `$HARNESS_DB` may point at any directory with this layout, for personal use. The
