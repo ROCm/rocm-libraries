@@ -298,42 +298,6 @@ jobs:
       contents: read
       id-token: write
 
-  rocjitsu_race_check:
-    name: rocjitsu race check (${{ matrix.amdgpu_families }})
-    # A caller cannot depend on an individual job inside a reusable workflow,
-    # so start after the Linux workflow has finished publishing its artifacts.
-    # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - amdgpu_families: gfx94X-dcgpu
-            amdgpu_targets: gfx942
-          - amdgpu_families: gfx950-dcgpu
-            amdgpu_targets: gfx950
-    # Temporarily disabled due to artifact setup flakes. Re-enable after
-    # https://github.com/ROCm/TheRock-Infra/issues/1160 is resolved.
-    if: >-
-      ${{
-        false &&
-        !cancelled() &&
-        github.event_name == 'pull_request' &&
-        (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
-        ) &&
-        needs.linux_build_and_test.result != 'skipped'
-      }}
-    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
-    with:
-      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
-      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
-      amdgpu_families: ${{ matrix.amdgpu_families }}
-      amdgpu_targets: ${{ matrix.amdgpu_targets }}
-      # TODO(newling): Add gfx1151 after validating a target-specific workload.
-
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
     # Build and test jobs run inside TheRock's reusable workflows, so
