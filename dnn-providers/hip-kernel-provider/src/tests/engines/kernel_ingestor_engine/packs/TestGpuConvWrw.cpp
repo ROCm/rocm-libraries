@@ -292,6 +292,8 @@ struct DeviceCase
     /// Fewer than 8 reduction steps (one split) into dw of contiguous channels: every config
     /// but loop 5 writes dw itself, without workspace or reduce.
     bool writesDw = false;
+    /// Served by the 16-bit matrix atoms only: no fp32 or gfx906 (FMA) configs.
+    bool matrix16Only = false;
 };
 
 ConvShape conv(int64_t c,
@@ -427,6 +429,20 @@ std::vector<DeviceCase> deviceCases()
         = conv(16, 32, {3, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 1, 1);
     oneSplitConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"OneSplitTrueConvolutionNhwc", oneSplitConvolution, false, true});
+    // Inception's asymmetric and 5x5 rows (channels-first, 16-bit matrix atoms): 7x1 and 3x1 on
+    // the ring (3x1 also at a whole-vector width for the aligned configs), 5x5 on the rows and
+    // the ring, and 5x5 over a 5x5 map (point_output: one output position per image).
+    const std::vector<std::pair<std::string, ConvShape>> matrix16{
+        {"Inception7x1", conv(24, 40, {13, 9}, {7, 1}, {3, 0}, {3, 0}, {1, 1}, {1, 1})},
+        {"Inception3x1", conv(24, 40, {8, 9}, {3, 1}, {1, 0}, {1, 0}, {1, 1}, {1, 1})},
+        {"Inception3x1Aligned", conv(24, 40, {8, 16}, {3, 1}, {1, 0}, {1, 0}, {1, 1}, {1, 1})},
+        {"Inception5x5", conv(16, 24, {11, 13}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1})},
+        {"PointOutput5x5", conv(16, 24, {5, 5}, {5, 5}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
+    };
+    for(const auto& [name, shape] : matrix16)
+    {
+        cases.push_back({name, shape, false, false, true});
+    }
     return cases;
 }
 
@@ -605,7 +621,11 @@ void runCase(const DeviceCase& deviceCase)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    if(ran == 0 && !expectServed(device.gcnArchName, shape.dataType))
+    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT
+                           || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    if(ran == 0
+       && (!expectServed(device.gcnArchName, shape.dataType)
+           || (deviceCase.matrix16Only && fmaOrFp32)))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }

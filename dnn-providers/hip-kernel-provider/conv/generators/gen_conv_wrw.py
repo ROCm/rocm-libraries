@@ -465,6 +465,9 @@ EXTRA_TILES = {
             "3x3d36r1",
         ),
     ): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32), (128, 64, 4, 2, 32)],
+    # Measured on gfx1201 (fp16, n128 / n16): inception 5x5 on the ring, deeplab 1x1 on the rows.
+    ("wmma12", ("5x5",)): [(64, 32, 4, 2, 32)],
+    ("wmma12", ("1x1r0",)): [(128, 64, 4, 2, 32)],
 }
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
@@ -517,7 +520,20 @@ FILTERS = [
     ("3x3s2ph", 3, 2, 1, 2, 1, [0, 1], [0], None),
     ("2x2s2ph", 2, 2, 1, 1, 1, [0, 1], [0], None),
     ("1x1s2", 1, 2, 1, 1, 0, [0, 1], [0], None),
+    # Inception's asymmetric and 5x5 rows (channels-first), from the tiles measured best on
+    # gfx950 and gfx1201 (n128 fp16): 7x1 and 3x1 on the ring with the 64 x 64 tile, 5x5 on the
+    # output rows with the 64 x 64 tile (gfx950) and on the ring with RDNA's 64 x 32 tile
+    # (EXTRA_TILES, gfx1201).
+    ("7x1", 1, 1, 1, 7, 1, [1], [0, 1], [CF]),
+    ("3x1", 1, 1, 1, 3, 1, [1], [0, 1], [CF]),
+    ("5x5r1", 5, 1, 1, 1, 0, [1], [0], [CF]),
+    ("5x5", 5, 1, 1, 5, 1, [], [0], [CF]),
+    # Pointwise on RDNA's output rows (EXTRA_TILES): deeplab's 1x1 at 128^2 runs 1.5x faster
+    # there than on the ring's tiles (gfx1201).
+    ("1x1r0", 1, 1, 1, 1, 0, [], [0], [CF]),
 ]
+# Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
+MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0"}
 BASE = {
     "3x3",
     "1x1",
@@ -833,6 +849,8 @@ def build_fma906():
     for dtype in CATALOG906:
         vec = 16 // eb(dtype)
         for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
+            if tag in MATRIX16_ONLY:
+                continue
             # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
             tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
             tiles = tiles + (FMA906_SMALLC if tag in SMALLC906 else [])
@@ -918,6 +936,8 @@ def build():
             vec = 16 // eb(dtype)
             for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
                 if only is not None and tag not in only:
+                    continue
+                if tag in MATRIX16_ONLY and dtype == "FLOAT":
                     continue
                 picked = (
                     tiles
