@@ -396,6 +396,12 @@ from .sweep import (
     pass2_row_chunks,
     sweep_row_chunks,
 )
+from .global_read import (
+    GlobalReadCursor,
+    GlobalReadPlan,
+    GlobalReadSpec,
+    emit_global_read_paths,
+)
 from .tensor_view import (
     BufferResource,
     TensorCoordinate,
@@ -576,6 +582,10 @@ __all__ = [
     "make_simple_op_manifest",
     "write_artifact",
     # CK Tile-inspired tensor abstractions
+    "GlobalReadCursor",
+    "GlobalReadPlan",
+    "GlobalReadSpec",
+    "emit_global_read_paths",
     "BufferResource",
     "TensorCoordinate",
     "TensorDescriptor",

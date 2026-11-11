@@ -167,6 +167,10 @@ typedef struct rocke_gemm_trait_spec
     /* Permit one resident workgroup for the gfx1201 WMMA compv4 double
      * buffer. False retains the two-workgroup LDS budget. */
     bool lds_db_allow_1wg; /* default false */
+    /* Prepared read paths: legacy preserves existing emission; auto selects
+     * bounded buffer reads or full-width global reads once per workgroup;
+     * global64 forces the full-width path. Python TraitSpec.global_addressing. */
+    const char* global_addressing; /* default "legacy" */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

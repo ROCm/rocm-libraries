@@ -127,7 +127,7 @@ class TileSpec:
         return out
 
 
-Pipeline = Literal["mem", "compv3", "compv4", "wsp3", "wmma_v1"]
+Pipeline = Literal["mem", "compv3", "compv4", "wsp3", "wmma_v1", "direct_a"]
 Scheduler = Literal["intrawave", "interwave"]
 Epilogue = Literal["default", "cshuffle"]
 
@@ -350,6 +350,10 @@ class TraitSpec:
     # resident workgroup instead of reserving room for two. Explicit opt-in;
     # actual padded row bytes must still fit the device's LDS capacity.
     lds_db_allow_1wg: bool = False
+    # Prepared global-read addressing. The opt-in paths hoist invariant
+    # coordinates, select bounded buffer loads once per workgroup (auto),
+    # and retain full-width input/output addressing for larger spans.
+    global_addressing: Literal["legacy", "auto", "global64"] = "legacy"
 
 
 @dataclass(frozen=True)
@@ -443,6 +447,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 # and every other kernel keeps its name.
                 f"c{self.data.dtype_c}": self.data.dtype_c != self.data.dtype_a,
                 "db1wg": tr.lds_db_allow_1wg,
+                f"addr_{tr.global_addressing}": tr.global_addressing != "legacy",
             },
         )
 
@@ -708,7 +713,46 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     except KeyError as e:
         return False, str(e)
 
+    # The direct-A pipeline has its own emitter and its own gate.
+    if spec.trait.pipeline == "direct_a":
+        from .gemm_direct_a import is_valid_direct_a_spec
+
+        return is_valid_direct_a_spec(spec, arch)
+
     t = spec.tile
+    if spec.trait.global_addressing not in ("legacy", "auto", "global64"):
+        return False, "global_addressing must be legacy, auto, or global64"
+    if spec.trait.global_addressing != "legacy":
+        if not (
+            arch == "gfx1201"
+            and spec.wave_size == 32
+            and spec.data.dtype_a in ("fp16", "f16")
+            and spec.data.dtype_b == spec.data.dtype_a
+            and spec.data.dtype_c == spec.data.dtype_a
+            and spec.data.dtype_acc in ("fp32", "f32")
+            and spec.data.layout == "RCR"
+            and spec.trait.pipeline == "compv4"
+            and spec.trait.epilogue == "default"
+            and not spec.batched
+            and getattr(spec, "_fused_epilogue", None) is None
+            and not spec.trait.persistent
+            and spec.trait.split_k == 1
+            and not any(
+                (
+                    spec.trait.pad_m,
+                    spec.trait.pad_n,
+                    spec.trait.pad_k,
+                    spec.trait.preshuffle_b,
+                    spec.trait.direct_to_lds,
+                    spec.trait.dtl_prefetch,
+                    spec.trait.tdm,
+                )
+            )
+        ):
+            return False, (
+                "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR "
+                "compv4/default without split-K, persistence, preshuffle, DTL, TDM, or fusion"
+            )
     try:
         _storage_dtype(spec)  # validates the storage dtypes / fp32 acc / RCR
     except ValueError as e:
@@ -1056,6 +1100,18 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     b_total = t.tile_n * t.tile_k
     if a_total < threads or b_total < threads:
         return False, "block too small for one element/thread/phase"
+    if spec.trait.global_addressing != "legacy":
+        width = _choose_load_vec(spec)
+        if width > 8:
+            return (
+                False,
+                "global_addressing needs FP16 load vectors of at most 8 elements",
+            )
+        if a_total // width // threads + b_total // width // threads > 128:
+            return (
+                False,
+                "global_addressing needs at most 128 prepared input vectors per thread",
+            )
 
     # Split-K (over the production body): the K-slice each CTA processes
     # is ``ks = K // split_k`` and must itself be a whole number of
@@ -1315,6 +1371,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     pipelines/epilogues remain CDNA-only until ported.
     """
 
+    global_reads = spec.trait.global_addressing != "legacy"
+    if global_reads:
+        ok, why = is_valid_spec(spec, arch=arch)
+        if not ok:
+            raise ValueError(f"invalid GEMM spec: {why}")
+
     # Warp-specialized producer/consumer 3-stage pipeline.
     # Lives in a SEPARATE emitter (gemm_wsp3.py) and produces new kernel
     # names, so the byte-identical golden gate over the existing
@@ -1324,9 +1386,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         return build_wsp3_gemm(spec, arch=arch)
 
-    ok, why = is_valid_spec(spec, arch=arch)
-    if not ok:
-        raise ValueError(f"invalid GEMM spec: {why}")
+    # gfx1201 direct-A WMMA pipeline: its own emitter and its own kernel names.
+    if spec.trait.pipeline == "direct_a":
+        from .gemm_direct_a import build_direct_a_gemm
+
+        return build_direct_a_gemm(spec, arch=arch)
+
+    if not global_reads:
+        ok, why = is_valid_spec(spec, arch=arch)
+        if not ok:
+            raise ValueError(f"invalid GEMM spec: {why}")
 
     op = _resolve_mma_op(spec, arch)
     if op is None:  # pragma: no cover - is_valid_spec already rejects this
@@ -1724,6 +1793,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     b_view = make_global_view(
         Bp, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
     )
+    prepared_loads = None
     # LDS views are 2D packed (block_m, block_k) / (block_n, block_k).
     from ...helpers.tensor_view import TensorDescriptor, TensorView
 
@@ -2177,6 +2247,37 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 raw = b.global_load(Bp, safe_off, storage_dtype)
                 vals.append(_mask_storage_scalar(raw, valid))
             return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
+
+        if prepared_loads is not None:
+            deltas = (c0, c0, k_off)
+            for prepared, lds_tile, ld_row in (
+                (prepared_loads[0], a_lds_tile, _ld_a_row),
+                (prepared_loads[1], b_lds_tile, _ld_b_row),
+            ):
+                for cursor, row, col in prepared:
+                    value = (
+                        cursor.load_scalar(b, deltas)
+                        if load_vec == 1
+                        else cursor.load_vec(b, deltas, n=load_vec)
+                    )
+                    if load_vec == 1:
+                        _lds_store(
+                            lds_tile.store_scalar,
+                            b,
+                            ld_row(row),
+                            _swz_col(col, row),
+                            value=value,
+                        )
+                    else:
+                        _lds_store(
+                            lds_tile.store_vec,
+                            b,
+                            ld_row(row),
+                            _swz_col(col, row),
+                            value=value,
+                            n=load_vec,
+                        )
+            return
 
         for e in range(a_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
@@ -3244,9 +3345,53 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 c_per_lane,
                 batch_off_c=batch_off_c,
                 fused_epilogue=fused_ep,
+                wide_c=wide_c_offsets,
             )
 
-    if do_work_cond is None:
+    wide_c_offsets = False
+    if global_reads:
+        from ...helpers import GlobalReadSpec, emit_global_read_paths
+
+        def emit_prepared_body(plans) -> None:
+            nonlocal prepared_loads, _for_results, wide_c_offsets
+            # C's span is part of the guard, so the buffer path may keep
+            # 32-bit C offsets; only the full-width path pays for wide ones.
+            wide_c_offsets = plans[2].addressing != "buffer"
+            prepared = []
+            for plan, vectors, block_off in (
+                (plans[0], a_vecs_per_thread, block_m_off),
+                (plans[1], b_vecs_per_thread, block_n_off),
+            ):
+                operand = []
+                for e in range(vectors):
+                    vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                    row = b.div(vec_idx, c_block_k_div_vec)
+                    col_v = b.mod(vec_idx, c_block_k_div_vec)
+                    col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                    global_row = b.add(block_off, row)
+                    cursor = plan.bind(b, (c0, global_row, col))
+                    operand.append((cursor, row, col))
+                prepared.append(operand)
+            prepared_loads = tuple(prepared)
+            _for_results = ()
+            emit_compute_and_epilogue()
+
+        emit_global_read_paths(
+            b,
+            (
+                GlobalReadSpec(a_view, (1, M, K)),
+                GlobalReadSpec(b_view, (1, N, K)),
+                GlobalReadSpec(
+                    make_global_view(
+                        C, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, N, 1)
+                    ),
+                    (1, M, N),
+                ),
+            ),
+            emit_prepared_body,
+            addressing=spec.trait.global_addressing,
+        )
+    elif do_work_cond is None:
         emit_compute_and_epilogue()
     else:
         with b.scf_if(do_work_cond):
@@ -3429,6 +3574,7 @@ def _emit_epilogue_default(
     *,
     batch_off_c: Optional[Value] = None,
     fused_epilogue=None,  # Optional[FusedEpilogue] from helpers.fuse
+    wide_c: bool = False,
 ) -> None:
     """Direct vector-store epilogue.
 
@@ -3470,6 +3616,12 @@ def _emit_epilogue_default(
         record_runtime = getattr(fused_epilogue, "record_runtime", None)
         if record_runtime is not None:
             record_runtime(b, N=N)
+
+    wide_c_desc = None
+    if op.family == "wmma" and wide_c:
+        from ...helpers import TensorDescriptor
+
+        wide_c_desc = TensorDescriptor.with_strides((1, 1, 1), (1, N, 1), c_dtype)
 
     def _store_masked(c_m: Value, c_n: Value, c_off: Value, h: Value) -> None:
         """Per-element global store with optional ``pad_m`` / ``pad_n`` guard.
@@ -3513,9 +3665,23 @@ def _emit_epilogue_default(
                     row_in_atom, col_in_atom = c_map.coord(b, lane, i)
                     c_m = b.add(atom_m, row_in_atom)
                     c_n = b.add(atom_n, col_in_atom)
-                    c_off = b.add(b.mul(c_m, N), c_n)
-                    if batch_off_c is not None:
-                        c_off = b.add(batch_off_c, c_off)
+                    if wide_c_desc is not None:
+                        # The store's index operand lowers as i32, so a wide
+                        # offset goes into the pointer instead.
+                        batch = (
+                            batch_off_c if batch_off_c is not None else b.const_i32(0)
+                        )
+                        c_wide = wide_c_desc.offset_i64(b, (batch, c_m, c_n))
+                        c_ptr = b.global_ptr_offset(
+                            C, b.mul(c_wide, b.const_i64(elem_bytes))
+                        )
+                        h = b.vec_extract(acc_h, i)
+                        b.global_store(c_ptr, b.const_i32(0), h, align=elem_bytes)
+                        continue
+                    else:
+                        c_off = b.add(b.mul(c_m, N), c_n)
+                        if batch_off_c is not None:
+                            c_off = b.add(batch_off_c, c_off)
                     h = b.vec_extract(acc_h, i)
                     if fused_epilogue is not None:
                         h = fused_epilogue.apply_scalar(b, h, c_m, c_n)

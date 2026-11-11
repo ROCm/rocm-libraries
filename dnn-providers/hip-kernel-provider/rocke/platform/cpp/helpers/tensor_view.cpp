@@ -184,6 +184,52 @@ rocke_value_t* rocke_tensor_descriptor_offset(rocke_ir_builder_t* b,
     return off != NULL ? off : rocke_b_const_i32(b, 0);
 }
 
+static rocke_value_t* rocke_tv_signed_i64(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(value && rocke_tv_name_is(value->type, "i64"))
+        return value;
+    if(value && rocke_tv_name_is(value->type, "i32"))
+        return rocke_b_sext(b, value, rocke_i64());
+    rocke_i_set_err(b, ROCKE_ERR_TYPE, "offset_i64 requires signed i32 or i64 operands");
+    return NULL;
+}
+
+rocke_value_t* rocke_tensor_descriptor_offset_i64(rocke_ir_builder_t* b,
+                                                  const rocke_tensor_descriptor_t* d,
+                                                  rocke_value_t* const* indices,
+                                                  int num_indices)
+{
+    rocke_value_t* off = NULL;
+    int i;
+    if(b == NULL)
+        return NULL;
+    if(d == NULL || indices == NULL || num_indices != d->rank)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "offset_i64 index rank mismatch");
+        return NULL;
+    }
+    for(i = 0; i < d->rank; ++i)
+    {
+        rocke_value_t* idx = rocke_tv_signed_i64(b, indices[i]);
+        rocke_value_t* term;
+        const rocke_stride_t* stride = &d->strides[i];
+        if(stride->is_value)
+        {
+            rocke_value_t* wide = rocke_tv_signed_i64(b, stride->value);
+            term = rocke_b_mul(b, idx, wide);
+        }
+        else if(stride->imm == 1)
+            term = idx;
+        else
+        {
+            rocke_value_t* wide = rocke_b_const_i64(b, stride->imm);
+            term = rocke_b_mul(b, idx, wide);
+        }
+        off = off == NULL ? term : rocke_b_add(b, off, term);
+    }
+    return off != NULL ? off : rocke_b_const_i64(b, 0);
+}
+
 /* ============================================================= TensorView */
 
 const rocke_type_t* rocke_tensor_view_dtype(const rocke_tensor_view_t* v)

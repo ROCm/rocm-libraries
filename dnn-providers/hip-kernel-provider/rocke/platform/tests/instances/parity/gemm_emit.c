@@ -736,6 +736,103 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->batched = false;
         break;
     }
+    case 41: /* prepared reads, auto, 128x128x32 */
+    case 42: /* prepared reads, auto, 64x64x64 */
+    case 43: /* prepared reads, auto, one-workgroup 128x128x64 */
+    case 44: /* prepared reads, global64 only, 128x128x32 */
+    {
+        /* mirrors _GFX1201_PREPARED_READ_CONFIGS in gemm_emit.py */
+        static const struct
+        {
+            const char* name;
+            int tm, tn, tk, wm, wn;
+            bool one_wg;
+            const char* addressing;
+        } cfgs[] = {
+            {"test_gfx1201_compv4_reads_128x128x32", 128, 128, 32, 2, 2, false, "auto"},
+            {"test_gfx1201_compv4_reads_64x64x64", 64, 64, 64, 2, 2, false, "auto"},
+            {"test_gfx1201_compv4_reads_128x128x64", 128, 128, 64, 2, 4, true, "auto"},
+            {"test_gfx1201_compv4_reads_128x128x32", 128, 128, 32, 2, 2, false, "global64"},
+        };
+        const int i = idx - 41;
+        spec->name = cfgs[i].name;
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = cfgs[i].tm,
+                                              .tile_n = cfgs[i].tn,
+                                              .tile_k = cfgs[i].tk,
+                                              .warp_m = cfgs[i].wm,
+                                              .warp_n = cfgs[i].wn,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue = "default";
+        spec->trait.lds_swizzle = true;
+        spec->trait.lds_db_allow_1wg = cfgs[i].one_wg;
+        spec->trait.lds_store_after_mma = true;
+        spec->trait.group_m = 4;
+        spec->trait.k_stagger = 8;
+        spec->trait.k_stagger_step = 4;
+        spec->trait.global_addressing = cfgs[i].addressing;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 32;
+        spec->block_size = 32 * cfgs[i].wm * cfgs[i].wn;
+        spec->batched = false;
+        break;
+    }
+    case 45: /* direct_a 128x64x64, B fragments read one atom ahead */
+    case 46: /* direct_a 128x96x64, no read-ahead */
+    case 47: /* direct_a 64x64x64, GROUP_M 8, no stagger */
+    case 48: /* direct_a 64x32x32 two waves, no swizzle, no raster */
+    case 49: /* direct_a 128x64x64, BF16 A/B/C */
+    case 50: /* direct_a 128x64x64, FP16 A/B, FP32 C */
+    case 51: /* direct_a 128x96x64, BF16 A/B, FP32 C */
+    {
+        /* mirrors _GFX1201_DIRECT_A_CONFIGS in gemm_emit.py */
+        static const struct
+        {
+            const char* name;
+            int tm, tn, tk, wm;
+            bool swizzle;
+            int group_m, k_stagger, k_stagger_step;
+            const char* ab;
+            const char* c;
+        } cfgs[] = {
+            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp16"},
+            {"test_gfx1201_direct_a_128x96x64", 128, 96, 64, 4, true, 4, 8, 4, "fp16", "fp16"},
+            {"test_gfx1201_direct_a_64x64x64", 64, 64, 64, 4, true, 8, 0, 1, "fp16", "fp16"},
+            {"test_gfx1201_direct_a_64x32x32", 64, 32, 32, 2, false, 0, 4, 1, "fp16", "fp16"},
+            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "bf16", "bf16"},
+            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp32"},
+            {"test_gfx1201_direct_a_128x96x64", 128, 96, 64, 4, true, 4, 8, 4, "bf16", "fp32"},
+        };
+        const int i = idx - 45;
+        spec->name = cfgs[i].name;
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = cfgs[i].tm,
+                                              .tile_n = cfgs[i].tn,
+                                              .tile_k = cfgs[i].tk,
+                                              .warp_m = cfgs[i].wm,
+                                              .warp_n = 1,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "direct_a";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue = "default";
+        spec->trait.lds_swizzle = cfgs[i].swizzle;
+        spec->trait.group_m = cfgs[i].group_m;
+        spec->trait.k_stagger = cfgs[i].k_stagger;
+        spec->trait.k_stagger_step = cfgs[i].k_stagger_step;
+        spec->data.dtype_a = cfgs[i].ab;
+        spec->data.dtype_b = cfgs[i].ab;
+        spec->data.dtype_c = cfgs[i].c;
+        spec->wave_size = 32;
+        spec->block_size = 32 * cfgs[i].wm;
+        spec->batched = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -743,7 +840,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-40
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-51
  * gfx1201; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -755,7 +852,7 @@ static const char* arch_for(int idx)
     {
         return "gfx1250";
     }
-    if(idx >= 33 && idx <= 40)
+    if(idx >= 33 && idx <= 51)
     {
         return "gfx1201";
     }
@@ -766,7 +863,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..40>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..51>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

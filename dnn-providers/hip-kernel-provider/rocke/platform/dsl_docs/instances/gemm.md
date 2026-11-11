@@ -84,7 +84,7 @@ class TileSpec:
  mfmas_per_warp_n -> tile_n // (warp_n * warp_tile_n)
  k_atoms_per_tile_k -> tile_k // warp_tile_k
 
-Pipeline = Literal["mem", "compv3", "compv4"]
+Pipeline = Literal["mem", "compv3", "compv4", "wsp3", "wmma_v1", "direct_a"]
 Scheduler = Literal["intrawave", "interwave"]
 Epilogue = Literal["default", "cshuffle"]
 
@@ -209,6 +209,48 @@ two workgroups. It is default-off on every architecture: existing kernel names
 and IR are unchanged. Opted-in names append `db1wg` after every other flag,
 including the C dtype. Combine it with `lds_store_after_mma`, `group_m`, and
 `k_stagger` only under those traits' existing validity rules.
+
+`TraitSpec(global_addressing=...)` selects how the A/B global loads are
+addressed. `"legacy"` (default) keeps the per-load 32-bit element index and
+every existing kernel byte-identical. `"auto"` and `"global64"` route the loads
+through `rocke.helpers.global_read`: each lane's row and column address is
+bound once outside the K loop, and C offsets are formed in 64 bits. `"auto"`
+chooses bounded buffer loads or full-width global loads once per workgroup
+from the runtime `M`, `N` and `K`; `"global64"` always uses the full-width
+path. Both are admitted only for the unpadded, non-batched gfx1201 FP16 RCR
+compv4 kernel with the default epilogue and no split-K, persistence,
+preshuffle, DirectToLDS, TDM or fused epilogue. Names append `addr_auto` or
+`addr_global64`.
+
+### gfx1201 `direct_a` pipeline
+
+`TraitSpec(pipeline="direct_a")` selects a separate emitter
+(`instances/common/gemm_direct_a.py`, C++ `rocke_build_direct_a_gemm`) for
+gfx1201 RCR with the 16x16x16 WMMA atom and `warp_n == 1`. A and B are FP16 or
+BF16 (the same type); C is that type, or FP32 (`DataSpec(dtype_c="fp32")`),
+which stores the fp32 accumulator unrounded and halves the C span limit:
+
+- each wave owns its M rows and loads its A fragments from global memory in
+  the matrix operand layout, so A never enters LDS and is never read twice;
+- B goes through one LDS buffer. The next B tile is stored after the last K
+  atom's LDS reads and before that atom's matrix operations, between two
+  workgroup barriers;
+- when the tile's accumulators and fragments leave room
+  (`direct_a_local_prefetch`), each K atom's B fragments are read one atom
+  ahead;
+- A, B and C go through bounded buffer resources. A load past the end of A or
+  B reads zero and a store outside C is dropped, so the grid is
+  `ceil(N / tile_n) x ceil(M / tile_m)` and M and N need not divide the tile.
+
+The traits it reads are `group_m`, `k_stagger` / `k_stagger_step`,
+`lds_swizzle` and `waves_per_eu`; every other non-default trait is rejected.
+Keep `lds_swizzle` on: without it the B fragment reads conflict in LDS and
+the kernel is much slower. The launch contract is
+`K % tile_k == 0` and every byte span below 2 GiB with M and N rounded up to
+whole tiles; `direct_a_launch_supported(spec, M, N, K)` checks it and
+dispatch applies it. A K that is a multiple of 8192 (a 16 KiB FP16 row
+stride) is legal but slow, because one A fragment load touches 16 rows.
+
 
 
 LDS allocations are part of the algorithm. They control:

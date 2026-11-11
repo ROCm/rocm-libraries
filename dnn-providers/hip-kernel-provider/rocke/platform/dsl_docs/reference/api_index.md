@@ -85,6 +85,7 @@ make_naive_tensor_descriptor_packed, make_naive_tensor_view_packed
 make_tile_window
 make_tensor_coordinate, move_tensor_coordinate
 view_from_transforms_descriptor
+GlobalReadSpec, GlobalReadPlan, GlobalReadCursor, emit_global_read_paths
 
 # Tile distributions
 TileDistributionEncoding, TileDistribution

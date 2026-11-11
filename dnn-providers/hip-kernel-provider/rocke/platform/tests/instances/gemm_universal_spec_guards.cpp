@@ -113,6 +113,32 @@ void gfx1201_db1wg_tile(Spec& s)
     s.trait.lds_store_after_mma = true;
 }
 
+/* The FP16 128x128x32 compv4 tile the prepared-read addressing is admitted on. */
+void gfx1201_prepared_read_tile(Spec& s)
+{
+    gfx1201_tile(s);
+    s.data.dtype_a = "fp16";
+    s.data.dtype_b = "fp16";
+    s.data.dtype_c = "fp16";
+    s.tile.tile_m = 128;
+    s.tile.tile_n = 128;
+    s.trait.pipeline = "compv4";
+    s.trait.global_addressing = "auto";
+}
+
+/* The measured direct-A tile: 128x64x64, four waves each owning 32 M rows. */
+void gfx1201_direct_a_tile(Spec& s)
+{
+    gfx1201_tile(s);
+    s.tile.tile_m = 128;
+    s.tile.tile_n = 64;
+    s.tile.tile_k = 64;
+    s.tile.warp_m = 4;
+    s.tile.warp_n = 1;
+    s.trait.pipeline = "direct_a";
+    s.trait.lds_swizzle = true;
+}
+
 void run(const Case& c)
 {
     Spec s = base_spec();
@@ -282,6 +308,106 @@ int main()
              s.block_size = 256;
          },
          "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"},
+        /* prepared global reads: gfx1201 FP16 RCR compv4/default only */
+        {"prepared reads, auto", "gfx1201", gfx1201_prepared_read_tile, nullptr},
+        {"prepared reads, global64",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             s.trait.global_addressing = "global64";
+         },
+         nullptr},
+        {"prepared reads, unknown mode",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             s.trait.global_addressing = "buffer";
+         },
+         "global_addressing must be legacy, auto, or global64"},
+        {"prepared reads on mem",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             s.trait.pipeline = "mem";
+         },
+         "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR"},
+        {"prepared reads on BF16",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             bf16_16x16x16(s);
+         },
+         "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR"},
+        {"prepared reads with padding",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             s.trait.pad_m = true;
+         },
+         "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR"},
+        /* direct_a: its own gate */
+        {"direct_a, BF16", "gfx1201", gfx1201_direct_a_tile, nullptr},
+        {"direct_a, BF16 in and FP32 out",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.data.dtype_c = "fp32";
+         },
+         nullptr},
+        {"direct_a, 128x96x64",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_n = 96;
+         },
+         nullptr},
+        {"direct_a off gfx1201",
+         "gfx1151",
+         gfx1201_direct_a_tile,
+         "direct_a is a gfx1201 wave32 pipeline"},
+        {"direct_a with waves sharing M rows",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.warp_m = 2;
+             s.tile.warp_n = 2;
+         },
+         "direct_a requires warp_n=1"},
+        {"direct_a with mixed A/B types",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.data.dtype_b = "fp16";
+         },
+         "direct_a requires FP16 or BF16 A and B of the same type"},
+        {"direct_a with a C type it cannot store",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.data.dtype_c = "fp16";
+         },
+         "direct_a requires C in the A/B type or FP32"},
+        {"direct_a with a trait it would ignore",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.trait.lds_store_after_mma = true;
+         },
+         "direct_a takes only group_m, k_stagger, lds_swizzle and waves_per_eu"},
+        {"direct_a tile beyond the register file",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_n = 128;
+         },
+         "exceed the VGPR file"},
+        {"direct_a swizzle on a row that is not a power of two of slots",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_k = 48;
+         },
+         "lds_swizzle needs a power-of-two count of 8-element slots per row"},
         {"one-workgroup policy with direct-to-LDS retains earlier rejection",
          "gfx1201",
          [](Spec& s) {

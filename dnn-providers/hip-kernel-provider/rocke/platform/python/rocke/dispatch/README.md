@@ -76,17 +76,40 @@ geometry variant whose configuration is a point in a knob space
 
 ### gfx1201 FP16 RCR selection
 
-Automatic FP16 selection on **gfx1201 only** uses the declared `compv4` palette
-in `gemm/fp16_rcr.py`. `GemmRequest.dims()` exposes `output_elements = M * N`
+Automatic FP16 selection on **gfx1201 only** tries the `direct_a` palette
+first and falls back to the declared `compv4` palette, both in
+`gemm/fp16_rcr.py`. `GemmRequest.dims()` exposes `output_elements = M * N`
 alongside `M`, `N`, and `K`, so coverage manifests carry the output-area bounds.
 Selection is a pure function of the request; it never probes a GPU or timings.
 
-The ordered bands are:
+A request is in the direct-A domain when K is a multiple of 64, at least 256
+and not a multiple of 8192, the output is above 2¹⁷ elements, and the A, B and
+C byte spans (M and N rounded up to whole tiles) are each below 2 GiB. M and N
+need not divide the tile: partial tiles are part of the pipeline. The classes
+are exclusive:
+
+| Class | Tile M×N×K / waves | Constraint |
+|---|---|---|
+| Small | 64×64×64 / 4×1 | output ≤ 2¹⁹ |
+| Tall | 128×64×64 / 4×1, grouped-M 8 | M ≥ 8·N |
+| Wide 96 | 128×96×64 / 4×1 | N a multiple of 96, output ≥ 2²⁰ |
+| Default | 128×64×64 / 4×1 | everything else |
+
+All four use LDS swizzle, grouped-M 4 (8 for Tall) and stagger 8×4. The
+exclusions are measured: short K loops do not amortise the prologue, a 16 KiB
+row stride makes the 16 rows of one A fragment load collide, and the smallest
+outputs stay ahead on the compv4 small tile.
+
+When no other candidate's tile divides M and N, two last-resort direct-A
+candidates (64×64×64 for K a multiple of 64, then 64×32×16 for K a multiple of
+16) serve the request. They are correct for any M and N and are not tuned.
+
+Outside that domain the ordered compv4 bands are:
 
 | Band | Tile M×N×K / wave grid | Additional constraints |
 |---|---|---|
 | Short K=32 | 128×128×32 / 2×4 | `K <= 32`; stores before WMMA |
-| Long contiguous-row stride | 64×64×64 / 2×2 | output area ≤ 2²²; K a multiple of 8192 |
+| Long contiguous-row stride | 128×128×64 / 2×4: grouped-M 8 without stagger from 2²¹ outputs, grouped-M 4 with stagger above 2¹⁸; then 64×64×64 / 2×2, grouped-M 8 without stagger above 2¹⁸ outputs | K a multiple of 8192 (a 16 KiB row stride): rows alias in the caches, so the K-32 tiles and direct A reads are the slow choices there |
 | Small output | 64×64×64 / 2×2 | output area ≤ 3·2¹⁸ |
 | Medium output | 128×128×64 / 2×4 | 3·2¹⁸ < area ≤ 2²⁰ |
 | Large output, long K | 256×128×32 / 4×2 | 2²² < area < 2²⁴; 4096 ≤ K < 8192 |
@@ -101,10 +124,17 @@ buffers, including every padded row, must fit the 64 KiB device budget.
 The common traits are LDS swizzle, stores after WMMA, grouped-M 4 and stagger
 8×4. Medium reductions with 1024 ≤ K < 2048 and the large-wide band instead
 use grouped-M 8 without stagger. The longer-K medium band retains stagger.
+Compv4 candidates set `global_addressing="auto"`, whether selected
+automatically or pinned, except the K16-tile and short-K32 candidates: the
+two-path kernel measured slower there, so they keep `"legacy"`. The legacy
+`mem` pins are unaffected.
 
 The existing explicit `rdna_wmma_default` and `rdna_wmma_32x32` pins keep their
-original `mem` specs. Other architectures and BF16 automatic selection are
-unchanged. Candidates outside a declared band are rejected even when pinned;
+original `mem` specs. Other architectures are unchanged. BF16 on gfx1201 takes
+the same direct-A classes and last-resort candidates (`gemm/direct_a.py` is
+shared by both families; the kernel differs only in the matrix atom) and keeps
+its `mem` candidates outside them: there is no BF16 compv4 palette.
+Candidates outside a declared band are rejected even when pinned;
 the registry's normal priority and divisibility checks choose the next candidate.
 
 ### Declared coverage and the arch gate
