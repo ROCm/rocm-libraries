@@ -58,7 +58,6 @@ def _state(**overrides):
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
     "StreamKAtomic": 0,
-    "ClusterDim": [1, 1],
     "PrefetchAcrossPersistent": 0,
     "ReuseAcrossPersistent": 0,
     "GlobalSplitU": 1,
@@ -134,7 +133,6 @@ def test_disabled_is_not_validated():
 
 _OUTPUT = "TDMStoreInst supports fp32 D, and bf16 and fp16 D converted from fp32 accumulators"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
-_CLUSTER_BARRIER = "TDMStoreInst requires the cluster barrier with persistent multicast"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
@@ -147,7 +145,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
-  (dict(_STREAMK, ClusterDim=[2, 1], ClusterBarrier=False), _CLUSTER_BARRIER),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
@@ -165,21 +162,16 @@ def test_rejects_unsupported(overrides, reason):
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0},
   dict(_STREAMK, WorkAssignment="DynamicWorkQueue"),
   dict(_STREAMK, WorkAssignment="Hybrid"),
-  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ClusterDim": [2, 1], "ClusterBarrier": True},
-  dict(_STREAMK, ClusterDim=[4, 1], ClusterBarrier=True),
-  dict(_STREAMK, ClusterDim=[2, 1], Multicast=False, ClusterBarrier=False),
   dict(_STREAMK, PrefetchAcrossPersistent=1),
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1},
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1},
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1,
    "PrefetchAcrossPersistent": 1},
-], ids=["dp", "sk4", "sk5", "dp_cluster", "sk3_cluster", "sk3_cluster_no_multicast", "sk3_pap", "dp_pap", "dp_rap",
-        "dp_rap_pap"])
+], ids=["dp", "sk4", "sk5", "sk3_pap", "dp_pap", "dp_rap", "dp_rap_pap"])
 def test_accepts_persistent_policies(overrides):
   """Every non-atomic persistent policy stores the tiles it completes directly to D: DataParallel, and
   StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid,
-  also in spatial clusters, whose multicast waits on the cluster barrier, and with PrefetchAcrossPersistent and
-  ReuseAcrossPersistent."""
+  also with PrefetchAcrossPersistent and ReuseAcrossPersistent."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -711,25 +703,6 @@ def test_requires_tdm_in_the_assembler(gp_gfx1250, gfx1250_iim, assembler, capsy
 def _nextLine(lines, start, prefixes):
   """The index of the first line after `start` whose instruction starts with one of `prefixes`, or None."""
   return next((i for i in range(start + 1, len(lines)) if _code(lines[i]).startswith(prefixes)), None)
-
-
-@pytest.mark.parametrize("level", _LEVELS)
-@pytest.mark.parametrize("policy", [{"StreamK": 3}, {"StreamK": 3, "StreamKForceDPOnly": 1}], ids=["sk3", "dp"])
-def test_cluster_tdm_store_precedes_the_loop_close_arrive(gp_gfx1250, gfx1250_iim, assembler, capsys, level, policy):
-  """In a spatial cluster (ClusterDim [2, 1]) a peer's next-tile multicast waits on the cluster barrier, which
-  this workgroup arrives at when it closes the persistent loop: the wait of each TDM store comes before that
-  arrive."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ClusterDim=[2, 1], **policy)
-  assert sol.get("Valid"), capsys.readouterr().out
-  assert sol["Multicast"] and sol["ClusterBarrier"]
-  lines = asm.splitlines()
-  stores = [i for i, line in enumerate(lines) if _code(line).startswith("tensor_store_from_lds")]
-  arrives = [i for i, line in enumerate(lines) if "cluster_barrier signal (arrive)" in line]
-  assert stores and any(arrive > stores[0] for arrive in arrives)
-  for store in stores:
-    later = [arrive for arrive in arrives if arrive > store]
-    wait = _nextLine(lines, store, ("s_wait_tensorcnt",))
-    assert not later or (wait is not None and wait < later[0]), lines[store]
 
 
 @pytest.mark.parametrize("overMainLoop", [True, False])
