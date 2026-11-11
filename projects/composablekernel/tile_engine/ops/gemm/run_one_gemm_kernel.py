@@ -13,6 +13,12 @@ Input JSON format:
     Single: {"so_path": "...", "problem": {"M":.., "N":.., "K":..}, "kernel_name": "..."}
     Batch:  {"items": [{"so_path": "...", "problem": {...}, "kernel_name": "..."}, ...]}
 
+A problem with ``batch_count`` is a batched GEMM problem (``batched_gemm_utils``:
+``BatchedGemmProblem``, its library runs on ``GpuBatchedGemmRunner``), the
+same options included: run_one_batched_gemm_kernel.py is this worker. An
+item's (or the top level's) ``arch`` pins the fp8/bf8 host format of its
+runner instead of the local GPU's detection.
+
 Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
 fp32 numpy reference check; when set, each OK result also carries ``verified``
 and ``max_rel``. With ``check_identity`` (bool) a library whose own kernel name
@@ -53,6 +59,11 @@ if gemm_pypath:
         if p and p not in sys.path:
             sys.path.insert(0, p)
 
+from batched_gemm_utils import (  # noqa: E402
+    BatchedGemmProblem,
+    GpuBatchedGemmRunner,
+    packed_strides,
+)
 from gemm_utils import (  # noqa: E402
     GemmProblem,
     GpuGemmRunner,
@@ -80,6 +91,18 @@ _COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__fi
 def _is_multi_abd(kernel_name):
     """A multi_abd kernel name carries the ``_multiabd_`` suffix (see codegen)."""
     return "_multiabd_" in (kernel_name or "")
+
+
+def _problem(prob_dict):
+    """The problem of a payload: batched when it has ``batch_count``."""
+    batched = "batch_count" in prob_dict
+    return (BatchedGemmProblem if batched else GemmProblem).from_dict(prob_dict)
+
+
+def _lead(problem):
+    """The leading (batch) extents of ``problem``'s operands: () for a GEMM."""
+    batch = getattr(problem, "batch_count", None)
+    return () if batch is None else (batch,)
 
 
 def _check_identity(runner, kernel_name):
@@ -137,18 +160,22 @@ def _search_host_data(runner, problem):
     dtype = _dtype_from_kernel_name(runner.kernel_name)
     la, lb, _ = _layout_from_kernel_name(runner.kernel_name)
     m, n, k = problem.M, problem.N, problem.K
+    lead = _lead(problem)  # a batched problem's operands are per-batch stacks
     gen = np.random.Generator(np.random.PCG64(INPUT_SEED))
-    a, qa = _search_operand(gen, (m, k) if la == "r" else (k, m), dtype, runner._use_ocp)
-    b, qb = _search_operand(gen, (k, n) if lb == "r" else (n, k), dtype, runner._use_ocp)
-    if la == lb == "c":  # of the stored arrays, a block of rows at a time: about
-        # 8x faster than two transposed views with a reference BLAS (numpy
-        # without an optimized one), and each block's transposed copy is
-        # small and of an odd row count (see _odd_blocks)
+    a, qa = _search_operand(gen, lead + ((m, k) if la == "r" else (k, m)), dtype,
+                            runner._use_ocp)
+    b, qb = _search_operand(gen, lead + ((k, n) if lb == "r" else (n, k)), dtype,
+                            runner._use_ocp)
+    if la == lb == "c" and not lead:  # of the stored arrays, a block of rows
+        # at a time: about 8x faster than two transposed views with a
+        # reference BLAS (numpy without an optimized one), and each block's
+        # transposed copy is small and of an odd row count (see _odd_blocks)
         ref = np.empty((m, n), np.float32)
         for i, rows in _odd_blocks(m, max(1, REF_BLOCK // n)):
             ref[i:i + rows] = (qb @ qa[:, i:i + rows]).T
-    else:
-        ref = (qa if la == "r" else qa.T) @ (qb if lb == "r" else qb.T)
+    else:  # a "c" operand's logical view is (each batch's) transpose
+        ref = (qa if la == "r" else np.swapaxes(qa, -1, -2)) @ (
+            qb if lb == "r" else np.swapaxes(qb, -1, -2))
     del qa, qb
     peak = max(float(np.max(ref)), -float(np.min(ref)))
     return {"a": a, "b": b, "ref": ref, "denom": np.float64(peak or 1.0)}
@@ -170,7 +197,9 @@ def _host_data(runner, problem, spec, prepare=False):
     holds them once stored there). The entry's key holds everything they
     depend on: the problem, the kernel's dtype and layout (its packed strides
     follow from the layout and the extents), the fp8/bf8 format and the input
-    generator."""
+    generator; a batched problem's (its batch_count included) is of op
+    ``batched_gemm`` and also lists those strides, per batch and between
+    batches (``batched_gemm_utils.packed_strides``)."""
     if _COMMON_DIR not in sys.path:
         sys.path.insert(0, _COMMON_DIR)
     import host_cache
@@ -184,6 +213,9 @@ def _host_data(runner, problem, spec, prepare=False):
         "fp8_ocp": _resolve_use_ocp(runner._use_ocp) if dtype in ("fp8", "bf8") else None,
         "inputs": [SEARCH_INPUTS, INPUT_SEED, INPUT_SCALE],
     }
+    if _lead(problem):
+        fields.update(op="batched_gemm", strides=packed_strides(
+            fields["layout"], problem.M, problem.N, problem.K))
     return (host_cache.prepare if prepare else host_cache.cached)(
         spec, fields, lambda: _search_host_data(runner, problem))
 
@@ -192,7 +224,7 @@ def _prepare(prob_dict, kernel_name, spec):
     """Store a problem's host data for ``kernel_name``'s dtype and layout in
     the host cache ``spec`` and print whether the cache holds it."""
     try:
-        problem = GemmProblem.from_dict(prob_dict)
+        problem = _problem(prob_dict)
         out = {"ok": True, "stored": _host_data(_HostCodec(kernel_name), problem, spec,
                                                 prepare=True)}
     except Exception as e:  # the type too: str(MemoryError()) is empty
@@ -238,6 +270,7 @@ def _run_one(
     check_identity=False,
     host_cache=None,
     search_host_data=False,
+    arch=None,
 ):
     """Run a single kernel and emit its result as one JSON line.
 
@@ -254,7 +287,8 @@ def _run_one(
     config object (N2) so the runner never guesses the layout from the name.
     """
     try:
-        problem = GemmProblem.from_dict(prob_dict)
+        problem = _problem(prob_dict)
+        lead = _lead(problem)
 
         # Multi-ABD has a divergent (array-pointer) ABI and its own runner, which
         # generates its A/B/D operands internally (no shared A,B). Route by name.
@@ -280,10 +314,12 @@ def _run_one(
             if not search:
                 # Drawn once per shape; kernels of the shape reuse their encoding
                 # and verify reference (gemm_utils._sweep_inputs).
-                A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
+                A, B = _sweep_inputs(lead + (problem.M, problem.K),
+                                     lead + (problem.K, problem.N))
 
             # CRITICAL: load the library ONLY inside this subprocess.
-            runner = GpuGemmRunner(lib_path=so_path)
+            cls = GpuBatchedGemmRunner if lead else GpuGemmRunner
+            runner = cls(lib_path=so_path, **({"arch": arch} if arch else {}))
             if check_identity:
                 _check_identity(runner, kernel_name)
             if not search:
@@ -315,9 +351,9 @@ def _run_one(
                 if result.max_rel is not None:
                     out["max_rel"] = result.max_rel
                     out["verified"] = bool(result.max_rel <= verify_tol)
-            elif verify and host is not None:
+            elif verify and host is not None:  # a block of rows (batches) at a time
                 _check(out, result.output, host["ref"], float(host["denom"]), verify_tol,
-                       max(1, BLOCK // max(1, problem.N)))
+                       max(1, BLOCK // max(1, int(np.prod(host["ref"].shape[1:])))))
             elif verify and A is not None and B is not None:
                 # Reference uses the SAME quantized inputs the device sees, so the
                 # metric isolates compute error from input quantization (fp8/bf8
@@ -390,6 +426,7 @@ def main():
                 check_identity=check_identity,
                 host_cache=host_cache,
                 search_host_data=search_host_data,
+                arch=item.get("arch", d.get("arch")),
             )
     else:
         _run_one(
@@ -406,6 +443,7 @@ def main():
             check_identity=check_identity,
             host_cache=host_cache,
             search_host_data=search_host_data,
+            arch=d.get("arch"),
         )
 
 

@@ -38,7 +38,7 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -2515,17 +2515,6 @@ def setup_multiple_gemm_dispatchers(
             resolved_configs.append(replace(c, gfx_arch=_shared_arch))
     configs = resolved_configs
 
-    max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
-
-    # Dedupe identical configs by name; compile once, share the path.
-    first_index: Dict[str, int] = {}
-    unique: List[int] = []
-    for i, c in enumerate(configs):
-        key = c.name
-        if key not in first_index:
-            first_index[key] = i
-            unique.append(i)
-
     codegen_script = _cu.get_codegen_path()
     output_dir = _cu.get_generated_kernels_dir()
     static_lib = _cu.get_build_dir() / "libck_tile_dispatcher.a"
@@ -2553,37 +2542,82 @@ def setup_multiple_gemm_dispatchers(
             "Build the dispatcher first (cmake + make)."
         )
 
+    def codegen_arg(c):
+        return {
+            "python": sys.executable,
+            "codegen_script": str(codegen_script),
+            "output_dir": str(output_dir),
+            "dtype": c.dtype_a,
+            # Multi-ABD codegen expects the 4-char (A,B,E,D) layout so it can
+            # split off the D layout; every other variant uses 3-char.
+            "layout": c.layout4 if c.variant == "multi_abd" else c.layout,
+            "gpu_target": c.gfx_arch,
+            "tile_config_json": c.to_codegen_json(),
+            "hpp_glob_pattern": f"{c.name}.hpp",
+            # Honor the config's variant so non-standard kernels are codegen'd
+            # as themselves; the kernel name (and thus hpp_glob_pattern) already
+            # carries the variant suffix, so a missing/standard value here would
+            # produce a header whose name never matches the requested pattern.
+            "variant": c.variant,
+        }
+
+    return build_libraries(
+        configs, codegen_arg, _build_compile_jobs, "gemm-bridge", verbose,
+        max_workers, errors, build_timeout,
+    )
+
+
+def build_libraries(
+    configs: List[GemmKernelConfig],
+    codegen_arg: Callable[[GemmKernelConfig], Dict[str, Any]],
+    compile_job: Callable[[GemmKernelConfig, Path], Tuple[Dict[str, Any], Path]],
+    tag: str,
+    verbose: bool = True,
+    max_workers: Optional[int] = None,
+    errors: Optional[Dict[str, str]] = None,
+    build_timeout: Optional[int] = None,
+) -> List[Optional[Path]]:
+    """The build half every GEMM-family bridge shares: parallel codegen of one
+    header per distinct config name, then parallel compile + link of its .so.
+
+    ``codegen_arg(config)`` is the config's codegen job
+    (``ctypes_utils._generate_single_kernel_subprocess``, without ``index``),
+    ``compile_job(config, header)`` its ``(job, lib path)``
+    (``_build_compile_jobs``); ``tag`` prefixes the progress lines. Returns
+    one .so path per config (None for a failed one), ``errors`` and
+    ``build_timeout`` as in ``setup_multiple_gemm_dispatchers``: every name
+    of ``configs`` is cleared from ``errors`` first, then each failed one gets
+    its reason.
+    """
+    n = len(configs)
+    results: List[Optional[Path]] = [None] * n
+    if errors is not None:
+        for c in configs:
+            errors.pop(c.name, None)
+    if n == 0:
+        return results
+
+    max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
+
+    # Dedupe identical configs by name; compile once, share the path.
+    first_index: Dict[str, int] = {}
+    unique: List[int] = []
+    for i, c in enumerate(configs):
+        key = c.name
+        if key not in first_index:
+            first_index[key] = i
+            unique.append(i)
+
     # -- Step 1: parallel codegen (one header per unique config) -----------
     codegen_args = []
     for i in unique:
-        c = configs[i]
-        codegen_args.append(
-            {
-                "index": i,
-                "python": sys.executable,
-                "codegen_script": str(codegen_script),
-                "output_dir": str(output_dir),
-                "dtype": c.dtype_a,
-                "layout": c.codegen_layout,
-                # Multi-ABD codegen expects the 4-char (A,B,E,D) layout so it can
-                # split off the D layout; every other variant uses 3-char.
-                "layout": c.layout4 if c.variant == "multi_abd" else c.layout,
-                "gpu_target": c.gfx_arch,
-                "tile_config_json": c.to_codegen_json(),
-                "hpp_glob_pattern": f"{c.name}.hpp",
-                # Honor the config's variant so non-standard kernels are codegen'd
-                # as themselves; the kernel name (and thus hpp_glob_pattern) already
-                # carries the variant suffix, so a missing/standard value here would
-                # produce a header whose name never matches the requested pattern.
-                "variant": c.variant,
-            }
-        )
+        codegen_args.append({"index": i, **codegen_arg(configs[i])})
         if build_timeout:
             codegen_args[-1]["timeout"] = build_timeout
 
     if verbose:
         print(
-            f"[gemm-bridge] codegen: {len(codegen_args)} headers "
+            f"[{tag}] codegen: {len(codegen_args)} headers "
             f"(workers={max_workers})..."
         )
 
@@ -2618,7 +2652,7 @@ def setup_multiple_gemm_dispatchers(
         hdr = headers.get(i)
         if hdr is None:
             continue
-        job, _ = _build_compile_jobs(configs[i], hdr)
+        job, _ = compile_job(configs[i], hdr)
         if build_timeout:
             job["compile_timeout"] = job["link_timeout"] = build_timeout
         compile_jobs.append(job)
@@ -2626,7 +2660,7 @@ def setup_multiple_gemm_dispatchers(
 
     if verbose and compile_jobs:
         print(
-            f"[gemm-bridge] compile: {len(compile_jobs)} .so "
+            f"[{tag}] compile: {len(compile_jobs)} .so "
             f"(workers={max_workers})..."
         )
 
@@ -2667,7 +2701,7 @@ def setup_multiple_gemm_dispatchers(
 
     if verbose:
         ok_count = sum(1 for r in results if r is not None)
-        print(f"[gemm-bridge] setup complete: {ok_count}/{n} configs -> .so")
+        print(f"[{tag}] setup complete: {ok_count}/{n} configs -> .so")
 
     return results
 

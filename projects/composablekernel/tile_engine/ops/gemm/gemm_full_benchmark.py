@@ -39,6 +39,7 @@ tests is intended to drop into the same ``configs/`` directory.
 import argparse
 import contextlib
 import csv
+import functools
 import io
 import json
 import os
@@ -142,10 +143,19 @@ SUPPORTED_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8")
 # to K of roughly 256k; pass --verify-tol for larger K.
 DEFAULT_VERIFY_TOL = 2e-2
 VERIFY_TOL = {"fp32": 256 * 2.0**-23}
-CSV_FIELDS = [
-    "kernel", "problem_idx", "M", "N", "K", "device",
-    "latency_ms", "tflops", "non_zero", "max_rel", "verified",
-]
+# A problem's fields, in the order of its key ("MxNxK") and of the CSV
+# columns. The batched driver's problems also have a batch count
+# (batched_gemm_full_benchmark.DIMS); the shared helpers below take theirs.
+DIMS = ("M", "N", "K")
+
+
+def csv_fields(dims=DIMS):
+    """The measurement CSV's columns for problems of ``dims``."""
+    return ["kernel", "problem_idx", *dims, "device", "latency_ms", "tflops",
+            "non_zero", "max_rel", "verified"]
+
+
+CSV_FIELDS = csv_fields()
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
 # The 4-char codes (rcrr, ...) are the multi_abd A,B,E,D layouts; TE gemm_multi_abd
 # only supports rcrr today.
@@ -294,7 +304,6 @@ def _run_batch_on_device(
     it is cancelled the unit is not run and the result is empty.
     """
     prob_idx, prob_dict, batch = unit
-    M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
 
     def _fail(name, kind, error):
         if failures is not None:
@@ -302,9 +311,7 @@ def _run_batch_on_device(
                 {
                     "kernel": name,
                     "problem_idx": prob_idx,
-                    "M": M,
-                    "N": N,
-                    "K": K,
+                    **prob_dict,
                     "device": device_id,
                     "kind": kind,
                     "error": str(error)[:500],
@@ -395,9 +402,7 @@ def _run_batch_on_device(
                     {
                         "kernel": cfg.name,
                         "problem_idx": prob_idx,
-                        "M": M,
-                        "N": N,
-                        "K": K,
+                        **prob_dict,
                         "device": device_id,
                         "latency_ms": result["ms"],
                         "tflops": result["tflops"],
@@ -518,9 +523,10 @@ KERNEL_RECORD_FIELDS = (
 )
 
 
-def problem_key(prob):
-    """The 'MxNxK' key that names a problem in --pairs and --list-pairs files."""
-    return f"{int(prob['M'])}x{int(prob['N'])}x{int(prob['K'])}"
+def problem_key(prob, dims=DIMS):
+    """The 'MxNxK' key that names a problem in --pairs and --list-pairs files
+    (its ``dims`` joined by "x": "BxMxNxK" for a batched problem)."""
+    return "x".join(str(int(prob[d])) for d in dims)
 
 
 def _kernel_record(cfg):
@@ -558,7 +564,7 @@ def candidate_pairs(vfb, problems, configs):
         return vfb.pairs(problems, [(c, None) for c in configs])
 
 
-def listed_pairs(problems, wanted, paired, built_kernels):
+def listed_pairs(problems, wanted, paired, built_kernels, dims=DIMS):
     """Per-problem indices into ``built_kernels`` for the --pairs measurement.
 
     ``wanted`` maps a problem key to the listed kernel names, ``paired`` maps it to
@@ -570,7 +576,7 @@ def listed_pairs(problems, wanted, paired, built_kernels):
         index.setdefault(cfg.name, i)
     out, skipped, seen = [], [], set()
     for prob in problems:
-        key = problem_key(prob)
+        key = problem_key(prob, dims)
         idx = set()
         for name in wanted.get(key, ()):
             if name not in paired.get(key, ()):
@@ -585,6 +591,156 @@ def listed_pairs(problems, wanted, paired, built_kernels):
                 skipped.append((key, name, why))
         out.append(sorted(idx))
     return out, skipped
+
+
+def write_pair_listing(path, header, problems, configs, vfb, dims=DIMS):
+    """--list-pairs: write every (problem, kernel) pair a real run would
+    measure if every kernel built (expansion and pairing on the full config
+    and problems files, as in a real run), with each kernel's configuration,
+    after ``header`` (the run's arch, dtype, layout, variant and configs)."""
+    kernels, listed = {}, {}
+    for prob, idx in zip(problems, candidate_pairs(vfb, problems, configs)):
+        names = listed.setdefault(problem_key(prob, dims), [])
+        for i in idx:
+            cfg = configs[i]
+            kernels.setdefault(cfg.name, _kernel_record(cfg))
+            if cfg.name not in names:
+                names.append(cfg.name)
+    out = {
+        **header,
+        "problems": [{d: int(p[d]) for d in dims} for p in problems],
+        "kernels": kernels,
+        "pairs": listed,
+    }
+    Path(path).write_text(json.dumps(out, indent=1) + "\n")
+    print(
+        f"  Listed {sum(map(len, listed.values()))} pairs: {len(listed)} problems, "
+        f"{len(kernels)} kernels -> {path} (dry run, nothing built)"
+    )
+
+
+def read_listed_pairs(path, problems, configs, vfb, searching=False, dims=DIMS):
+    """--pairs: the listed pairs, validated against the full expansion and
+    judged by the pairing a full run applies. Returns (wanted, paired, star,
+    needed): the listed kernel names per problem key ("*" expanded), the
+    names the driver pairs with each problem, the "*" keys, and the names to
+    build (``searching``: the search builds only those it proposes); None
+    after printing why the file cannot be used."""
+    try:
+        requested = load_pair_list(path)
+    except (OSError, ValueError) as e:
+        print(f"  ERROR: --pairs {path}: {e}")
+        return None
+    unknown = sorted(set(requested) - {problem_key(p, dims) for p in problems})
+    expanded = {cfg.name for cfg in configs}
+    absent = sorted({n for v in requested.values() if v != "*" for n in v} - expanded)
+    if unknown or absent:
+        for what, items in (("problems", unknown), ("kernels", absent)):
+            if items:
+                print(
+                    f"  ERROR: --pairs lists {len(items)} {what} this run does not "
+                    f"have (same configs, problems, dtype, layout and arch?): "
+                    f"{', '.join(items[:3])}{' ...' if len(items) > 3 else ''}"
+                )
+        return None
+    order = {}
+    for i, cfg in enumerate(configs):
+        order.setdefault(cfg.name, i)
+    paired = defaultdict(set)
+    for prob, idx in zip(problems, candidate_pairs(vfb, problems, configs)):
+        paired[problem_key(prob, dims)].update(configs[i].name for i in idx)
+    wanted = {
+        key: sorted(paired[key], key=order.get) if names == "*" else names
+        for key, names in requested.items()
+    }
+    needed = {n for names in wanted.values() for n in names}
+    # A "*" problem is measured as a full run would measure it, including the
+    # fixed-width kernels that replace a native kernel that fails to build:
+    # build every fixed-width kernel that can run it, and pair it after the
+    # build like a full run does.
+    star = {key for key, names in requested.items() if names == "*"}
+    if star:
+        fixed = [cfg for cfg in configs if any(cfg.vector_sizes)]
+        for prob, idx in zip(problems, candidate_pairs(vfb, problems, fixed)):
+            if problem_key(prob, dims) in star:
+                needed.update(fixed[i].name for i in idx)
+    plan = (
+        "the search builds only the kernels it proposes"
+        if searching
+        else f"building {len(needed)} kernels"
+    )
+    print(
+        f"  Pair list: {sum(map(len, wanted.values()))} pairs over "
+        f"{len(wanted)} problems; {plan} ({path})"
+    )
+    return wanted, paired, star, needed
+
+
+def run_search_mode(args, settings, problems, configs, vfb, listed, devices, *,
+                    build, worker, context, dims=DIMS):
+    """Search mode (--search-config), which replaces the build and the full
+    measurement: its exit code. A problem's candidates are the kernels a full
+    run would measure with it (with --pairs, ``listed`` = (wanted, paired):
+    only the listed problems, and the listed kernels among those); only
+    proposed ones are built, by ``build`` (the driver's build function), and
+    measured by ``benchmark_on_devices`` on ``worker`` (the driver's
+    ``worker_setup()``). ``context`` (arch, layout, variant, configs) goes to
+    run.json; ``dims`` are a problem's fields (``DriverHooks.dims``)."""
+    from gemm_search import run_gemm_search
+
+    if listed is None:
+        eligible = [
+            [configs[i].name for i in idx]
+            for idx in candidate_pairs(vfb, problems, configs)
+        ]
+    else:
+        wanted, paired = listed
+        problems = [p for p in problems if problem_key(p, dims) in wanted]
+        keys = [problem_key(p, dims) for p in problems]
+        eligible = [[n for n in wanted[k] if n in paired[k]] for k in keys]
+    return run_gemm_search(
+        args, settings, search_hooks(build, dims), problems=problems,
+        configs=configs, eligible=eligible, devices=devices, worker=worker,
+        context=context,
+    )
+
+
+def search_hooks(build, dims=DIMS):
+    """The ``gemm_search.DriverHooks`` of a driver whose kernels ``build``
+    builds and whose problems have the fields ``dims``: this driver's
+    measurement, records, problem keys and pair lists."""
+    from gemm_search import DriverHooks
+
+    return DriverHooks(
+        build=build,
+        measure=functools.partial(benchmark_on_devices, dims=dims),
+        record=_kernel_record,
+        problem_key=functools.partial(problem_key, dims=dims),
+        load_pairs=load_pair_list,
+        build_reason=build_failure_summary,
+        build_dir=get_build_dir(),
+        dims=dims,
+    )
+
+
+def measured_listed_pairs(problems, wanted, paired, star, built_kernels, vfb,
+                          dims=DIMS):
+    """The --pairs measurement after the build: per problem the indices into
+    ``built_kernels`` to run, and the listed (key, name, reason) pairs that
+    are not measured (both printed). A "*" problem is paired like in a full
+    run, its unbuilt native kernels replaced by their fixed-width ones."""
+    pairs, unmeasured = listed_pairs(problems, wanted, paired, built_kernels, dims)
+    if star:
+        built_pairs = candidate_pairs(vfb, problems, [c for c, _ in built_kernels])
+        for p, prob in enumerate(problems):
+            if problem_key(prob, dims) in star:
+                pairs[p] = built_pairs[p]
+        unmeasured = [u for u in unmeasured if u[0] not in star or u[2] != "not built"]
+    print(f"  Problems: {len(problems)}")
+    print(f"  Total measurements: {sum(map(len, pairs))} (listed pairs)")
+    for key, name, why in unmeasured:
+        print(f"  Listed pair not measured: {key} {name}: {why}")
+    return pairs, unmeasured
 
 
 def repeat_plan(measured, top_k):
@@ -688,19 +844,20 @@ def unique_built_kernels(configs, lib_paths):
     return kernels, len(built) - len(kernels)
 
 
-def worker_setup():
-    """The worker script and its environment: the driver's, plus GEMM_PYPATH so
-    the worker finds the dispatcher's python modules."""
+def worker_setup(script="run_one_gemm_kernel.py"):
+    """The worker ``script`` (in this directory) and its environment: the
+    driver's, plus GEMM_PYPATH so the worker finds the dispatcher's python
+    modules."""
     base_env = os.environ.copy()
     base_env["GEMM_PYPATH"] = os.pathsep.join(
         [str(_DISPATCHER_ROOT / "python"), str(_THIS_DIR)]
     )
-    return _THIS_DIR / "run_one_gemm_kernel.py", base_env
+    return _THIS_DIR / script, base_env
 
 
 def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_path,
                          base_env, csv_path, extra=None, *, record_failures=None,
-                         measured=None, device_of=None, title=None):
+                         measured=None, device_of=None, title=None, dims=DIMS):
     """Phase 3: fan (problem, kernel-batch) units out over device-pinned workers.
 
     ``pairs[i]`` lists the indices into ``built_kernels`` to run on
@@ -712,6 +869,7 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
     row is also appended to. ``device_of``, if given, names the device that
     runs every unit of ``problems[i]`` (the devices still run in parallel).
     ``title``, if given, is printed as one line instead of the Phase 3 banner.
+    ``dims`` are a problem's fields, passed to the worker and in every row.
     """
     if title is None:
         print(f"\n{'=' * 80}")
@@ -724,13 +882,13 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
         print(f"  {title} (timeout {args.kernel_timeout}s per kernel)", flush=True)
 
     csv_file = open(csv_path, "w", newline="")
-    writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+    writer = csv.DictWriter(csv_file, fieldnames=csv_fields(dims))
     writer.writeheader()
 
     work_q = queue.Queue()
     pinned = None if device_of is None else {d: queue.Queue() for d in devices}
     for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
-        prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
+        prob_dict = {d: int(prob[d]) for d in dims}
         q = work_q if pinned is None else pinned[device_of[prob_idx]]
         for start in range(0, len(idx), args.batch_size):
             batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
@@ -794,6 +952,73 @@ def print_summary(build_time, stats, devices, csv_path):
     if stats["skipped"]:
         print(f"  Skipped (unsupported problem): {stats['skipped']}")
     print(f"  Output: {csv_path}")
+
+
+def add_pair_and_search_args(parser, key="MxNxK", search_scope=""):
+    """Add the --list-pairs, --pairs, --search-config and --search-output-dir
+    options, which the GEMM and the batched GEMM driver share (``key``: the
+    form of a problem key in a pair list; ``search_scope``: appended to
+    --search-config's help). ``check_pair_and_search_args`` validates them."""
+    parser.add_argument(
+        "--list-pairs",
+        default=None,
+        metavar="PATH",
+        help="Dry run: write every (problem, kernel) pair this run would measure, "
+        "with each kernel's configuration, then exit without building anything",
+    )
+    parser.add_argument(
+        "--pairs",
+        default=None,
+        metavar="PATH",
+        help=f"Measure only listed pairs: a JSON object mapping '{key}' to kernel "
+        'names, or "*" for every kernel paired with that problem (a --list-pairs '
+        "file is accepted). Only the listed kernels are built",
+    )
+    parser.add_argument(
+        "--search-config",
+        default=None,
+        metavar="PATH",
+        help="Adaptive search instead of measuring every pair: a search settings "
+        "JSON (see README). Builds and measures only the kernels the search "
+        "proposes, re-verifies the best and writes the confirmed winners as a "
+        f"--pairs file. Needs --search-output-dir{search_scope}",
+    )
+    parser.add_argument(
+        "--search-output-dir",
+        default=None,
+        metavar="DIR",
+        help="Output of --search-config (winners.json, run.json, trials.jsonl, "
+        "summary.json, rounds/, artifacts/); must not hold an earlier run",
+    )
+
+
+def check_pair_and_search_args(parser, args, files, driver="gemm"):
+    """Validate the options of ``add_pair_and_search_args`` (``parser.error``
+    on a bad combination): --pairs and --list-pairs exclude each other, the
+    run's ``files`` ((option, path) pairs: the files it writes and the pair
+    list it reads) are distinct, and the search options suit ``driver`` (a key
+    of ``gemm_search.DRIVER_OPTIONS``). Returns the search settings; None
+    without --search-config and --search-output-dir."""
+    if args.pairs and args.list_pairs:
+        parser.error("--pairs and --list-pairs are mutually exclusive")
+    # Every file the run writes, and the pair list it reads, must be distinct:
+    # opening one twice corrupts it, and a later one replaces an earlier one.
+    seen = {}
+    for opt, path in files:
+        if path:
+            key = Path(path).resolve()
+            if key in seen:
+                parser.error(f"{seen[key]} and {opt} name the same file: {path}")
+            seen[key] = opt
+    if args.search_config is None and args.search_output_dir is None:
+        return None
+    # Imported only in search mode, so a run without it loads nothing new.
+    from gemm_search import SettingsError, check_search_options
+
+    try:
+        return check_search_options(args, driver)
+    except SettingsError as e:
+        parser.error(str(e))
 
 
 def main():
@@ -925,37 +1150,7 @@ def main():
         help="Output of --repeat-top, one row per launch "
         "(default: the --csv path with suffix .repeats.csv)",
     )
-    parser.add_argument(
-        "--list-pairs",
-        default=None,
-        metavar="PATH",
-        help="Dry run: write every (problem, kernel) pair this run would measure, "
-        "with each kernel's configuration, then exit without building anything",
-    )
-    parser.add_argument(
-        "--pairs",
-        default=None,
-        metavar="PATH",
-        help="Measure only listed pairs: a JSON object mapping 'MxNxK' to kernel "
-        'names, or "*" for every kernel paired with that problem (a --list-pairs '
-        "file is accepted). Only the listed kernels are built",
-    )
-    parser.add_argument(
-        "--search-config",
-        default=None,
-        metavar="PATH",
-        help="Adaptive search instead of measuring every pair: a search settings "
-        "JSON (see README). Builds and measures only the kernels the search "
-        "proposes, re-verifies the best and writes the confirmed winners as a "
-        "--pairs file. Needs --search-output-dir; gemm_universal only",
-    )
-    parser.add_argument(
-        "--search-output-dir",
-        default=None,
-        metavar="DIR",
-        help="Output of --search-config (winners.json, run.json, trials.jsonl, "
-        "summary.json, rounds/, artifacts/); must not hold an earlier run",
-    )
+    add_pair_and_search_args(parser, search_scope="; gemm_universal only")
     args = parser.parse_args()
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
@@ -963,10 +1158,6 @@ def main():
         parser.error("--build-timeout must be positive")
     if args.repeat_top < 0 or args.repeat_count < 1:
         parser.error("--repeat-top must be >= 0 and --repeat-count >= 1")
-    if args.pairs and args.list_pairs:
-        parser.error("--pairs and --list-pairs are mutually exclusive")
-    # Every file the run writes, and the pair list it reads, must be distinct:
-    # opening one twice corrupts it, and a later one replaces an earlier one.
     files = [
         ("--csv", args.csv),
         ("--pairs", args.pairs),
@@ -979,23 +1170,7 @@ def main():
                 args.repeat_csv or str(Path(args.csv).with_suffix(".repeats.csv")),
             )
         )
-    seen = {}
-    for opt, path in files:
-        if path:
-            key = Path(path).resolve()
-            if key in seen:
-                parser.error(f"{seen[key]} and {opt} name the same file: {path}")
-            seen[key] = opt
-
-    search_settings = None
-    if args.search_config is not None or args.search_output_dir is not None:
-        # Imported only in search mode, so a run without it loads nothing new.
-        from gemm_search import SettingsError, check_search_options
-
-        try:
-            search_settings = check_search_options(args)
-        except SettingsError as e:
-            parser.error(str(e))
+    search_settings = check_pair_and_search_args(parser, args, files)
 
     arch = _resolve_arch(args.arch)
     config_paths = resolve_configs(args, arch)
@@ -1109,125 +1284,32 @@ def main():
         return 1
 
     if args.list_pairs:
-        # The pairs a real run would measure if every kernel built: expansion and
-        # pairing use the full config and problems files, as a real run does.
-        kernels, listed = {}, {}
-        for prob, idx in zip(problems, candidate_pairs(vfb, problems, all_configs)):
-            names = listed.setdefault(problem_key(prob), [])
-            for i in idx:
-                cfg = all_configs[i]
-                kernels.setdefault(cfg.name, _kernel_record(cfg))
-                if cfg.name not in names:
-                    names.append(cfg.name)
-        out = {
-            "arch": arch,
-            "dtype": args.dtype,
-            "layout": sweep_layout,
-            "variant": codegen_variant,
-            "configs": config_paths,
-            "problems": [
-                {"M": int(p["M"]), "N": int(p["N"]), "K": int(p["K"])} for p in problems
-            ],
-            "kernels": kernels,
-            "pairs": listed,
-        }
-        Path(args.list_pairs).write_text(json.dumps(out, indent=1) + "\n")
-        print(
-            f"  Listed {sum(map(len, listed.values()))} pairs: {len(listed)} problems, "
-            f"{len(kernels)} kernels -> {args.list_pairs} (dry run, nothing built)"
-        )
+        header = {"arch": arch, "dtype": args.dtype, "layout": sweep_layout,
+                  "variant": codegen_variant, "configs": config_paths}
+        write_pair_listing(args.list_pairs, header, problems, all_configs, vfb)
         return 0
 
-    wanted = None
+    wanted = paired = None
     if args.pairs:
         # Validate against the full expansion, build only what is listed, and
         # judge every listed pair by the pairing a full run would apply.
-        try:
-            requested = load_pair_list(args.pairs)
-        except (OSError, ValueError) as e:
-            print(f"  ERROR: --pairs {args.pairs}: {e}")
+        listed = read_listed_pairs(args.pairs, problems, all_configs, vfb,
+                                   searching=search_settings is not None)
+        if listed is None:
             return 1
-        unknown = sorted(set(requested) - {problem_key(p) for p in problems})
-        expanded = {cfg.name for cfg in all_configs}
-        absent = sorted(
-            {n for v in requested.values() if v != "*" for n in v} - expanded
-        )
-        if unknown or absent:
-            for what, items in (("problems", unknown), ("kernels", absent)):
-                if items:
-                    print(
-                        f"  ERROR: --pairs lists {len(items)} {what} this run does not "
-                        f"have (same configs, problems, dtype, layout and arch?): "
-                        f"{', '.join(items[:3])}{' ...' if len(items) > 3 else ''}"
-                    )
-            return 1
-        order = {}
-        for i, cfg in enumerate(all_configs):
-            order.setdefault(cfg.name, i)
-        paired = defaultdict(set)
-        for prob, idx in zip(problems, candidate_pairs(vfb, problems, all_configs)):
-            paired[problem_key(prob)].update(all_configs[i].name for i in idx)
-        wanted = {
-            key: sorted(paired[key], key=order.get) if names == "*" else names
-            for key, names in requested.items()
-        }
-        needed = {n for names in wanted.values() for n in names}
-        # A "*" problem is measured as a full run would measure it, including the
-        # fixed-width kernels that replace a native kernel that fails to build:
-        # build every fixed-width kernel that can run it, and pair it after the
-        # build like a full run does.
-        star = {key for key, names in requested.items() if names == "*"}
-        if star:
-            fixed = [cfg for cfg in all_configs if any(cfg.vector_sizes)]
-            for prob, idx in zip(problems, candidate_pairs(vfb, problems, fixed)):
-                if problem_key(prob) in star:
-                    needed.update(fixed[i].name for i in idx)
+        wanted, paired, star, needed = listed
         all_configs = [cfg for cfg in all_configs if cfg.name in needed]
-        plan = (
-            f"building {len(needed)} kernels"
-            if search_settings is None
-            else "the search builds only the kernels it proposes"
-        )
-        print(
-            f"  Pair list: {sum(map(len, wanted.values()))} pairs over "
-            f"{len(wanted)} problems; {plan} ({args.pairs})"
-        )
     if search_settings is not None:
-        # Search mode replaces the build and the full measurement. A problem's
-        # candidates are the kernels a full run would measure with it (with
-        # --pairs: only the listed problems, and the listed kernels among
-        # those); only proposed ones are built.
-        from gemm_search import DriverHooks, run_gemm_search
-
-        if wanted is None:
-            eligible = [
-                [all_configs[i].name for i in idx]
-                for idx in candidate_pairs(vfb, problems, all_configs)
-            ]
-        else:
-            problems = [p for p in problems if problem_key(p) in wanted]
-            eligible = [
-                [n for n in wanted[k] if n in paired[k]]
-                for k in map(problem_key, problems)
-            ]
-        hooks = DriverHooks(
-            build=setup_multiple_gemm_dispatchers,
-            measure=benchmark_on_devices,
-            record=_kernel_record,
-            problem_key=problem_key,
-            load_pairs=load_pair_list,
-            build_reason=build_failure_summary,
-            build_dir=get_build_dir(),
-        )
         context = {
             "arch": arch,
             "layout": sweep_layout,
             "variant": codegen_variant,
             "configs": config_paths,
         }
-        return run_gemm_search(
-            args, search_settings, hooks, problems=problems, configs=all_configs,
-            eligible=eligible, devices=devices, worker=worker_setup(),
+        return run_search_mode(
+            args, search_settings, problems, all_configs, vfb,
+            None if wanted is None else (wanted, paired), devices,
+            build=setup_multiple_gemm_dispatchers, worker=worker_setup(),
             context=context,
         )
     print(f"  Build workers: {args.workers}")
@@ -1300,20 +1382,9 @@ def main():
     if wanted is None:
         pairs = vfb.pairs(problems, built_kernels)
     else:
-        pairs, unmeasured = listed_pairs(problems, wanted, paired, built_kernels)
-        if star:
-            built_pairs = candidate_pairs(vfb, problems, [c for c, _ in built_kernels])
-            for p, prob in enumerate(problems):
-                if problem_key(prob) in star:
-                    pairs[p] = built_pairs[p]
-            # A "*" problem's unbuilt natives are replaced like in a full run.
-            unmeasured = [
-                u for u in unmeasured if u[0] not in star or u[2] != "not built"
-            ]
-        print(f"  Problems: {len(problems)}")
-        print(f"  Total measurements: {sum(map(len, pairs))} (listed pairs)")
-        for key, name, why in unmeasured:
-            print(f"  Listed pair not measured: {key} {name}: {why}")
+        pairs, unmeasured = measured_listed_pairs(
+            problems, wanted, paired, star, built_kernels, vfb
+        )
 
     if fail_writer:
         for key, name, why in unmeasured:

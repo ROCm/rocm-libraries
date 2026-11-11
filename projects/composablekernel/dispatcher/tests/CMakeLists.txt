@@ -437,9 +437,9 @@ set_tests_properties(dispatcher_test_gemm_driver_pairs PROPERTIES
 )
 
 # Adaptive kernel search (--search-config): the vendored ck_search core, the
-# op-agnostic coordinator, the GEMM adapter and the driver options. CPU only:
-# builds, workers and strategies are faked or run in-process.
-foreach(_search_test ck_search_core adaptive_search_coordinator gemm_search_adapter gemm_search_cli)
+# op-agnostic coordinator, the GEMM adapter, the GEMM and batched GEMM driver
+# options. CPU only: builds, workers and strategies are faked or run in-process.
+foreach(_search_test ck_search_core adaptive_search_coordinator gemm_search_adapter gemm_search_cli batched_gemm_search)
     add_test(
         NAME dispatcher_test_${_search_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_${_search_test}.py

@@ -35,8 +35,6 @@ from __future__ import annotations
 from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -227,6 +225,20 @@ class BatchedGemmProblem:
             N=int(d["N"]),
             K=int(d["K"]),
         )
+
+
+def packed_strides(layout: str, M: int, N: int, K: int) -> Dict[str, int]:
+    """The strides ``dispatcher_run_batched`` derives for packed A, B and C of
+    ``layout`` (e.g. "rcr"; stride and batch-stride arguments of 0, as
+    ``GpuBatchedGemmRunner.run`` passes them without padding): each leading
+    stride is its operand's columns when row-major, its rows when
+    column-major, and each batch stride one whole matrix."""
+    out: Dict[str, int] = {}
+    for name, lay, rows, cols in (("A", layout[0], M, K), ("B", layout[1], K, N),
+                                  ("C", layout[2], M, N)):
+        out[f"stride_{name}"] = cols if lay == "r" else rows
+        out[f"batch_stride_{name}"] = rows * cols
+    return out
 
 
 @dataclass
@@ -458,14 +470,45 @@ class GpuBatchedGemmRunner:
             )
 
         dtype = _gu._dtype_from_kernel_name(self._kernel_name)
-        la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
-        C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
-
+        la, lb, _ = _gu._layout_from_kernel_name(self._kernel_name)
         # A/B host buffers in the kernel's element dtype and per-batch layout; the
         # kernels of a sweep worker's shape reuse them (see _gu._sweep_inputs).
         A_h, B_h = _gu._encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )
+        return self.run_encoded(
+            A_h, B_h, problem, k_batch, batch_pad_A, batch_pad_B, batch_pad_C,
+            warmup, repeat, flush_cache, rotating_count,
+        )
+
+    def run_encoded(
+        self,
+        A_h: np.ndarray,
+        B_h: np.ndarray,
+        problem: BatchedGemmProblem,
+        k_batch: int = 1,
+        batch_pad_A: int = 0,
+        batch_pad_B: int = 0,
+        batch_pad_C: int = 0,
+        warmup: int = 50,
+        repeat: int = 100,
+        flush_cache: bool = True,
+        rotating_count: int = 1000,
+    ) -> BatchedGemmResult:
+        """run() on host buffers in the kernel's element dtype and memory
+        order: per batch, a 'c' operand transposed (what run() encodes, and
+        what a search's host cache holds)."""
+        batch, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
+        # The .so copies batch*M*K and batch*K*N elements from the host
+        # pointers whatever the arrays hold (see run()).
+        if A_h.size != batch * M * K or B_h.size != batch * K * N:
+            raise ValueError(
+                f"host buffers of {A_h.size} and {B_h.size} elements, expected "
+                f"{batch * M * K} and {batch * K * N} for problem {problem.to_dict()}"
+            )
+        dtype = _gu._dtype_from_kernel_name(self._kernel_name)
+        lc = _gu._layout_from_kernel_name(self._kernel_name)[2]
+        C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
         out_dtype, c_np = _gu._c_numpy_dtype(dtype)
         # F6: the host C buffer is memcpy'd byte-for-byte to/from the device
         # buffer the kernel writes as CDataType, so the numpy element size MUST
@@ -635,127 +678,58 @@ def setup_multiple_batched_gemm_dispatchers(
     configs: List[BatchedGemmKernelConfig],
     verbose: bool = True,
     max_workers: Optional[int] = None,
+    *,
+    errors: Optional[Dict[str, str]] = None,
+    build_timeout: Optional[int] = None,
 ) -> List[Optional[Path]]:
     """Codegen + compile each batched config into its own .so. Returns .so paths
-    aligned to input order (None for configs that failed). Pure CPU (no GPU)."""
+    aligned to input order (None for configs that failed). Pure CPU (no GPU).
+
+    The build itself is ``gemm_utils.build_libraries``; ``errors`` is filled
+    with each failed config's reason, as in
+    ``gemm_utils.setup_multiple_gemm_dispatchers``. ``build_timeout``
+    (seconds) replaces the limit of every kernel's codegen, compile and link
+    step; ``None`` keeps this build's own: 300 s each, fixed-vector-width
+    kernels included (its compile jobs set no ``compile_timeout``, so the
+    GEMM build's 1200 s for those does not apply)."""
     import sys
 
-    n = len(configs)
-    results: List[Optional[Path]] = [None] * n
-    if n == 0:
-        return results
-
-    max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
-
-    first_index: Dict[str, int] = {}
-    unique: List[int] = []
-    for i, c in enumerate(configs):
-        key = c.name
-        if key not in first_index:
-            first_index[key] = i
-            unique.append(i)
-
-    codegen_script = _cu.get_codegen_path()
-    output_dir = _cu.get_generated_kernels_dir()
     ctypes_source = (
         _cu.get_dispatcher_root()
         / "bindings"
         / "ctypes"
         / "batched_gemm_ctypes_lib.cpp"
     )
-    if not ctypes_source.exists():
+    if configs and not ctypes_source.exists():
         raise FileNotFoundError(
             f"Missing batched ctypes source required for compilation:\n  {ctypes_source}"
         )
+    codegen_script = _cu.get_codegen_path()
+    output_dir = _cu.get_generated_kernels_dir()
 
-    # -- Step 1: parallel codegen (one header per unique config) --------------
-    codegen_args = []
-    for i in unique:
-        c = configs[i]
-        # Resolve arch here too so codegen and compile target the same detected
-        # (or explicitly-validated) GPU -- never a silent gfx942 default.
-        gpu_target = _resolve_arch(c.gfx_arch)
-        codegen_args.append(
-            {
-                "index": i,
-                "python": sys.executable,
-                "codegen_script": str(codegen_script),
-                "output_dir": str(output_dir),
-                "dtype": c.dtype_a,
-                "layout": c.layout,
-                "gpu_target": gpu_target,
-                "tile_config_json": c.to_codegen_json(),
-                "hpp_glob_pattern": f"{c.name}.hpp",
-                # Thread the batched variant so the emitted header is the batched
-                # kernel and its name carries the _batched suffix (matching the
-                # glob pattern above).
-                "variant": c.variant,
-            }
-        )
-
-    if verbose:
-        print(
-            f"[batched-gemm-bridge] codegen: {len(codegen_args)} headers "
-            f"(workers={max_workers})..."
-        )
-
-    headers: Dict[int, Path] = {}
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futs = {
-            ex.submit(_cu._generate_single_kernel_subprocess, a): a["index"]
-            for a in codegen_args
+    def codegen_arg(c):
+        return {
+            "python": sys.executable,
+            "codegen_script": str(codegen_script),
+            "output_dir": str(output_dir),
+            "dtype": c.dtype_a,
+            "layout": c.layout,
+            # Resolve arch here too so codegen and compile target the same
+            # detected (or explicitly-validated) GPU -- never a silent gfx942
+            # default.
+            "gpu_target": _resolve_arch(c.gfx_arch),
+            "tile_config_json": c.to_codegen_json(),
+            "hpp_glob_pattern": f"{c.name}.hpp",
+            # Thread the batched variant so the emitted header is the batched
+            # kernel and its name carries the _batched suffix (matching the
+            # glob pattern above).
+            "variant": c.variant,
         }
-        for fut in as_completed(futs):
-            i = futs[fut]
-            ok, hdr, err = fut.result()
-            if ok and hdr:
-                headers[i] = Path(hdr)
-                if verbose:
-                    print(f"  OK  codegen [{i}] {configs[i].name}")
-            elif verbose:
-                print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
 
-    # -- Step 2: parallel compile + link --------------------------------------
-    compile_jobs = []
-    job_index: List[int] = []
-    for i in unique:
-        hdr = headers.get(i)
-        if hdr is None:
-            continue
-        job, _ = _build_batched_compile_jobs(configs[i], hdr)
-        compile_jobs.append(job)
-        job_index.append(i)
-
-    if verbose and compile_jobs:
-        print(
-            f"[batched-gemm-bridge] compile: {len(compile_jobs)} .so "
-            f"(workers={max_workers})..."
-        )
-
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futs = {
-            ex.submit(_cu._run_hipcc_subprocess, job): job_index[j]
-            for j, job in enumerate(compile_jobs)
-        }
-        for fut in as_completed(futs):
-            i = futs[fut]
-            ok, lp, err = fut.result()
-            if ok and lp:
-                results[i] = Path(lp)
-                if verbose:
-                    print(f"  OK  compile [{i}] {Path(lp).name}")
-            elif verbose:
-                print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
-
-    for i, c in enumerate(configs):
-        if results[i] is None:
-            results[i] = results[first_index[c.name]]
-
-    if verbose:
-        ok_count = sum(1 for r in results if r is not None)
-        print(f"[batched-gemm-bridge] setup complete: {ok_count}/{n} configs -> .so")
-
-    return results
+    return _gu.build_libraries(
+        configs, codegen_arg, _build_batched_compile_jobs, "batched-gemm-bridge",
+        verbose, max_workers, errors, build_timeout,
+    )
 
 
 # ============================================================================
