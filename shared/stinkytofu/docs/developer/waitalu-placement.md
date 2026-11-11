@@ -192,9 +192,10 @@ memory-address pairs under 8 cycles.
 
 ## Open
 
-- `WaitAluTracker` starts each BB empty, where the pass seeds it from its predecessors, so
-  loop-carried producers are not seen at the top of the loop body. Seed the tracker from the
-  pass's BB entry state.
+- The DAG's `WaitAluTracker` starts each BB empty, where the pass seeds it from its predecessors,
+  so loop-carried producers are not seen at the top of the loop body. A tracker built from
+  `WaitAluEntryStates` starts from the pass's BB entry state (`DsRefillSinkPass` uses one); the
+  DAG does not yet.
 - When a candidate needs both `va_vdst` and `vm_vsrc`, how their two counts combine in the rank.
 - Loop strict waits rose by 5 in step 3: traced and fixed in step 3b (medium mxf8 stays at 5).
 - The prefetch lead is an empirical time, not derived. The MI400 shader guide gives the semantics

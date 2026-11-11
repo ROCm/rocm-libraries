@@ -160,4 +160,5 @@ Read the related docs:
 - [`docs/developer/dag-wait-and-prefetch-placement.md`](../../../../docs/developer/dag-wait-and-prefetch-placement.md)
 - [`docs/developer/wmma-batch-ds-spread-plan.md`](../../../../docs/developer/wmma-batch-ds-spread-plan.md)
 - [`docs/developer/waitalu-placement.md`](../../../../docs/developer/waitalu-placement.md)
+- [`docs/developer/ds-refill-placement.md`](../../../../docs/developer/ds-refill-placement.md)
 - [`docs/developer/cluster-barrier.md`](../../../../docs/developer/cluster-barrier.md)

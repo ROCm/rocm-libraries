@@ -151,7 +151,8 @@ matches. It runs:
 
 1. the verifier and the CFG builder, then wait and nop removal when wait insertion is on;
 2. `StinkyBuildImplicitDependencyPass`, which attaches the LDS tokens;
-3. at `ScheduleIterAlg: 4` only: `StinkyDAGSchedulerPass` and `StinkyMergeBarrierPass`;
+3. at `ScheduleIterAlg: 4` only: `StinkyDAGSchedulerPass` and `StinkyMergeBarrierPass`, then
+   `DsRefillSinkPass` when `DsRefillSink` is set;
 4. `StinkyWaitCntInsertionPass` when wait insertion is on;
 5. later, at the module level: `InsertVgprMsb`, wait-alu, delay-alu, `SetMatrixReuse`, xnack.
 
@@ -162,6 +163,10 @@ matches. It runs:
 
 The TensileLite default, after `StinkyBuildImplicitDependencyPass`, comes before the DAG
 scheduler, so at `ScheduleIterAlg: 4` the scheduler reorders whatever is loaded there.
+
+With `DsRefillSink` set, an edit loaded after `StinkyMergeBarrierPass` still goes through
+`DsRefillSinkPass`, which can move its refill ds_loads. Cut at
+`loopWithPrefetch+noLoadLoopBody:DsRefillSinkPass` to edit the order the pass leaves.
 
 A checkpoint after wait insertion works, but the waits in the bundle are then part of the
 edit, and nothing re-derives them.

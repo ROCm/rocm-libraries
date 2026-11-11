@@ -164,7 +164,9 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
+| `WarGateWmmas` | -1 → derived `L / I` (with `DsRefillGate`: the `va_vdst` hide distance) | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
+| `DsRefillGate` | false | `--ds-refill-gate` | Hold a refill ds_load as long as its `va_vdst` wait needs. The derived `WarGateWmmas` becomes the WMMA count that hides the wait (`HWModel::WaitHide`, 12 for the f8 WMMA), open gates carry into the next block, and a ds pacer that is behind lifts a gate only when the load's data would otherwise be late. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`; a set `WarGateWmmas` still sets the distance. See [Refill placement](../developer/ds-refill-placement.md). |
+| `DsRefillSink` | 0 | `--DsRefillSinkPass` (pass; `=report` for 1) | After the DAG, move each ds_load refill that still waits on `va_vdst` later, into its window, without moving a WMMA. 0 = off, 1 = report only (log under `StinkyTofuDebugPass: "DsRefillSinkPass"`), 2 = move. Only with `EnableESM2`. See [Refill placement](../developer/ds-refill-placement.md). |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | `ReduceClusterBarrierPerLoop` | -1 → heuristic | – | `1`: first Rule 3 handshake of each enclosing loop, then another after each 2000 estimated cycles. Nearby HalfPLR / ExpandPointerSwap copies still share one handshake. `0`: every loop trigger handshakes. Unset turns on when the main loop's WMMA latency sum > 2500 and that sum / ds_load count >= 5. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | *CLI only* `mergeBarrierThreshold` | unused | `--merge-barrier-threshold=N` | Parsed but ignored. `StinkyMergeBarrierPass` merges adjacent groups only when no matrix instruction is issued between them. |
@@ -191,3 +193,4 @@ dependences allow.
 | ds_loads as soon as they are ready and a credit is free | `DsSpread=false` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
+| Refill ds_loads placed past their `va_vdst` wait | `DsRefillGate=true, DsRefillSink=2` |

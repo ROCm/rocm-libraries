@@ -53,6 +53,7 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 | `CFGBuilderPass` | Splits `BasicBlock`s at labels, builds CFG edges |
 | `FlattenCFGPass` | The inverse: merges every block back into the flat entry block, keeping labels so a later `CFGBuilderPass` splits again. A `ScopeAdaptor` walks its group ranges along one instruction list, so a CFG built before an adaptor has to be flattened first |
 | `StinkyDAGSchedulerPass` | DAG-based instruction scheduling. Calls `buildUseDefChain` (inserts pseudo-PHI nodes) before scheduling |
+| `DsRefillSinkPass` | After the DAG on gfx1250 with ESM2: moves each ds_load that refills a WMMA operand and waits on `va_vdst` later, into its window, without moving a WMMA. Off by default (`DsRefillSink`). See [Refill placement](ds-refill-placement.md) |
 | `StinkyWaitCntInsertionPass` | Def-use based wait count insertion for memory operations |
 | `DeadCodeEliminationPass` | Block-local forward scan: removes instructions whose destination is overwritten before use. Iterates to fixpoint. Preserves memory ops, barriers, side-effects, in-place ops, and dummy registers |
 | `RedundantMovEliminationPass` | Block-local backward search: removes duplicate mov-type instructions (same opcode + dest + src, source unmodified between occurrences) |
