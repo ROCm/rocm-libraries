@@ -473,16 +473,25 @@ EXTRA_TILES = {
             "3x3d36r1",
         ),
     ): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32), (128, 64, 4, 2, 32)],
-    # Measured on gfx1201 (fp16, n128 / n16): inception 5x5 on the ring, deeplab 1x1 on the rows.
+    # Measured on gfx1201 (fp16, n128 / n16): inception 5x5 on the ring (gfx12 only: on gfx11
+    # the output rows' 64 x 64 tile is 3.4x faster), deeplab 1x1 on the rows (gfx11 too:
+    # 1.3-2.2x over the ring's tiles on gfx1101).
     ("wmma12", ("5x5",)): [(64, 32, 4, 2, 32)],
-    ("wmma12", ("1x1r0",)): [(128, 64, 4, 2, 32)],
+    ("wmma", ("1x1r0",)): [(128, 64, 4, 2, 32)],
     # Packed rows, measured (fp16, n128): gfx950 resnet50 c512 7^2 / 14^2 s2, inception c288
     # 35^2 s2; gfx1201 the same and resnet50 c256 14^2 (its 128 x 32 tile at 64 positions ran
-    # within 1% of the 64 x 64 one: not shipped).
+    # within 1% of the 64 x 64 one: not shipped); gfx11 (gfx1101) the WMMA tiles again, 2.4x.
     ("mfma32x16", ("3x3pk",)): [(128, 64, 4, 2, 64), (64, 128, 2, 4, 64)],
     ("mfma32x16", ("3x3s2pk",)): [(128, 64, 4, 2, 64), (128, 64, 4, 2, 32)],
-    ("wmma12", ("3x3pk",)): [(64, 64, 4, 2, 64), (128, 32, 4, 2, 32)],
-    ("wmma12", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
+    ("wmma", ("3x3pk",)): [(64, 64, 4, 2, 64), (128, 32, 4, 2, 32)],
+    # 32 x 32 rings, measured on resnext50 c1024 g32 14^2 (fp16 n128): gfx950 294 against
+    # 361 us, gfx1201 953 against 1052.
+    ("mfma32x16", ("3x3g32",)): [(32, 32, 1, 1, 32)],
+    ("wmma12", ("3x3g32",)): [(32, 32, 2, 2, 32)],
+    # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
+    ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
+    ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
+    ("wmma", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
 }
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
@@ -550,9 +559,11 @@ FILTERS = [
     # layers), on the tiles measured best on gfx950 and gfx1201 (EXTRA_TILES).
     ("3x3pk", 3, 1, 1, 1, 7, [], [0], [CF]),
     ("3x3s2pk", 3, 2, 1, 1, 7, [], [0], [CF]),
+    # 32 x 32 rings for 32-channel groups (ResNeXt c1024 g32 14^2; EXTRA_TILES).
+    ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
 ]
 # Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
-MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk"}
+MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk", "3x3g32"}
 BASE = {
     "3x3",
     "1x1",
@@ -1034,9 +1045,12 @@ def dws_of(c):
 
 def family_of(c):
     """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA, or the FMA loops."""
+    MFMA atoms, RDNA's WMMA, or the FMA loops. The 32 x 32 atom's packed rows ship in a pack
+    without gfx950, which has its own measured packed-rows tiles."""
     if c["loop"] == 5:
         return "direct"
+    if c["loop"] == 7 and c["atom"].startswith("mfma32_"):
+        return "cdnapk"
     if c["atom"] == "fma":
         return "fma"
     if c["atom"].startswith("wmma"):
@@ -1142,9 +1156,11 @@ def emit():
                     "version": "1.0",
                     "id": U(f"kdp.{dt}.{fam}"),
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
-                    "arch": {"fma906": FMA906_ARCHS, "fmardna": FMARDNA_ARCHS}.get(
-                        fam, []
-                    ),
+                    "arch": {
+                        "fma906": FMA906_ARCHS,
+                        "fmardna": FMARDNA_ARCHS,
+                        "cdnapk": CDNA[:3],
+                    }.get(fam, []),
                     "matchers": [umd],
                     "engine": ued,
                     "dispatch": udd,
