@@ -27,6 +27,7 @@ add_executable( rocfft-internal-test
   kernel_name_test.cpp
   rtc_test.cpp
   solution_map_test.cpp
+  stockham_grid_test.cpp
   ../data_set.cpp
   ../enum_printer.cpp
   ../rocfft_stub.cpp

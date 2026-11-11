@@ -304,8 +304,7 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
-    gp.b_x   = (batch + bwd - 1) / bwd;
-    gp.wgs_x = wgs;
+    SetStockhamGrid(gp);
 
     size_t padded_len0 = length[0];
     size_t padded_len1 = length[1];
@@ -317,9 +316,14 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
     padded_len0 = IsPo2(padded_len0) ? padded_len0 + 1 : padded_len0;
 
     lds = padded_len0 * padded_len1 * bwd;
+}
 
+std::pair<size_t, unsigned int> Single2DNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
     // if we're doing 3D transform, we need to repeat the 2D
     // transform in the 3rd dimension
-    if(length.size() > 2)
-        gp.b_x *= length[2];
+    return {DivRoundingUp<size_t>(batch, kernel.transforms_per_block)
+                * product(length.begin() + 2, length.end()),
+            kernel.workgroup_size};
 }
