@@ -3,8 +3,16 @@
   "id": "2e852f30-1df1-5fbe-911c-98933a471ff9",
   "name": "hipkernel:hip_conv_fwd_rdna",
   "arch": [
-    "gfx11-generic",
-    "gfx12-generic"
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
   ],
   "matchers": [
     "170b083e-29cf-59a7-80e1-94b8083967ad"

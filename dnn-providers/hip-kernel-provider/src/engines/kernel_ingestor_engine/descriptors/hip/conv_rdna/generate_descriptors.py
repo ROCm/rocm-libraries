@@ -19,7 +19,20 @@ def uid(kind, name):
     return str(uuid.uuid5(NAMESPACE, f"{kind}:{name}"))
 
 
-ARCH = ["gfx11-generic", "gfx12-generic"]
+# The RDNA targets, listed one by one rather than as gfx11-generic / gfx12-generic, so each
+# build compiles its own targets and the packer stamps each shard with its architecture.
+ARCH = [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201",
+]
 
 DTYPES = [("f32", "FLOAT", 0), ("f16", "HALF", 1), ("bf16", "BFLOAT16", 2)]
 TILES = [32, 64, 128]

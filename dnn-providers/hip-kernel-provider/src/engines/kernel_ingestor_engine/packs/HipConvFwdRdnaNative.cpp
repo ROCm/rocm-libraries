@@ -33,6 +33,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/HipConvFwdRdnaLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
@@ -65,11 +66,8 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.hip_conv_fwd_rdna.
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.hip_conv_fwd_rdna.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.hip_conv_fwd_rdna.dispatch";
 
-// The saved form of a launch: a versioned contract name and the named values the launch is
-// computed from. Use a new version for a change to the values, to the kernel arguments, or
-// to how the grid is derived; keep the old handler registered while plans saved under it
-// must load.
-constexpr std::string_view DISPATCH_SYMBOL_V1 = "hipkernel.hip_conv_fwd_rdna.dispatch.v1";
+// The names of the saved launch values (HipConvFwdRdnaLaunchValues.hpp).
+constexpr std::string_view DISPATCH_SYMBOL_V1 = HIP_CONV_FWD_RDNA_DISPATCH_SYMBOL_V1;
 constexpr std::string_view X_UID_VALUE = "x.uid";
 constexpr std::string_view W_UID_VALUE = "w.uid";
 constexpr std::string_view Y_UID_VALUE = "y.uid";
@@ -105,13 +103,8 @@ constexpr int64_t MIN_OUT_CHANNELS_PER_GROUP = 16;
 constexpr int64_t MAX_GRID_X_BLOCKS = 0x7fffffff / FMA_BLOCK_SIZE;
 constexpr int64_t MAX_GRID_Y = 0xffff;
 
-/// The operand uids a match binds, in kernel argument order.
-struct ConvBinding
-{
-    int64_t x = 0;
-    int64_t w = 0;
-    int64_t y = 0;
-};
+using ConvBinding = HipConvFwdRdnaBinding;
+using LaunchInputs = HipConvFwdRdnaLaunchInputs;
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -336,7 +329,7 @@ std::unique_ptr<PreparedDispatch>
     return std::make_unique<PreparedHipConvFwdRdna>(std::move(code), binding, problem);
 }
 
-/// The values of the `hipkernel.hip_conv_fwd_rdna.dispatch.v1` contract.
+/// @see hipConvFwdRdnaLaunchValues
 MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& problem)
 {
     MetadataValues values{{std::string(X_UID_VALUE), binding.x},
@@ -358,17 +351,7 @@ MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& probl
     return values;
 }
 
-/// What a launch reads back from a saved plan.
-struct LaunchInputs
-{
-    ConvBinding binding;
-    ConvProblem problem;
-};
-
-/// Reads the values of the `hipkernel.hip_conv_fwd_rdna.dispatch.v1` contract. Every extent,
-/// stride and dilation must be in [1, INT_MAX], every padding in [0, INT_MAX], C and K must
-/// split into the groups, and the grid must fit the launch limits. Dtype and layout are not
-/// saved: they are compiled into the saved kernel, which the launch does not re-derive.
+/// @see readHipConvFwdRdnaLaunchInputs
 LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
 {
     requireLaunchContract(inputs, DISPATCH_SYMBOL_V1);
@@ -549,6 +532,17 @@ const HipConvFwdRdnaDispatchHandler& dispatchHandler()
 }
 
 } // namespace
+
+MetadataValues hipConvFwdRdnaLaunchValues(const HipConvFwdRdnaBinding& binding,
+                                          const conv_rdna::ConvProblem& problem)
+{
+    return launchValues(binding, problem);
+}
+
+HipConvFwdRdnaLaunchInputs readHipConvFwdRdnaLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    return readLaunchInputs(inputs);
+}
 
 compilation::KpackModuleCache& hipConvFwdRdnaKpackModuleCache()
 {
