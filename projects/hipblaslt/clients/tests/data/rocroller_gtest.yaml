@@ -189,5 +189,28 @@ Tests:
   expect_no_solution: 1
   initialization: hpl
   gpu_arch: '950'
+# rocRoller-off build only. rocRoller's first ranked tile for this NT problem
+# is a 32x32x128 Stream-K tile, so both APIs must serve the checked-in NT
+# Stream-K kernel for it, at the default uniform-summation-order setting, and
+# get the right answer.
+- name: rocroller_nt_streamk_kernel
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [128]
+  N: [1024]
+  K: [4096]
+  transA: N
+  transB: T
+  use_ext: [0, 1]
+  requires_streamk: 1
+  expected_kernel: RR_GEMM_NT_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_32x32x128_UR_2
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
 
 ...
