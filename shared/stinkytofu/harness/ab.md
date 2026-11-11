@@ -20,8 +20,8 @@ tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
 Every comparison run records the baseline commit hash.
 
 **Final check (local CI).** Finish the change using the A/B above. Then, before you submit a PR, run
-the StinkyTofu tests locally (build, ctest, FileCheck; see `README.md` and `tests/README.md`). They
-are fast, so run them locally and do not leave them to CI.
+the StinkyTofu tests locally: `invoke build`, then `ctest` and `ctest -R FileCheck` from `build/` (see
+`README.md`). They are fast, so run them locally and do not leave them to CI.
 
 **Tier 1 needs a fresh binding.** TensileLite loads the rocisa binding, not the `invoke build` output.
 After every StinkyTofu edit, run `invoke rocisa` in `projects/hipblaslt/tensilelite` (see its

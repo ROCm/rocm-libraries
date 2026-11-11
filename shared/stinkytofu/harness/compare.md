@@ -22,7 +22,7 @@ Read this when you run tier 1. The flow is in `ab.md`.
   IR. Both then run the same ASM IR passes. A change in an ASM IR pass (for example the DAG scheduler)
   shows in both modes. A change in the logical IR shows only with `stinkytofu`, and a change in rocisa's
   own code shows only with `rocisa`. Run the mode that executes the code you edited, use the same mode
-  on both sides, and record it. With the wrong mode you will see no difference. With no edit, both modes
+  on both sides, and record it. One mode is enough for a change in an ASM IR pass. With the wrong mode you will see no difference. With no edit, both modes
   give the same asm, and a difference is a bug. Print the loaded `rocisa` and `stinkytofu` paths on each
   side, and check that they are the worktree's own.
 - build the baseline and the candidate in separate worktrees, each with its own venv, so the two
