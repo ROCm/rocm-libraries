@@ -54,45 +54,6 @@ CK_TILE_DEVICE void fence()
     sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
 }
 
-/// The descriptor groups of a rank-2 TDM tile load; groups 3 and 4 are zero.
-// g1 first: its int32x8_t is 32-byte aligned, and after g0 it would add 16 bytes of padding
-// that amd_wave_read_first_lane reads as well.
-struct TdmDesc
-{
-    TDM_GROUP1 g1;
-    TDM_GROUP0 g0;
-    TDM_GROUP2 g2;
-};
-static_assert(sizeof(TdmDesc) == 64, "TdmDesc must hold its 16 SGPRs without padding");
-
-/// Group 1 of a rank-2 load of 1-byte elements: tensor_dim1 rows of tensor_dim0 bytes,
-/// row_stride bytes apart, in a tile_dim0 x tile_dim1 box. The dim-1 stride is 1, as CK Tile
-/// programs rank 2. Padding is the zero config without padding.
-template <bool Iterate, bool Pad, TDMLdsPaddingConfig Padding = TDMLdsPaddingConfig{}>
-CK_TILE_DEVICE TDM_GROUP1 tdm_group1(uint32_t workgroup_mask,
-                                     uint32_t tensor_dim0,
-                                     uint32_t tensor_dim1,
-                                     uint16_t tile_dim0,
-                                     uint16_t tile_dim1,
-                                     uint32_t row_stride)
-{
-    // A cluster has at most 16 workgroups; without this the 16-bit field costs an s_and.
-    __builtin_assume(workgroup_mask <= 0xFFFFu);
-    TDM_GROUP1 g1;
-    g1.workgroup_mask = workgroup_mask;
-    g1.iterate_enable = Iterate;
-    g1.pad_enable     = Pad;
-    g1.pad_interval   = Padding.pad_interval;
-    g1.pad_amount     = Padding.pad_amount;
-    g1.tensorDim0(tensor_dim0);
-    g1.tensorDim1(tensor_dim1);
-    g1.tileDim(0, tile_dim0);
-    g1.tileDim(1, tile_dim1);
-    g1.tensorDim0Stride(row_stride);
-    g1.tensorDim1Stride(1);
-    return g1;
-}
-
 /// The MxTdmV4GemmTraits values rocKE derives from `spec`'s shape, as host values.
 struct ShapeTraits
 {
@@ -401,8 +362,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         index_t k_atoms;
         uint32_t a_mask = 0;
         uint32_t b_mask = 0;
-        mx_tdm_v4::TdmDesc data{};
-        mx_tdm_v4::TdmDesc scale{};
+        TDMGroups data{};
+        TDMGroups scale{};
         // Group 0 of each load is rebuilt from these: patching the hoisted descriptor's own
         // words keeps it live, and every load then copies it into a fresh register quad.
         uint32_t data_lds     = 0;
@@ -461,8 +422,46 @@ struct GemmPipelineAgBgCrCompTDMV4
                 return row0 < extent ? left : 0;
         }
 
+        /// The groups of a rank-2 byte load through CK's descriptor: dim0 x dim1 tensor of
+        /// row_stride-byte rows (dim-1 stride 1, as CK Tile programs rank 2) into a box0 x box1
+        /// tile at LDS byte address `lds`. `lds` goes in as an integer, not an LDS pointer: a
+        /// flat cast of one would add an aperture and null check.
+        CK_TILE_DEVICE static TDMGroups Groups(const void* global,
+                                               uint32_t lds,
+                                               uint32_t dim0,
+                                               uint32_t dim1,
+                                               uint16_t box0,
+                                               uint16_t box1,
+                                               uint32_t row_stride,
+                                               const TDMConfig& config)
+        {
+            const uint32_t dims[2]    = {dim0, dim1};
+            const uint64_t strides[2] = {row_stride, 1};
+            const uint16_t box[2]     = {box0, box1};
+            return TDMDescriptor<uint8_t, 2>(global,
+                                             reinterpret_cast<void*>(static_cast<uintptr_t>(lds)),
+                                             dims,
+                                             strides,
+                                             box,
+                                             config)
+                .getGroups();
+        }
+
+        /// The TDMConfig of an operand: its LDS padding and cluster multicast mask.
+        template <bool Pad, TDMLdsPaddingConfig Padding>
+        CK_TILE_DEVICE static TDMConfig Config(uint32_t workgroup_mask)
+        {
+            // A cluster has at most 16 workgroups; without this the 16-bit field costs an s_and.
+            __builtin_assume(workgroup_mask <= 0xFFFFu);
+            TDMConfig config{};
+            config.pad_enable     = Pad;
+            config.pad_config     = Padding;
+            config.workgroup_mask = static_cast<uint16_t>(workgroup_mask);
+            return config;
+        }
+
         template <bool IsA>
-        CK_TILE_DEVICE mx_tdm_v4::TdmDesc DataDescriptor(index_t component) const
+        CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
             constexpr MxTdmV4Operand L  = IsA ? kLayout.a : kLayout.b;
             constexpr bool edge         = IsA ? Traits::kEdgeM : Traits::kEdgeN;
@@ -477,20 +476,10 @@ struct GemmPipelineAgBgCrCompTDMV4
                 wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
             const index_t rows_left = RowsLeft<IsA>(row0);
 
-            mx_tdm_v4::TdmDesc d{};
-            d.g0 = TDM_GROUP0{smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
-                              reinterpret_cast<uintptr_t>(global),
-                              0,
-                              0};
             constexpr TDMLdsPaddingConfig padding =
                 pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
                     : TDMLdsPaddingConfig{};
-            d.g1 = mx_tdm_v4::tdm_group1<iterate, pad, padding>(IsA ? a_mask : b_mask,
-                                                                static_cast<uint32_t>(packed_k),
-                                                                static_cast<uint32_t>(rows_left),
-                                                                kLayout.row_bytes,
-                                                                tile_rows,
-                                                                static_cast<uint32_t>(packed_k));
+            TDMConfig config = Config<pad, padding>(IsA ? a_mask : b_mask);
             if constexpr(iterate)
             {
                 constexpr index_t count = L.rows / tile_rows;
@@ -503,16 +492,24 @@ struct GemmPipelineAgBgCrCompTDMV4
                     const index_t held = max(min(rows_left, L.rows), 1);
                     iterations = integer_divide_nonnegative<tile_rows>(held + tile_rows - 1);
                 }
-                d.g2.mode0.lds_addr_increment = static_cast<uint32_t>(L.iterate_stride);
-                d.g2.mode0.globalAddrIncrement(static_cast<uint32_t>(packed_k * tile_rows));
-                d.g2.mode0.iterate_count = static_cast<uint32_t>(iterations - 1);
+                config.iterate_enable = true;
+                config.iter_config    = {static_cast<uint32_t>(packed_k * tile_rows),
+                                         static_cast<uint32_t>(L.iterate_stride),
+                                         static_cast<uint16_t>(iterations - 1)};
             }
-            return d;
+            return Groups(global,
+                          smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
+                          static_cast<uint32_t>(packed_k),
+                          static_cast<uint32_t>(rows_left),
+                          kLayout.row_bytes,
+                          tile_rows,
+                          static_cast<uint32_t>(packed_k),
+                          config);
         }
 
         /// K-major scales [K / 128][MN][4]: one row per K step, 4 B per MN row.
         template <bool IsA>
-        CK_TILE_DEVICE mx_tdm_v4::TdmDesc ScaleDescriptor(index_t component) const
+        CK_TILE_DEVICE TDMGroups ScaleDescriptor(index_t component) const
         {
             constexpr MxTdmV4Operand L = IsA ? kLayout.a_scale : kLayout.b_scale;
             constexpr bool edge        = IsA ? Traits::kEdgeM : Traits::kEdgeN;
@@ -525,21 +522,17 @@ struct GemmPipelineAgBgCrCompTDMV4
             const index_t col0         = mn0 * 4;
             const index_t bytes_left   = edge ? RowsLeft<IsA>(mn0) * 4 : row_stride - col0;
 
-            mx_tdm_v4::TdmDesc d{};
-            d.g0 = TDM_GROUP0{smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
-                              reinterpret_cast<uintptr_t>(base + col0),
-                              0,
-                              0};
             constexpr TDMLdsPaddingConfig padding =
                 pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
                     : TDMLdsPaddingConfig{};
-            d.g1 = mx_tdm_v4::tdm_group1<false, pad, padding>(IsA ? a_mask : b_mask,
-                                                              static_cast<uint32_t>(bytes_left),
-                                                              static_cast<uint32_t>(k_atoms),
-                                                              L.rows * 4,
-                                                              kLayout.k_steps,
-                                                              static_cast<uint32_t>(row_stride));
-            return d;
+            return Groups(base + col0,
+                          smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
+                          static_cast<uint32_t>(bytes_left),
+                          static_cast<uint32_t>(k_atoms),
+                          L.rows * 4,
+                          kLayout.k_steps,
+                          static_cast<uint32_t>(row_stride),
+                          Config<pad, padding>(IsA ? a_mask : b_mask));
         }
 
         /// Both descriptors for tile 0, buffer 0, selected by wave parity; every word uniform.
@@ -547,7 +540,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             const bool even         = integer_modulo_nonnegative<2>(c.wave) == 0;
             const index_t component = integer_divide_nonnegative<2>(c.wave);
-            const auto select = [&](const mx_tdm_v4::TdmDesc& b, const mx_tdm_v4::TdmDesc& a) {
+            const auto select       = [&](const TDMGroups& b, const TDMGroups& a) {
                 return amd_wave_read_first_lane(even ? b : a);
             };
             data      = select(DataDescriptor<false>(component), DataDescriptor<true>(component));
@@ -564,7 +557,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             const index_t k_byte      = integer_divide_nonnegative<kKPerByte>(k0);
             const index_t remaining_k = packed_k - k_byte;
-            mx_tdm_v4::TdmDesc d      = data;
+            TDMGroups d               = data;
             d.g0 = TDM_GROUP0{data_lds + static_cast<uint32_t>(BufferBase(parity)),
                               data_global + static_cast<uint32_t>(k_byte),
                               0,
@@ -573,7 +566,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             amd_tdm_load(d.g0, d.g1, d.g2);
             const index_t k_step     = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
-            mx_tdm_v4::TdmDesc s     = scale;
+            TDMGroups s              = scale;
             s.g0 = TDM_GROUP0{scale_lds + static_cast<uint32_t>(BufferBase(parity)),
                               scale_global + static_cast<uint32_t>(k_step * scale_stride),
                               0,

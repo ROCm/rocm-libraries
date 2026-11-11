@@ -363,6 +363,17 @@ union TDM_GROUP2
 static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "group 2 fields must fit its four SGPRs");
 static_assert(sizeof(TDM_GROUP2) == 16, "group 2 fields must fit its four SGPRs");
 
+/// The groups of a load of rank 2 or less (groups 3 and 4 zero), for a caller that builds them
+/// once and keeps them in registers. Group 1 comes first: its int32x8_t is 32-byte aligned, and
+/// after group 0 it would add 16 bytes of padding that amd_wave_read_first_lane reads as well.
+struct TDMGroups
+{
+    TDM_GROUP1 g1;
+    TDM_GROUP0 g0;
+    TDM_GROUP2 g2;
+};
+static_assert(sizeof(TDMGroups) == 64, "TDMGroups must hold its 16 SGPRs without padding");
+
 /// TENSOR_LOAD_TO_LDS of a load of rank 2 or less (groups 3 and 4 zero) from groups the caller
 /// built, for a caller that keeps them in registers across loads and updates only the fields
 /// that change. amd_tdm_load(const TDMDescriptor&) instead builds every group on each call.
@@ -591,6 +602,22 @@ class TDMDescriptor
                               amd_wave_read_first_lane(group3.bitfield),
                               v8i_zeros);
         }
+    }
+
+    /// Groups 0 to 2 of a load of rank 2 or less, unlike getResourceDescriptorGroup with group 2
+    /// set (iterate mode) and not read-first-lane'd: for amd_tdm_load(g0, g1, g2) by a caller
+    /// that keeps them in registers and updates only the fields that change.
+    CK_TILE_DEVICE TDMGroups getGroups() const
+    {
+        static_assert(TensorRank <= 2 && !IsGatherMode, "TDM: getGroups is for rank <= 2 loads");
+        TDMGroups groups;
+        groups.g0 = TDM_GROUP0{reinterpret_cast<uintptr_t>(m_localAddress),
+                               reinterpret_cast<uintptr_t>(m_globalAddress),
+                               static_cast<uint32_t>(m_rowIdxSize),
+                               0u};
+        configureGroup1(groups.g1);
+        configureGroup2(groups.g2);
+        return groups;
     }
 
     private:
