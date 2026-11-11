@@ -1791,6 +1791,36 @@ def _has_nsw(op: Op) -> bool:
     return not _is_unsigned(op.result.type) and op.attrs.get("wrap") != "nuw"
 
 
+def _scale_sel(op: Op) -> Tuple[int, int]:
+    """A scaled MFMA's ``scale_sel``: the byte, 0..3, of the A and of the B
+    scale VGPR each lane reads (``opsel_a`` / ``opsel_b``). Byte 0 when absent.
+    The C++ engine (mma.cpp) and the direct compiler accept the same values."""
+    sel = op.attrs.get("scale_sel")
+    if sel is None:
+        return 0, 0
+    if (
+        not isinstance(sel, (list, tuple))
+        or len(sel) != 2
+        or not all(type(s) is int and 0 <= s <= 3 for s in sel)
+    ):
+        raise ValueError(
+            f"tile.mma scale_sel must be two byte indices in 0..3, got {sel!r}"
+        )
+    return sel[0], sel[1]
+
+
+def _lds_dma_offset(op: Op) -> int:
+    """A buffer LDS-DMA op's instruction offset, 0..4095 bytes (0 when
+    absent). The C++ engine (mem.cpp) and the direct compiler accept the same
+    values."""
+    offset = op.attrs.get("offset", 0)
+    if type(offset) is not int or not 0 <= offset <= 4095:
+        raise ValueError(
+            f"{op.name} offset must be 0..4095 bytes, got {offset!r}"
+        )
+    return offset
+
+
 _I32_MIN = -(1 << 31)
 _I32_MAX = (1 << 31) - 1
 
@@ -4562,6 +4592,14 @@ class _Lowerer:
         # An emulated atom is expanded here, *before* ISA dispatch, so one
         # expansion serves both MFMA and WMMA. Native atoms -- every atom that
         # predates XF32 -- fall straight through, so their emission is unchanged.
+        if "scale_sel" in op.attrs:
+            from .arch.mfma_scale import gfx950_scaled_mfma
+
+            if gfx950_scaled_mfma(op.attrs.get("op_id", "")) is None:
+                raise ValueError(
+                    f"tile.mma {op.attrs.get('op_id')}: scale_sel applies only to "
+                    "a scaled MFMA atom"
+                )
         if self._expand_emulated_mma(op):
             return
         self._backend.emit_mma(self, op)
@@ -4954,12 +4992,13 @@ class _Lowerer:
         if error:
             raise ValueError(error)
         a, b, c, sa, sb = op.operands
+        sel_a, sel_b = _scale_sel(op)
         self._need(INTRINSIC_KEY)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.{INTRINSIC_KEY}("
             f"<8 x i32> {self._operand(a)}, <8 x i32> {self._operand(b)}, <16 x float> {self._operand(c)}, "
             f"i32 {MATRIX_FORMATS[atom.a_dtype]}, i32 {MATRIX_FORMATS[atom.b_dtype]}, "
-            f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
+            f"i32 {sel_a}, i32 {self._operand(sa)}, i32 {sel_b}, i32 {self._operand(sb)})"
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
@@ -6214,6 +6253,7 @@ class _Lowerer:
         dwords = int(op.attrs["dwords"])
         size_bytes = dwords * 4
         aux = int(op.attrs.get("aux", 0))
+        offset = _lds_dma_offset(op)
         self._need("raw.ptr.buffer.load.lds")
         # Convert the i64 LDS address back to ptr addrspace(3).
         ptr_name = self._fresh("lds_ptr")
@@ -6227,7 +6267,7 @@ class _Lowerer:
             f"i32 {size_bytes}, "
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
-            f"i32 0, i32 {aux})"
+            f"i32 {offset}, i32 {aux})"
             f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
@@ -7335,6 +7375,7 @@ class _Lowerer:
         dwords = int(op.attrs["dwords"])
         bytes_per_lane = dwords * 4
         aux = int(op.attrs.get("aux", 0))
+        offset = _lds_dma_offset(op)
         self._need("raw.ptr.buffer.load.lds")
         lds = self._lds_ptr_operand("async_buffer_load_lds", lds_ptr)
         self._current().emit(
@@ -7344,7 +7385,7 @@ class _Lowerer:
             f"i32 {bytes_per_lane}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0, "
+            f"i32 {offset}, "
             f"i32 {aux})"
             f"{self._lds_aa_suffix(self._lds_prov.get(lds_ptr.name))}"
         )

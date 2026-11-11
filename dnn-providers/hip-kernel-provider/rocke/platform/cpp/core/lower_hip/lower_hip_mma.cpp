@@ -189,19 +189,36 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        /* scale_sel: the byte, 0..3, of the A and B scale VGPR (Python _scale_sel). */
+        int64_t sel[2] = {0, 0};
+        if(const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "scale_sel"))
+        {
+            if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 2 ||
+               v->u.ilist.ints[0] < 0 || v->u.ilist.ints[0] > 3 || v->u.ilist.ints[1] < 0 ||
+               v->u.ilist.ints[1] > 3)
+                return rocke_h_fail(
+                    lw, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
+            sel[0] = v->u.ilist.ints[0];
+            sel[1] = v->u.ilist.ints[1];
+        }
         rocke_h_emitf(lw,
                       "f32x16 %s = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(%s, %s, %s, %d, "
-                      "%d, 0, %s, 0, %s);",
+                      "%d, %lld, %s, %lld, %s);",
                       rocke_h_name(lw, op->results[0]),
                       rocke_h_name(lw, op->operands[0]),
                       rocke_h_name(lw, op->operands[1]),
                       rocke_h_name(lw, op->operands[2]),
                       rocke_mfma_matrix_format(atom->a_dtype),
                       rocke_mfma_matrix_format(atom->b_dtype),
+                      (long long)sel[0],
                       rocke_h_name(lw, op->operands[3]),
+                      (long long)sel[1],
                       rocke_h_name(lw, op->operands[4]));
         return ROCKE_OK;
     }
+    if(rocke_attr_get(&op->attrs, "scale_sel"))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "tile.mma %s: scale_sel applies only to a scaled MFMA atom", op_id);
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {

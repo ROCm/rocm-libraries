@@ -1401,6 +1401,22 @@ static const char* ll_lds_ptr_operand(rocke_lower_t* L, const char* op_name, con
     return name;
 }
 
+/* A buffer LDS-DMA op's instruction offset, 0..4095 bytes (0 when absent).
+ * Python's _lds_dma_offset accepts the same values. */
+static int64_t ll_lds_dma_offset(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "offset");
+    if(!v)
+    {
+        return 0;
+    }
+    if(v->kind != ROCKE_ATTR_INT || v->u.i < 0 || v->u.i > 4095)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s offset must be 0..4095 bytes", op->name);
+    }
+    return v->u.i;
+}
+
 static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1410,6 +1426,7 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
     int64_t dwords = ll_attr_int(op, "dwords", 0);
     int64_t size_bytes = dwords * 4;
     int64_t aux = ll_attr_int(op, "aux", 0);
+    int64_t offset = ll_lds_dma_offset(L, op);
     const char* ptr_name;
     rocke_ll_need(L, "raw.ptr.buffer.load.lds");
     ptr_name = rocke_ll_fresh(L, "lds_ptr");
@@ -1418,12 +1435,13 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)%s",
+                   "i32 %lld, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    ptr_name,
                    (long long)size_bytes,
                    rocke_ll_operand(L, voff),
                    rocke_ll_operand(L, soff),
+                   (long long)offset,
                    (long long)aux,
                    rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_addr)));
 }
@@ -1437,18 +1455,20 @@ static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op
     int64_t dwords = ll_attr_int(op, "dwords", 0);
     int64_t bytes_per_lane = dwords * 4;
     int64_t aux = ll_attr_int(op, "aux", 0);
+    int64_t offset = ll_lds_dma_offset(L, op);
     const char* lds;
     rocke_ll_need(L, "raw.ptr.buffer.load.lds");
     lds = ll_lds_ptr_operand(L, "async_buffer_load_lds", lds_ptr);
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)%s",
+                   "i32 %lld, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    lds,
                    (long long)bytes_per_lane,
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset),
+                   (long long)offset,
                    (long long)aux,
                    rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_ptr)));
 }

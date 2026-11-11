@@ -71,6 +71,22 @@ static int64_t mem_attr_int(const rocke_op_t* op, const char* key, int64_t dflt)
     return dflt;
 }
 
+/* A buffer LDS-DMA op's instruction offset, 0..4095 bytes (Python
+ * _lds_dma_offset). */
+static int64_t mem_lds_dma_offset(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "offset");
+    if(!v)
+    {
+        return 0;
+    }
+    if(v->kind != ROCKE_ATTR_INT || v->u.i < 0 || v->u.i > 4095)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s offset must be 0..4095 bytes", op->name);
+    }
+    return v->u.i;
+}
+
 /* Fetch a string attr, defaulting to `dflt` when absent. */
 static const char* mem_attr_str(const rocke_op_t* op, const char* key, const char* dflt)
 {
@@ -1619,15 +1635,17 @@ static rocke_status_t _op_tile_async_buffer_load_lds_addr(rocke_h_lowerer_t* lw,
     soff = op->operands[3];
     dwords = mem_attr_int(op, "dwords", 0);
     size_bytes = dwords * 4;
+    int64_t offset = mem_lds_dma_offset(lw, op);
     rocke_h_emitf(lw,
                   "_llvm_amdgcn_raw_ptr_buffer_load_lds(%s, "
                   "(__attribute__((address_space(3))) void*)(%s), "
-                  "%lld, %s, %s, 0, 0);",
+                  "%lld, %s, %s, %lld, 0);",
                   rocke_h_name(lw, rsrc),
                   rocke_h_name(lw, lds_addr),
                   (long long)size_bytes,
                   rocke_h_name(lw, voff),
-                  rocke_h_name(lw, soff));
+                  rocke_h_name(lw, soff),
+                  (long long)offset);
     return lw->status;
 }
 
@@ -1651,6 +1669,7 @@ static rocke_status_t _op_tile_async_buffer_load_lds(rocke_h_lowerer_t* lw, cons
     soff = op->operands[3];
     dwords = mem_attr_int(op, "dwords", 0);
     aux = mem_attr_int(op, "aux", 0);
+    int64_t offset = mem_lds_dma_offset(lw, op);
     size_bytes = dwords * 4;
     storage = mem_storage_of(lw, lds_val);
     if(!storage)
@@ -1661,12 +1680,13 @@ static rocke_status_t _op_tile_async_buffer_load_lds(rocke_h_lowerer_t* lw, cons
     rocke_h_emitf(lw,
                   "_llvm_amdgcn_raw_ptr_buffer_load_lds(%s, "
                   "(__attribute__((address_space(3))) void*)&%s[0], "
-                  "%lld, %s, %s, 0, %lld);",
+                  "%lld, %s, %s, %lld, %lld);",
                   rocke_h_name(lw, rsrc),
                   storage,
                   (long long)size_bytes,
                   rocke_h_name(lw, voff),
                   rocke_h_name(lw, soff),
+                  (long long)offset,
                   (long long)aux);
     return lw->status;
 }
