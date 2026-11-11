@@ -467,16 +467,22 @@ def test_hidden_paths_and_excluded_folders_are_neither_pack_inputs_nor_configure
     consumer, empty_arch_fixture
 ):
     """Editing a file the packer never reads must not repack or reconfigure: the
-    input manifest and the probe's configure dependencies skip hidden paths and the
-    excluded family folders."""
+    input manifest and the probe's configure dependencies skip hidden paths, the
+    excluded family folders and an excluded bundle path (matched case-insensitively,
+    as the packer matches it)."""
     authored = consumer.source / "authored"
     _wildcard_pointwise(empty_arch_fixture, authored / "pointwise")
-    for hidden in (authored / ".hidden", authored / "fam"):
-        hidden.mkdir()
+    for hidden in (
+        authored / ".hidden",
+        authored / "fam",
+        authored / "nested" / "bundle",
+    ):
+        hidden.mkdir(parents=True)
     (authored / ".hidden" / "x.kdp.json").write_text("{", encoding="utf-8")
     (authored / "fam" / "y.kdp.json").write_text("{", encoding="utf-8")
+    (authored / "nested" / "bundle" / "z.kdp.json").write_text("{", encoding="utf-8")
     consumer._write(
-        _wire_root(exclude="fam")
+        _wire_root(exclude="fam NESTED/bundle")
         + f"""get_property(_deps DIRECTORY PROPERTY CMAKE_CONFIGURE_DEPENDS)
 {_report("deps", "${_deps}")}
 """
@@ -491,6 +497,7 @@ def test_hidden_paths_and_excluded_folders_are_neither_pack_inputs_nor_configure
     for path in [*deps, *inputs]:
         assert "/.hidden/" not in path
         assert "/fam/" not in path
+        assert "/nested/bundle/" not in path
 
 
 @pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])

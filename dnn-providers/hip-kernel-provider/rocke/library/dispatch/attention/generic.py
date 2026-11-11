@@ -40,7 +40,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
     _unified_path_coverage,
@@ -80,6 +80,16 @@ _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
 )
 
+# The two generic unified-path algorithms this module registers, named so a
+# caller outside this package (the SDPA gate) does not have to reconstruct
+# ``f"unified_{path}"`` itself.
+UNIFIED_2D_ALGORITHM = "unified_2d"
+UNIFIED_3D_ALGORITHM = "unified_3d"
+_UNIFIED_PATH_ALGORITHMS = {"2d": UNIFIED_2D_ALGORITHM, "3d": UNIFIED_3D_ALGORITHM}
+
+# The D256 bf16 decode candidate's algorithm (see _make_d256_decode_candidate).
+D256_DECODE_ALGORITHM = "d256_decode"
+
 
 def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     spec_id = f"unified_{path}"
@@ -93,7 +103,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = _unified_path_coverage(req, problem, path, req.arch)
         if not ok:
             return False, why
@@ -113,7 +123,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path=path,
             head_size=problem.head_size,
@@ -133,7 +143,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm=f"unified_{path}",
+        algorithm=_UNIFIED_PATH_ALGORITHMS[path],
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
@@ -171,7 +181,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -188,7 +198,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="3d",
             head_size=problem.head_size,
@@ -205,7 +215,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_decode",
+        algorithm=D256_DECODE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

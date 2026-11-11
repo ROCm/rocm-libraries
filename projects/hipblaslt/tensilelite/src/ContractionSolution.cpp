@@ -8731,4 +8731,17 @@ namespace TensileLite
                       << " shiftPtrElemB=" << st.shiftPtrElemB << " depthUorMT0=" << st.depthUorMT0
                       << " depthUorMT1=" << st.depthUorMT1;
     }
+
+    std::ostream& operator<<(std::ostream& stream, GL2PrefetchSAddrCheckPacket const& st)
+    {
+        return stream << " tluA=" << st.tluA << " tluB=" << st.tluB << " depthUA=" << st.depthUA
+                      << " depthUB=" << st.depthUB << " clusterMT0=" << st.clusterMT0
+                      << " clusterMT1=" << st.clusterMT1 << " depthU=" << st.depthU
+                      << " matrixInstK=" << st.matrixInstK << " mxBlockA=" << st.mxBlockA
+                      << " mxBlockB=" << st.mxBlockB << " mxBlockFreeA=" << st.mxBlockFreeA
+                      << " mxBlockFreeB=" << st.mxBlockFreeB << " metadata=" << st.metadata
+                      << " tluMetadata=" << st.tluMetadata
+                      << " depthUMetadata=" << st.depthUMetadata
+                      << " clusterMTMetadata=" << st.clusterMTMetadata;
+    }
 } // namespace TensileLite

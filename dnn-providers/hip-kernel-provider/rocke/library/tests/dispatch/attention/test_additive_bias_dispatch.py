@@ -20,7 +20,7 @@ from dispatch.attention import (
 )
 from dispatch.attention.common import (
     AttentionSpec,
-    _problem,
+    attention_problem,
     _tuning_problem,
     _unified_path_coverage,
 )
@@ -73,9 +73,9 @@ def _pinned(candidate, **kw) -> AttentionRequest:
 
 class TestRouting(unittest.TestCase):
     def test_request_maps_to_problem(self):
-        self.assertTrue(_problem(_req()).use_additive_bias)
+        self.assertTrue(attention_problem(_req()).use_additive_bias)
         self.assertTrue(_tuning_problem(_req()).use_additive_bias)
-        self.assertFalse(_problem(_req(use_attn_bias=False)).use_additive_bias)
+        self.assertFalse(attention_problem(_req(use_attn_bias=False)).use_additive_bias)
 
     def test_gfx950_prefill_and_decode_admit_bias(self):
         for path, kw in (
@@ -150,9 +150,11 @@ class TestRouting(unittest.TestCase):
             for bias in (False, True):
                 with self.subTest(path=path, bias=bias):
                     req = _req(use_attn_bias=bias, **kw)
-                    ok, why = _unified_path_coverage(req, _problem(req), path, "gfx950")
+                    ok, why = _unified_path_coverage(
+                        req, attention_problem(req), path, "gfx950"
+                    )
                     self.assertTrue(ok, why)
-                    problem = replace(_problem(req), q_dtype="fp16")
+                    problem = replace(attention_problem(req), q_dtype="fp16")
                     ok, why = _unified_path_coverage(req, problem, path, "gfx950")
                     self.assertFalse(ok)
                     self.assertIn("q_dtype override requires use_fp8", why)
@@ -218,7 +220,7 @@ class TestTuningCandidates(unittest.TestCase):
                 self.assertTrue(ok, why)
 
     def test_explicit_spec_is_gfx950_only(self):
-        problem = replace(_problem(_req()), use_additive_bias=True)
+        problem = replace(attention_problem(_req()), use_additive_bias=True)
         config = ExplicitAttention2DConfig(
             num_warps=1, block_m_per_warp=16, tile_policy="1x"
         )
@@ -266,8 +268,8 @@ class TestTuningCandidates(unittest.TestCase):
                 )
                 make_explicit_attention_2d_spec(problem, config, arch="gfx950")
 
-        bias_problem = replace(_problem(_req()), use_additive_bias=True)
-        plain_problem = replace(_problem(_req()), use_additive_bias=False)
+        bias_problem = replace(attention_problem(_req()), use_additive_bias=True)
+        plain_problem = replace(attention_problem(_req()), use_additive_bias=False)
         self.assertTrue(GFX950_TUNING_VARIANTS)
         compared = Counter()
         for variant in GFX950_TUNING_VARIANTS:
@@ -374,7 +376,7 @@ class TestBinding(unittest.TestCase):
         from dispatch.attention.bindings import _tuning_additive_bias
 
         req = _req(seqlen_q=1, seqlen_k=1, batch=2)
-        problem = replace(_problem(req), use_additive_bias=True)
+        problem = replace(attention_problem(req), use_additive_bias=True)
         broadcast = _Tensor((2, 32, 1, 1), "torch.float32", strides=(0, 0, 0, 0))
         with self.assertRaisesRegex(ValueError, r"contiguous along Sk"):
             _tuning_additive_bias(req, problem, {"attn_bias": broadcast})

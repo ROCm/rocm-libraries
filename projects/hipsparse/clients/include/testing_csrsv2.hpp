@@ -434,8 +434,8 @@ void testing_csrsv2(Arguments argus)
                                                                  dbuffer));
 
         int               hposition_1;
-        hipsparseStatus_t pivot_status_1;
-        pivot_status_1 = hipsparseXcsrsv2_zeroPivot(handle, info, &hposition_1);
+        hipsparseStatus_t pivot_status_1 = hipsparseXcsrsv2_zeroPivot(handle, info, &hposition_1);
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -454,18 +454,20 @@ void testing_csrsv2(Arguments argus)
                                                                  policy,
                                                                  dbuffer));
 
-        hipsparseStatus_t pivot_status_2;
-        pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info, d_position);
+        hipsparseStatus_t pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info, d_position);
+        int               hposition_2;
+        CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
         // Copy output from device to CPU
-        int hposition_2;
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host csrsv2
+        int             device_id;
         hipDeviceProp_t prop{};
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, device_id));
 
         int position_gold;
         if((fill_mode == HIPSPARSE_FILL_MODE_LOWER && trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
@@ -501,17 +503,8 @@ void testing_csrsv2(Arguments argus)
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
-        if(hposition_1 != -1)
+        if(hposition_1 != -1 || hposition_2 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return;
-        }
-
-        if(hposition_2 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(pivot_status_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
