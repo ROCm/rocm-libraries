@@ -143,6 +143,8 @@ TEST(TestGpuRepackKernels, StridedCopyMatchesTheHostOverRandomPermutations)
     }
 }
 
+// The run kernels are checked at every run width (no thread floor: these problems are small).
+
 /// A random disjoint-filter col2im (stride at least the dilated extent on every axis): 2-D or
 /// 3-D, groups, padding, flip, dx channels-first, channels-last or strided, both column orders,
 /// widths and channel counts that do and do not fill 16-byte runs.
@@ -302,7 +304,7 @@ void runDisjoint(const DisjointCase& caseData, const RepackProgram& program)
                                             : data_objects::DataType::HALF,
                           0,
                           0};
-    program.launch(step, deviceCol, deviceX, nullptr);
+    program.launch(step, deviceCol, deviceX, nullptr, 0);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     std::vector<Bits> got(want.size());
@@ -328,7 +330,7 @@ TEST(TestGpuRepackKernels, DisjointCol2imMatchesTheGenericKernelBitForBit)
             Col2ImArgs probe{};
             probe.geometry = caseData.g;
             probe.x = nullptr; // 16-byte aligned, as hipMalloc's are
-            entries.insert(col2imLaunch(probe, bytes == 2 ? "Half" : "Float", bytes).entry);
+            entries.insert(col2imLaunch(probe, bytes == 2 ? "Half" : "Float", bytes, 0).entry);
         }
         runDisjoint<uint16_t>(caseData, program);
         runDisjoint<uint32_t>(caseData, program);
@@ -340,6 +342,109 @@ TEST(TestGpuRepackKernels, DisjointCol2imMatchesTheGenericKernelBitForBit)
                              "Col2ImDisjointChannels2V8",
                              "Col2ImDisjointChannels4V4",
                              "Col2ImDisjoint2"})
+    {
+        EXPECT_EQ(entries.count(entry), 1u) << entry;
+    }
+}
+
+/// The generic im2col (ConvRepack.cpp im2col) on the host.
+template <typename Bits>
+void im2colReference(const ConvColumnGeometry& g,
+                     const std::vector<Bits>& x,
+                     std::vector<Bits>& col)
+{
+    const long long taps = g.filter[0] * g.filter[1] * g.filter[2];
+    const long long columns = g.groups * g.cPerGroup * taps;
+    const long long outputs = g.output[0] * g.output[1] * g.output[2];
+    const long long total = g.n * outputs * columns;
+    for(long long index = 0; index < total; ++index)
+    {
+        const long long column
+            = g.columnsFirst != 0 ? (index / outputs) % columns : index % columns;
+        const long long row = g.columnsFirst != 0
+                                  ? (index / (outputs * columns)) * outputs + index % outputs
+                                  : index / columns;
+        const long long group = column / (g.cPerGroup * taps);
+        const long long inGroup = column % (g.cPerGroup * taps);
+        const long long channel = g.channelsInner != 0 ? inGroup % g.cPerGroup : inGroup / taps;
+        const long long element = g.channelsInner != 0 ? inGroup / g.cPerGroup : inGroup % taps;
+        const long long n = row / outputs;
+        long long position = row % outputs;
+        long long rest = element;
+        long long offset = n * g.xStrides[0] + (group * g.cPerGroup + channel) * g.xStrides[1];
+        bool inside = true;
+        for(int axis = 2; axis >= 0; --axis)
+        {
+            const long long o = position % g.output[axis];
+            position /= g.output[axis];
+            const long long e = rest % g.filter[axis];
+            rest /= g.filter[axis];
+            const long long tap = g.flipFilter != 0 ? g.filter[axis] - 1 - e : e;
+            const long long i = o * g.stride[axis] - g.prePadding[axis] + tap * g.dilation[axis];
+            inside = inside && i >= 0 && i < g.input[axis];
+            offset += i * g.xStrides[2 + axis];
+        }
+        col[static_cast<size_t>(index)] = inside ? x[static_cast<size_t>(offset)] : Bits(0);
+    }
+}
+
+template <typename Bits>
+void runDisjointIm2col(const DisjointCase& caseData, const RepackProgram& program)
+{
+    std::vector<Bits> x(static_cast<size_t>(caseData.xSpan));
+    std::iota(x.begin(), x.end(), Bits(1));
+    std::vector<Bits> want(static_cast<size_t>(caseData.columnElements));
+    im2colReference(caseData.g, x, want);
+
+    void* deviceX = nullptr;
+    void* deviceCol = nullptr;
+    ASSERT_EQ(hipMalloc(&deviceX, x.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&deviceCol, want.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceX, x.data(), x.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemset(deviceCol, 0xab, want.size() * sizeof(Bits)), hipSuccess);
+
+    Im2ColArgs args{};
+    args.geometry = caseData.g;
+    args.total = caseData.columnElements;
+    const RepackStep step{args,
+                          sizeof(Bits) == 4 ? data_objects::DataType::FLOAT
+                                            : data_objects::DataType::HALF,
+                          0,
+                          0};
+    program.launch(step, deviceX, deviceCol, nullptr, 0);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::vector<Bits> got(want.size());
+    ASSERT_EQ(hipMemcpy(got.data(), deviceCol, got.size() * sizeof(Bits), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(deviceX), hipSuccess);
+    ASSERT_EQ(hipFree(deviceCol), hipSuccess);
+    EXPECT_EQ(got, want);
+}
+
+TEST(TestGpuRepackKernels, DisjointIm2colMatchesTheGenericKernelBitForBit)
+{
+    SKIP_IF_NO_DEVICES();
+    const RepackProgram program;
+    std::mt19937 random(2028);
+    std::set<std::string> entries;
+    for(int trial = 0; trial < 96; ++trial)
+    {
+        auto caseData = randomDisjointCase(random, trial);
+        caseData.g.columnsFirst = 1; // the run kernel's columns; channels-last ones keep theirs
+        SCOPED_TRACE(::testing::Message() << "trial " << trial);
+        for(const int bytes : {2, 4})
+        {
+            Im2ColArgs probe{};
+            probe.geometry = caseData.g;
+            entries.insert(im2colLaunch(probe, bytes, 0).entry);
+        }
+        runDisjointIm2col<uint16_t>(caseData, program);
+        runDisjointIm2col<uint32_t>(caseData, program);
+    }
+    for(const char* entry :
+        {"Im2ColDisjointOutputs2V1", "Im2ColDisjointOutputs2V8", "Im2ColDisjointOutputs4V4"})
     {
         EXPECT_EQ(entries.count(entry), 1u) << entry;
     }

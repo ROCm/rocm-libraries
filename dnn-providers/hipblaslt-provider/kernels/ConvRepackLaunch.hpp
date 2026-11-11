@@ -22,6 +22,10 @@ struct RepackLaunch
     size_t ldsBytes = 0;
 };
 
+/// The disjoint run kernels narrow their runs until they have at least this many threads: wide
+/// runs of a small problem leave most of the device idle.
+constexpr long long MIN_RUN_THREADS = 1LL << 16;
+
 namespace repack_launch_detail
 {
 
@@ -173,11 +177,13 @@ inline RepackLaunch stridedCopyLaunch(StridedCopyArgs& args, int bytes)
  * Channels-last columns in KRSC order from channels-contiguous x: the rows kernel, 16-byte
  * vectors when the channels and every stride allow, or one thread per tap when a tap holds under
  * 32 bytes of channels (staged in LDS for 16-byte stores when aligned). Channels-first 2-D
- * columns from a width-contiguous x: the LDS tile kernel, 32 x 8 outputs (narrower and taller for
- * narrow outputs), its longer side halved until the halo fits. Anything else, or offsets past
- * 32 bits: the generic kernel.
+ * columns of a filter whose taps never overlap: one thread per run of a column's outputs, at least
+ * @p minRunThreads of them. Other channels-first 2-D columns from a width-contiguous x: the LDS
+ * tile kernel, 32 x 8 outputs (narrower and taller for narrow outputs), its longer side halved
+ * until the halo fits. Anything else, or offsets past 32 bits: the generic kernel.
  */
-inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
+inline RepackLaunch
+    im2colLaunch(Im2ColArgs& args, int bytes, long long minRunThreads = MIN_RUN_THREADS)
 {
     using namespace repack_launch_detail;
     const auto& g = args.geometry;
@@ -228,6 +234,27 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
         return launch;
     }
 
+    if(fitsInt(g) && g.columnsFirst != 0 && convColumnsDisjoint(g))
+    {
+        // Disjoint taps into channels-first columns: no input element feeds two entries, so no
+        // halo to stage. One thread per run of a column along its output positions, the widest
+        // of 16, 8, 4 bytes or one element that keeps every run aligned and leaves
+        // minRunThreads threads.
+        const long long outputs = product3(g.output);
+        const long long lines = g.n * g.groups * g.cPerGroup * product3(g.filter);
+        int vectorWidth = 16 / bytes;
+        while(vectorWidth > 1
+              && (outputs % vectorWidth != 0 || !aligned(args.col, vectorWidth * bytes)
+                  || lines * ((outputs + vectorWidth - 1) / vectorWidth) < minRunThreads))
+        {
+            vectorWidth /= 2;
+        }
+        const long long runs = (outputs + vectorWidth - 1) / vectorWidth;
+        const long long threads = lines * runs;
+        launch.entry = "Im2ColDisjointOutputs" + width + "V" + std::to_string(vectorWidth);
+        launch.grid = static_cast<unsigned int>((threads + BLOCK - 1) / BLOCK);
+        return launch;
+    }
     if(fitsInt(g) && g.columnsFirst != 0 && g.input[0] == 1 && g.filter[0] == 1
        && g.xStrides[4] == 1)
     {
@@ -313,9 +340,13 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
  * the staged-groups kernel, as many groups per block as fit 16 lanes and the LDS, halved until
  * the stage fits; otherwise the rows kernel. Both read 4-wide fp32 when the channels allow.
  * Channels-first columns into width-contiguous dx: one thread per element, width fastest.
- * Anything else, or offsets past 32 bits: the generic kernel.
+ * Disjoint taps: one thread per run of dx, at least @p minRunThreads of them. Anything else, or
+ * offsets past 32 bits: the generic kernel.
  */
-inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, int bytes)
+inline RepackLaunch col2imLaunch(Col2ImArgs& args,
+                                 const std::string& typeName,
+                                 int bytes,
+                                 long long minRunThreads = MIN_RUN_THREADS)
 {
     using namespace repack_launch_detail;
     const auto& g = args.geometry;
@@ -323,10 +354,11 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
     args.launch = RepackLaunchShape{};
 
     // Disjoint taps (a single one included): the columns are in dx's type (ConvRepackArgs.h).
-    // Within 32-bit offsets, one thread per run of dx along its contiguous axis -- width, or
-    // channels (with width too when dx packs them together), the longer when both are unit --
-    // the run the widest of 16, 8, 4 bytes or one element that every run start keeps aligned
-    // and the run's axis holds; otherwise the generic kernel.
+    // Within 32-bit offsets, one thread per run of dx along its contiguous axis -- width (with
+    // height too when dx packs rows), or channels (with width too when dx packs them), the longer
+    // when both are unit --
+    // the run the widest of 16, 8, 4 bytes or one element that every run start keeps aligned,
+    // the run's axis holds and leaves minRunThreads threads; otherwise the generic kernel.
     if(convColumnsDisjoint(g))
     {
         const long long channels = g.groups * g.cPerGroup;
@@ -335,21 +367,27 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
         if(fitsInt(g) && (channelsUnit || widthUnit))
         {
             const bool byChannels = channelsUnit && (!widthUnit || channels >= g.input[2]);
-            const bool fused = byChannels && g.xStrides[4] == channels;
+            // Fused runs: channels with width (channels-last), or rows (channels-first), where
+            // dx packs them.
+            const bool fused = byChannels ? g.xStrides[4] == channels : g.xStrides[3] == g.input[2];
             // The axes whose strides place a run's start: all but the run's own.
             long long starts[5]
                 = {g.xStrides[0], g.xStrides[1], g.xStrides[2], g.xStrides[3], g.xStrides[4]};
             starts[byChannels ? 1 : 4] = 0;
             if(fused)
             {
-                starts[4] = 0;
+                starts[byChannels ? 4 : 3] = 0;
             }
-            const long long length
-                = byChannels ? (fused ? channels * g.input[2] : channels) : g.input[2];
+            const long long length = byChannels ? (fused ? channels * g.input[2] : channels)
+                                                : (fused ? g.input[1] * g.input[2] : g.input[2]);
+            const long long lines = byChannels
+                                        ? g.n * g.input[0] * g.input[1] * (fused ? 1 : g.input[2])
+                                        : g.n * channels * g.input[0] * (fused ? 1 : g.input[1]);
             int width = 16 / bytes;
             while(width > 1)
             {
-                bool fits = width <= length && aligned(args.x, width * bytes);
+                bool fits = width <= length && aligned(args.x, width * bytes)
+                            && lines * ((length + width - 1) / width) >= minRunThreads;
                 for(const long long stride : starts)
                 {
                     fits = fits && stride % width == 0;
@@ -361,9 +399,6 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
                 width /= 2;
             }
             const long long runs = (length + width - 1) / width;
-            const long long lines = byChannels
-                                        ? g.n * g.input[0] * g.input[1] * (fused ? 1 : g.input[2])
-                                        : g.n * channels * g.input[0] * g.input[1];
             args.launch.rows = fused ? 1 : 0;
             launch.entry = std::string("Col2ImDisjoint") + (byChannels ? "Channels" : "Width")
                            + std::to_string(bytes) + "V" + std::to_string(width);

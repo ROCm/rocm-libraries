@@ -9,6 +9,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "common/ConvGemmFormulation.hpp"
+#include "kernels/ConvRepackLaunch.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -35,8 +36,13 @@ public:
     RepackProgram& operator=(RepackProgram&&) = delete;
 
     /// Runs @p step on @p stream, reading @p src and writing @p dst (already advanced by the
-    /// step's byte offsets).
-    void launch(const RepackStep& step, const void* src, void* dst, hipStream_t stream) const;
+    /// step's byte offsets). @p minRunThreads: the disjoint run kernels' narrowing
+    /// (ConvRepackLaunch.hpp); tests lower it to reach every run width on small problems.
+    void launch(const RepackStep& step,
+                const void* src,
+                void* dst,
+                hipStream_t stream,
+                long long minRunThreads = MIN_RUN_THREADS) const;
 
     /// The kernel entry point that runs @p step.
     static std::string entryName(const RepackStep& step);
