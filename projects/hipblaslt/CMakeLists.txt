@@ -831,8 +831,8 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
 endif()
 
 # Windows VERSIONINFO for every hipBLASLt-family DLL and EXE installed to bin/.
-# The Windows CI VERSIONINFO check fails on a shipped binary without it, so a
-# new installed target needs a line here too.
+# rocm_libraries_check_version_resources at the end of this file fails configure
+# when a DLL/EXE target has no line here and is not in its EXCLUDE list.
 include(hipblaslt_version_resource)
 hipblaslt_add_version_resource(hipblaslt "AMD hipBLASLt - Lightweight BLAS Library for GPU Computing")
 hipblaslt_add_version_resource(tensilelite-host "AMD hipBLASLt TensileLite Host Library")
@@ -843,6 +843,8 @@ hipblaslt_add_version_resource(hipblaslt-bench-extop-layernorm "AMD hipBLASLt La
 hipblaslt_add_version_resource(hipblaslt-bench-extop-matrixtransform "AMD hipBLASLt Matrix Transform Extension Benchmark")
 hipblaslt_add_version_resource(hipblaslt-bench-extop-softmax "AMD hipBLASLt Softmax Extension Benchmark")
 hipblaslt_add_version_resource(hipblaslt-bench-extop-amax "AMD hipBLASLt AMax Extension Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-a2a "AMD hipBLASLt GEMM All-to-All Benchmark")
+hipblaslt_add_version_resource(hipblaslt-cotenant-kernel "AMD hipBLASLt Cotenant Kernel")
 hipblaslt_add_version_resource(hipblaslt-sequence "AMD hipBLASLt Sequence Benchmark")
 hipblaslt_add_version_resource(hipblaslt-test "AMD hipBLASLt Test Client")
 hipblaslt_add_version_resource(hipblaslt-test-hostunit "AMD hipBLASLt Host Unit Tests")
@@ -1238,3 +1240,11 @@ if(HIPBLASLT_VALIDATE_INSTALL)
         endif()
     ")
 endif()
+
+# Every DLL/EXE target defined here needs hipblaslt_add_version_resource (above) unless it
+# is not installed to bin/: samples go to libexec/, the Python extension installs under
+# lib/hipblaslt/rocisa, and the TensileLite client and test tools are not shipped there.
+rocm_libraries_check_version_resources(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    EXCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/clients/samples"
+    EXCLUDE _rocisa tensilelite-client cpu-gemm-driver tensilelite-tests)

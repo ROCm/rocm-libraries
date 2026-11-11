@@ -20,6 +20,16 @@
 # does not relink the target. When no resource compiler is available
 # (CMAKE_RC_COMPILER unset, NOTFOUND or NOTREQUIRED, or RC not enabled) a
 # warning is printed and the target is built without a version resource.
+#
+#   rocm_libraries_check_version_resources(DIRECTORY <dir>
+#       [EXCLUDE <target>...]
+#       [EXCLUDE_DIRECTORIES <dir>...])
+#
+# Fails configuration, on every platform, if a DLL, EXE or module target
+# defined under <dir> was never passed to rocm_libraries_add_version_resource.
+# Call it once at the end of a project's top-level CMakeLists.txt. Targets
+# from other source trees, from the build tree (e.g. FetchContent
+# dependencies), under EXCLUDE_DIRECTORIES or listed in EXCLUDE are skipped.
 
 include_guard(GLOBAL)
 
@@ -82,6 +92,8 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "rocm_libraries_add_version_resource: unexpected arguments: ${ARG_UNPARSED_ARGUMENTS}")
     endif()
+    # Marked on every platform so rocm_libraries_check_version_resources works in Linux builds too.
+    set_property(TARGET ${TARGET} PROPERTY ROCM_LIBRARIES_VERSION_RESOURCE TRUE)
     if(NOT WIN32)
         return()
     endif()
@@ -150,4 +162,69 @@ ${comments_value}    END
 END
 ")
     target_sources(${TARGET} PRIVATE "${rc_path}")
+endfunction()
+
+# Set OUT_VAR to every buildsystem target defined in DIR or its subdirectories.
+function(_rocm_libraries_version_resource_targets DIR OUT_VAR)
+    get_property(targets DIRECTORY "${DIR}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(subdirs DIRECTORY "${DIR}" PROPERTY SUBDIRECTORIES)
+    foreach(subdir IN LISTS subdirs)
+        _rocm_libraries_version_resource_targets("${subdir}" subdir_targets)
+        list(APPEND targets ${subdir_targets})
+    endforeach()
+    set(${OUT_VAR} ${targets} PARENT_SCOPE)
+endfunction()
+
+# Set OUT_VAR to TRUE when TARGET must carry a version resource under the given project and exclusions.
+function(_rocm_libraries_version_resource_required TARGET DIRECTORY EXCLUDE EXCLUDE_DIRECTORIES OUT_VAR)
+    set(${OUT_VAR} FALSE PARENT_SCOPE)
+    get_target_property(type ${TARGET} TYPE)
+    list(FIND EXCLUDE ${TARGET} excluded_index)
+    if(NOT type MATCHES "^(EXECUTABLE|SHARED_LIBRARY|MODULE_LIBRARY)$" OR NOT excluded_index EQUAL -1)
+        return()
+    endif()
+    get_target_property(source_dir ${TARGET} SOURCE_DIR)
+    cmake_path(IS_PREFIX DIRECTORY "${source_dir}" NORMALIZE in_project)
+    if(NOT in_project)
+        return()
+    endif()
+    set(fetchcontent_dir "${CMAKE_BINARY_DIR}/_deps")
+    if(FETCHCONTENT_BASE_DIR)
+        set(fetchcontent_dir "${FETCHCONTENT_BASE_DIR}")
+    endif()
+    foreach(skipped_dir IN LISTS EXCLUDE_DIRECTORIES fetchcontent_dir)
+        cmake_path(IS_PREFIX skipped_dir "${source_dir}" NORMALIZE in_skipped)
+        if(in_skipped)
+            return()
+        endif()
+    endforeach()
+    set(${OUT_VAR} TRUE PARENT_SCOPE)
+endfunction()
+
+# Fail configuration if a DLL, EXE or module target under DIRECTORY lacks a version resource; see the top of this file.
+function(rocm_libraries_check_version_resources)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "DIRECTORY" "EXCLUDE;EXCLUDE_DIRECTORIES")
+    if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_DIRECTORY)
+        message(FATAL_ERROR "rocm_libraries_check_version_resources: usage: "
+                            "DIRECTORY <dir> [EXCLUDE <target>...] [EXCLUDE_DIRECTORIES <dir>...]")
+    endif()
+    _rocm_libraries_version_resource_targets("${ARG_DIRECTORY}" targets)
+    set(missing "")
+    foreach(target IN LISTS targets)
+        get_target_property(marked ${target} ROCM_LIBRARIES_VERSION_RESOURCE)
+        if(NOT marked)
+            _rocm_libraries_version_resource_required(
+                ${target} "${ARG_DIRECTORY}" "${ARG_EXCLUDE}" "${ARG_EXCLUDE_DIRECTORIES}" required)
+            if(required)
+                list(APPEND missing ${target})
+            endif()
+        endif()
+    endforeach()
+    if(missing)
+        list(JOIN missing ", " missing_list)
+        message(FATAL_ERROR
+            "These DLL/EXE targets under ${ARG_DIRECTORY} have no Windows version resource: ${missing_list}. "
+            "Add a rocm_libraries_add_version_resource call (or the project's wrapper) for each shipped "
+            "binary, or list a binary that is not shipped in the project's EXCLUDE list.")
+    endif()
 endfunction()

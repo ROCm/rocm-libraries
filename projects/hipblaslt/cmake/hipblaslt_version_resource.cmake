@@ -5,8 +5,9 @@ include_guard(GLOBAL)
 
 # Embeds Windows PE VERSIONINFO into a shipped hipBLASLt-family DLL or EXE through
 # the shared rocm_libraries_add_version_resource, stamped with the hipBLASLt product
-# name and the git commit the binary was built from. Does nothing on non-Windows
-# platforms, for static libraries, or for targets this configuration does not define.
+# name and the git commit the binary was built from. Skips static libraries and
+# targets this configuration does not define; on non-Windows platforms it only marks
+# the target for rocm_libraries_check_version_resources.
 #
 #   hipblaslt_add_version_resource(<target> <file-description>)
 
@@ -29,7 +30,7 @@ if(WIN32)
 endif()
 
 function(hipblaslt_add_version_resource TARGET DESCRIPTION)
-    if(NOT WIN32 OR NOT TARGET ${TARGET})
+    if(NOT TARGET ${TARGET})
         return()
     endif()
     get_target_property(_type ${TARGET} TYPE)

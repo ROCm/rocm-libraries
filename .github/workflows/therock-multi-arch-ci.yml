@@ -298,64 +298,6 @@ jobs:
       contents: read
       id-token: write
 
-  # Fails when a shipped hipBLASLt-family DLL or EXE in the Windows build has no
-  # embedded VERSIONINFO resource (ROCM-31530). Samples are reported, never fail.
-  windows_versioninfo_check:
-    name: Windows VERSIONINFO check
-    needs: [ci-env, windows_build_and_test]
-    if: ${{ !cancelled() && needs.windows_build_and_test.result != 'skipped' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout check script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Checkout TheRock artifact tools
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ needs.ci-env.outputs.therock-ref }}
-          path: _therock
-          sparse-checkout: build_tools
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Test check script
-        run: python3 -B .github/scripts/tests/test_check_pe_versioninfo.py -v
-
-      - name: Fetch Windows BLAS host artifacts
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install --quiet boto3==1.39.15 pyzstd==0.19.1
-          .venv/bin/python _therock/build_tools/fetch_artifacts.py \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-github-repo "${GITHUB_REPOSITORY}" \
-            --platform windows \
-            --output-dir artifacts \
-            --extract \
-            '^blas_(lib|test)_generic'
-
-      - name: Check VERSIONINFO
-        run: |
-          if [ ! -d artifacts/blas_lib_generic ]; then
-            echo "::warning::No Windows BLAS artifacts for this run (the Windows build likely failed before upload); skipping."
-            exit 0
-          fi
-          python3 -B .github/scripts/check_pe_versioninfo.py artifacts \
-            --require \
-              'blas_lib_generic/math-libs/BLAS/hipBLASLt/stage/bin/*.dll' \
-              'blas_lib_generic/math-libs/BLAS/origami/stage/bin/*.dll' \
-              'blas_test_generic/math-libs/BLAS/hipBLASLt/stage/bin/*.exe' \
-              'blas_test_generic/math-libs/BLAS/origami/stage/bin/*.exe' \
-            --report-only \
-              'blas_test_generic/math-libs/BLAS/hipBLASLt/stage/libexec/hipblaslt-samples/*.exe'
-
   rocjitsu_race_check:
     name: rocjitsu race check (${{ matrix.amdgpu_families }})
     # A caller cannot depend on an individual job inside a reusable workflow,
@@ -452,7 +394,6 @@ jobs:
       - setup
       - linux_build_and_test
       - windows_build_and_test
-      - windows_versioninfo_check
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
