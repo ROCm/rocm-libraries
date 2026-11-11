@@ -41,21 +41,24 @@ are fast, so run them locally and do not leave them to CI.
 After every StinkyTofu edit, run `invoke rocisa` in `projects/hipblaslt/tensilelite` (see its
 `AGENTS.md`), in each worktree, or the comparison runs against stale output.
 
-**The pattern check** is a filter, not a score. The patterns to check for come from the
-database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
-status. Record the result as `skipped` (no database), `no entries` (database read, nothing
-matched), or a hit (see `DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A hit
-on a `candidate` pattern only warns the developer. A clean result means only "no known problem". The
-GPU decides the rest. Different asm is not a performance win: only tier 2 can show a gain. Identical
-asm supports only "no performance change".
+**The pattern check** is a filter, not a score. The patterns to check for come from the database
+(`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a status. Record
+the result as `skipped` (no database), `no entries` (database read, nothing matched), or a hit (see
+`DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A hit on
+a `candidate` pattern only warns the developer. The check covers entries of kind `pattern`. Any other
+entry that matches the task (a finding, an insight) is mentioned to the developer as context and never
+rejects anything. A clean result means only "no known problem". The GPU decides the rest. Different asm
+is not a performance win: only tier 2 can show a gain. Identical asm supports only "no performance
+change".
 
 ## Rules
 
 1. **Check for new commits first.** At task start, run `git fetch origin develop` and list the new
-   commits that touch the files in scope (`git log HEAD..FETCH_HEAD -- <path>`). If there are any,
-   tell the developer before starting. A fix may already have landed. Rebasing during development is
-   the developer's choice. Before merge, the base skill `rocm-pr-quality` (pre-merge gate) does the
-   matching overlap check. Neither the PR bot nor this file replaces it.
+   commits that touch the files in scope (`git log HEAD..FETCH_HEAD -- <path>`). `git fetch` only
+   updates the remote refs and does not change your files, so run it even when you are asked not to
+   change anything. If there are any, tell the developer before starting. A fix may already have landed.
+   Rebasing during development is the developer's choice. Before merge, the base skill `rocm-pr-quality`
+   (pre-merge gate) does the matching overlap check. Neither the PR bot nor this file replaces it.
    - If `git fetch` fails, tell the developer and continue. In a sparse or partial clone it can print
      `bad tree object` or `failed to run repack`. That message comes from background garbage
      collection, so check whether the fetch completed (`git rev-parse FETCH_HEAD`).
