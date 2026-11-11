@@ -104,6 +104,13 @@ Consequences:
 
 ### D3. Version scheme and generator-format version
 
+> **Partly superseded (2026-11-11)** by Q121, Q123 and Q125 in
+> [PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md): only
+> TheRock builds stamp `+rocm`/`+devrocm`; every other build is versioned
+> `5.0.0+g<sha>[.dirty]` and reads no ROCm installation, so package builds do not
+> fail without a ROCm version. `GENERATOR_VERSION` and `__version__` stay as
+> decided here.
+
 Decision:
 
 - `tensilelite` uses versions such as `5.0.0+rocm7.2.4`.
@@ -271,6 +278,11 @@ the hipBLASLt build checkout-dependent. Publishing them as public commands would
 create additional interfaces with no demonstrated downstream requirement.
 
 ### D9. Compatibility scope and lifetime
+
+> **Superseded (2026-11-11)** by Q133 in
+> [PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md): the
+> compatibility package is removed and the legacy `Tensile*` commands have no
+> replacement; use the `tensilelite` command family.
 
 Decision:
 
@@ -479,6 +491,12 @@ entry point consistently without expanding public API or threading a new path
 argument through the legacy benchmarking call graph.
 
 ### D15. ROCm compatibility has one source of truth
+
+> **Superseded (2026-11-11)** by Q121, Q122, Q124, Q125 and Q134 in
+> [PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md): the wheel
+> carries a ROCm identity only from TheRock; TheRock-built prefixes are compared
+> by their full manifest identity; the client is paired by source commit and
+> records its own build ROCm.
 
 Decision:
 
