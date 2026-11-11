@@ -49,7 +49,7 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** launch kernels (the exceptions are `plan_lifetime_test` and `elementwise_broadcast_test`, noted below). The test binaries are:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** launch kernels (the exceptions are `plan_lifetime_test`, `elementwise_broadcast_test`, and `concurrency_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
@@ -62,6 +62,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
 | `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`; a permute or trinary op whose output data type differs from its input's returns `NOT_SUPPORTED`. Allocates small device buffers but launches no kernel |
 | `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
+| `concurrency_test` | Thread safety of execution. Four threads run the same problem at once (scale, bilinear, and trinary contraction; permute; elementwise binary and trinary; reduction), each with its own inputs, output, and stream, with one plan per thread and with one plan shared by all threads. Every result is compared bit for bit with a single-threaded call (integer-valued FP32 inputs keep results exact regardless of accumulation order). `Serial` (calls under one mutex) and `Broken` (thread 1 given thread 0's inputs) controls prove the harness detects a swapped result. Also covers concurrent brute-force plan creation and concurrent workspace estimation. Launches kernels, so it **requires a GPU**; contraction cases skip on architectures without contraction kernels (e.g. gfx12). `HIPTENSOR_CONCURRENCY_ITERS` overrides the 300 calls per thread |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -81,6 +82,12 @@ ctest -j$(nproc)               # same, running test binaries in parallel
 ```
 
 There is no ctest filter to run only the unit tests currently.
+
+To run a subset of GoogleTest cases in any hipTensor test binary, use the `GTEST_FILTER` environment variable. The `--gtest_filter` flag does not work: the shared test `main()` parses arguments with LLVM's option parser before GoogleTest sees them, and it rejects unknown flags.
+
+```bash
+GTEST_FILTER='AllOps/ConcurrencyTest.*/Permute_*' ./bin/concurrency_test
+```
 
 
 **What is NOT covered by unit tests:**
@@ -137,6 +144,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Contraction — unary ops | `bilinear_contraction_with_unary_ops_test`, `scale_contraction_with_unary_ops_test` | Fused unary activation ops |
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
+| Concurrency | `concurrency_test` | Concurrent execution of every op with per-thread and shared plans, concurrent plan creation, and concurrent workspace estimation; bit-exact against single-threaded results (FP32; launches kernels) |
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
 | Elementwise — permute | `rank{2-6}_elementwise_permute_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
@@ -148,7 +156,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
 
 **CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`). `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
@@ -247,6 +255,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `hiptensor_options_test` | Trusted gate | CPU-only, reliable |
 | `abi_exported_symbols` | Trusted gate | Host-only ABI allowlist check (Linux/ELF); no GPU |
 | `plan_lifetime_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
+| `concurrency_test` | Trusted gate | Device test (launches kernels from four threads); runs on GPU runners. Registered once under `quick` (nesting into the higher tiers) and not in the FFM tiers, where multi-threaded runs are too slow |
 | `*standard*` device tests | Trusted gate | Run on dedicated GPU runners |
 | `*comprehensive*` / `*full*` | Informational | Nightly only; not PR gates |
 | `*ffm-quick*` | Trusted gate | On FFM-equipped queues |
@@ -343,12 +352,15 @@ cmake --build build -- -j$(nproc)
 **What is explicitly not covered:**
 - Device memory access patterns (out-of-bounds GPU reads/writes).
 - GPU data races (no TSAN equivalent for device code).
+- Host-side data races are not checked by a sanitizer. `concurrency_test` exercises concurrent use of the shared state (solution registries, plan cache, autotune manager, shared plans) and detects races through crashes and bit-exact result checks, but a race that happens not to corrupt a result can still pass it.
 
 ---
 
 ## Known Bugs and Expected Failures
 
 There is currently one suppression mechanism: CTest `SKIP_REGULAR_EXPRESSION`. Any test binary that prints `HIPTENSOR_STATUS_ARCH_MISMATCH` or `unsupported host device` is skipped rather than failed — this is the mechanism for running a single install across multiple GPU architectures without every test failing on incompatible hardware. It is applied uniformly to all test binaries at configure time in `test/CMakeLists.txt`.
+
+Because the match applies to the whole binary, a test binary that skips only *some* of its cases must not print `HIPTENSOR_STATUS_ARCH_MISMATCH` in its skip messages: CTest would report the whole binary as skipped and hide failures in the cases that did run. `concurrency_test` prints a plain "operation not supported on this device" for that reason.
 
 There is no client-side known-bug list (analogous to `known_bugs.yaml` in other components). Tests that expose a known defect are either disabled via empty config files (which causes CMake to omit the `add_test` entry entirely) or manually skipped until a fix lands. A tracked quarantine list with ticket references does not exist today — see the Known Gaps table.
 
@@ -360,6 +372,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 |---|---|
 | New CPU-side logic (logging, YAML, option parsing, utility math) | Unit test in `test/00_unit/` using GoogleTest |
 | New or changed GPU operation behavior | Integration test: add a YAML config entry in the appropriate `validation/` tier |
+| Change to shared state (solution registries and `*Solution` classes, plan cache, autotune manager, plan objects) | Run `concurrency_test`; if the change adds a new execute path or operation, add a case to it |
 | Bug fix | A regression test (unit if CPU-side, integration config entry if GPU-side) that fails before the fix |
 | New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered. Also add entries to `emulation/quick` **and** `emulation/full` (the FFM tiers do not nest, so `ffm-full` does not inherit `ffm-quick`), to `bench`, and a case in the op's host CPU-reference test (e.g. `elementwise_cpu_test`) where one exists |
 | Performance-sensitive change | Run `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
@@ -380,6 +393,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | Trinary and unary-ops contraction variants are not in the bench tier (trinary configs exist but are unregistered; unary-ops has none) | Low | Low | Not performance-gated |
 | `clang-format` and static analysis not enforced in CI | Low | Low | Manual enforcement in code review |
 | No sanitizer (ASAN/TSAN) gate in CI | Low | High if hit | None; ASAN can be built manually |
+| Thread-safety coverage is one FP32 problem per operation at four threads; no TSAN run of the host code | Low | High if hit | `concurrency_test` catches races that crash or corrupt a result |
 | Permute `bench` configs exceed device memory on smaller GPUs: the binary aborts with a HIP out-of-memory error partway through (gfx908 and gfx1100 already in the FP32 entries; gfx90a in the FP64 entries at ranks 2 and 4, which are listed last so the other types complete) | Low | Medium | Bench results on those targets are incomplete; run bench on MI300-class GPUs |
 | `test/02_elementwise/configs/code_coverage/` is unused (elementwise coverage reads `emulation/quick`) | Low | Low | Documented in the Coverage section |
 
