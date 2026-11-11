@@ -370,8 +370,8 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         constexpr BQDramTileWindowStep bq_move_step = {0, GetKStepBQ(bq_copy_dram_window)};
 
         // Instructions Count
-        constexpr index_t VectorSizeB  = Policy::template GetVectorSizeB<Problem>();
-        constexpr index_t B_LOAD_INST  = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
+        constexpr index_t VectorSizeB = Policy::template GetVectorSizeB<Problem>();
+        constexpr index_t B_LOAD_INST = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
         // Loads allowed in flight once the A tile has landed in LDS: everything load_global /
         // main_body issues after the A DMA. With asyncmark, the wait counts only asyncmark'd
         // DMAs, so the AQ/BQ scale loads (ordinary VMEM loads) must not be included.
