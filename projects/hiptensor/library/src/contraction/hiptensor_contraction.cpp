@@ -61,6 +61,34 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
     return false;
 }
 
+// C is added to the result element by element, so each element of D
+// needs exactly one element of C with the same modes.
+// Therefore C's modes must be D's modes, each once, in any order.
+// Without this check a mode that C lacks is silently given length 1.
+static bool hasModesOf(std::vector<int32_t> const& modeCV, std::vector<int32_t> const& modeDV)
+{
+    return std::is_permutation(modeCV.cbegin(), modeCV.cend(), modeDV.cbegin(), modeDV.cend());
+}
+
+// C and D must give each mode the same value: always the same extent, and the
+// same stride when they share one buffer.
+// The lookup is by mode because C may list its modes in another order than D.
+static bool matchesPerMode(std::vector<std::size_t> const& valuesC,
+                           std::vector<int32_t> const&     modeCV,
+                           std::vector<std::size_t> const& valuesD,
+                           std::vector<int32_t> const&     modeDV)
+{
+    for(std::size_t i = 0; i < modeCV.size(); i++)
+    {
+        auto it = std::find(modeDV.cbegin(), modeDV.cend(), modeCV[i]);
+        if(it == modeDV.cend() || valuesC[i] != valuesD[std::distance(modeDV.cbegin(), it)])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
 inline auto toContractionSolutionVec(std::vector<void*> const& v)
@@ -227,6 +255,24 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                  sharedMode);
         logger->logError("hiptensorCreateContraction", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    // C must match D mode for mode. A C with other modes or extents would
+    // otherwise be accepted here and later read with lengths it doesn't have.
+    if(descC != nullptr && !hasModesOf(modeCV, modeDV))
+    {
+        snprintf(msg, sizeof(msg), "C must have the same modes as D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(descC != nullptr
+       && !matchesPerMode(
+           hiptensor::getTensorLengths(descC), modeCV, hiptensor::getTensorLengths(descD), modeDV))
+    {
+        snprintf(msg, sizeof(msg), "Each mode must have the same extent in C and D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
     *desc = new hiptensorOperationDescriptor();
@@ -1008,6 +1054,26 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
                  sharedStep);
         logger->logError("hiptensorCreateContractionTrinary", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    // D must match E mode for mode. A D with other modes or extents would
+    // otherwise be accepted here and later read with lengths it doesn't have.
+    if(descD != nullptr && !hasModesOf(modeDV, modeEV))
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "D must have the same modes as E");
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(descD != nullptr
+       && !matchesPerMode(
+           hiptensor::getTensorLengths(descD), modeDV, hiptensor::getTensorLengths(descE), modeEV))
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Each mode must have the same extent in D and E");
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
     *desc = new hiptensorOperationDescriptor();

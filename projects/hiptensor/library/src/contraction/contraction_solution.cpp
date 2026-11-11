@@ -174,10 +174,9 @@ namespace hiptensor
 
         // C (ds_*) is normalized with its own modes: it may be laid out differently
         // from D (e_*), and reading it with D's strides gives wrong results.
-        // A C given without modes carries D's modes. Scale contractions have no C,
-        // so it mirrors D.
-        auto const& ds_modes = ds_ms_ns_modes.empty() ? e_ms_ns_modes : ds_ms_ns_modes;
-        if(ds_ms_ns_lengths.size() != ds_modes.size() || ds_ms_ns_strides.size() != ds_modes.size())
+        // Only a contraction without C mirrors D. A C that is present carries D's
+        // modes and extents; hiptensorCreateContraction rejects any other.
+        if(ds_ms_ns_lengths.empty())
         {
             normal_ds_ms_ns_lengths = normal_e_ms_ns_lengths;
             normal_ds_ms_ns_strides = normal_e_ms_ns_strides;
@@ -185,7 +184,7 @@ namespace hiptensor
         else
         {
             normalizeLikeResult(contraction_result_modes,
-                                ds_modes,
+                                ds_ms_ns_modes,
                                 ds_ms_ns_lengths,
                                 ds_ms_ns_strides,
                                 normal_ds_ms_ns_lengths,
