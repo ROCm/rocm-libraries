@@ -33,7 +33,8 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
         ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile LDS
         descriptor, unmasked LDS verbs, extent-vs-descriptor guard).
     ``TensorDesc`` / ``TensorWindow`` / ``TileDesc`` / ``Fragment`` / ``fragment_length``   the value types.
-    ``load_mma_traits`` / ``MmaTraits`` / ``MmaTraitsCatalog`` / ``DEFAULT_TRAITS_PATH``   the atom SSOT.
+    ``load_mma_traits`` / ``MmaTraits`` / ``MmaTraitsCatalog`` / ``MmaLayoutParams`` / ``MmaScale`` /
+        ``DEFAULT_TRAITS_PATH``   the MMA catalog (one row per instruction variant).
     ``describe`` / ``render_forward_map`` / ``render_inverse_map``   see a layout instead of decoding it.
     ``emit_tensor_coordinates``   lower a desc to per-lane tensor coordinates.
     ``classify_transform`` / ``describe_edge`` / ``mma_pair_k_aligned`` / ``mma_operand_layout_sound`` /
@@ -44,6 +45,8 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
         observers above hand back).
     ``WarpDistributionEncoding``   the raw coordinate-transform encoding (extension substrate; rarely
         built by hand).
+    ``tensor_transforms`` -- coordinate graphs, split addresses and bound checks (import from
+        ``rocke.helpers.tiling.tensor_transforms``).
 
 MACHINERY -- internal, NOT re-exported (``RegisterMapper``, the warp-encoding calculators, the transform
 solver core): import from its own module only if you are extending the layer.
@@ -61,6 +64,7 @@ from .descriptors import (
 from .emit import (
     emit_tensor_coordinates,
     fill_fragment,
+    lds_allocation,
     lds_element_span,
     load_fragment,
     store_fragment,
@@ -88,6 +92,8 @@ from .memory import (
 from .visualization import describe, render_forward_map, render_inverse_map
 from .traits import (
     DEFAULT_TRAITS_PATH,
+    MmaLayoutParams,
+    MmaScale,
     MmaTraits,
     MmaTraitsCatalog,
     load_mma_traits,
@@ -115,6 +121,7 @@ __all__ = [
     "check_gemm_shapes",
     "make_tile_desc",
     "make_fragment",
+    "lds_allocation",
     "lds_element_span",
     "load_fragment",
     "store_fragment",
@@ -141,6 +148,8 @@ __all__ = [
     "load_mma_traits",
     "MmaTraits",
     "MmaTraitsCatalog",
+    "MmaLayoutParams",
+    "MmaScale",
     "DEFAULT_TRAITS_PATH",
     "describe",
     "render_forward_map",

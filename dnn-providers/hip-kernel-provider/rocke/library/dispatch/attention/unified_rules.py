@@ -22,6 +22,8 @@ from kernels.common.attention_unified import (
     _wave_page_id_load_3d,
 )
 
+from rocke.dispatch.tuning import WavesPerEuSpace
+
 from .axes import (
     DEAD_END_KNOBS,
     KNOWN_WRONG_KNOBS,
@@ -41,7 +43,7 @@ from .common import (
     ATTENTION_ABI_VERSION,
     AttentionRequest,
     AttentionTuningSpec,
-    _problem,
+    attention_problem,
 )
 from .tuning_specs import (
     ExplicitAttention2DConfig,
@@ -50,7 +52,7 @@ from .tuning_specs import (
     make_explicit_attention_3d_specs,
     resolve_num_segments,
 )
-from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
+from .waves import FULL_WAVES, PRODUCTION_WAVES
 
 TUNING_ALGORITHM = "unified_tuning"
 
@@ -387,13 +389,23 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
+            # ``emit_lse`` is an output the problem selects, not a default that
+            # knobs are a delta against: keeping it out of both the 2D kernel
+            # and the split-KV reduce defaults leaves every config_key, and so
+            # every stored pin, as before the field existed.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded
+                if name not in recorded and name != "emit_lse"
             },
             "reduce": (
-                None if reduce is None else dict(_declared_defaults(type(reduce)))
+                None
+                if reduce is None
+                else {
+                    name: value
+                    for name, value in _declared_defaults(type(reduce))
+                    if name != "emit_lse"
+                }
             ),
         }
 
@@ -504,7 +516,7 @@ def iter_tuning_specs(
     """Specs for one geometry at ``level``: ``production`` walks the curated
     stacks (no dead-end knobs); ``full`` walks every kernel knob -- consume it
     through :func:`sample_tuning_specs` unless the space is known to be small."""
-    return unified_space(variant).stream(_problem(req), level)
+    return unified_space(variant).stream(attention_problem(req), level)
 
 
 def sample_tuning_specs(
@@ -515,4 +527,4 @@ def sample_tuning_specs(
 ) -> Iterable[AttentionTuningSpec]:
     """Up to ``n`` distinct random legal specs from the full knob space, dead
     ends included; ``KNOWN_WRONG_KNOBS`` never."""
-    return unified_space(variant).sample(_problem(req), n, seed)
+    return unified_space(variant).sample(attention_problem(req), n, seed)

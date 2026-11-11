@@ -5,8 +5,10 @@ Quick reference for the shipped instance builders. Each row points to the per-fa
 The `File` columns list module basenames. Cross-arch builders live under
 `instances/common/`; arch-specialized matrix-core bodies (e.g. the tiled
 attention kernels) live in the per-arch dirs `instances/gfx942/`,
-`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`. All public
-symbols are re-exported from `rocke.instances`. Targets: gfx942 / gfx950
+`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`, and
+`instances/gfx1250/`. Core public symbols are re-exported from
+`rocke.instances`; arch-specific APIs use the indicated
+`rocke.instances.<gfx>` package. Targets: gfx942 / gfx950
 (CDNA, wave64, MFMA) and gfx1151 / gfx1201 (RDNA, wave32, WMMA — gfx1201 is
 RDNA4); gfx950 is the default build target. See `instances/SUPPORT_MATRIX.md`
 for the per-instance arch grid.
@@ -18,6 +20,7 @@ for the per-instance arch grid.
 | `gemm_universal.py` | `TileSpec`, `TraitSpec`, `DataSpec`, `UniversalGemmSpec` | `instances/gemm.md` |
 | `batched_gemm.py` | `BatchedGemmSpec` | `instances/gemm.md` |
 | `grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `GroupedGemmLauncher` | `instances/gemm.md` |
+| `gfx1250/nvfp4_gemm.py` | `NvFp4GemmSpec` | [gfx1250 NVFP4 GEMM](gemm.md#gfx1250-nvfp4-gemm) |
 
 ABI: `(A, B, C, M, N, K)` for plain GEMM, with `stride_a/b/c` added for batched.
 
@@ -38,15 +41,35 @@ implementation.
 
 ## Convolution Family
 
+The convolution builders are library-owned (`library/kernels/common/`); their doc,
+[`library/kernels/conv/docs/convolution.md`](../../../library/kernels/conv/docs/convolution.md),
+lives with them. `pooling.py` is a platform instance documented in `instances/small_ops.md`.
+
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
-| `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
-| `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
-| `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
-| `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
+| `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` (incl. split-K forward: `split_k`, `split_k_cluster`) | `library/kernels/conv/docs/convolution.md` |
+| `conv_fwd_split_k_reduce.py` | `FwdSplitKReduceSpec` (split-K forward Stage 2) | `library/kernels/conv/docs/convolution.md` |
+| `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `library/kernels/conv/docs/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode), `DirectConvWgradSpec` (incl. the gfx1250 image-per-block and small-C wgrad), `DirectDepthwiseWgradSpec` (VALU depthwise wgrad, cached for the wave32 targets) | `library/kernels/conv/docs/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
+| `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `library/kernels/conv/docs/convolution.md` |
+| `conv_dgrad_patch_wmma.py` | `DgradPatchWmmaSpec` (gfx1250 patch-embedding dgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_dgrad_smallc_wmma.py` | `DgradSmallcWmmaSpec` (gfx1250 small-C stem dgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `library/kernels/conv/docs/convolution.md` |
+| `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |
+| `conv_winograd_fwd.py`, `conv_winograd_fwd_rt.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `RtFilterSpec` / `RtPrescaleSpec` / `RtInputSpec` / `RtOutputSpec` (shape-generic, AOT), `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
+| `img2col.py` | `Img2ColSpec` | `library/kernels/conv/docs/convolution.md` |
+| `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/small_ops.md` |
 
-ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-GEMM / direct grouped conv kernel takes `(A, B, D, A_bytes, B_bytes, D_bytes)` followed by the problem block -- extents, strides, padding, dilation, groups and the host-computed magic-division constants -- whose names and order come from `kernels.common.conv_abi` (`conv_arg_names(direction)` / `conv_direct_arg_names(direction)`; C++ twin `instance_conv_abi.h`). Hosts fill them with `kernels.common.conv_args.ConvArgs.from_problem(...).to_launch_values(...)`; wgrad appends the split-K `ks` / `ks_count` pair (and the two-stage `ws_ptr` / `ws_bytes`), dgrad its sub-GEMM table. See `instances/convolution.md`. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
+ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-GEMM / direct grouped conv kernel takes `(A, B, D, A_bytes, B_bytes, D_bytes)` followed by the problem block -- extents, strides, padding, dilation, groups and the host-computed magic-division constants -- whose names and order come from `kernels.common.conv_abi` (`conv_arg_names(direction)` / `conv_direct_arg_names(direction)`; C++ twin `library/cpp/include/rocke/instance_conv_abi.h`). Hosts fill them with `kernels.common.conv_args.ConvArgs.from_problem(...).to_launch_values(...)`; wgrad appends the split-K `ks` / `ks_count` pair (and the two-stage `ws_ptr` / `ws_bytes`), the split-K forward (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr` / `ws_bytes` / `ks` / `ks_count`, dgrad its sub-GEMM table. See `library/kernels/conv/docs/convolution.md`. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
 Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
@@ -139,11 +162,11 @@ Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token
 
 Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships a single-token decode kernel and a split chunkwise prefill mode; gfx950.
 
-GDN decode uses the static `(2, 16, 8)` dispatcher default whenever it is legal;
-batch changes its grid, not its auto tile. GDN prefill picks `value_splits` per
-`batch_heads`. Both tune the same tension -- splitting a head's value dimension
-across workgroups buys parallelism when the natural grid starves, and costs
-redundant tile reads once it does not.
+GDN decode runs one static `auto` configuration per case (gate kind x fused x
+state width; `instances/gdn.md`); batch changes its grid, not its configuration.
+GDN prefill picks `value_splits` per `batch_heads`. Both tune the same tension
+-- splitting a head's value dimension across workgroups buys parallelism when
+the natural grid starves, and costs redundant tile reads once it does not.
 
 ## Small Ops
 
@@ -223,8 +246,19 @@ From `helpers/README.md`:
 | batched_gemm | - | - | - | - | - | yes | - | (wraps gemm_universal) |
 | grouped_gemm | - | planned | - | - | - | yes | - | (wraps gemm_universal) |
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
-| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
+| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}), `chiplet_transform_chunked_runtime` (`helpers.grid`, `xcd_tiles`) |
 | conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
+| conv_dgrad_patch_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_dgrad_smallc_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
+| conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
+| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
+| conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
+| conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
+| conv_winograd (fwd / fwd_rt / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |
+| conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
+| conv_direct_wgrad (gfx1250 image / small-C; depthwise) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` (image `tdm_stages`), `buffer_atomic_fadd_f32` two-stage scratch |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |

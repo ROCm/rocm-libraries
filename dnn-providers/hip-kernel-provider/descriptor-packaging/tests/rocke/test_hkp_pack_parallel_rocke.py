@@ -6,6 +6,7 @@ agreement a pool of rocKE variants must keep. The producer path runs in
 
 import concurrent.futures
 import importlib
+import multiprocessing
 import pickle
 import re
 import sys
@@ -100,14 +101,18 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
 
 @pytest.mark.quick
 def test_worker_inherits_the_in_tree_rocke_paths():
-    """A pool worker imports rocke and kernels from the paths this directory's
+    """A spawned pool worker imports rocke and kernels from the paths this directory's
     conftest inserts, which no `PYTHONPATH` carries, so it can only have them by
-    inheriting the parent's `sys.path`."""
+    inheriting the parent's `sys.path`. The pool is pinned to `spawn`: under the Linux
+    default (`fork` up to Python 3.13) the child copies the parent's memory and the
+    check would prove nothing."""
     candidates = [_ROCKE_ROOT / "platform" / "python", _ROCKE_ROOT / "library"]
     expected = _conftest_only_paths(candidates)
     assert len(expected) == 2, "the premise: conftest inserted both, PYTHONPATH neither"
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
     assert set(expected) <= set(child_path)

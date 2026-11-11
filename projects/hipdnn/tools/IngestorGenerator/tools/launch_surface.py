@@ -106,13 +106,23 @@ def _path_part(value: str) -> str:
     return value.split(":", 1)[0].strip()
 
 
+#: A directory every rocm-libraries tree has at its root, checkout or not.
+_REPO_MARKER = Path("projects") / "hipdnn"
+
+
 def find_repo_root(start: Path) -> Path:
-    """The nearest ``.git`` ancestor of ``start``, or the resolved ``start``.
-    Callers anchor on this script's location rather than ``Path.cwd()``, since
-    every path a surface names is repo-relative. Always absolute."""
+    """The nearest ``.git`` ancestor of ``start``; else, for a tree without git
+    metadata (``git archive``, a tarball), the nearest ancestor holding
+    ``projects/hipdnn``; else the resolved ``start``. Callers anchor on this
+    script's location rather than ``Path.cwd()``, since every path a surface
+    names is repo-relative. Always absolute."""
     current = start.resolve()
-    for candidate in (current, *current.parents):
+    ancestors = (current, *current.parents)
+    for candidate in ancestors:
         if (candidate / ".git").exists():
+            return candidate
+    for candidate in ancestors:
+        if (candidate / _REPO_MARKER).is_dir():
             return candidate
     return current
 
@@ -125,7 +135,7 @@ _REQUIRED_ACCESSORS = ("getIntMetadata", "getStringMetadata")
 
 #: Helpers called as ``helper(<kernel>, <FIELD>)`` that decline the match when the
 #: field is absent: a catalog omitting it declines every candidate.
-_DECLINING_ACCESSORS = ("integerMetadata",)
+_DECLINING_ACCESSORS = ("integerMetadata", "stringMetadata")
 
 _CONST_DEF_RE = re.compile(r'constexpr\s+std::string_view\s+(\w+)\s*=\s*"([^"]*)"\s*;')
 _WRAPPER_LAMBDA_RE = re.compile(

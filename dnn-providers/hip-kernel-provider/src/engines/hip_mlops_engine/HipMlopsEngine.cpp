@@ -2,11 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipMlopsEngine.hpp"
+#include "core/Utils.hpp"
 #include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider
 {
@@ -31,6 +35,16 @@ static void initializeHipKernelSettings(
 bool HipMlopsEngine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[HipMlopsEngine::isApplicable] ";
+
+    const auto& tensorMap = opGraph.getTensorMap();
+    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
+                               "Ragged tensors are not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
+        "All tensors must be aligned to a multiple of 16 bytes");
+
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
     for(const auto& planBuilder : _planBuilders)
@@ -74,8 +88,12 @@ void HipMlopsEngine::getDetails(Handle& handle,
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    const std::vector<int32_t> behaviorNotesVector{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    auto behaviorNotes = builder.CreateVector(behaviorNotesVector);
+
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, _id, knobs, behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

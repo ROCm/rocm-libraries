@@ -3,7 +3,7 @@
 
 import pytest
 
-from Tensile.KernelWriterAssembly import _enableLdsTr6Rearrange
+from tensilelite.KernelWriterAssembly import _enableLdsTr6Rearrange
 
 pytestmark = pytest.mark.unit
 

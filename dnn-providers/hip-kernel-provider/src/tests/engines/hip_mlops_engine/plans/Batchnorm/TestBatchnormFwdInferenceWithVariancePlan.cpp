@@ -304,24 +304,28 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileDefaultSetsCorrectDef
 
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPUPCAST=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPUPCAST=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=HIP_PLUGIN_BN_N"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS0=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCH_ELEMENTS=HIP_PLUGIN_BN_BATCHES"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=4"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL=2500"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
@@ -364,6 +368,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
@@ -403,6 +410,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
@@ -443,6 +453,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefine)
@@ -473,7 +486,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefi
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefine)
@@ -504,16 +517,16 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefi
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionThrows)
 {
     const MockKernelCompiler mockCompiler;
 
-    // 3D tensor is not supported
+    // 2D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        {4, 1}, {1, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

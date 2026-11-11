@@ -12,6 +12,9 @@ import pytest
 from rocke.core import lower_llvm
 from rocke.core.ir import IRBuilder
 from rocke.runtime import comgr
+from rocke.tests.arch_marks import COVERED_ARCHES
+
+ARCHS = COVERED_ARCHES
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +117,18 @@ def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch):
         assert lower_llvm._resolve_llvm_flavor() == "llvm23"
 
 
-def test_auto_lowering_recovers_then_retains_success(monkeypatch):
+@pytest.mark.parametrize("value", ["llvm25", "LLVM24", " llvm24 "])
+def test_unknown_explicit_flavor_fails_without_querying(monkeypatch, value):
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", value)
+    query = Mock(side_effect=AssertionError("unknown override queried COMGR"))
+    monkeypatch.setattr(comgr, "_require_compiler_info", query)
+    with pytest.raises(ValueError, match="not a recognized flavor"):
+        lower_llvm._resolve_llvm_flavor()
+    query.assert_not_called()
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_auto_lowering_recovers_then_retains_success(monkeypatch, arch):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
     monkeypatch.setattr(comgr, "_lib", None)
     monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: None)
@@ -125,11 +139,11 @@ def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     builder.kernel.attrs["max_workgroup_size"] = 64
     builder.const_i32(1)
     with pytest.raises(comgr.ComgrError, match="could not be loaded"):
-        lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
-    second = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
+        lower_llvm.lower_kernel_to_llvm(builder.kernel, arch=arch)
+    second = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch=arch)
     assert lower_llvm._datalayout_for_flavor("llvm23") in second
     info = comgr.loaded_compiler_info()
-    assert lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950") == second
+    assert lower_llvm.lower_kernel_to_llvm(builder.kernel, arch=arch) == second
     assert comgr.loaded_compiler_info() is info
     assert load.call_count == 2
     library.LLVMGetVersion.assert_called_once()
@@ -152,8 +166,9 @@ def test_unqueryable_success_is_retained_without_retry(monkeypatch):
     probe.assert_called_once()
 
 
+@pytest.mark.parametrize("arch", ARCHS)
 @pytest.mark.parametrize("source", ["api", "environment"])
-def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
+def test_explicit_lowering_bypasses_library_load(monkeypatch, source, arch):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
     load = Mock(side_effect=AssertionError("explicit lowering loaded COMGR"))
     monkeypatch.setattr(comgr, "_load_lib", load)
@@ -163,7 +178,7 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
     kwargs = {"llvm_flavor": "llvm23"} if source == "api" else {}
     if source == "environment":
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
-    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950", **kwargs)
+    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch=arch, **kwargs)
     assert lower_llvm._datalayout_for_flavor("llvm23") in ir
     load.assert_not_called()
 
@@ -176,11 +191,16 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
         (21, "llvm22"),
         (22, "llvm22"),
         (23, "llvm23"),
-        (24, "llvm23"),
+        (24, "llvm24"),
     ],
 )
 def test_llvm_flavor_boundaries(major, flavor):
     assert lower_llvm._flavor_for_llvm(major) == flavor
+
+
+def test_newer_compiler_major_is_not_silently_qualified():
+    with pytest.raises(ValueError, match="major 25.*latest qualified lane llvm24"):
+        lower_llvm._flavor_for_llvm(25)
 
 
 def test_override_does_not_falsify_guard_evidence(monkeypatch):
@@ -195,6 +215,28 @@ def test_override_does_not_falsify_guard_evidence(monkeypatch):
             f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
         )
     assert info.describe() in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "ir",
+    [
+        "define void @k() {}",
+        'target datalayout = "unrecognized"\ndefine void @k() {}',
+        f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm24")}"\n'
+        "define void @k() {}",
+    ],
+)
+def test_unqualified_future_compiler_is_rejected_before_ir_shape_checks(
+    monkeypatch, ir
+):
+    info = comgr.CompilerInfo(
+        (25, 0, 0), "fixture", "requested.so", "loaded.so", "loaded.so"
+    )
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    with pytest.raises(
+        comgr.ComgrError, match="major 25.*latest qualified lane llvm24"
+    ):
+        comgr._assert_ir_flavor_matches_lib(ir)
 
 
 def test_loader_skips_unloadable_candidate_before_querying(monkeypatch):
@@ -277,13 +319,14 @@ def test_compilation_requires_version_evidence_before_creating_inputs(
         create.assert_called_once()
 
 
-def test_explicit_offline_lowering_never_queries_comgr(monkeypatch):
+@pytest.mark.parametrize("arch", ARCHS)
+def test_explicit_offline_lowering_never_queries_comgr(monkeypatch, arch):
     from rocke.core.ir import IRBuilder
 
     query = Mock(side_effect=AssertionError("offline emission queried COMGR"))
     monkeypatch.setattr(comgr, "loaded_compiler_info", query)
     ir = lower_llvm.lower_kernel_to_llvm(
-        IRBuilder("offline").kernel, llvm_flavor="llvm20", arch="gfx950"
+        IRBuilder("offline").kernel, llvm_flavor="llvm20", arch=arch
     )
     assert lower_llvm._datalayout_for_flavor("llvm20") in ir
     query.assert_not_called()

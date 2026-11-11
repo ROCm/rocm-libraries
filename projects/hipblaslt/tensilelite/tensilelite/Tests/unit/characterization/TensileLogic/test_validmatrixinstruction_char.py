@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for
-``TensileLogic.ValidMatrixInstruction._validateMatrixInstruction``.
+``tensilelite.logic.valid_matrix_instruction._validateMatrixInstruction``.
 
 A thin CLI wrapper around ``Validators.MatrixInstruction.validateMIParameters``:
 run the validator, assert ``solution["Valid"]``, return ``True``; on
@@ -52,12 +52,12 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.Types import IsaVersion
-from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
 )
-from Tensile.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+from tensilelite.logic.valid_matrix_instruction import _validateMatrixInstruction
 
 pytestmark = pytest.mark.unit
 

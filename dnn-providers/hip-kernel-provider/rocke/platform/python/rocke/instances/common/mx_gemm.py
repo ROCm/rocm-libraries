@@ -5,19 +5,20 @@
 
 DSL counterpart of CK Tile's ``example/ck_tile/42_mx_gemm``. The MX
 GEMM uses the OCP MX-spec shared-exponent format: each 32-element
-mantissa block carries one 8-bit unbiased E8M0 scale, so the per-
+mantissa block carries one 8-bit biased E8M0 scale (bias 127), so the per-
 element math is::
 
  A_mantissa[i] = fp8_or_fp6_or_fp4 value
- A_scale[i // 32] = 8-bit unbiased exponent (E8M0)
+ A_scale[i // 32] = 8-bit unsigned biased exponent (E8M0)
  A_real[i] = A_mantissa[i] * 2^(A_scale[i // 32] - 127)
 
 Same for B. The kernel does an A * B^T contraction in f32 (the MX
 intrinsic family ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``
-applies the scale in-instruction; v1 uses the explicit
-:func:`rocke.helpers.mx_scale.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.mx_scale.apply_mx_scale` chain instead so the
-scalar inner GEMM stays interpretable).
+applies the scale in-instruction; v1 applies it explicitly after each
+group's MFMA with :func:`rocke.helpers.mx_scale.fma_with_mx_scale_pair`
+so the inner GEMM stays interpretable). Each group's update of an output is
+the exact value rounded once to f32, bit for bit; the MX GEMM section of
+``dsl_docs/instances/gemm.md`` says why.
 
 What v1 ships:
 
@@ -65,12 +66,50 @@ from ...helpers.mfma_gemm_inner import (
     validate_arch_and_block_size,
     validate_mfma_atom_in_catalog,
 )
-from ...helpers.mx_scale import decode_mx_scale_e8m0
+from ...helpers.mx_scale import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    MxElementFormat,
+    exact_mx_scale_split,
+    fma_with_mx_scale_pair,
+)
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
+# sched_barrier mask: every instruction class may be scheduled across the
+# barrier except VMEM (0x10) and VMEM read (0x20).
+_SCALE_LOADS_FIRST = 0x7CF
+# The E8M0 scale code of 2^0 (the code is the exponent biased by 127).
+_E8M0_CODE_FOR_ONE = 127
+
 
 MxMantissaDType = Literal["fp8e4m3", "bf8e5m2"]
+
+# The fp8 / bf8 encoding the MFMA of each target reads: the FNUZ encodings on
+# gfx942, the OCP ones on gfx950.
+_MFMA_ELEMENT_FORMATS = {
+    "gfx942": {"fp8e4m3": FP8_E4M3_FNUZ, "bf8e5m2": BF8_E5M2_FNUZ},
+    "gfx950": {"fp8e4m3": FP8_E4M3_OCP, "bf8e5m2": BF8_E5M2_OCP},
+}
+
+
+def mx_gemm_element_format(mantissa_dtype: str, arch: str) -> MxElementFormat:
+    """The element format ``arch``'s MFMA reads for ``mantissa_dtype``.
+
+    The MX GEMM derives its scale split from it
+    (:func:`rocke.helpers.mx_scale.exact_mx_scale_split`), so the split
+    depends on the target: gfx942 reads the FNUZ encodings, gfx950 the OCP
+    ones.
+    """
+    formats = _MFMA_ELEMENT_FORMATS.get(arch, {})
+    if mantissa_dtype not in formats:
+        raise ValueError(
+            f"mx_gemm: no {mantissa_dtype} element format known for {arch}; "
+            f"the MX GEMM reads fp8e4m3 / bf8e5m2 on gfx942 and gfx950"
+        )
+    return formats[mantissa_dtype]
 
 
 @dataclass(frozen=True)
@@ -171,10 +210,11 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
 
     ``arch`` (``"gfx942"`` / ``"gfx950"``) selects the target GPU and is
     validated via :func:`is_valid_spec`. The fp8 / bf8 ``16x16x32`` MFMA
-    atom this kernel uses ships on both targets, so the emitted IR is
-    arch-neutral; the fp4 / fp6 mantissa families that genuinely require
-    the gfx950-only MX MFMA intrinsics are rejected by :func:`is_valid_spec`
-    (and the catalog guard) before any IR is built.
+    atom this kernel uses ships on both targets; the scale split's cap
+    depends on the element encoding the target's MFMA reads
+    (:func:`mx_gemm_element_format`). The fp4 / fp6 mantissa families that
+    genuinely require the gfx950-only MX MFMA intrinsics are rejected by
+    :func:`is_valid_spec` (and the catalog guard) before any IR is built.
 
     Kernel signature::
 
@@ -194,6 +234,10 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
 
     mantissa_ty = quant_ir_type(spec.mantissa_dtype)
     BS = spec.block_size
+    # The split that makes each group's scale update exact, derived from the
+    # bounds of a group's dot product in the elements the MFMA reads.
+    element_format = mx_gemm_element_format(spec.mantissa_dtype, arch)
+    scale_split = exact_mx_scale_split(element_format, element_format, spec.group_k)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
@@ -243,50 +287,55 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
     a_scale_row_base = b.mul(m_global_row, b.const_i32(k_scale_count))
 
     # Single-level K iteration over MX shared-exponent groups (one E8M0
-    # byte per group, decoded once per iter). Each group's
-    # ``atoms_per_group`` MFMA invocations are Python-unrolled into a
-    # fresh per-group acc, then scaled by ``a_scale * b_scale`` and folded
-    # into the outer accumulator with one fused ``v_pk_fma_f32`` per lane
-    # element. The MX ``mfma_f32_16x16x128_f8f6f4`` intrinsic does the
-    # scale in-instruction; the v1 chain replicates it explicitly so
-    # parity isn't blocked on the in-instruction intrinsic.
+    # byte per group). Each group's ``atoms_per_group`` MFMA invocations
+    # are Python-unrolled into a fresh per-group acc, which is then scaled
+    # by ``2^(ea + eb)`` and folded into the outer accumulator with one
+    # fused ``v_pk_fma_f32`` per lane element. The MX
+    # ``mfma_f32_16x16x128_f8f6f4`` intrinsic does the scale
+    # in-instruction; the v1 chain replicates it explicitly so parity
+    # isn't blocked on the in-instruction intrinsic.
+    #
+    # The fold runs one group late: group ``kg`` issues its scale, A and B
+    # loads, folds group ``kg - 1`` (carried in ``prev_group`` with its two
+    # scale codes) while those loads are in flight, then runs its own MFMA.
+    # The scale math thus never waits on a load issued in the same group.
+    # The first iteration folds a zero group with scale code 127 (2^0) into
+    # the +0 accumulator, which leaves it +0, and the last group is folded
+    # after the loop: the same updates in the same order as folding each
+    # group straight after its MFMA, so the output is bit for bit the same.
+    unit_scale_code = b.trunc(b.const_i32(_E8M0_CODE_FOR_ONE), I8)
     outer = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(k_scale_count),
         b.const_i32(1),
-        [("oacc", atom.zero_acc(b))],
+        [
+            ("oacc", atom.zero_acc(b)),
+            ("prev_group", atom.zero_acc(b)),
+            ("prev_a_code", unit_scale_code),
+            ("prev_b_code", unit_scale_code),
+        ],
         iv_name="kg",
     )
-    with outer as (kg, (outer_acc,)):
-        # Per-group E8M0 scale loads + decode. Only the ``kg``-dependent
+    with outer as (kg, (outer_acc, prev_group, prev_a_code, prev_b_code)):
+        # Per-group E8M0 scale byte loads. Only the ``kg``-dependent
         # term is added here; the per-lane (row, col) bases are hoisted.
         a_scale_off = b.add(a_scale_row_base, kg)
         b_scale_off = b.add(
             b.mul(kg, b.const_i32(spec.N)),
             n_global_col,
         )
-        a_scale = decode_mx_scale_e8m0(
-            b,
-            b.global_load_i8(AScale, a_scale_off),
-        )
-        b_scale = decode_mx_scale_e8m0(
-            b,
-            b.global_load_i8(BScale, b_scale_off),
-        )
-        # The MX-spec apply is ``elem * 2^(scale_unbiased - 127)``;
-        # mathematically equivalent to ``elem * 2^scale_unbiased / 2^127``
-        # and since a_scale / b_scale are already the post-decode f32
-        # multipliers, the combined scale is just their product.
-        ab_scale = b.fmul(a_scale, b_scale)
+        a_scale_code = b.global_load_i8(AScale, a_scale_off)
+        b_scale_code = b.global_load_i8(BScale, b_scale_off)
+        # Issue the two scale-byte loads before the A and B loads: no global
+        # load may be scheduled across this point (every other instruction
+        # may).
+        b.sched_barrier(_SCALE_LOADS_FIRST)
 
         k_group_base = b.mul(kg, b.const_i32(spec.group_k))
 
-        # Python-unrolled per-group MFMA chain on a fresh f32 acc. The
-        # loads stay in the shared helpers (row-major-contiguous A,
-        # col-strided B); the unroll just removes the trip-1 ``scf.for``
-        # so the (load A, load B, MFMA) chain is visible to the backend
-        # scheduler all at once.
-        group_acc = atom.zero_acc(b)
+        # The group's A and B operands, one pair per MFMA atom. The loads
+        # stay in the shared helpers (row-major-contiguous A, col-strided B).
+        operands = []
         for kt_local in range(atoms_per_group):
             k_tile_base = b.add(
                 k_group_base,
@@ -310,19 +359,28 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
                 k_tile_base=k_tile_base,
                 N=spec.N,
             )
+            operands.append((a_vec, b_vec))
+
+        # Fold the previous group while this group's loads are in flight.
+        # The helper adds the two scale exponents as integers: the product
+        # of the two decoded scales can overflow or flush to zero in f32
+        # even when the result is an ordinary f32.
+        new_outer = fma_with_mx_scale_pair(
+            b, prev_group, prev_a_code, prev_b_code, outer_acc, split=scale_split
+        )
+
+        # Python-unrolled per-group MFMA chain on a fresh f32 acc: the
+        # count is a compile-time constant, so no trip-1 ``scf.for``.
+        group_acc = atom.zero_acc(b)
+        for a_vec, b_vec in operands:
             group_acc = atom.emit(b, a_vec, b_vec, group_acc)
+        b.scf_yield(new_outer, group_acc, a_scale_code, b_scale_code)
 
-        # Tile-level scale-and-accumulate the group's MFMA result.
-        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
-        # per-lane vectors; broadcast the scalar ``ab_scale`` to that
-        # width and fold with a single fused multiply-add per lane element
-        # (``new = outer + group * ab_scale``), which lowers to packed
-        # ``v_pk_fma_f32`` on AMDGPU instead of a separate mul + add.
-        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
-        new_outer = b.vector_fma(group_acc, ab_scale_vec, outer_acc)
-        b.scf_yield(new_outer)
-
-    acc_final = outer.results[0]
+    # Fold the last group.
+    outer_acc, last_group, last_a_code, last_b_code = outer.results
+    acc_final = fma_with_mx_scale_pair(
+        b, last_group, last_a_code, last_b_code, outer_acc, split=scale_split
+    )
 
     # Output store via the shared MFMA epilogue helper: each lane
     # writes its ``c_per_lane`` cells to global via the atom's
@@ -371,6 +429,7 @@ __all__ = [
     "MxMantissaDType",
     "build_mx_gemm",
     "is_valid_spec",
+    "mx_gemm_element_format",
     "mx_gemm_grid",
     "mx_gemm_signature",
 ]

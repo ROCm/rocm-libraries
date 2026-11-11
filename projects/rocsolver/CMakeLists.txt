@@ -68,6 +68,7 @@ option(ROCSOLVER_ENABLE_CHOLQR "Enable CholQR method" ON)
 option(ROCSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 option(ROCSOLVER_ENABLE_EIG_2STAGE "Enable 2-stage eigensolver reduction (he2hb + hb2st)" ON)
 option(ROCSOLVER_ENABLE_HESSENBERG "Enable Hessenberg reduction routines (gehrd/gehd2/lahr2)" ON)
+option(ROCSOLVER_ENABLE_LARFG_TAU2 "Enable larfg setting tau=2 when norm(x)=0" OFF)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -103,7 +104,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.38.0")
+set(VERSION_STRING "3.39.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files

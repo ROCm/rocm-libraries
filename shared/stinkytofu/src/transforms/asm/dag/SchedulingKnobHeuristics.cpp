@@ -19,10 +19,18 @@
 
 namespace stinkytofu {
 
+// Preserves the existing gfx1250 boundary for the common 56-cycle ds_load and 8-cycle WMMA:
+// eleven windows provide 88 cycles, leaving 32 cycles after the load returns.
+constexpr int kQueueFillSafetyMarginCycles = 32;
+
 ResolvedSchedulingKnobs staticSchedulingKnobDefaults(const std::array<int, 3>&) {
     ResolvedSchedulingKnobs out;
     out.clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
+    out.reduceClusterBarrierPerLoop = kStaticDefaultReduceClusterBarrierPerLoop;
+    out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
     return out;
 }
 
@@ -51,6 +59,9 @@ SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
     // Rule3 lead: <0 unset; 0 means co-locate signal and wait.
     if (opts.ClusterBarrierRule3SignalLeadCycles >= 0)
         out.clusterBarrierRule3SignalLeadCycles = opts.ClusterBarrierRule3SignalLeadCycles;
+    // One handshake per loop: <0 unset; 0 off; >0 on.
+    if (opts.ReduceClusterBarrierPerLoop >= 0)
+        out.reduceClusterBarrierPerLoop = opts.ReduceClusterBarrierPerLoop != 0;
     return out;
 }
 
@@ -77,6 +88,16 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
 
+    // One handshake cadence when the main-loop WMMA latency budget is long and
+    // each ds_load has at least 5 cycles of that budget.
+    const int sumWmmaLatency = features.stats.sumWmmaLatencyCycles;
+    const int dsLoads = features.stats.dsLoadCount;
+    out.reduceClusterBarrierPerLoop =
+        sumWmmaLatency > 2500 && dsLoads > 0 && sumWmmaLatency / dsLoads >= 5;
+    out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+
     return out;
 }
 
@@ -102,6 +123,25 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
     } else {
         out.clusterBarrierRule3SignalLeadCycles = defaults.clusterBarrierRule3SignalLeadCycles;
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (overrides.reduceClusterBarrierPerLoop.has_value()) {
+        out.reduceClusterBarrierPerLoop = *overrides.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.reduceClusterBarrierPerLoop = proposed.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
+    } else {
+        out.reduceClusterBarrierPerLoop = defaults.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (!features.stats.degenerate()) {
+        out.queueFillSafetyMarginCycles = proposed.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.queueFillSafetyMarginCycles = defaults.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
     return out;
@@ -138,7 +178,11 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " dsLoad=" << features.stats.dsLoadCount
        << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
-       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")";
+       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")"
+       << " reduceClusterBarrierPerLoop=" << resolved.reduceClusterBarrierPerLoop << "("
+       << schedulingKnobSourceName(resolved.reduceClusterBarrierPerLoopSource) << ")"
+       << " queueFillSafetyMarginCycles=" << resolved.queueFillSafetyMarginCycles << "("
+       << schedulingKnobSourceName(resolved.queueFillSafetyMarginCyclesSource) << ")";
     os << "\n";
 }
 

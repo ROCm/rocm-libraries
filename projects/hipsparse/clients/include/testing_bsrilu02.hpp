@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -52,8 +53,7 @@ void testing_bsrilu02_bad_arg(const Arguments& argus)
     hipsparseDirection_t   dirA      = HIPSPARSE_DIRECTION_COLUMN;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -353,8 +353,7 @@ void testing_bsrilu02(Arguments argus)
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
     std::string            filename  = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -673,6 +672,20 @@ void testing_bsrilu02(Arguments argus)
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
         CHECK_HIPSPARSE_ERROR(
             hipsparseXbsrilu02_numericBoost(handle, info, 0, (double*)nullptr, (T*)nullptr));
+
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXbsrilu02_analysis(handle,
+                                                          dir,
+                                                          mb,
+                                                          nnzb,
+                                                          descr,
+                                                          dbsr_val_1,
+                                                          dbsr_row_ptr,
+                                                          dbsr_col_ind,
+                                                          block_dim,
+                                                          info,
+                                                          policy,
+                                                          dbuffer));
 
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)

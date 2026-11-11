@@ -1469,8 +1469,11 @@
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
     'PersistentXCCMapping',
+    'PostLoopStoreInNll',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
+    'PrefetchGL2Inc64Bit',
+    'PrefetchGL2SAddr',
     'PrefetchGlobalRead',
     'PrefetchGlobalReadA',
     'PrefetchGlobalReadB',
@@ -1489,6 +1492,7 @@
     'StaggerUMapping',
     'StaggerUStride',
     'StinkyTofuParameters',
+    'StinkyTofuRegisterAllocation',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -2484,6 +2488,14 @@
       'len': 8,
       'type': 'list',
     }),
+    'PostLoopStoreInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2499,6 +2511,22 @@
         2,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchGL2Inc64Bit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2SAddr': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'PrefetchGlobalRead': dict({
@@ -2640,6 +2668,10 @@
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
     }),

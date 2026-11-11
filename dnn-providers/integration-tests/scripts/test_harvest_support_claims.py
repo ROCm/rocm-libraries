@@ -37,6 +37,7 @@ from harvest_support_claims import (
     run_git,
     split_streams,
 )
+from support_features.feature_matrix import DEFAULT_OVERVIEW_PATH
 from support_sidecar import Claim, load, render
 
 _TS = "2026-09-28T05:47:38.5917461Z "
@@ -842,6 +843,9 @@ class TestWrite(unittest.TestCase):
         self.assertIn(f"changed {self._rel(self.sweep)} (+2)\n", err)
         self.assertIn(f"changed {self._rel(self.single)} (+1)\n", err)
         self.assertIn("2 sidecars changed, +3 claims", err)
+        # The overview is refreshed apart from claim changes, so that
+        # concurrent claim PRs do not all conflict on it.
+        self.assertFalse((self.root / DEFAULT_OVERVIEW_PATH.name).exists())
 
     def test_without_write_names_the_changes_and_writes_nothing(self) -> None:
         old = {self._claim("2_8_3_3_fp16_nchw")}

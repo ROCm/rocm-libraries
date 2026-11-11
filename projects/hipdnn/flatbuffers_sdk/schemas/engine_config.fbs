@@ -13,6 +13,10 @@ table KnobSetting {
 table EngineConfig {
     engine_id: int64;
     knobs: [KnobSetting];
+    // RFC 0019 section 11.4: the registered ranking metric (e.g. "tflops", "time") this
+    // configuration was selected by, and the one its engine ranks its own catalog and
+    // answers predictions in. Absent or empty means the default metric, "tflops".
+    ranking_metric: string;
 }
 
 root_type EngineConfig;

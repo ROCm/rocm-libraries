@@ -15,7 +15,8 @@ changes.
 > `ROCKE_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
 > Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
 > to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
-> stack (older ROCm needs `ROCKE_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
+> stack. AUTO queries the loaded COMGR compiler’s LLVM version; select an
+> explicit flavor for offline emission, not from the ROCm release label.
 
 ## Two engines at a glance
 
@@ -72,7 +73,7 @@ New to the DSL? Read in this order:
 9. [`primitives/quantization.md`](./primitives/quantization.md)
 10. [`instances/index.md`](./instances/index.md)
 11. [`instances/gemm.md`](./instances/gemm.md)
-12. [`instances/convolution.md`](./instances/convolution.md)
+12. [`library/kernels/conv/docs/convolution.md`](../../library/kernels/conv/docs/convolution.md) — convolution builders (library-owned)
 13. [`instances/attention.md`](./instances/attention.md)
 14. [`instances/small_ops.md`](./instances/small_ops.md)
 15. [`runtime/compile_launch_and_manifest.md`](./runtime/compile_launch_and_manifest.md)

@@ -64,6 +64,12 @@ void printLaneSummary(const LaneTally& lane, std::ostream& out)
             << " registered are known reference gaps (see knownReferenceGaps()): they assert "
                "the reference declines the graph, and are NOT validated against golden data";
     }
+    if(lane.disabledByMetadata > 0)
+    {
+        out << "\n       " << lane.disabledByMetadata
+            << " bundle(s) disable this reference in their metadata (no_cpu_reference / "
+               "no_gpu_reference): each is a skipping test naming the flag, not validated here";
+    }
     if(lane.noGoldenOutputs > 0)
     {
         out << "\n       " << lane.noGoldenOutputs
@@ -82,6 +88,10 @@ const char* toString(LaneVerdict verdict)
     {
     case LaneVerdict::NO_GOLDEN_OUTPUTS:
         return "carries no golden outputs";
+    case LaneVerdict::DISABLED_BY_METADATA:
+        return "disabled by bundle metadata";
+    case LaneVerdict::DISABLED_WITH_GAP_ENTRY:
+        return "disabled by bundle metadata and also a known reference gap";
     case LaneVerdict::OUTSIDE_OP_SET:
         return "outside its supported-op set";
     case LaneVerdict::TOO_COSTLY:
@@ -97,11 +107,25 @@ const char* toString(LaneVerdict verdict)
 
 LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
                       const std::string& bundleId,
-                      ReferenceExecutorType reference)
+                      ReferenceExecutorType reference,
+                      const std::vector<KnownReferenceGap>& gaps)
 {
     if(!bundle.hasGoldenOutputs)
     {
         return LaneVerdict::NO_GOLDEN_OUTPUTS;
+    }
+    // Checked right after golden: a bundle that opts a reference out of verifying it
+    // has said everything about this lane, whatever the op set or cost would add.
+    // The gap entry is looked up here too, because a disabled lane never reaches the
+    // check at the end, and an entry nothing consults is a gap nobody will notice
+    // closing.
+    const bool disabled = reference == ReferenceExecutorType::GPU ? bundle.metadata.noGpuReference
+                                                                  : bundle.metadata.noCpuReference;
+    if(disabled)
+    {
+        return findKnownReferenceGap(gaps, reference, bundleId) != nullptr
+                   ? LaneVerdict::DISABLED_WITH_GAP_ENTRY
+                   : LaneVerdict::DISABLED_BY_METADATA;
     }
     if(!referenceCoversGraph(reference, bundle.graphBuffer.data(), bundle.graphBuffer.size()))
     {
@@ -119,7 +143,7 @@ LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
     }
     // Checked last, so a gap entry only changes the outcome for a bundle this
     // reference would otherwise validate.
-    if(findKnownReferenceGap(reference, bundleId) != nullptr)
+    if(findKnownReferenceGap(gaps, reference, bundleId) != nullptr)
     {
         return LaneVerdict::KNOWN_GAP;
     }
@@ -130,6 +154,7 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                                         const GoldenDataSession& session)
 {
     const auto lanes = selectedLanes(session);
+    const auto& gaps = session.gaps != nullptr ? *session.gaps : knownReferenceGaps();
     const bool crossCheck = session.cpuSelected && session.gpuSelected;
 
     GoldenDataPlan plan;
@@ -163,7 +188,7 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                   + BundleReferenceValidationHarness::referenceLabel(reference);
             auto& tally = plan.lanes[lane];
 
-            const auto verdict = judgeLane(*bundle.bundle, bundleId, reference);
+            const auto verdict = judgeLane(*bundle.bundle, bundleId, reference, gaps);
             verdictByReference.at(reference == ReferenceExecutorType::CPU ? 0 : 1) = verdict;
 
             switch(verdict)
@@ -174,6 +199,44 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                 // data. Counted rather than assumed away so it surfaces instead of
                 // skewing the registered-of-total line.
                 tally.noGoldenOutputs++;
+                break;
+            case LaneVerdict::DISABLED_BY_METADATA:
+                tally.disabledByMetadata++;
+                accounted = true;
+                laneTests[lane].push_back(PlannedTest{
+                    PlannedKind::SKIP,
+                    index,
+                    reference,
+                    suiteName,
+                    bundle.testName,
+                    std::string("Bundle metadata disables the ")
+                        + BundleReferenceValidationHarness::referenceLabel(reference)
+                        + " reference ("
+                        + (reference == ReferenceExecutorType::GPU ? "no_gpu_reference"
+                                                                   : "no_cpu_reference")
+                        + "), so this lane does not validate its golden data.\n  bundle: "
+                        + bundle.jsonPath.string(),
+                    std::nullopt});
+                break;
+            case LaneVerdict::DISABLED_WITH_GAP_ENTRY:
+                tally.disabledByMetadata++;
+                accounted = true;
+                laneTests[lane].push_back(PlannedTest{
+                    PlannedKind::FAIL,
+                    index,
+                    reference,
+                    suiteName,
+                    bundle.testName,
+                    std::string("Bundle metadata disables the ")
+                        + BundleReferenceValidationHarness::referenceLabel(reference)
+                        + " reference ("
+                        + (reference == ReferenceExecutorType::GPU ? "no_gpu_reference"
+                                                                   : "no_cpu_reference")
+                        + ") and knownReferenceGaps() also lists this bundle for the same lane. "
+                          "The lane never runs it, so the gap entry could never go stale: remove "
+                          "the metadata flag or the gap entry.\n  bundle: "
+                        + bundle.jsonPath.string(),
+                    std::nullopt});
                 break;
             case LaneVerdict::OUTSIDE_OP_SET:
                 tally.outsideOpSet++;
@@ -218,13 +281,14 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                 tally.knownGaps++;
                 accounted = true;
                 // judgeLane() just found this entry, so the lookup cannot come back empty.
-                laneTests[lane].push_back(PlannedTest{PlannedKind::EXPECT_DECLINE,
-                                                      index,
-                                                      reference,
-                                                      suiteName,
-                                                      bundle.testName,
-                                                      {},
-                                                      *findKnownReferenceGap(reference, bundleId)});
+                laneTests[lane].push_back(
+                    PlannedTest{PlannedKind::EXPECT_DECLINE,
+                                index,
+                                reference,
+                                suiteName,
+                                bundle.testName,
+                                {},
+                                *findKnownReferenceGap(gaps, reference, bundleId)});
                 break;
             case LaneVerdict::VALIDATE:
                 tally.validated++;

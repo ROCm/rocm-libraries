@@ -278,9 +278,10 @@ class WmmaFmhaDecodeSpec:
         return bool(self.bias or self.softcap or self.alibi or self.qq_bias)
 
     # ---- hipDNN catalog metadata ----
-    # hipkernel:Gfx1151WmmaAttention ships this spec beside WmmaFmhaFwdV2Spec, and
-    # its IngestorGenerator specialization binds each matcher field to one accessor
-    # both specs define (configs/gfx1151_wmma_attention.yaml).
+    # hipkernel:Gfx1151WmmaAttentionDecode ships this spec, and
+    # hipkernel:Gfx1151WmmaAttention WmmaFmhaFwdV2Spec; both IngestorGenerator
+    # specializations bind each matcher field to one accessor both specs define
+    # (configs/gfx1151_wmma_attention_decode.yaml, configs/gfx1151_wmma_attention.yaml).
     def catalog_kind(self) -> str:
         """``"decode"``: this object runs the split-KV decode (with its merge)."""
         return "decode"
@@ -1591,15 +1592,24 @@ def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
     sloop = b.scf_for_iter(c0, n_grp, c1, iter_args=iter_args, iv_name="sg")
     with sloop as (sg, st):
         lses, parts = [], []
+        zero = b.zero_vec_f32(_MERGE_COLS)
         for i in range(U):
             s = b.add(b.mul(sg, ci(U)), ci(i))
             ok = b.cmp_lt(s, ns)
             prow = b.add(row_ns, b.select(ok, s, c0))
             lses.append(b.select(ok, b.global_load_f32(ws_lse, prow), ninf))
             base = b.mul(prow, dv)
+            # A padded slot (s >= ns) re-reads split 0's partial, which may be Inf; its
+            # zero weight would then give Inf * 0 = NaN, so it contributes a zero vector.
             parts.append(
                 [
-                    b.global_load_vN(ws_o, b.add(base, cv), F32, _MERGE_COLS, align=16)
+                    b.select(
+                        ok,
+                        b.global_load_vN(
+                            ws_o, b.add(base, cv), F32, _MERGE_COLS, align=16
+                        ),
+                        zero,
+                    )
                     for cv in cols
                 ]
             )

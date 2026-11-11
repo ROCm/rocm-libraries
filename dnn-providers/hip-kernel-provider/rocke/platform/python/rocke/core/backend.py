@@ -74,6 +74,8 @@ agrees.
 
 from __future__ import annotations
 
+import dataclasses
+import importlib
 import os
 import sys
 from dataclasses import dataclass
@@ -271,7 +273,7 @@ def _lower_via_cpp_engine(
 
     Raises :class:`BackendError` if the engine extension is unavailable.
     """
-    engine = _import_engine()
+    engine = import_engine()
     flavor = llvm_flavor
     if flavor is None:
         from .lower_llvm import _resolve_llvm_flavor
@@ -286,11 +288,14 @@ def _lower_via_cpp_engine(
 
     if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
+    refused = getattr(engine, "ArchDomainError", None)
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
     except (
         Exception
     ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+        if refused is not None and isinstance(e, refused):
+            raise _arch_domain_refusal(str(e)) from None
         msg = str(e)
         if "unknown opcode" in msg:
             so = getattr(engine, "__file__", "<unknown>")
@@ -300,6 +305,36 @@ def _lower_via_cpp_engine(
                 f"it (the .so predates the opcode). Loaded from: {so}"
             ) from e
         raise
+
+
+def _arch_domain_refusal(message: str) -> Exception:
+    """The C++ engine's arch-domain refusal, as the Python lowerer raises it.
+
+    The engine passes only its message, which ``domain.message`` formats and
+    ``domain.parse_message`` reads back. The cell is then looked up again in
+    this checkout's table, so a refusal the Python side would not make -- an
+    extension built from other columns or waivers -- is reported as the
+    engines disagreeing rather than passed off as a verdict.
+    """
+    from .arch import domain as arch_domain
+    from .lower_llvm import ArchDomainError
+
+    parsed = arch_domain.parse_message(message)
+    table = arch_domain.load(parsed[2]) if parsed is not None else None
+    cell = table.lookup(parsed[0], parsed[1]) if table is not None else None
+    if (
+        parsed is None
+        or cell is None
+        or not arch_domain.is_negative(cell.status)
+        or arch_domain.is_waived(*parsed[:3])
+    ):
+        return BackendMismatch(
+            "the C++ engine refused a lowering that this checkout's arch-domain "
+            f"table does not refuse ({message!r}); the rocke_engine extension "
+            "was built from other columns or waivers -- rebuild it"
+        )
+    key, arch, flavor, _ = parsed
+    return ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
 
 
 def _effective_flavor(llvm_flavor: Optional[str]) -> str:
@@ -357,9 +392,9 @@ def lower_kernel_via_backend(
     # The Python lowerer reads the mode only for a kernel that demands an
     # intrinsic and the C++ path only in its post-pass, so one bad value used to
     # raise for some kernels and some backends and be ignored by the rest.
-    from .lower_llvm import _arch_domain_mode
+    from .arch import domain as arch_domain
 
-    _arch_domain_mode()
+    arch_domain.mode()
 
     chosen = resolve_backend()
 
@@ -376,12 +411,18 @@ def lower_kernel_via_backend(
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
     from .ir_serialize import serialize
+    from .lower_llvm import ArchDomainError
 
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
             flavor = _effective_flavor(llvm_flavor)
             out = _lower_via_cpp_engine(ir_text, _arch, flavor)
+        except ArchDomainError:
+            # A verdict about the kernel, not an engine failure. The Python
+            # lowerer reads the same table and would refuse the same kernel, so
+            # falling back would only print a misleading "fell back" line first.
+            raise
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
@@ -408,10 +449,39 @@ def lower_kernel_via_backend(
     # One flavor for both engines: each resolving for itself could compare IR
     # lowered at two different flavors and report the gap as a parity failure.
     flavor = _effective_flavor(llvm_flavor)
-    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    #
+    # An arch-domain refusal is compared like the IR is: both engines must
+    # refuse, over the same intrinsic, or this is a mismatch. The refusal is
+    # what `both` returns then, as the other modes do.
+    try:
+        py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    except ArchDomainError as py_refusal:
+        try:
+            _lower_via_cpp_engine(serialize(kernel), _arch, flavor)
+        except ArchDomainError as cpp_refusal:
+            if (cpp_refusal.key, cpp_refusal.arch, cpp_refusal.flavor) == (
+                py_refusal.key,
+                py_refusal.arch,
+                py_refusal.flavor,
+            ):
+                raise py_refusal from None
+            raise BackendMismatch(
+                f"python vs cpp engine refused kernel '{name}' on {_arch} over "
+                f"different intrinsics: python {py_refusal.key!r}, cpp "
+                f"{cpp_refusal.key!r}"
+            ) from py_refusal
+        raise BackendMismatch(
+            f"the python lowerer refused kernel '{name}' on {_arch} and the cpp "
+            f"engine lowered it: {py_refusal}"
+        ) from py_refusal
     ir_text = serialize(kernel)
     try:
         cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
+    except ArchDomainError as cpp_refusal:
+        raise BackendMismatch(
+            f"the cpp engine refused kernel '{name}' on {_arch} and the python "
+            f"lowerer lowered it: {cpp_refusal}"
+        ) from cpp_refusal
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError
@@ -435,8 +505,12 @@ def lower_kernel_via_backend(
 # ------------------------------------------------------------------ binding
 
 
-def _import_engine():
-    """Import and return the ``rocke_engine`` extension module.
+def import_engine(module: str = "rocke_engine"):
+    """Import and return a C++ engine extension module.
+
+    ``rocke_engine`` carries the engine's own families. Library-owned families
+    (``library/cpp``) bind into ``rocke_library_engine``, which the same build
+    places beside it; their bridges pass that name.
 
     Raises :class:`BackendError` with actionable build guidance when the
     extension is not importable (it is built out-of-tree into a temporary
@@ -444,15 +518,14 @@ def _import_engine():
     package must be installed alongside the built extension).
     """
     try:
-        import rocke_engine  # type: ignore
+        return importlib.import_module(module)
     except ImportError as e:
         raise BackendError(
-            "the C++ engine extension 'rocke_engine' is not importable: "
+            f"the C++ engine extension {module!r} is not importable: "
             f"{e}. Build it from cpp/bindings/ (see its README) and put "
             "the resulting build directory on sys.path, then retry with "
             "backend='cpp' or backend='both'."
         ) from e
-    return rocke_engine
 
 
 # ------------------------------------------------- spec dict serialization
@@ -464,56 +537,19 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
     The binding accepts a flat key view that mirrors every
     ``TileSpec`` / ``TraitSpec`` / ``DataSpec`` field plus the top-level
-    scalars. Keeping this converter in one place is the single source of
-    truth for the Python-spec -> C-engine-spec mapping.
+    scalars. The dict takes every field from the dataclasses (see
+    :func:`_gemm_subspec_to_dict`), so a new field is always in it; the binding
+    still reads each key by name (``fill_universal_spec`` in
+    ``cpp/bindings/rocke_engine.cpp``), so a new field must also be read there,
+    or ``backend="cpp"`` keeps the C default for it without a word.
+    ``tests/core/test_gemm_spec_dict_binding_parity.py`` fails when the keys
+    this dict (or the batched, grouped or FlatMM dict) writes and the keys the
+    binding reads differ.
     """
-    t = spec.tile
-    tr = spec.trait
-    d = spec.data
-    return dict(
-        name=spec.name,
-        # tile geometry
-        tile_m=t.tile_m,
-        tile_n=t.tile_n,
-        tile_k=t.tile_k,
-        warp_m=t.warp_m,
-        warp_n=t.warp_n,
-        warp_k=t.warp_k,
-        warp_tile_m=t.warp_tile_m,
-        warp_tile_n=t.warp_tile_n,
-        warp_tile_k=t.warp_tile_k,
-        # trait
-        pipeline=tr.pipeline,
-        scheduler=tr.scheduler,
-        epilogue=tr.epilogue,
-        pad_m=tr.pad_m,
-        pad_n=tr.pad_n,
-        pad_k=tr.pad_k,
-        persistent=tr.persistent,
-        chiplet_swizzle=tr.chiplet_swizzle,
-        chiplet_wgm=tr.chiplet_wgm,
-        chiplet_num_xcds=tr.chiplet_num_xcds,
-        chiplet_chunk_size=tr.chiplet_chunk_size,
-        waves_per_eu=tr.waves_per_eu,
-        preshuffle_b=tr.preshuffle_b,
-        direct_to_lds=tr.direct_to_lds,
-        dtl_cache_a=tr.dtl_cache_a,
-        dtl_cache_b=tr.dtl_cache_b,
-        dtl_prefetch=tr.dtl_prefetch,
-        active_tile_skip=tr.active_tile_skip,
-        lds_k_pad=tr.lds_k_pad,
-        lds_swizzle=tr.lds_swizzle,
-        # data
-        dtype_a=d.dtype_a,
-        dtype_b=d.dtype_b,
-        dtype_c=d.dtype_c,
-        dtype_acc=d.dtype_acc,
-        layout=d.layout,
-        # top-level scalars
-        wave_size=spec.wave_size,
-        block_size=spec.block_size,
-        batched=spec.batched,
-    )
+    d = _gemm_subspec_to_dict(spec)
+    d.update(_dataclass_items(spec.data))
+    d.update(name=spec.name, batched=spec.batched)
+    return d
 
 
 # ---------------------------------------------------------------- diff util
@@ -638,7 +674,7 @@ def _lower_python(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
 
 def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
     """C++-engine lowering of a universal-GEMM spec via ``rocke_engine``."""
-    engine = _import_engine()
+    engine = import_engine()
     sd = universal_gemm_spec_to_dict(spec)
     ll = engine.gemm_lower_llvm(sd, arch=arch)
     ir = ""
@@ -661,49 +697,25 @@ def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
 # =====================================================================
 
 
-def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
-    """Flatten the tile/trait pair shared by the GEMM-wrapper families
-    (batched / grouped / flatmm) into the dict the binding consumes.
+def _dataclass_items(obj: Any) -> Dict[str, Any]:
+    """``{field: value}`` for every field of a dataclass instance, shallow."""
+    return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
 
-    The binding reads the same flat tile/trait key view as the universal GEMM,
-    so this reuses those field names. The caller layers the family-specific
-    scalars (``dtype``, ``batch_size`` …) on top.
+
+def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
+    """Flatten the tile/trait pair shared by the GEMM families (universal,
+    batched, grouped, flatmm) into the dict the binding consumes.
+
+    Every ``TileSpec`` and ``TraitSpec`` field is taken from the dataclasses
+    rather than listed by hand: a field missing from the dict reaches the C
+    engine as its default, so it would validate and plan a different kernel.
+    The caller layers the family-specific scalars (``dtype``, ``batch_size`` …)
+    on top.
     """
-    t = spec.tile
-    tr = spec.trait
-    return dict(
-        tile_m=t.tile_m,
-        tile_n=t.tile_n,
-        tile_k=t.tile_k,
-        warp_m=t.warp_m,
-        warp_n=t.warp_n,
-        warp_k=t.warp_k,
-        warp_tile_m=t.warp_tile_m,
-        warp_tile_n=t.warp_tile_n,
-        warp_tile_k=t.warp_tile_k,
-        pipeline=tr.pipeline,
-        scheduler=tr.scheduler,
-        epilogue=tr.epilogue,
-        pad_m=tr.pad_m,
-        pad_n=tr.pad_n,
-        pad_k=tr.pad_k,
-        persistent=tr.persistent,
-        chiplet_swizzle=tr.chiplet_swizzle,
-        chiplet_wgm=tr.chiplet_wgm,
-        chiplet_num_xcds=tr.chiplet_num_xcds,
-        chiplet_chunk_size=tr.chiplet_chunk_size,
-        waves_per_eu=tr.waves_per_eu,
-        preshuffle_b=tr.preshuffle_b,
-        direct_to_lds=tr.direct_to_lds,
-        dtl_cache_a=tr.dtl_cache_a,
-        dtl_cache_b=tr.dtl_cache_b,
-        dtl_prefetch=tr.dtl_prefetch,
-        active_tile_skip=tr.active_tile_skip,
-        lds_k_pad=tr.lds_k_pad,
-        lds_swizzle=tr.lds_swizzle,
-        wave_size=spec.wave_size,
-        block_size=spec.block_size,
-    )
+    d = _dataclass_items(spec.tile)
+    d.update(_dataclass_items(spec.trait))
+    d.update(wave_size=spec.wave_size, block_size=spec.block_size)
+    return d
 
 
 # ----------------------------- spec_to_dict ---------------------------
@@ -764,7 +776,6 @@ def block_scale_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         group_k=gk,
         block_tile_m=spec.block_tile_m,
         block_tile_n=spec.block_tile_n,
-        per_input_row=spec.per_input_row,
     )
 
 
@@ -849,221 +860,6 @@ def gemm_multi_abd_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
-def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
-    """:class:`ConvProblem` -> dict (shared by conv_implicit_gemm / img2col).
-
-    The filter-window extent is named ``Y``/``X`` in the C engine; on this
-    branch the Python ``ConvProblem`` still exposes it as ``R``/``S`` (the
-    merge-target rename to ``Y``/``X`` is a separate change). Read whichever the
-    Python object exposes and always emit the engine's ``Y``/``X`` keys.
-    3-D fields are passed through when present (default 2-D leaves them 0)."""
-    y = getattr(p, "Y", None)
-    if y is None:
-        y = p.R
-    x = getattr(p, "X", None)
-    if x is None:
-        x = p.S
-    d = dict(
-        N=p.N,
-        Hi=p.Hi,
-        Wi=p.Wi,
-        C=p.C,
-        K=p.K,
-        Y=y,
-        X=x,
-        sH=p.sH,
-        sW=p.sW,
-        pH=p.pH,
-        pW=p.pW,
-        dH=p.dH,
-        dW=p.dW,
-        groups=getattr(p, "groups", 1),
-    )
-    for f in ("Di", "Z", "sD", "pD", "dD"):
-        v = getattr(p, f, None)
-        if v is not None:
-            d[f] = v
-            d["is_3d"] = True
-    return d
-
-
-def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
-    """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
-    fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
-    binding leaves them at the engine default (Python ``None``) otherwise."""
-    d = dict(
-        problem=_conv_problem_to_dict(spec.problem),
-        name=spec.name,
-        tile_m=spec.tile_m,
-        tile_n=spec.tile_n,
-        tile_k=spec.tile_k,
-        warp_m=spec.warp_m,
-        warp_n=spec.warp_n,
-        warp_tile_m=spec.warp_tile_m,
-        warp_tile_n=spec.warp_tile_n,
-        warp_tile_k=spec.warp_tile_k,
-        wave_size=spec.wave_size,
-        pipeline=spec.pipeline,
-        epilogue=spec.epilogue,
-        async_dma=spec.async_dma,
-        unroll_k=spec.unroll_k,
-        chiplet_swizzle=spec.chiplet_swizzle,
-        chiplet_wgm=spec.chiplet_wgm,
-        chiplet_num_xcds=spec.chiplet_num_xcds,
-        chiplet_chunk_size=spec.chiplet_chunk_size,
-        k0_k1_split=spec.k0_k1_split,
-        groups=spec.groups,
-        # Changes the emitted kernel and its launch grid; dropped, the engine
-        # would build an unmerged kernel under a merged spec's name and grid.
-        group_merge=getattr(spec, "group_merge", 1),
-    )
-    # dtype_* and the vector-size/optional knobs are merge-target additions
-    # (#8624); forward them only when this branch's spec exposes them so the
-    # binding falls back to the engine default otherwise.
-    for f in (
-        "dtype_a",
-        "dtype_b",
-        "dtype_d",
-        "dtype_acc",
-        "lds_k_pad",
-        "waves_per_eu",
-        "vector_size_a",
-        "vector_size_b",
-        "vector_size_c",
-    ):
-        v = getattr(spec, f, None)
-        if v is not None:
-            d[f] = v
-    return d
-
-
-def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
-    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` -> flat dict.
-    ``kind`` ("16c"|"4c") selects the binding's spec path. The 16c-only
-    ``double_buffer``/``fold_k32`` fields are forwarded when present."""
-    p = spec.problem
-    d = dict(
-        kind=kind,
-        problem=dict(
-            N=p.N,
-            H=p.H,
-            W=p.W,
-            groups=p.groups,
-            cpg=p.cpg,
-            kpg=p.kpg,
-            KH=p.KH,
-            KW=p.KW,
-            PAD=p.PAD,
-            stride=p.stride,
-            dil_h=p.dil_h,
-            dil_w=p.dil_w,
-        ),
-        name=spec.name,
-        block_q=spec.block_q,
-        block_groups=spec.block_groups,
-        wave_size=spec.wave_size,
-    )
-    for f in ("double_buffer", "fold_k32"):
-        v = getattr(spec, f, None)
-        if v is not None:
-            d[f] = v
-    return d
-
-
-def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
-    """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
-    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
-    p = spec.problem
-    return dict(
-        problem=dict(
-            N=p.N,
-            H=p.H,
-            W=p.W,
-            groups=p.groups,
-            cpg=p.cpg,
-            kpg=p.kpg,
-            KH=p.KH,
-            KW=p.KW,
-            PAD=p.PAD,
-            stride=p.stride,
-            dil_h=p.dil_h,
-            dil_w=p.dil_w,
-            dtype=p.dtype,
-        ),
-        name=spec.name,
-        tile_h=spec.tile_h,
-        tile_w=spec.tile_w,
-        tile_k=spec.tile_k,
-        ck=spec.ck,
-        waves_m=spec.waves_m,
-        waves_n=spec.waves_n,
-        atom=spec.atom,
-        wave_size=spec.wave_size,
-        lds_pad=spec.lds_pad,
-        chiplet_swizzle=spec.chiplet_swizzle,
-        swizzle_wgm=spec.swizzle_wgm,
-        chiplet_chunk=spec.chiplet_chunk,
-        num_xcds=spec.num_xcds,
-        double_buffer=spec.double_buffer,
-        iglp=spec.iglp,
-        waves_per_eu=spec.waves_per_eu,
-    )
-
-
-def img2col_spec_to_dict(spec: Any) -> Dict[str, Any]:
-    """:class:`Img2ColSpec` -> flat dict (problem nested)."""
-    return dict(
-        problem=_conv_problem_to_dict(spec.problem),
-        dtype=spec.dtype,
-        block_tile_m=spec.block_tile_m,
-        block_tile_k=spec.block_tile_k,
-        vec_k=spec.vec_k,
-        name=spec.name,
-    )
-
-
-def deep_fused_conv_pool_spec_to_dict(spec: Any) -> Dict[str, Any]:
-    """:class:`DeepFusedConvPoolSpec` -> the factory-argument dict the binding
-    feeds to ``rocke_make_deep_fused_conv_pool_spec``. The factory derives the
-    same fields both engines do, so the flat conv/pool shape + tiling knobs are
-    sufficient."""
-    prob = spec.problem
-    conv = prob.conv
-    r = getattr(conv, "Y", None)
-    if r is None:
-        r = conv.R
-    s = getattr(conv, "X", None)
-    if s is None:
-        s = conv.S
-    return dict(
-        n=conv.N,
-        h=conv.Hi,
-        w=conv.Wi,
-        c=conv.C,
-        k0=conv.K,
-        k1=prob.conv1_k,
-        r=r,
-        s=s,
-        pool_tile_h=spec.pool_tile_h,
-        pool_tile_w=spec.pool_tile_w,
-        tile_n=spec.tile_n,
-        tile_k=spec.tile_k,
-        conv1_tile_k=spec.conv1_tile_k,
-        warp_m=spec.warp_m,
-        warp_n=spec.warp_n,
-        warp_tile_m=spec.warp_tile_m,
-        warp_tile_n=spec.warp_tile_n,
-        warp_tile_k=spec.warp_tile_k,
-        wave_size=spec.wave_size,
-        name=spec.name,
-        pipeline=spec.pipeline,
-        unroll_k=spec.unroll_k,
-        async_dma=spec.async_dma,
-        cache_input_footprint=spec.cache_input_footprint,
-        direct_conv0_from_input_cache=spec.direct_conv0_from_input_cache,
-    )
-
-
 # --------------------------- generic dispatch -------------------------
 
 
@@ -1092,23 +888,27 @@ def _diff_and_pick(
     return GemmLowerResult(BACKEND_BOTH, py_ll, py_ir if want_ir else "")
 
 
-def _lower_family(
+def lower_family(
+    *,
     family: str,
-    spec: Any,
     arch: str,
     backend: Optional[str],
     want_ir: bool,
-    py_fn,
-    cpp_ll_fn,
-    cpp_ir_fn,
+    py_fn: Callable[[bool], Tuple[str, str]],
+    cpp_ll_fn: Callable[[], str],
+    cpp_ir_fn: Callable[[], str],
     spec_name: str,
 ) -> "GemmLowerResult":
     """The family-agnostic python/cpp/both driver.
 
     ``py_fn(want_ir) -> (ll, ir)`` runs the native Python engine.
-    ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the ``rocke_engine``
-    binding for this family. The selection precedence and the differential
-    comparison are identical to :func:`lower_universal_gemm`.
+    ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the C++ binding for
+    this family. ``family`` and ``spec_name`` only label a mismatch report.
+    The selection precedence and the differential comparison are identical to
+    :func:`lower_universal_gemm`.
+
+    Public so a library-owned family's bridge (``library/kernels``) drives its
+    ``rocke_library_engine`` binding through the same selection and diff.
     """
     chosen = resolve_backend(backend)
 
@@ -1130,7 +930,8 @@ def _lower_family(
     )
 
 
-def _name_of(spec: Any) -> str:
+def name_of(spec: Any) -> str:
+    """The spec's kernel name, for backend mismatch reports."""
     return getattr(spec, "name", "?")
 
 
@@ -1156,18 +957,17 @@ def lower_batched_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = batched_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "batched GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.batched_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.batched_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="batched GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.batched_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.batched_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1193,18 +993,17 @@ def lower_grouped_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = grouped_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "grouped GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.grouped_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.grouped_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="grouped GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.grouped_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.grouped_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1230,18 +1029,17 @@ def lower_flatmm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = flatmm_spec_to_dict(spec)
-    return _lower_family(
-        "flatmm",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.flatmm_lower_llvm(sd, arch=arch),
-        lambda: eng.flatmm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="flatmm",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.flatmm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.flatmm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1267,18 +1065,17 @@ def lower_streamk_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = streamk_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "stream-K GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.streamk_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.streamk_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="stream-K GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.streamk_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.streamk_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1304,18 +1101,17 @@ def lower_block_scale_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = block_scale_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "block-scale GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.block_scale_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.block_scale_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="block-scale GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.block_scale_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.block_scale_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1341,18 +1137,17 @@ def lower_mx_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = mx_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "mx GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.mx_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.mx_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="mx GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.mx_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.mx_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1378,18 +1173,17 @@ def lower_mfma_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = mfma_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "mfma GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.mfma_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.mfma_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="mfma GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.mfma_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.mfma_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1416,18 +1210,17 @@ def lower_matmul_nbits(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = matmul_nbits_spec_to_dict(spec)
-    return _lower_family(
-        "matmul_nbits",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.matmul_nbits_lower_llvm(sd, arch=arch),
-        lambda: eng.matmul_nbits_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="matmul_nbits",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.matmul_nbits_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.matmul_nbits_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1453,18 +1246,17 @@ def lower_gemm_multi_d(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = gemm_multi_d_spec_to_dict(spec)
-    return _lower_family(
-        "gemm_multi_d",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.gemm_multi_d_lower_llvm(sd, arch=arch),
-        lambda: eng.gemm_multi_d_serialize_ir(sd, arch=arch),
-        _name_of(spec.base),
+    return lower_family(
+        family="gemm_multi_d",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.gemm_multi_d_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.gemm_multi_d_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec.base),
     )
 
 
@@ -1490,209 +1282,15 @@ def lower_gemm_multi_abd(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = gemm_multi_abd_spec_to_dict(spec)
-    return _lower_family(
-        "gemm_multi_abd",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.gemm_multi_abd_lower_llvm(sd, arch=arch),
-        lambda: eng.gemm_multi_abd_serialize_ir(sd, arch=arch),
-        _name_of(spec.base),
-    )
-
-
-def lower_conv_implicit_gemm(
-    spec: Any,
-    *,
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower an :class:`ImplicitGemmConvSpec`."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
-        from .lower_llvm import lower_kernel_to_llvm
-
-        k = build_implicit_gemm_conv(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = conv_implicit_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "conv_implicit_gemm",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_implicit_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_implicit_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
-    )
-
-
-def lower_conv_direct_grouped(
-    spec: Any,
-    *,
-    kind: str = "16c",
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec`.
-    ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.conv_direct_grouped import (
-            build_direct_conv_16c,
-            build_direct_conv_4c,
-        )
-        from .lower_llvm import lower_kernel_to_llvm
-
-        build = build_direct_conv_4c if kind == "4c" else build_direct_conv_16c
-        k = build(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = conv_direct_grouped_spec_to_dict(spec, kind)
-    return _lower_family(
-        "conv_direct_grouped",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_grouped_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_grouped_serialize_ir(sd, arch=arch),
-        _name_of(spec),
-    )
-
-
-def lower_conv_direct_nongrouped(
-    spec: Any,
-    *,
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower a :class:`DirectNongroupedConvSpec` (the ``groups == 1`` direct conv)."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
-        from .lower_llvm import lower_kernel_to_llvm
-
-        k = build_direct_conv_nongrouped(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = conv_direct_nongrouped_spec_to_dict(spec)
-    return _lower_family(
-        "conv_direct_nongrouped",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
-        _name_of(spec),
-    )
-
-
-def lower_img2col(
-    spec: Any,
-    *,
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower an :class:`Img2ColSpec`."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.img2col import build_img2col
-        from .lower_llvm import lower_kernel_to_llvm
-
-        k = build_img2col(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = img2col_spec_to_dict(spec)
-    return _lower_family(
-        "img2col",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.img2col_lower_llvm(sd, arch=arch),
-        lambda: eng.img2col_serialize_ir(sd, arch=arch),
-        _name_of(spec),
-    )
-
-
-def lower_deep_fused_conv_pool(
-    spec: Any,
-    *,
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower a :class:`DeepFusedConvPoolSpec`."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.deep_fused_conv_pool import (
-            build_deep_fused_conv_pool,
-        )
-        from .lower_llvm import lower_kernel_to_llvm
-
-        k = build_deep_fused_conv_pool(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = deep_fused_conv_pool_spec_to_dict(spec)
-    return _lower_family(
-        "deep_fused_conv_pool",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.deep_fused_conv_pool_lower_llvm(sd, arch=arch),
-        lambda: eng.deep_fused_conv_pool_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="gemm_multi_abd",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.gemm_multi_abd_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.gemm_multi_abd_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec.base),
     )

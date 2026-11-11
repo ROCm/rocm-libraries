@@ -31,10 +31,10 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_compatibility/cudnn/detail/note_triage.h>
@@ -143,7 +143,8 @@ public:
     }
 
     /// @brief Creates execution plans and applies pending plan filters.
-    /// @note Only HeurMode_t::FALLBACK is honored; other modes are accepted with a warning.
+    /// @note A and B select hipDNN's prediction policies; OPENSOURCE is accepted with a warning
+    ///       and runs fallback selection.
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
         warnUnhonoredHeuristicModes(modes);
@@ -218,8 +219,10 @@ public:
 
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
 
-        // Native HEURISTICS_CHOICE only checks the active plan; cuDNN narrows the candidates,
-        // so retarget onto the top-ranked plan this shim's filters did not bar.
+        // Native HEURISTICS_CHOICE moves off a failing active plan for any failure, but never
+        // off a barred active plan; cuDNN narrows the candidates, so retarget onto the
+        // top-ranked plan this shim's filters did not bar. build_plan_at_index does not walk
+        // that fallback, so a failing retarget target returns its error.
         int64_t activeEngineId = -1;
         if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE && !_shimBarredEngineIds.empty()
            && _graph->get_execution_plan_engine_id(activeEngineId).is_good()
@@ -1660,18 +1663,19 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
-    error_t refreshEngineIndexMap(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    // Engine indices are a property of the operation graph, as in cuDNN: they always follow
+    // the FALLBACK ranking, whatever heuristic modes created the plans, so get_engine_count,
+    // get_knobs_for_engine, create_execution_plan and deselect_engines agree on every index.
+    error_t refreshEngineIndexMap()
     {
         _engineIndexToNativeEngineId.clear();
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
-        return _graph->get_ranked_engine_ids(_engineIndexToNativeEngineId, modes);
+        return _graph->get_ranked_engine_ids(_engineIndexToNativeEngineId, {HeurMode_t::FALLBACK});
     }
 
-    error_t mapEngineIndex(int64_t engineIndex,
-                           int64_t& nativeEngineId,
-                           const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    error_t mapEngineIndex(int64_t engineIndex, int64_t& nativeEngineId)
     {
-        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap());
         if(engineIndex < 0
            || static_cast<size_t>(engineIndex) >= _engineIndexToNativeEngineId.size())
         {
@@ -1686,15 +1690,14 @@ private:
     }
 
     error_t mapEngineIndices(const std::vector<int64_t>& engineIndices,
-                             std::vector<int64_t>& nativeEngineIds,
-                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+                             std::vector<int64_t>& nativeEngineIds)
     {
         nativeEngineIds.clear();
         nativeEngineIds.reserve(engineIndices.size());
         for(const auto engineIndex : engineIndices)
         {
             int64_t nativeEngineId = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
             nativeEngineIds.push_back(nativeEngineId);
         }
         return {};
@@ -1733,8 +1736,7 @@ private:
         if(!_barredEngineIndices.empty())
         {
             std::vector<int64_t> nativeEngineIds;
-            CHECK_CUDNN_FRONTEND_ERROR(
-                mapEngineIndices(_barredEngineIndices, nativeEngineIds, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
             _graph->deselect_engines(nativeEngineIds);
             _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }
@@ -1940,13 +1942,7 @@ private:
     {
         for(const auto mode : modes)
         {
-            if(mode != HeurMode_t::FALLBACK)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
-                                   << hipdnn_frontend::to_string(mode)
-                                   << " is accepted but not honored; hipDNN uses fallback "
-                                      "selection. Plan choice may differ from cuDNN.");
-            }
+            cudnn_frontend::detail::warnUnhonoredHeuristicMode(mode);
         }
     }
 

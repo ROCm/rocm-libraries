@@ -5,7 +5,7 @@
 // Declarative pattern definitions for peephole optimizations.
 // Parsed at compile time by TableGen, generates C++ matcher code.
 //
-// Original Python implementations: projects/hipblaslt/tensilelite/Tensile/Activation.py
+// Original Python implementations: projects/hipblaslt/tensilelite/tensilelite/Activation.py
 //
 //===----------------------------------------------------------------------===//
 

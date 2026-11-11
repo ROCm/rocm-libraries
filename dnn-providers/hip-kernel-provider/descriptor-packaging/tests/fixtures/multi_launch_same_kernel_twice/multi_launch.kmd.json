@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "2c940d18-b3a5-42e6-9e90-df81f40acc29",
+  "name": "MultiLaunch variant fields",
+  "fields": [
+    {
+      "name": "family",
+      "type": "string"
+    }
+  ]
+}

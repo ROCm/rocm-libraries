@@ -11,9 +11,8 @@
 #   * the extern "C" C API  -> all `hiptensor`-prefixed (demangled == mangled, no leading _Z)
 #   * the two shared-state singletons the test harness and the library must share one copy of:
 #       hiptensor::HiptensorOptions  and  hiptensor::Logger
-#     reached through hiptensor::LazySingleton<...>, so their member functions, the
-#     LazySingleton<...>::instance() code, its function-local `sInstance` static (_ZZ...),
-#     and that static's guard variable (_ZGVZ...) all stay exported.
+#     Their instance() is a non-template member defined in the library, so their member
+#     functions are all that needs exporting (the function-local static stays local).
 #
 # CAUTION: the kept C++ symbols are mangled `_ZN9hiptensor...` and do NOT start with the
 # literal text "hiptensor", so a bare `hiptensor*;` would hide them and break the test link
@@ -27,17 +26,11 @@
     # extern "C" public API
     hiptensor*;
 
-    # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing
+    # hiptensor::HiptensorOptions (shared singleton)
     _ZN9hiptensor16HiptensorOptions*;
-    _ZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
-    _ZZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
-    _ZGVZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
 
-    # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
+    # hiptensor::Logger (shared singleton)
     _ZN9hiptensor6Logger*;
-    _ZN9hiptensor13LazySingletonINS_6LoggerEE*;
-    _ZZN9hiptensor13LazySingletonINS_6LoggerEE*;
-    _ZGVZN9hiptensor13LazySingletonINS_6LoggerEE*;
 
   local:
     *;

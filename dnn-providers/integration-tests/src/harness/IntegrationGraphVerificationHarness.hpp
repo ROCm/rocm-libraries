@@ -12,7 +12,6 @@
 #include <memory>
 #include <sstream>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -30,8 +29,10 @@
 #include <random>
 #include <vector>
 
+#include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -248,18 +249,28 @@ protected:
         auto initResult = initializeBundle(graph, gpuBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
         initResult = initializeBundle(graph, refBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
+
+        // Only a verified graph is timed.
+        const auto& benchmark = TestConfig::get().benchmarkSettings();
+        if(benchmark.has_value() && !::testing::Test::HasFailure())
+        {
+            auto variantPack = gpuBundle.toDeviceVariantPack();
+            reportBenchmark(benchmarkGraph(graph, getSharedHandle(), variantPack, *benchmark));
+        }
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
@@ -437,6 +448,17 @@ protected:
         }
     }
 
+    // A recipe that cannot fill its tensor is an error in the test, so it fails. A
+    // graph whose inputs the harness cannot fill skips.
+    static void reportFillFailure(const FillResult& result)
+    {
+        if(result.status == FillResult::Status::INVALID)
+        {
+            FAIL() << "input fill failed: " << result.reason;
+        }
+        GTEST_SKIP() << result.reason;
+    }
+
     FillResult fillGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
                                hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
@@ -517,7 +539,7 @@ public:
         }
 
         nlohmann::json meta;
-        meta["format_version"] = 1;
+        meta["format_version"] = requiredFormatVersion(_inputFillRecipes);
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
@@ -548,14 +570,12 @@ public:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        int64_t workspaceSize;
-        auto result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        std::string error;
+        auto workspace = allocatePlanWorkspace(graph, error);
+        ASSERT_TRUE(workspace.has_value()) << error;
 
         auto variantPack = bundle.toDeviceVariantPack();
-        result = graph.execute(handle, variantPack, workspace.get());
+        auto result = graph.execute(handle, variantPack, workspace->get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
