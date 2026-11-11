@@ -309,7 +309,7 @@ int rocke_i_buffer_access_bytes(
             err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
         return 0;
     }
-    /* Python _SCALE_ENCODING_SCALARS: whole bytes, but no value form in the IR
+    /* Python core.storage.SCALE_ENCODINGS: whole bytes, but no value form in the IR
      * (no LLVM or HIP type in either engine). */
     if(strcmp(elem->name, "e8m0") == 0 || strcmp(elem->name, "e5m3") == 0)
     {
@@ -1330,7 +1330,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.gpu_check_failed",
 
     /* tile.global_addr_of */
-    "tile.global_addr_of"};
+    "tile.global_addr_of",
+
+    /* tile.* buffer f32 atomic add with a cache policy */
+    "tile.buffer_atomic_fadd_f32"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1629,7 +1632,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* tile.* gpu_checked_value failure path (effectful) */
     /* gpu_check_failed           */ false,
 
-    /* tile.global_addr_of        */ true};
+    /* tile.global_addr_of        */ true,
+
+    /* tile.* buffer f32 atomic add (effectful) */
+    /* buffer_atomic_fadd_f32     */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

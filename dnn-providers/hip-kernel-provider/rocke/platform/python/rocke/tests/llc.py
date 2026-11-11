@@ -1,8 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Test helper: build small AMDGPU kernels with llc to read the compiler's own
-occupancy report and code objects.
+"""Test helper: find the LLVM tools (:func:`find_llvm_tool`) and build small
+AMDGPU kernels with llc to read the compiler's own occupancy report and code
+objects.
 
 Each kernel uses an exact number of VGPRs (and AGPRs), so a test can compare an
 occupancy model with what the compiler reports for the same register count.
@@ -12,21 +13,26 @@ An llc that does not know a processor gives ``None`` from
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 import unittest
+from pathlib import Path
 
 __all__ = ["find_llvm_tool", "llc_code_object", "llc_occupancy"]
 
 
 def find_llvm_tool(name: str) -> str | None:
-    """The ROCm LLVM tool ``name`` (llc, llvm-readelf), or None when absent."""
-    for candidate in (f"/opt/rocm/llvm/bin/{name}", name):
-        path = shutil.which(candidate)
-        if path:
-            return path
-    return None
+    """The LLVM tool ``name`` (llc, llvm-readelf, llvm-objdump), or None when
+    absent.
+
+    ROCm's own LLVM is tried first (``$ROCM_PATH/llvm/bin``, ``/opt/rocm`` when
+    unset), then ``PATH``: a distro LLVM may lack the AMDGPU target or predate
+    the processor under test.
+    """
+    rocm_bin = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin"
+    return shutil.which(str(rocm_bin / name)) or shutil.which(name)
 
 
 def _vgpr_kernel_ir(vgprs: int, wave_size: int = 32, agprs: int = 0) -> str:
