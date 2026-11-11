@@ -16,7 +16,8 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
-| `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
+| `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaFmaIgemm.cpp`) |
+| `hip/conv_bias_rdna/` | `hipkernel:hip_conv_fwd_bias_fma_igemm_rdna` | `packs/HipConvFwdBiasFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaFmaIgemm.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
@@ -39,6 +40,11 @@ bundle is packed, for every build whose GPU targets include one of the gfx11 and
 targets its KDP declares. It needs neither rocKE nor DVC. Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_fma_igemm_rdna.yaml`; edit the config and
 regenerate rather than editing the JSON.
+
+`hip/conv_bias_rdna/` holds no kernel source of its own: its UKDs name
+`../conv_rdna/kernels/ConvFwdFmaIgemm.cpp`, built with the bias epilogue (`CONV_HAS_BIAS`).
+Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_fma_igemm_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

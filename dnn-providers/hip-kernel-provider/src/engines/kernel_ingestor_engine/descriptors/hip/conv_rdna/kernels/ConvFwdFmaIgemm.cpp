@@ -28,6 +28,9 @@
 //   CONV_CHANNELS_LAST  0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
 //   CONV_WEI_KCZYX      0 = weights K x taps x (C / groups), 1 = K x (C / groups) x taps
 //   TILE_N              output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
+//   CONV_HAS_BIAS       1 = add bias[k] (one value per output channel, the dtype of the data)
+//                       to every output before it is stored; the kernel then takes the bias
+//                       pointer after `out`
 
 #ifndef CONV_DTYPE
 #define CONV_DTYPE 0
@@ -40,6 +43,9 @@
 #endif
 #ifndef TILE_N
 #define TILE_N 128
+#endif
+#ifndef CONV_HAS_BIAS
+#define CONV_HAS_BIAS 0
 #endif
 
 #define TILE_M 128
@@ -91,6 +97,9 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     ConvFwdFmaIgemm(const data_t* __restrict__ in,
                     const data_t* __restrict__ wei,
                     data_t* __restrict__ out,
+#if CONV_HAS_BIAS
+                    const data_t* __restrict__ bias,
+#endif
                     int N,
                     int C,
                     int Di,
@@ -284,6 +293,16 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         __syncthreads();
     }
 
+#if CONV_HAS_BIAS
+    // The bias of this thread's output channels, added in fp32 before the one rounding.
+    float bv[MICRO_N];
+    for(int j = 0; j < MICRO_N; ++j)
+    {
+        const int k = k0 + tn + j * (TILE_N / MICRO_N);
+        bv[j] = k < Kg ? to_float(bias[static_cast<long>(g) * Kg + k]) : 0.f;
+    }
+#endif
+
     for(int i = 0; i < MICRO_M; ++i)
     {
         const long m = m0 + tm + i * (TILE_M / MICRO_M);
@@ -300,8 +319,13 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         for(int j = 0; j < MICRO_N; ++j)
         {
             const int k = k0 + tn + j * (TILE_N / MICRO_N);
+#if CONV_HAS_BIAS
+            const float v = acc[i][j] + bv[j];
+#else
+            const float v = acc[i][j];
+#endif
             if(k < Kg)
-                out_m[k * out_kstride] = from_float(acc[i][j]);
+                out_m[k * out_kstride] = from_float(v);
         }
     }
 }
