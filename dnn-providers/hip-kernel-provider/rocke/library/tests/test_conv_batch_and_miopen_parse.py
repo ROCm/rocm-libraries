@@ -44,6 +44,7 @@ _FLAGS = (
     ],
 )
 def test_implicit_parse_keeps_flags_before_mode(kw, dtype):
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
 
     problem, got_dtype, forw = parse_miopen_cmd(
@@ -59,6 +60,7 @@ def test_implicit_parse_keeps_flags_before_mode(kw, dtype):
 
 
 def test_implicit_parse_rejects_mode_value_as_keyword():
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
 
     with pytest.raises(ValueError, match="No MIOpenDriver keyword"):
@@ -71,6 +73,7 @@ def test_implicit_parse_rejects_mode_value_as_keyword():
 
 
 def test_direct_parse_keeps_flags_before_mode():
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     problem, dtype, forw = parse_miopen_cmd_direct(
@@ -84,6 +87,7 @@ def test_direct_parse_keeps_flags_before_mode():
 
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
 def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     # The fp32 driver keywords give fp32 problems, and TF32 under -M 0 (the
@@ -94,6 +98,7 @@ def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
 
 
 def test_direct_parse_takes_dtype_from_keyword_not_mode_value():
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     # "-m conv" is a flag value, not the fp32 driver keyword.
@@ -103,6 +108,7 @@ def test_direct_parse_takes_dtype_from_keyword_not_mode_value():
 
 
 def test_direct_parse_rejects_mode_value_as_keyword():
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     with pytest.raises(ValueError, match="No MIOpenDriver keyword"):
@@ -114,6 +120,7 @@ def test_direct_parse_rejects_mode_value_as_keyword():
     [("-u 2 -v 1 -p 1 -q 1", "stride"), ("-u 1 -v 1 -p 1 -q 0", "padding")],
 )
 def test_direct_parse_rejects_per_axis_stride_or_padding(geom, what):
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     with pytest.raises(ValueError, match=f"one {what} for both axes"):
@@ -130,18 +137,22 @@ _DW_1X31 = (
 )
 
 
-def test_direct_parse_takes_column_padding_for_depthwise_wgrad():
+# -F 6 (dgrad + wgrad) runs wgrad, as -F 4 does.
+@pytest.mark.parametrize("forw", [4, 6])
+def test_direct_parse_takes_column_padding_for_depthwise_wgrad(forw):
     """A stride-1 depthwise wgrad keeps its column padding (the Toeplitz WMMA
     kernel computes it)."""
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
-    problem, dtype, forw = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))
-    assert (dtype, forw) == ("bf16", 4)
+    problem, dtype, forw = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=forw))
+    assert dtype == "bf16"
     assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (1, 31, 0, 1)
     assert (problem.pad_w, problem.PAD_W) == (15, 15)
 
 
 def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     with pytest.raises(ValueError, match="one padding for both axes"):
@@ -192,6 +203,7 @@ def test_per_axis_pad_variants_name_every_per_axis_variant():
 
 
 def _chunks(direction, problem, dtype="fp16"):
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_implicit_gemm_conv import _batch_chunks
 
     return _batch_chunks(direction, problem, dtype)
@@ -262,6 +274,7 @@ def test_wgrad_slices_need_a_kernel_that_accumulates():
     dW: only the packed-atomic split-K kernels accumulate into it."""
     from types import SimpleNamespace
 
+    pytest.importorskip("torch")
     from benchmarks.common.benchmark_implicit_gemm_conv import _wgrad_accumulates
 
     def ident(split_k, two_stage=False, streamk="off"):

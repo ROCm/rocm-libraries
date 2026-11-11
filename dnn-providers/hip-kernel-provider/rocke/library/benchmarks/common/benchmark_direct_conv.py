@@ -325,7 +325,7 @@ def parse_miopen_cmd_direct(cmd: str):
     # padding for both axes.
     from kernels.conv.direct_variants import per_axis_pad_variants
 
-    direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}.get(miopen_args.forw)
+    direction = _miopen_forw_to_direction(miopen_args.forw)
     pad_w_ok = direction is not None and bool(
         per_axis_pad_variants(
             direction,

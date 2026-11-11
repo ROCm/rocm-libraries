@@ -833,6 +833,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
+        "tests/library/tests/test_conv_batch_and_miopen_parse.py"
         "tests/library/tests/test_direct_wgrad_refusals.py"
         "tests/library/tests/test_direct_depthwise_wgrad_cachepolicy.py"
         "tests/library/tests/test_direct_dw_wgrad_wmma.py"
