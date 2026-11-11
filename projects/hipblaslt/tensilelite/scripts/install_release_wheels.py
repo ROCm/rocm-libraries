@@ -59,6 +59,7 @@ def main(argv=None) -> int:
     parser.add_argument("--destination", required=True, type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--copy-wheels", type=Path)
+    parser.add_argument("--copy-only", action="store_true")
     parser.add_argument("wheels", nargs="*", type=Path)
     args = parser.parse_args(argv)
     wheels = list(args.wheels)
@@ -67,7 +68,10 @@ def main(argv=None) -> int:
         wheels.append(args.manifest.parent / manifest["wheel"])
     if not wheels:
         parser.error("provide wheels or --manifest")
-    install_wheels(wheels, args.destination)
+    if args.copy_only and not args.copy_wheels:
+        parser.error("--copy-only requires --copy-wheels")
+    if not args.copy_only:
+        install_wheels(wheels, args.destination)
     if args.copy_wheels:
         args.copy_wheels.mkdir(parents=True, exist_ok=True)
         for wheel in wheels:

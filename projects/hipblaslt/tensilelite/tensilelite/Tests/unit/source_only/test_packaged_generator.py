@@ -203,8 +203,11 @@ hipblaslt_install_tensilelite_test_wheel("{_SOURCE.as_posix()}" share/tests)
     _configure(tmp_path, build)
     prefix = tmp_path / "prefix"
     _run("cmake", "--install", str(build), "--prefix", str(prefix), "--component", "tests")
-    assert (prefix / "share/tests/tensilelite/explicit_marker.py").is_file()
-    assert [path.name for path in (prefix / "share/tests/wheels").iterdir()] == [wheel.name]
+    installed = prefix / "share/tests/wheels" / wheel.name
+    assert [path.name for path in installed.parent.iterdir()] == [wheel.name]
+    assert installed.read_bytes() == wheel.read_bytes()
+    # The artifact ships the wheel; an unpacked copy would shadow it.
+    assert not (prefix / "share/tests/tensilelite").exists()
     assert not (build / "tensilelite-release-wheels").exists()
 
 

@@ -953,7 +953,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
 
-# Install ROCm-versioned wheels and installed tests for artifact-based testing.
+# Install the tensilelite wheel and installed tests for artifact-based testing.
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     hipblaslt_install_tensilelite_test_wheel("${_tensilelite_src}" "${_tensilelite_install_dest}")
