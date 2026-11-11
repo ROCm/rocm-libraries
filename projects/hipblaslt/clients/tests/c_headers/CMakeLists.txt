@@ -5,8 +5,8 @@
 # fails this build. Not registered with ctest (see ../../CMakeLists.txt for why
 # extra ctest entries break TheRock sharding); building it is the check.
 add_executable(hipblaslt-c-headers-check
-    ${CMAKE_CURRENT_SOURCE_DIR}/c_headers_a.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/c_headers_b.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/c_headers_a_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/c_headers_b_test.c
 )
 set_target_properties(hipblaslt-c-headers-check PROPERTIES
     C_STANDARD 11

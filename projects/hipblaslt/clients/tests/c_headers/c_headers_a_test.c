@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Must build as C, not C++: the public headers wrap their API in extern "C",
-// and C consumers include them directly. This file links with c_headers_b.c,
+// and C consumers include them directly. This file links with c_headers_b_test.c,
 // which includes the same headers, so an object defined with external linkage
 // in a header fails the link. The binary is built, never run.
 

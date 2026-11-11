@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Second C translation unit for the header check; see c_headers_a.c.
+// Second C translation unit for the header check; see c_headers_a_test.c.
 
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-local-kernel.h>
