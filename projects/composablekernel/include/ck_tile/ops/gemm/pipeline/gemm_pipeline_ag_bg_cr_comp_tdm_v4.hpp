@@ -121,10 +121,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     using AElementWise   = remove_cvref_t<typename Problem::AElementWise>;
     using BElementWise   = remove_cvref_t<typename Problem::BElementWise>;
 
-    static constexpr MxTdmV4Spec kSpec = Policy::template GetSpec<Problem>();
     static_assert(mx_tdm_v4::InvalidTuning<Policy::template GetReason<Problem>()>::value,
                   "comp_tdm_v4: the Problem and tuning break a rule of rocKE's validate()");
-    static constexpr MxTdmV4LdsLayout kLayout = Policy::template GetLdsLayout<Problem>();
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr index_t BlockSize      = Problem::kBlockSize;
@@ -167,41 +165,42 @@ struct GemmPipelineAgBgCrCompTDMV4
     using Coords                       = mx_tdm_v4::Coords;
 
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
-    static constexpr index_t kThreads     = kSpec.block_size();
-    static constexpr index_t kTileM       = kSpec.tile_m;
-    static constexpr index_t kTileN       = kSpec.tile_n;
-    static constexpr index_t kTileK       = kSpec.tile_k;
-    static constexpr index_t kWarpM       = kSpec.warp_m;
-    static constexpr index_t kWarpN       = kSpec.warp_n;
-    static constexpr index_t kRm          = kSpec.wave_repeat_m();
-    static constexpr index_t kRn          = kSpec.wave_repeat_n();
-    static constexpr index_t kNumAcc      = kRm * kRn;
-    static constexpr index_t kKSteps      = kSpec.k_steps();
-    static constexpr index_t kAtomM       = kSpec.atom_m();
-    static constexpr index_t kAtomN       = kSpec.atom_n();
-    static constexpr bool kMma32          = kSpec.mma == MxTdmV4Mma::M32N16;
-    static constexpr index_t kCFragLen    = kSpec.c_frag_len();
-    static constexpr index_t kKPerByte    = kSpec.k_per_byte();
-    static constexpr index_t kStepBytes   = kSpec.step_bytes();
-    static constexpr index_t kChunks      = kSpec.chunks_per_lane();
-    static constexpr index_t kRowWords    = kChunks * 4;
-    static constexpr bool kLocalPrefetch  = kSpec.local_prefetch == 1;
-    static constexpr bool kHalfB          = kSpec.half_b();
-    static constexpr bool kHalfBLate      = kSpec.half_b_late();
-    static constexpr index_t kHalf        = kRn / 2;
-    static constexpr bool kHasCluster     = kSpec.has_cluster();
-    static constexpr index_t kClusterX    = kSpec.cluster_x;
-    static constexpr index_t kClusterY    = kSpec.cluster_y;
-    static constexpr index_t kClusterZ    = kSpec.cluster_z;
-    static constexpr index_t kSignalWmmas = kSpec.signal_wmmas();
-    static constexpr index_t kGl2Distance = kSpec.gl2_distance;
-    static constexpr index_t kReadsPerStep =
-        mx_tdm_v4::min_i(kSpec.reads_per_step(), mx_tdm_v4::kDscntMax);
-    static constexpr index_t kWait0       = Policy::template GetDscntWait<Problem>(0);
-    static constexpr index_t kWait1       = Policy::template GetDscntWait<Problem>(1);
-    static constexpr index_t kLatePending = Policy::template GetLatePendingReads<Problem>();
-    using AFrag                           = int32x16_t;
-    using BFrag                           = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
+    static constexpr index_t kThreads         = Policy::template GetBlockSize<Problem>();
+    static constexpr index_t kTileM           = BlockGemmShape::kM;
+    static constexpr index_t kTileN           = BlockGemmShape::kN;
+    static constexpr index_t kTileK           = BlockGemmShape::kK;
+    static constexpr index_t kWarpM           = BlockGemmShape::BlockWarps::at(number<0>{});
+    static constexpr index_t kWarpN           = BlockGemmShape::BlockWarps::at(number<1>{});
+    static constexpr index_t kRm              = Policy::template GetWaveRepeatM<Problem>();
+    static constexpr index_t kRn              = Policy::template GetWaveRepeatN<Problem>();
+    static constexpr index_t kNumAcc          = kRm * kRn;
+    static constexpr index_t kKSteps          = Policy::template GetKSteps<Problem>();
+    static constexpr index_t kAtomM           = BlockGemmShape::WarpTile::at(number<0>{});
+    static constexpr index_t kAtomN           = BlockGemmShape::WarpTile::at(number<1>{});
+    static constexpr bool kMma32              = kAtomM == 32;
+    static constexpr index_t kCFragLen        = Policy::template GetCFragLen<Problem>();
+    static constexpr index_t kKPerByte        = Policy::template GetKPerByte<Problem>();
+    static constexpr index_t kStepBytes       = Policy::template GetStepBytes<Problem>();
+    static constexpr index_t kChunks          = Policy::template GetChunksPerLane<Problem>();
+    static constexpr index_t kRowWords        = kChunks * 4;
+    static constexpr bool kLocalPrefetch      = Policy::template GetLocalPrefetch<Problem>();
+    static constexpr bool kHalfB              = Policy::template GetHalfB<Problem>();
+    static constexpr bool kHalfBLate          = Policy::template GetHalfBLate<Problem>();
+    static constexpr index_t kHalf            = kRn / 2;
+    static constexpr bool kHasCluster         = Policy::HasCluster();
+    static constexpr index_t kClusterX        = Tuning::kClusterDimX;
+    static constexpr index_t kClusterY        = Tuning::kClusterDimY;
+    static constexpr index_t kClusterZ        = Tuning::kClusterDimZ;
+    static constexpr index_t kSignalWmmas     = Policy::template GetSignalWmmas<Problem>();
+    static constexpr index_t kGl2Distance     = Tuning::kGl2PrefetchDistance;
+    static constexpr index_t kReadsPerStep    = Policy::template GetReadsPerStep<Problem>();
+    static constexpr index_t kLdsRowBytes     = Policy::template GetLdsRowBytes<Problem>();
+    static constexpr index_t kLdsBufferStride = Policy::template GetLdsBufferStride<Problem>();
+    static constexpr index_t kWait0           = Policy::template GetDscntWait<Problem>(0);
+    static constexpr index_t kWait1           = Policy::template GetDscntWait<Problem>(1);
+    static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
+    using AFrag                               = int32x16_t;
+    using BFrag                               = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
     using RowFrag = std::conditional_t<kRowWords == 8, int32x8_t, int32x16_t>;
     using CVec    = std::conditional_t<kMma32, fp32x16_t, fp32x8_t>;
     /// The accumulators: one CVec per M and N repeat, index rm * kRn + rn.
@@ -211,7 +210,10 @@ struct GemmPipelineAgBgCrCompTDMV4
     static_assert(CBlockTile::get_thread_buffer_size() == kNumAcc * kCFragLen,
                   "comp_tdm_v4: the C block tile holds the C fragments of every repeat");
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return kLayout.lds_bytes; }
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return Policy::template GetSmemSize<Problem>();
+    }
 
     CK_TILE_HOST static std::string GetName()
     {
@@ -221,11 +223,12 @@ struct GemmPipelineAgBgCrCompTDMV4
     /// The name of an MxGemmKernel of this pipeline: data types, tile, tuning and traits.
     [[nodiscard]] CK_TILE_HOST static std::string GetKernelName()
     {
-        std::string name = std::string("mx_gemm_tdm_v4_mx") + mx_tdm_v4_dtype_name(kSpec.a_dtype);
-        if(kSpec.b_dtype != kSpec.a_dtype)
-            name += mx_tdm_v4_dtype_name(kSpec.b_dtype);
-        name += "_t" + std::to_string(kSpec.tile_m) + "x" + std::to_string(kSpec.tile_n) + "x" +
-                std::to_string(kSpec.tile_k) + mx_tdm_v4_tuning_name(kSpec);
+        constexpr MxTdmV4Spec spec = Policy::template GetSpec<Problem>();
+        std::string name = std::string("mx_gemm_tdm_v4_mx") + mx_tdm_v4_dtype_name(spec.a_dtype);
+        if(spec.b_dtype != spec.a_dtype)
+            name += mx_tdm_v4_dtype_name(spec.b_dtype);
+        name += "_t" + std::to_string(spec.tile_m) + "x" + std::to_string(spec.tile_n) + "x" +
+                std::to_string(spec.tile_k) + mx_tdm_v4_tuning_name(spec);
         if(Traits::kEdgeM || Traits::kEdgeN)
             name += "_edge";
         if(Traits::kWideA || Traits::kWideB || Traits::kWideD)
@@ -390,18 +393,13 @@ struct GemmPipelineAgBgCrCompTDMV4
               a_scale_stride(opaque_scalar(p_.M * 4)),
               b_scale_stride(opaque_scalar(p_.N * 4))
         {
-            if constexpr(kHasCluster)
-            {
-                // Grid x walks N tiles and y walks M tiles: workgroups with the same cluster x
-                // share B, those with the same y share A.
-                b_mask = cluster_mask_same_x(kClusterX, kClusterY, c.cluster_wx);
-                a_mask = cluster_mask_same_y(kClusterX, c.cluster_wy);
-            }
+            b_mask = Policy::template GetTDMWorkgroupMask<false>(c.cluster_wx, c.cluster_wy);
+            a_mask = Policy::template GetTDMWorkgroupMask<true>(c.cluster_wx, c.cluster_wy);
         }
 
         CK_TILE_DEVICE static constexpr index_t BufferBase(index_t parity)
         {
-            return parity * kLayout.buffer_stride;
+            return parity * kLdsBufferStride;
         }
 
         CK_TILE_DEVICE index_t ClampK(index_t k) const { return k < p.K ? k : p.K - kTileK; }
@@ -447,15 +445,19 @@ struct GemmPipelineAgBgCrCompTDMV4
                 .getGroups();
         }
 
-        /// The TDMConfig of an operand: its LDS padding and cluster multicast mask.
-        template <bool Pad, TDMLdsPaddingConfig Padding>
-        CK_TILE_DEVICE static TDMConfig Config(uint32_t workgroup_mask)
+        /// The TDMConfig of A's or B's data or scales: its LDS padding and cluster multicast mask.
+        template <bool IsA, bool IsScale>
+        CK_TILE_DEVICE TDMConfig Config() const
         {
+            const uint32_t workgroup_mask = IsA ? a_mask : b_mask;
             // A cluster has at most 16 workgroups; without this the 16-bit field costs an s_and.
             __builtin_assume(workgroup_mask <= 0xFFFFu);
+            constexpr bool pad_enable = Policy::template GetLdsPadEnable<Problem, IsA, IsScale>();
+            constexpr TDMLdsPaddingConfig padding =
+                Policy::template GetLdsPaddingConfig<Problem, IsA, IsScale>();
             TDMConfig config{};
-            config.pad_enable     = Pad;
-            config.pad_config     = Padding;
+            config.pad_enable     = pad_enable;
+            config.pad_config     = padding;
             config.workgroup_mask = static_cast<uint16_t>(workgroup_mask);
             return config;
         }
@@ -463,11 +465,10 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
-            constexpr MxTdmV4Operand L  = IsA ? kLayout.a : kLayout.b;
+            constexpr MxTdmV4Operand L  = Policy::template GetLdsOperand<Problem, IsA>();
             constexpr bool edge         = IsA ? Traits::kEdgeM : Traits::kEdgeN;
             constexpr bool wide         = IsA ? Traits::kWideA : Traits::kWideB;
             constexpr bool iterate      = L.iterate_rows > 0;
-            constexpr bool pad          = !iterate && L.pad_bytes > 0;
             constexpr index_t tile_rows = iterate ? L.iterate_rows : L.rows;
             const index_t block         = IsA ? c.block_m : c.block_n;
             const uint8_t* base         = IsA ? p.a : p.b;
@@ -476,10 +477,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
             const index_t rows_left = RowsLeft<IsA>(row0);
 
-            constexpr TDMLdsPaddingConfig padding =
-                pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
-                    : TDMLdsPaddingConfig{};
-            TDMConfig config = Config<pad, padding>(IsA ? a_mask : b_mask);
+            TDMConfig config = Config<IsA, false>();
             if constexpr(iterate)
             {
                 constexpr index_t count = L.rows / tile_rows;
@@ -501,7 +499,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                           smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
                           static_cast<uint32_t>(packed_k),
                           static_cast<uint32_t>(rows_left),
-                          kLayout.row_bytes,
+                          kLdsRowBytes,
                           tile_rows,
                           static_cast<uint32_t>(packed_k),
                           config);
@@ -511,9 +509,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups ScaleDescriptor(index_t component) const
         {
-            constexpr MxTdmV4Operand L = IsA ? kLayout.a_scale : kLayout.b_scale;
+            constexpr MxTdmV4Operand L = Policy::template GetLdsOperand<Problem, IsA, true>();
             constexpr bool edge        = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            constexpr bool pad         = L.pad_bytes > 0;
             const index_t block        = IsA ? c.block_m : c.block_n;
             const index_t extent       = IsA ? p.M : p.N;
             const uint8_t* base        = IsA ? p.a_scale : p.b_scale;
@@ -522,17 +519,14 @@ struct GemmPipelineAgBgCrCompTDMV4
             const index_t col0         = mn0 * 4;
             const index_t bytes_left   = edge ? RowsLeft<IsA>(mn0) * 4 : row_stride - col0;
 
-            constexpr TDMLdsPaddingConfig padding =
-                pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
-                    : TDMLdsPaddingConfig{};
             return Groups(base + col0,
                           smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
                           static_cast<uint32_t>(bytes_left),
                           static_cast<uint32_t>(k_atoms),
                           L.rows * 4,
-                          kLayout.k_steps,
+                          kKSteps,
                           static_cast<uint32_t>(row_stride),
-                          Config<pad, padding>(IsA ? a_mask : b_mask));
+                          Config<IsA, true>());
         }
 
         /// Both descriptors for tile 0, buffer 0, selected by wave parity; every word uniform.
@@ -598,12 +592,11 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             if constexpr(kGl2Distance != 0)
             {
-                constexpr index_t line       = mx_tdm_v4::kGl2LineBytes;
-                k_ahead                      = k_ahead < p.K ? k_ahead : p.K - kTileK;
-                const index_t k_byte         = integer_divide_nonnegative<kKPerByte>(k_ahead);
-                constexpr index_t data_lines = kLayout.row_bytes / line == 0 && AheadParity == 0
-                                                   ? 1
-                                                   : kLayout.row_bytes / line;
+                constexpr index_t line = mx_tdm_v4::kGl2LineBytes;
+                k_ahead                = k_ahead < p.K ? k_ahead : p.K - kTileK;
+                const index_t k_byte   = integer_divide_nonnegative<kKPerByte>(k_ahead);
+                constexpr index_t data_lines =
+                    kLdsRowBytes / line == 0 && AheadParity == 0 ? 1 : kLdsRowBytes / line;
                 const index_t cluster_m0 =
                     kHasCluster ? c.block_m - c.cluster_wy * kTileM : c.block_m;
                 const index_t cluster_n0 =
@@ -617,8 +610,8 @@ struct GemmPipelineAgBgCrCompTDMV4
                 constexpr index_t counts[4] = {
                     data_lines ? kClusterY * kTileM * data_lines : 0,
                     data_lines ? kClusterX * kTileN * data_lines : 0,
-                    b_scale_row % line == 0 ? kLayout.k_steps * b_lines_per_row : 0,
-                    a_scale_row % line == 0 ? kLayout.k_steps * a_lines_per_row : 0};
+                    b_scale_row % line == 0 ? kKSteps * b_lines_per_row : 0,
+                    a_scale_row % line == 0 ? kKSteps * a_lines_per_row : 0};
                 constexpr index_t starts[4] = {
                     0, counts[0], counts[0] + counts[1], counts[0] + counts[1] + counts[2]};
                 constexpr index_t total = starts[3] + counts[3];
@@ -722,25 +715,31 @@ struct GemmPipelineAgBgCrCompTDMV4
                                            index_t row,
                                            index_t lane_k) const
         {
-            const uint32_t urow = static_cast<uint32_t>(row);
+            constexpr MxTdmV4Operand a_lds = Policy::template GetLdsOperand<Problem, true>();
+            constexpr MxTdmV4Operand b_lds = Policy::template GetLdsOperand<Problem, false>();
+            const uint32_t urow            = static_cast<uint32_t>(row);
             const index_t base =
                 buffer +
                 static_cast<index_t>(
-                    is_a ? mx_tdm_v4_row_offset<uint32_t>(kLayout.a, kLayout.row_bytes, urow)
-                         : mx_tdm_v4_row_offset<uint32_t>(kLayout.b, kLayout.row_bytes, urow)) +
+                    is_a ? mx_tdm_v4_row_offset<uint32_t>(a_lds, kLdsRowBytes, urow)
+                         : mx_tdm_v4_row_offset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
                 lane_k;
-            const int32x4_t c0 = Load4(base + kSpec.chunk_offset(0));
-            const int32x4_t c1 = Load4(base + kSpec.chunk_offset(1));
+            constexpr index_t o0 = Policy::template GetChunkOffset<Problem>(0);
+            constexpr index_t o1 = Policy::template GetChunkOffset<Problem>(1);
+            const int32x4_t c0   = Load4(base + o0);
+            const int32x4_t c1   = Load4(base + o1);
             if constexpr(kChunks == 2)
             {
                 return __builtin_shufflevector(c0, c1, 0, 1, 2, 3, 4, 5, 6, 7);
             }
             else
             {
-                const int32x4_t c2 = Load4(base + kSpec.chunk_offset(2));
-                const int32x4_t c3 = Load4(base + kSpec.chunk_offset(3));
-                const int32x8_t lo = __builtin_shufflevector(c0, c1, 0, 1, 2, 3, 4, 5, 6, 7);
-                const int32x8_t hi = __builtin_shufflevector(c2, c3, 0, 1, 2, 3, 4, 5, 6, 7);
+                constexpr index_t o2 = Policy::template GetChunkOffset<Problem>(2);
+                constexpr index_t o3 = Policy::template GetChunkOffset<Problem>(3);
+                const int32x4_t c2   = Load4(base + o2);
+                const int32x4_t c3   = Load4(base + o3);
+                const int32x8_t lo   = __builtin_shufflevector(c0, c1, 0, 1, 2, 3, 4, 5, 6, 7);
+                const int32x8_t hi   = __builtin_shufflevector(c2, c3, 0, 1, 2, 3, 4, 5, 6, 7);
                 return __builtin_shufflevector(
                     lo, hi, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             }
@@ -812,18 +811,20 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// A K step's scales and A rows.
         CK_TILE_DEVICE Head ReadHead(index_t buffer, index_t step) const
         {
+            constexpr MxTdmV4Operand as_lds = Policy::template GetLdsOperand<Problem, true, true>();
+            constexpr MxTdmV4Operand bs_lds =
+                Policy::template GetLdsOperand<Problem, false, true>();
             Head h;
             const index_t a_lane = kMma32 ? c.lane : c.lane_col;
             const uint32_t ustep = static_cast<uint32_t>(step);
-            ScaleWords<kRm>(
-                h.as,
-                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                             kLayout.a_scale, ustep, static_cast<uint32_t>(MRow(c, 0, a_lane)))));
-            ScaleWords<kRn>(
-                h.bs,
-                buffer +
-                    static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
-                        kLayout.b_scale, ustep, static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
+            ScaleWords<kRm>(h.as,
+                            buffer +
+                                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                                    as_lds, ustep, static_cast<uint32_t>(MRow(c, 0, a_lane)))));
+            ScaleWords<kRn>(h.bs,
+                            buffer +
+                                static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                                    bs_lds, ustep, static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
             static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
             return h;
         }

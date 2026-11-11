@@ -58,7 +58,8 @@ struct MxAlphaBetaEpilogue
     }
     /// The stores go from the accumulators straight to D.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
-    static constexpr MxTdmV4Spec kSpec = Pipeline::kSpec;
+    static constexpr MxTdmV4Spec kSpec =
+        Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
     static constexpr bool kFp8         = kSpec.out == MxTdmV4OutDtype::Fp8E4M3;
     static constexpr bool kFp16        = kSpec.out == MxTdmV4OutDtype::Fp16;
     static constexpr index_t kOutBytes = kSpec.out_bytes();

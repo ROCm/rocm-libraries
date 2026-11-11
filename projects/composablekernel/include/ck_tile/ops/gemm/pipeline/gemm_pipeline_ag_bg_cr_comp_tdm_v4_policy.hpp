@@ -237,6 +237,160 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
         return GetSpec<Problem>().signal_wmmas();
     }
 
+    /// Threads of the device pass: the waves times 32.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBlockSize()
+    {
+        return GetSpec<Problem>().block_size();
+    }
+
+    /// WMMA atoms per wave along M and N.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatM()
+    {
+        return GetSpec<Problem>().wave_repeat_m();
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatN()
+    {
+        return GetSpec<Problem>().wave_repeat_n();
+    }
+
+    /// 128-wide K steps per K tile.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetKSteps()
+    {
+        return GetSpec<Problem>().k_steps();
+    }
+
+    /// Floats of one WMMA C fragment per lane.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetCFragLen()
+    {
+        return GetSpec<Problem>().c_frag_len();
+    }
+
+    /// K values per byte of A and B (2 for FP4).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetKPerByte()
+    {
+        return GetSpec<Problem>().k_per_byte();
+    }
+
+    /// Bytes of a 128-wide K step in an A or B row.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetStepBytes()
+    {
+        return GetSpec<Problem>().step_bytes();
+    }
+
+    /// 16-byte LDS reads per lane per A or B row fragment, and the byte offset of read i.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetChunksPerLane()
+    {
+        return GetSpec<Problem>().chunks_per_lane();
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetChunkOffset(index_t i)
+    {
+        return GetSpec<Problem>().chunk_offset(i);
+    }
+
+    /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
+    {
+        return mx_tdm_v4::min_i(GetSpec<Problem>().reads_per_step(), mx_tdm_v4::kDscntMax);
+    }
+
+    /// Whether the next K step's fragments are read while this one's WMMAs run.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetLocalPrefetch()
+    {
+        return GetSpec<Problem>().local_prefetch == 1;
+    }
+
+    /// Whether the B fragments are read in two halves, and whether the second half is read late.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetHalfB()
+    {
+        return GetSpec<Problem>().half_b();
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetHalfBLate()
+    {
+        return GetSpec<Problem>().half_b_late();
+    }
+
+    /// Bytes between the two LDS buffers.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsBufferStride()
+    {
+        return GetLdsLayout<Problem>().buffer_stride;
+    }
+
+    /// Bytes of an A or B row of one K tile in LDS, padding excluded.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowBytes()
+    {
+        return GetLdsLayout<Problem>().row_bytes;
+    }
+
+    /// The LDS placement of A's or B's data or scales.
+    template <typename Problem, bool IsA, bool IsScale = false>
+    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Operand GetLdsOperand()
+    {
+        constexpr MxTdmV4LdsLayout l = GetLdsLayout<Problem>();
+        if constexpr(IsScale)
+            return IsA ? l.a_scale : l.b_scale;
+        else
+            return IsA ? l.a : l.b;
+    }
+
+    /// Whether the TDM pads A's or B's data or scales in LDS: a data load in iterate mode is
+    /// unpadded (its rows land at iterate_stride instead).
+    template <typename Problem, bool IsA, bool IsScale = false>
+    CK_TILE_HOST_DEVICE static constexpr bool GetLdsPadEnable()
+    {
+        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, IsScale>();
+        return (IsScale || op.iterate_rows == 0) && op.pad_bytes > 0;
+    }
+
+    /// The TDM LDS padding of A's or B's data or scales; the zero config without padding.
+    template <typename Problem, bool IsA, bool IsScale = false>
+    CK_TILE_HOST_DEVICE static constexpr TDMLdsPaddingConfig GetLdsPaddingConfig()
+    {
+        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA, IsScale>();
+        if constexpr(GetLdsPadEnable<Problem, IsA, IsScale>())
+            return make_tdm_lds_padding_config(op.block_bytes, op.pad_bytes);
+        else
+            return TDMLdsPaddingConfig{};
+    }
+
+    /// The cluster workgroups that share this one's A (same cluster y) or B (same cluster x)
+    /// tile and so receive its TDM loads; 0 without a cluster. Grid x walks N tiles and y M
+    /// tiles.
+    template <bool IsA>
+    CK_TILE_DEVICE static uint32_t GetTDMWorkgroupMask(index_t cluster_wx, index_t cluster_wy)
+    {
+        if constexpr(!HasCluster())
+        {
+            ignore = cluster_wx;
+            ignore = cluster_wy;
+            return 0;
+        }
+        else if constexpr(IsA)
+        {
+            ignore = cluster_wx;
+            return cluster_mask_same_y(Tuning::kClusterDimX, cluster_wy);
+        }
+        else
+        {
+            ignore = cluster_wy;
+            return cluster_mask_same_x(Tuning::kClusterDimX, Tuning::kClusterDimY, cluster_wx);
+        }
+    }
+
     /// The C block tile: per thread the WMMA C fragments of its M and N repeats, (rm, rn) outer
     /// and the fragment slot inner. A lane's M repeats are adjacent rows and its N repeats
     /// adjacent columns, so one slot across the N repeats is one vector store of D.

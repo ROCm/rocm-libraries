@@ -343,11 +343,19 @@ inline std::string first_mismatch(const std::vector<uint8_t>& got,
     return "";
 }
 
+/// The compile-time spec of a kernel's pipeline.
+template <typename Kernel>
+constexpr ck_tile::MxTdmV4Spec spec_of()
+{
+    using Pipeline = typename Kernel::GemmPipeline;
+    return Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
+}
+
 /// The output type of a kernel's D.
 template <typename Kernel>
 constexpr MxTdmV4OutDtype out_of()
 {
-    return Kernel::GemmPipeline::kSpec.out;
+    return spec_of<Kernel>().out;
 }
 
 /// Runs `Kernel` on rocKE's sparse inputs at each beta and requires bitwise equality with the
@@ -355,7 +363,7 @@ constexpr MxTdmV4OutDtype out_of()
 template <typename Kernel>
 void check(index_t M, index_t N, index_t K, std::initializer_list<float> betas = {0.0f, 0.5f})
 {
-    constexpr auto s = Kernel::GemmPipeline::kSpec;
+    constexpr auto s = spec_of<Kernel>();
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
     Inputs in        = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);
