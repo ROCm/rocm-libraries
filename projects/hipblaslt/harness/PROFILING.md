@@ -30,7 +30,7 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
 - compare old and new only in the same time window, on the same GPU, at the same clocks
 - rebuild the baseline from the commit you compare against, and record its hash
 - repeat each measurement and compute the SD of the run-to-run noise for that benchmark
-  (the values are machine-specific: database `know-how/`)
+  (the values are machine-specific: database `entries/`)
 - a perf difference of at least one SD needs a human check. Below one SD it is noise.
 - record the fields listed at the top of this file with every result
 ```
@@ -38,9 +38,9 @@ A second job on the same GPU distorts timing. For a benchmark or profiling run:
 ## Order
 
 ```text
-1. tier 0 and tier 1 first (CPU). Run tier 2 only for configs where tier 1 found a difference
+1. tier 1 first (CPU). Run tier 2 only for configs where tier 1 found a difference
    and no confirmed bad pattern.
-2. correctness (the local CI in HARNESS.md) before performance. If it fails, do not benchmark.
+2. correctness before performance. A kernel that gives wrong results has no meaningful perf number.
 3. benchmark the set together, not one case: a change must not regress the cases that already
    work well while improving the target case.
 4. print the plan or the reason behind a result before concluding from it.

@@ -31,19 +31,21 @@ tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
              a difference of at least one SD (run-to-run noise) needs a human check
 ```
 
-Before the A/B (tier 0, local CI): run what CI will run for the paths you changed (build, ctest,
-FileCheck; see `README.md` and `tests/README.md`). Run in order and stop at the first failure.
+Final check (local CI): finish the change using the A/B above. Then, before you submit a PR, run
+what CI will run for the paths you changed (build, ctest, FileCheck; see `README.md` and
+`tests/README.md`). You may instead let CI run them on the PR and wait for the result.
 
 **Tier 1 needs a fresh binding.** TensileLite loads the rocisa binding, not the `invoke build` output.
 After a StinkyTofu edit, rebuild it as described in `projects/hipblaslt/tensilelite/AGENTS.md`, or the
 comparison runs against stale output.
 
-**The pattern check** is a filter, not a score. The list of asm patterns known to be bad is know-how,
-so it lives in the database (`know-how/`, see `DATABASE.md`), not in this repo. Each entry there has a
-source and a status. Without the database, skip this check and record it as `skipped` (see
+**The pattern check** is a filter, not a score. The patterns to check for come from the
+database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
+status. Without the database, skip this check and record it as `skipped` (see
 `DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A hit
-on a `candidate` pattern only warns the developer. A clean result means only "no known
-problem". The GPU decides the rest. Never report a tier 1 result as a performance win.
+on a `candidate` pattern only warns the developer. A clean result means only "no known problem". The
+GPU decides the rest. Different asm is not a performance win: only tier 2 can show a gain. Identical
+asm supports only "no performance change".
 
 ## Rules
 
@@ -75,9 +77,9 @@ Method for adding, retiring, and re-checking components against a new model: [`C
 
 | Component | Assumes | Evidence | Status | Last checked (model, date, result) |
 | --- | --- | --- | --- | --- |
-| tier 0 local CI | model may break what CI would catch | CI runs these on the PR | active | |
+| final check: local CI | model may break what CI would catch | CI runs these on the PR | active | |
 | tier 1 asm A/B | model may spend GPU time on a change that did not alter the asm | identical asm needs no GPU run | active | |
-| tier 1 pattern check | model may spend GPU time on known-bad schedules | engineer input, experiments | active | |
+| tier 1 pattern check | model may spend GPU time on a candidate the pattern check would reject | engineer input, experiments | active | |
 | tier 2 perf A/B | model overrates its own performance wins | | active | |
 | progress file | a fresh session has no memory of the last | Anthropic harness post | active | |
 | planner / separate evaluator agent | not yet needed | none | not added | |

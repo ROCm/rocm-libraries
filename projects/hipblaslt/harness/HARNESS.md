@@ -28,19 +28,19 @@ tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
              a difference of at least one SD (run-to-run noise) needs a human check
 ```
 
-Before the A/B (tier 0, local CI): run what CI will run for the paths you changed (the TensileLite tox
-lanes, the GTest suite, hipblaslt-bench as CI runs it, and the rest). Commands come from `../TESTING.md`
-and the `AGENTS.md` files. If CI would fail it, this step fails. Run in order and stop at the first
-failure.
+Final check (local CI): finish the change using the A/B above. Then, before you submit a PR, run what
+CI will run for the paths you changed (the TensileLite tox lanes, the GTest suite, hipblaslt-bench as
+CI runs it, and the rest). Commands come from `../TESTING.md` and the `AGENTS.md` files. You may
+instead let CI run them on the PR and wait for the result.
 
-**The pattern check** is a filter, not a score. The list of kernel patterns known to be bad is
-know-how, so it lives in the database (`know-how/`, see `DATABASE.md`), not in this repo. Each entry
-there has a source and a status. Without the database, skip this check and record it as `skipped`
+**The pattern check** is a filter, not a score. The patterns to check for come from the
+database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
+status. Without the database, skip this check and record it as `skipped`
 (see `DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A
-hit on a `candidate` pattern only warns the developer. A clean result means only "no
-known problem". The GPU decides the rest. Never report a tier 1 result as a performance win. Pull
-requests are not benchmarked in CI today (see `../TESTING.md`), so tier 2 is where a performance claim
-is actually checked.
+hit on a `candidate` pattern only warns the developer. A clean result means only "no known problem".
+The GPU decides the rest. Different asm is not a performance win: only tier 2 can show a gain.
+Identical asm supports only "no performance change". Pull requests are not benchmarked in CI today
+(see `../TESTING.md`), so tier 2 is where a performance claim is actually checked.
 
 ## Rules
 
@@ -78,9 +78,9 @@ re-checking components against a new model: [`CORE.md`](../../../shared/stinkyto
 
 | Component | Assumes | Evidence | Status | Last checked (model, date, result) |
 | --- | --- | --- | --- | --- |
-| tier 0 local CI | model may break what CI would catch | CI runs these on the PR | active | |
+| final check: local CI | model may break what CI would catch | CI runs these on the PR | active | |
 | tier 1 asm A/B | model may spend GPU time on a change that did not alter the asm | identical asm needs no GPU run | active | |
-| tier 1 pattern check | model may spend GPU time on known-bad kernels | engineer input, experiments | active | |
+| tier 1 pattern check | model may spend GPU time on a candidate the pattern check would reject | engineer input, experiments | active | |
 | tier 2 perf A/B | model overrates its own performance wins | PR benchmarks do not exist in CI | active | |
 | progress file | a fresh session has no memory of the last | Anthropic harness post | active | |
 | planner / separate evaluator agent | not yet needed | none | not added | |
