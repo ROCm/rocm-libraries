@@ -171,18 +171,25 @@ def test_shipped_wgm_kernels_declare_the_eleven_roles():
     # A kernel maps workgroups when its custom.config declares the
     # RR_WorkgroupMapping kernarg: that is what the launch reads, so it is what
     # this checks, rather than the name or rocRoller's expression trees.
-    wgmKernels = 0
+    wgmKernels = []
+    namedWgm = []
     for name, customKernel in _shipped_rocroller_custom_kernels():
+        if "_WGM_" in name:
+            namedWgm.append(name)
         roles = [arg["semantic"] for arg in customKernel["args"]
                  if arg["semantic"] in WGM_ROLE_ORDER]
         if "RR_WorkgroupMapping" not in roles:
             assert roles == [], name
             continue
-        wgmKernels += 1
+        wgmKernels.append(name)
         # Flattened workgroup X. These kernels do not read workgroup Y.
         assert customKernel["grid"] == ["TilesXY", "One", "Batch"], name
-        assert tuple(roles) == WGM_ROLE_ORDER, name
-    assert wgmKernels == 20
+        # The launch fills each kernarg by its semantic, so the eleven roles may
+        # come in any order, but each exactly once.
+        assert sorted(roles) == sorted(WGM_ROLE_ORDER), name
+    # Captures with workgroup mapping carry the _WGM_ name suffix, and only those.
+    assert namedWgm, "no _WGM_ kernel found; the kernels or their naming moved"
+    assert wgmKernels == namedWgm
 
 
 def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
