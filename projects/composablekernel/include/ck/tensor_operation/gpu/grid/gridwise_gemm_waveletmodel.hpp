@@ -220,18 +220,6 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
 
         initial_compute_indices();
 
-        // First prefetch buffer A0, B0
-        load_bufs(I0);
-
-        compute_indices();
-
-        block_sync_func();
-
-        // Second prefetch buffer A1, B1
-        load_bufs(I1);
-
-        compute_indices();
-
         if constexpr(HasMainLoop)
         {
             index_t i = 0;
@@ -243,8 +231,6 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
             // invoker.
             do
             {
-                block_sync_func();
-
                 // Load A0, B0. Precompute indices for A1, B1
                 load_bufs(I0);
                 compute_indices();
@@ -254,15 +240,25 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 // Load A1, B1. Precompute indices for A0, B0
                 load_bufs(I1);
                 compute_indices();
+                block_sync_func();
 
                 i += 2;
             } while(i < (num_loop - 2));
         }
 
+        // Load A0, B0. Precompute indices for A1, B1
+        load_bufs(I0);
+        compute_indices();
+
+        block_sync_func();
+
         // tail
         if constexpr(TailNum == TailNumber::Even)
         {
-            // Wait for last load of A1, B1 (to be processed by math waves)
+
+            // Load A1, B1. Precompute indices for A0, B0
+            load_bufs(I1);
+            compute_indices();
             block_sync_func();
         }
     }
