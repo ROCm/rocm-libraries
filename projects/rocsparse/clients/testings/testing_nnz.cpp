@@ -90,7 +90,7 @@ void testing_nnz(const Arguments& arg)
     // Allocate device memory
     device_vector<T>             d_A(LD * N);
     // A zero-size device_vector is null and has no guard elements to catch an overrun.
-    device_vector<rocsparse_int> d_nnzPerRowColumn(std::max(MN, 1));
+    device_vector<rocsparse_int> d_nnzPerRowColumn(std::max<rocsparse_int>(MN, 1));
     device_vector<rocsparse_int> d_nnzTotalDevHostPtr(1);
 
     //
