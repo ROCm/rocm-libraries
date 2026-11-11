@@ -442,7 +442,7 @@ suites:
         cadence: presubmit
         archs: [cpu-emulation]
         gates: false
-        notes: "Advisory: continue-on-error until it is reliably green. Not described in TESTING.md yet."
+        notes: "Advisory: continue-on-error until it is reliably green."
         evidence: ["repo:.github/workflows/therock-rocjitsu-race-check-linux.yml"]
         action: keep
     target:

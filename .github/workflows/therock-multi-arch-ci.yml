@@ -300,6 +300,9 @@ jobs:
 
   rocjitsu_race_check:
     name: rocjitsu race check (${{ matrix.amdgpu_families }})
+    # Temporary: this job is moving into TheRock's test matrix and will then be
+    # removed. Do not add new jobs to this workflow; add tests to TheRock instead,
+    # see https://github.com/ROCm/TheRock/blob/main/docs/development/adding_tests.md
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.

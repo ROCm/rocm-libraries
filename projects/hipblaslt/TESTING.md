@@ -663,7 +663,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
-| rocjitsu smoke race checks | No | Component team | Post-build CPU emulation of hipblaslt-bench and TensileLite workloads for gfx942 and gfx950 on hipBLASLt/TensileLite PRs or those labeled `test:hipblaslt`. Failures are advisory and outside the required Multi-Arch summary |
+| rocjitsu smoke race checks | No | Component team | Post-build CPU emulation of hipblaslt-bench and TensileLite workloads for gfx942 and gfx950 on hipBLASLt/TensileLite PRs or those labeled `test:hipblaslt`. Failures are advisory and outside the required Multi-Arch summary. A failure can come from artifact setup rather than a detected race; the uploaded race report shows which. Temporary: moving into TheRock's test matrix, after which this job is removed |
 | rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
@@ -702,6 +702,8 @@ tracked as a gap.
   gfx94X and gfx950) runs on every pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
+- The rocjitsu smoke race checks on gfx942 and gfx950, described in
+  [Validation Gates and Ownership](#validation-gates-and-ownership)
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -1821,8 +1823,9 @@ TensileLite together.
 [Target test kinds](#target-test-kinds), where it runs today with evidence for each placement, where
 the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire, or review)
 with a rationale. Every target and disposition in it is a proposal; a retirement needs the owning
-team's agreement first. Building it surfaced three lanes this document does not describe yet (the
-GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). Those are
+team's agreement first. Building it surfaced three lanes this document did not describe (the
+GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). The race
+check is now described under [PR Test Classification](#pr-test-classification); the other two are
 recorded in the inventory as `review` items rather than settled here. It also surfaced a
 disagreement between the two documents on whether Math CI measures C++ coverage. It does, as
 [Coverage](#coverage) now describes.
