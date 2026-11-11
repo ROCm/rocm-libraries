@@ -9,7 +9,7 @@ Every output tensor of a bundle is compared element by element with its oracle
 
 One element outside the band fails the tensor. This document says where
 `atol` and `rtol` come from, and explains the dynamic tolerance that grades
-half and bfloat16 convolution-forward outputs.
+half, bfloat16 and float convolution-forward outputs.
 
 ## Where the numbers come from
 
@@ -20,7 +20,7 @@ applies:
 |---|---|---|
 | A `[[validator_overrides]]` entry | The tensors its glob names | The engine's TOML (see [File Formats](file-formats.md)) |
 | A `[[tolerance_overrides]]` entry | The tests its glob names | The engine's TOML |
-| The convolution-forward dynamic tolerance | half and bfloat16 outputs of a graph with one `ConvolutionFwd` node that accumulates in float, whose pointwise nodes and intermediates are half, bfloat16, float or double | `src/harness/tolerance/ConvFwdDynamicTolerance.hpp` |
+| The convolution-forward dynamic tolerance | half, bfloat16 and float outputs of a graph with one `ConvolutionFwd` node that accumulates in float, whose pointwise nodes and intermediates are half, bfloat16, float or double | `src/harness/tolerance/ConvFwdDynamicTolerance.hpp` |
 | The per-op default | Everything else; the loosest node of the graph wins, and the same value is used for `atol` and `rtol` | `TestTolerances.hpp` through `src/harness/tolerance/ToleranceResolver.hpp` |
 
 TOML overrides describe how far one engine may drift. They are never applied
@@ -201,8 +201,7 @@ convolution nor pointwise are ignored. The scale is one value for the whole
 graph, not one per output; those graphs have at most one multiply.
 A graph outside what is described here, an input whose statistics are not
 available (a NaN or an infinity in golden data or in a fill recipe, an
-unreadable baked value) and every float output (see "Float outputs") use the
-per-op default.
+unreadable baked value) use the per-op default.
 
 A graph input's statistics come from, in this order:
 
@@ -440,19 +439,20 @@ and the relative summation term, under 1 % of their `rtol`, is left out.
 depends on the solver MIOpen picks, and the tolerance is computed before the
 engine runs. In the calibration data (the float `ConvolutionFwd` and
 `ConvolutionFwdPointwise` cases of develop's and the test-plan bundles, on gfx942
-and gfx90a, 3 to 5 input seed sets each; outputs that fail even the fixed 0.1,
-the denormal cases and the non-zero-mean 3D cases left out) the solver is in MIOpen's
-log. Per output, the `c` it needs is the largest error left after
+and gfx90a, 6 input seed sets on gfx942 and 5 on gfx90a; outputs that fail even
+the fixed 0.1, the denormal cases and the non-zero-mean 3D cases left out) the
+solver is in MIOpen's log. Per output, the `c` it needs is the largest error
+left after
 `2 * eps * |ref|`, over `sqrt(K) * u32 * (sigma + |ref|)`. The largest, per
 solver family, over the outputs whose test ran that one family:
 
 | Solver family | Outputs | Largest `c` needed |
 |---|---|---|
-| Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 1,091 | gfx942 5.68, gfx90a 4.95 |
+| Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 1,178 | gfx942 5.68, gfx90a 5.40 |
 | CK fused (`ConvCKIgemmGrpFwd*Fused`) | 2,874 | gfx942 2.46 |
-| rocBLAS GEMM | 386 | gfx942 2.35, gfx90a 2.11 |
-| Implicit GEMM, xdlops | 3,450 | gfx942 2.31, gfx90a 2.31 |
-| Naive direct | 1,828 | gfx942 1.77, gfx90a 1.36 |
+| rocBLAS GEMM | 424 | gfx942 2.35, gfx90a 2.11 |
+| Implicit GEMM, xdlops | 3,779 | gfx942 2.31, gfx90a 2.31 |
+| Naive direct | 2,023 | gfx942 1.77, gfx90a 1.77 |
 
 ### The base coefficient and the engine's
 
@@ -461,9 +461,9 @@ the smallest whole number that leaves a headroom of at least 1.5 (the floor used
 for MIOpen's value below) over the largest need of any solver family but
 Winograd, 2.46 on CK fused solvers on gfx942. At 4 that headroom is 1.63. 3
 would be enough to pass the data (1.22) but is too thin for hardware nobody has
-measured. For Winograd the same constant fails 11 to 592 correct outputs per
-data set; no theory term tells the two apart, and the harness does not know the
-solver.
+measured. For Winograd the same constant fails up to 5 correct outputs in a run
+(one seed, one bundle set, one architecture); no theory term tells the two
+apart, and the harness does not know the solver.
 
 An engine whose solvers err more sets its own in its TOML, next to
 `[[tolerance_overrides]]`:
@@ -482,7 +482,7 @@ matches a test still replaces the dynamic tolerance whole, as for half and
 bfloat16.
 
 MIOpen's file sets 9. Its worst solver family, Winograd, needs 5.68 on gfx942
-and 4.95 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.82: at least 1.5,
+and 5.40 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.67: at least 1.5,
 a little above the 1.44 of half and bfloat16. The same 9 makes the other
 families' bands wider than they need: their headroom is 3.7 or more.
 

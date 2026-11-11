@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// How the bundle harness grades a half or bfloat16 convolution-forward output: the selection in
-// IntegrationBundleVerificationHarness::compareAgainst() between the dynamic tolerance and the
-// per-op default, and where the dynamic tolerance gets its input statistics.
+// How the bundle harness grades a half, bfloat16 or float convolution-forward output: the
+// selection in IntegrationBundleVerificationHarness::compareAgainst() between the dynamic
+// tolerance and the per-op default, and where the dynamic tolerance gets its input statistics.
 //
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
 // the harness actually handed to the comparison from that report. A TOML override is applied by
