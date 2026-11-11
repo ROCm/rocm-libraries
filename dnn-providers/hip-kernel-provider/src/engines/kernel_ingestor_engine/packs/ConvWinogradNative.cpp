@@ -436,7 +436,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         config.bins = intField("bins");
         const int llc = intField("llc");
         const int f16Math = intField("f16math");
-        if((llc != 0 && llc != 1) || (f16Math != 0 && f16Math != 1))
+        config.pf = intField("pf");
+        if((llc != 0 && llc != 1) || (f16Math != 0 && f16Math != 1)
+           || (config.pf != 0 && config.pf != 1))
         {
             return std::nullopt;
         }
@@ -447,7 +449,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                                      || config.variant == Variant::SREG
                                      || config.variant == Variant::COOP;
         if((config.variant != Variant::WREG && config.bins != 0)
-           || (!registerVariant && config.f16Math))
+           || (!registerVariant && config.f16Math)
+           || (config.variant != Variant::COOP && config.pf != 0))
         {
             return std::nullopt;
         }
@@ -1141,6 +1144,7 @@ public:
         options.add("CONV_WINO_KW", std::to_string(coopKw));
         options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
         options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_PF", std::to_string(config.pf));
         options.add(
             "CONV_WINO_MFMA",
             std::string(config.variant == Variant::COOP && config.arch == "gfx9" ? "1" : "0"));

@@ -74,6 +74,10 @@
     {
       "name": "f16math",
       "type": "int"
+    },
+    {
+      "name": "pf",
+      "type": "int"
     }
   ]
 }

@@ -35,6 +35,7 @@ FIELDS = [
     "waves",
     "bins",
     "f16math",
+    "pf",
 ]
 STRINGS = {"direction", "dtype", "variant", "layout", "arch"}
 # The integer fields identify a config among those one graph admits (the enrolled knob tuple):
@@ -53,6 +54,7 @@ KNOBS = [
     "waves",
     "bins",
     "f16math",
+    "pf",
 ]
 ENTRY = {
     "multipass": "ConvWinogradGemm",
@@ -79,6 +81,7 @@ def C(
     waves=0,
     bins=0,
     f16math=0,
+    pf=0,
 ):
     return dict(
         variant=variant,
@@ -97,6 +100,7 @@ def C(
         waves=waves,
         bins=bins,
         f16math=f16math,
+        pf=pf,
     )
 
 
@@ -144,10 +148,20 @@ WREG_BF16 = [(32, 2, 4, 0), (64, 1, 2, 0)]
 
 # Cooperative WMMA (gfx11 / gfx12): the block transforms each input chunk once into LDS. Waves =
 # 4 x kw (one per transform row per K group), each 16 x mt out channels by 16 x nt tiles.
-# m = 3 is F(3,2): stride 2 by phases.
-def coop(blocks, archs=("gfx11", "gfx12"), m=2):
+# m = 3 is F(3,2): stride 2 by phases. pf = 1 loads the next item's first input chunk behind the
+# epilogue (CDNA, few input chunks per item).
+def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
     return [
-        C("coop", m, arch=a, bk=16 * mt * kw, bt=16 * nt, waves=4 * kw, f16math=h)
+        C(
+            "coop",
+            m,
+            arch=a,
+            bk=16 * mt * kw,
+            bt=16 * nt,
+            waves=4 * kw,
+            f16math=h,
+            pf=pf,
+        )
         for mt, nt, kw, h in blocks
         for a in archs
     ]
@@ -178,6 +192,9 @@ COOP_CDNA_F16 = [
     (2, 2, 1, 1),
 ]
 COOP_CDNA_BF16 = [(2, 4, 2, 0), (2, 2, 2, 0), (1, 4, 1, 0), (2, 2, 1, 0)]
+# Cross-item prefetch on CDNA, small C (gfx950 inception c32 k32 149² n128: 7-8%).
+COOPPF_CDNA_F16 = [(2, 2, 1, 1)]
+COOPPF_CDNA_BF16 = [(2, 2, 1, 0)]
 COOP3_CDNA_F16 = [(1, 4, 4, 1), (2, 2, 1, 1), (1, 2, 1, 1), (2, 2, 2, 1)]
 COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 
@@ -217,6 +234,7 @@ CATALOG = {
     + coop(COOP3_F16, m=3)
     + coop(COOP_CDNA_F16, ("gfx9",))
     + coop(COOP3_CDNA_F16, ("gfx9",), m=3)
+    + coop(COOPPF_CDNA_F16, ("gfx9",), pf=1)
     + wreg(WREG_F16)
     + wmma()
     + sreg([1, 0])
@@ -227,6 +245,7 @@ CATALOG = {
     + coop(COOP3_BF16, m=3)
     + coop(COOP_CDNA_BF16, ("gfx9",))
     + coop(COOP3_CDNA_BF16, ("gfx9",), m=3)
+    + coop(COOPPF_CDNA_BF16, ("gfx9",), pf=1)
     + wreg(WREG_BF16)
     + wmma()
     + fused(BF16_BLOCKS)
@@ -244,7 +263,7 @@ def label(c):
         return f"wreg.f2.nchw.{c['arch']}.{c['bk']}g{c['bt'] // 16}b{c['bins']}{'h' if c['f16math'] else 'f'}"
     if c["variant"] == "coop":
         kw = c["waves"] // 4
-        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}"
+        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}"
     if c["variant"] == "sreg":
         return f"sreg.f2.nchw.{c['arch']}.{c['bk']}{'h' if c['f16math'] else 'f'}"
     return f"wmma.f2.nchw.{c['arch']}.{c['bk']}w{c['waves']}"

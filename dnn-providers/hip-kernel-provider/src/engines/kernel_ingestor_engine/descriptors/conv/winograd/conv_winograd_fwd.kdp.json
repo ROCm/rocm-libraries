@@ -36,7 +36,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -67,7 +68,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 999
     },
@@ -98,7 +100,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 998
     },
@@ -129,7 +132,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 997
     },
@@ -160,7 +164,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 996
     },
@@ -191,7 +196,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 995
     },
@@ -222,7 +228,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 994
     },
@@ -253,7 +260,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 993
     },
@@ -284,7 +292,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 992
     },
@@ -315,7 +324,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 991
     },
@@ -346,7 +356,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 990
     },
@@ -377,7 +388,8 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 989
     },
@@ -408,7 +420,8 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 988
     },
@@ -439,7 +452,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 987
     },
@@ -470,7 +484,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 986
     },
@@ -501,7 +516,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 985
     },
@@ -532,7 +548,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 984
     },
@@ -563,7 +580,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 983
     },
@@ -594,7 +612,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 982
     },
@@ -625,7 +644,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 981
     },
@@ -656,7 +676,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 980
     },
@@ -687,7 +708,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 979
     },
@@ -718,7 +740,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 978
     },
@@ -749,7 +772,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 977
     },
@@ -780,7 +804,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 976
     },
@@ -811,7 +836,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 975
     },
@@ -842,7 +868,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 974
     },
@@ -873,7 +900,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 973
     },
@@ -904,7 +932,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 972
     },
@@ -935,7 +964,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 971
     },
@@ -966,7 +996,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 970
     },
@@ -997,7 +1028,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 969
     },
@@ -1028,7 +1060,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 968
     },
@@ -1059,7 +1092,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 967
     },
@@ -1090,7 +1124,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 966
     },
@@ -1121,7 +1156,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 965
     },
@@ -1152,7 +1188,8 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 964
     },
@@ -1183,7 +1220,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -1214,7 +1252,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 999
     },
@@ -1245,7 +1284,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 998
     },
@@ -1276,7 +1316,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 997
     },
@@ -1307,7 +1348,8 @@
         "tn": 0,
         "waves": 32,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 996
     },
@@ -1338,7 +1380,8 @@
         "tn": 0,
         "waves": 32,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 995
     },
@@ -1369,7 +1412,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 994
     },
@@ -1400,7 +1444,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 993
     },
@@ -1431,7 +1476,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 992
     },
@@ -1462,7 +1508,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 991
     },
@@ -1493,7 +1540,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 990
     },
@@ -1524,7 +1572,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 989
     },
@@ -1555,7 +1604,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 988
     },
@@ -1586,7 +1636,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 987
     },
@@ -1617,7 +1668,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 986
     },
@@ -1648,7 +1700,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 985
     },
@@ -1679,7 +1732,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 984
     },
@@ -1710,7 +1764,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 983
     },
@@ -1741,7 +1796,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 982
     },
@@ -1772,7 +1828,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 981
     },
@@ -1803,7 +1860,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 980
     },
@@ -1834,7 +1892,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 979
     },
@@ -1865,7 +1924,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 978
     },
@@ -1896,7 +1956,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 977
     },
@@ -1927,7 +1988,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 976
     },
@@ -1958,7 +2020,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 975
     },
@@ -1989,7 +2052,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 974
     },
@@ -2020,7 +2084,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 973
     },
@@ -2051,7 +2116,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 972
     },
@@ -2082,7 +2148,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 971
     },
@@ -2113,7 +2180,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 970
     },
@@ -2144,9 +2212,42 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
       "priority": 969
+    },
+    {
+      "version": "1.0",
+      "id": "8c48b9ff-0f8c-52ff-a5c7-c8fd4372e392",
+      "name": "conv_winograd.fwd.f16.coop.f2.nchw.gfx9.m2n2k1h.pf1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradCoop"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "coop",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 0,
+        "f16math": 1,
+        "pf": 1
+      },
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -2175,9 +2276,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 4,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 968
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -2206,9 +2308,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 4,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 967
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -2237,9 +2340,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 966
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -2268,9 +2372,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 965
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -2299,9 +2404,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 2,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 964
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -2330,9 +2436,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 2,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 963
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -2361,9 +2468,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 962
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -2392,9 +2500,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 961
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -2423,9 +2532,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 960
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -2454,9 +2564,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 959
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -2485,9 +2596,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 958
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -2516,9 +2628,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 957
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -2547,9 +2660,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 1
+        "f16math": 1,
+        "pf": 0
       },
-      "priority": 956
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -2578,9 +2692,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 955
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -2609,9 +2724,10 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 954
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -2640,9 +2756,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 953
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -2671,9 +2788,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 952
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -2702,9 +2820,10 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 951
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -2733,9 +2852,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 950
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -2764,9 +2884,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 949
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -2795,9 +2916,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 948
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -2826,9 +2948,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 947
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -2857,9 +2980,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 946
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -2888,9 +3012,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 945
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -2919,9 +3044,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 944
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -2950,9 +3076,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 943
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -2981,9 +3108,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 942
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -3012,9 +3140,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 941
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -3043,9 +3172,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 940
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -3074,9 +3204,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 939
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -3105,9 +3236,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 938
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -3136,9 +3268,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 937
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -3167,9 +3300,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 936
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -3198,9 +3332,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 935
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -3229,9 +3364,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 934
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -3260,9 +3396,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 933
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -3291,7 +3428,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -3322,7 +3460,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 999
     },
@@ -3353,7 +3492,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 998
     },
@@ -3384,7 +3524,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 997
     },
@@ -3415,7 +3556,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 996
     },
@@ -3446,7 +3588,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 995
     },
@@ -3477,7 +3620,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 994
     },
@@ -3508,7 +3652,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 993
     },
@@ -3539,7 +3684,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 992
     },
@@ -3570,7 +3716,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 991
     },
@@ -3601,7 +3748,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 990
     },
@@ -3632,7 +3780,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 989
     },
@@ -3663,7 +3812,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 988
     },
@@ -3694,7 +3844,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 987
     },
@@ -3725,7 +3876,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 986
     },
@@ -3756,7 +3908,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 985
     },
@@ -3787,7 +3940,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 984
     },
@@ -3818,7 +3972,8 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 983
     },
@@ -3849,7 +4004,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 982
     },
@@ -3880,7 +4036,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 981
     },
@@ -3911,7 +4068,8 @@
         "tn": 0,
         "waves": 16,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 980
     },
@@ -3942,7 +4100,8 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 979
     },
@@ -3973,9 +4132,42 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
       "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "a864a37c-14d6-5185-808f-7a631ddc23e5",
+      "name": "conv_winograd.fwd.bf16.coop.f2.nchw.gfx9.m2n2k1f.pf1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradCoop"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "coop",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 1
+      },
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -4004,9 +4196,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 977
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -4035,9 +4228,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 4,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 976
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -4066,9 +4260,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 2,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 975
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -4097,9 +4292,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 2,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 974
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -4128,9 +4324,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 973
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -4159,9 +4356,10 @@
         "tn": 0,
         "waves": 8,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 972
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -4190,9 +4388,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 971
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -4221,9 +4420,10 @@
         "tn": 0,
         "waves": 4,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 970
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -4252,9 +4452,10 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 969
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -4283,9 +4484,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 968
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -4314,9 +4516,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 967
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -4345,9 +4548,10 @@
         "tn": 8,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 966
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -4376,9 +4580,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 965
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -4407,9 +4612,10 @@
         "tn": 4,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 964
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -4438,9 +4644,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 963
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -4469,9 +4676,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 962
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -4500,9 +4708,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 961
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -4531,9 +4740,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 960
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -4562,9 +4772,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 959
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -4593,9 +4804,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 958
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -4624,9 +4836,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 957
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -4655,9 +4868,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 956
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -4686,9 +4900,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 955
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -4717,9 +4932,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 954
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -4748,9 +4964,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 953
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -4779,9 +4996,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 952
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -4810,9 +5028,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 951
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -4841,9 +5060,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 950
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -4872,9 +5092,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 949
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -4903,9 +5124,10 @@
         "tn": 0,
         "waves": 0,
         "bins": 0,
-        "f16math": 0
+        "f16math": 0,
+        "pf": 0
       },
-      "priority": 948
+      "priority": 947
     }
   ]
 }

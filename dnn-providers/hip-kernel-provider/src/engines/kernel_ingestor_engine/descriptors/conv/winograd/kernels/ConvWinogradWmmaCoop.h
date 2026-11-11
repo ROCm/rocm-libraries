@@ -225,7 +225,15 @@ struct K5CoopCfg
 // forward (mode 1) a lane's channel pair is one real channel's two column phases of one row
 // parity, so a row is one 8-element run of x (two 12-byte loads, de-interleaved); backward data
 // (mode 2) reads dy like stride 1 and scatters each virtual out channel's 3x3 to its dx phase.
-template <class T, class W, int MT, int NT, int KW, bool F16MATH, int M = 2, int DIR = K5_FORWARD>
+template <class T,
+          class W,
+          int MT,
+          int NT,
+          int KW,
+          bool F16MATH,
+          int M = 2,
+          int DIR = K5_FORWARD,
+          int PF = 0>
 __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 {
     typedef K5CoopCfg<T, W, MT, NT, KW, M> C;
@@ -277,6 +285,19 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         = static_cast<unsigned>((W::KPL == 16 ? lane % 16 : lane) * W::KPL) * sizeof(T);
     constexpr unsigned UNIT = 256 * sizeof(T);
 
+    // The transform jobs' tables (set per item, setupJobs below), the input chunk in flight, and
+    // this wave's U offset. PF (prefetch) 1 sets them up one item ahead: the last chunk step of an
+    // item loads the next item's chunk 0 and its U, so their latency hides behind the epilogue.
+    int voff[JT][4][2]; // aligned byte offsets of the 12-byte row loads (chunk 0; may be < 0)
+    unsigned shf[JT]; // per (row, channel) half shift bits: bit 2 * r + v
+    unsigned selc[JT][4]; // channel-pairing perm selectors per column (0x0c: padding)
+    int tl[JT], cp[JT];
+    bool jobOn[JT];
+    bool negWave = false;
+    unsigned uWave = 0;
+    typedef unsigned k5u3 __attribute__((ext_vector_type(3)));
+    k5u3 raw[JT][4][2]; // the next chunk's input
+
     for(long long item = blockIdx.x; item < items; item += gridDim.x)
     {
         // Item order (K5Args::order): 0 K blocks fastest (the tile block's input stays in cache
@@ -301,102 +322,101 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 
         // ---- Transform jobs: lane -> (tile, channel pair). Job wave jw covers tiles
         // 16 * (jw % NT) + col and channel pair 2 * (jw / NT) + lane / 16.
-        int voff[JT][4][2]; // aligned byte offsets of the 12-byte row loads (chunk 0; may be < 0)
-        unsigned shf[JT]; // per (row, channel) half shift bits: bit 2 * r + v
-        unsigned selc[JT][4]; // channel-pairing perm selectors per column (0x0c: padding)
-        int tl[JT], cp[JT];
-        bool jobOn[JT];
-        bool anyNeg = false;
-#pragma unroll
-        for(int q = 0; q < JT; ++q)
+        auto setupJobs = [&](int t0, int g) __attribute__((always_inline))
         {
-            const int jw = JT > 1 ? wave + q * C::WAVES : wave;
-            jobOn[q] = jw < JW;
-            tl[q] = 16 * (jw % NT) + col;
-            cp[q] = (WAVE / 16) * (jw / NT) + (lane >> 4);
-            shf[q] = 0;
+            bool anyNeg = false;
 #pragma unroll
-            for(int r = 0; r < 4; ++r)
-                voff[q][r][0] = voff[q][r][1] = K5C_OOB;
-#pragma unroll
-            for(int j = 0; j < 4; ++j)
-                selc[q][j] = 0x0c0c0c0cu;
-            const int t = t0 + tl[q];
-            if(jobOn[q] && t < a.tiles)
+            for(int q = 0; q < JT; ++q)
             {
-                const int tw = t % a.tw, rr = t / a.tw;
-                const int th = rr % a.th, img = rr / a.th;
-                if constexpr(MODE == 1)
+                const int jw = JT > 1 ? wave + q * C::WAVES : wave;
+                jobOn[q] = jw < JW;
+                tl[q] = 16 * (jw % NT) + col;
+                cp[q] = (WAVE / 16) * (jw / NT) + (lane >> 4);
+                shf[q] = 0;
+#pragma unroll
+                for(int r = 0; r < 4; ++r)
+                    voff[q][r][0] = voff[q][r][1] = K5C_OOB;
+#pragma unroll
+                for(int j = 0; j < 4; ++j)
+                    selc[q][j] = 0x0c0c0c0cu;
+                const int t = t0 + tl[q];
+                if(jobOn[q] && t < a.tiles)
                 {
-                    // Virtual channels 2 cp, 2 cp + 1 = real channel cp / 2, row parity cp % 2,
-                    // column phases 0 and 1: row r of the tile is x row 2 (th M + r) + parity,
-                    // columns 2 (tw M) - xpw + 0 .. 7 (phase = column parity).
-                    const int c = cp[q] >> 1, rp = cp[q] & 1;
-                    const long long cbase
-                        = (static_cast<long long>(img) * (a.ci >> 2) + g * (cgi >> 2) + c)
-                          * chanStride;
-                    const int iw0 = 2 * tw * M - a.xpw;
-#pragma unroll
-                    for(int r = 0; r < 4; ++r)
+                    const int tw = t % a.tw, rr = t / a.tw;
+                    const int th = rr % a.th, img = rr / a.th;
+                    if constexpr(MODE == 1)
                     {
-                        const int ih = 2 * (th * M + r) + rp - a.xph;
-                        if(ih < 0 || ih >= a.xh || 2 * cp[q] >= cgi)
-                            continue;
-                        const long long e = cbase + static_cast<long long>(ih) * a.xw + iw0;
-                        anyNeg = anyNeg || e < 0;
-                        voff[q][r][0] = static_cast<int>((e & ~1LL) * 2);
-                        voff[q][r][1] = voff[q][r][0] + 12;
-                        shf[q] |= static_cast<unsigned>(e & 1) << (2 * r);
-                    }
-#pragma unroll
-                    for(int j = 0; j < 4; ++j)
-                    {
-                        // Per channel (half): the column's half of each channel, or 0 (0x0c).
-                        const int iw = iw0 + 2 * j;
-                        const unsigned odd = (j & 1) ? 0x0202u : 0u;
-                        const unsigned lo = iw >= 0 && iw < a.xw ? 0x0100u + odd : 0x0c0cu;
-                        const unsigned hi = iw + 1 >= 0 && iw + 1 < a.xw ? 0x0504u + odd : 0x0c0cu;
-                        selc[q][j] = lo | (hi << 16);
-                    }
-                }
-                else
-                {
-                    const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
-#pragma unroll
-                    for(int v = 0; v < 2; ++v)
-                    {
-                        const int c = 2 * cp[q] + v;
+                        // Virtual channels 2 cp, 2 cp + 1 = real channel cp / 2, row parity cp % 2,
+                        // column phases 0 and 1: row r of the tile is x row 2 (th M + r) + parity,
+                        // columns 2 (tw M) - xpw + 0 .. 7 (phase = column parity).
+                        const int c = cp[q] >> 1, rp = cp[q] & 1;
                         const long long cbase
-                            = (static_cast<long long>(img) * a.ci + g * cgi + c) * chanStride;
+                            = (static_cast<long long>(img) * (a.ci >> 2) + g * (cgi >> 2) + c)
+                              * chanStride;
+                        const int iw0 = 2 * tw * M - a.xpw;
 #pragma unroll
                         for(int r = 0; r < 4; ++r)
                         {
-                            const int ih = ih0 + r;
-                            if(ih < 0 || ih >= a.hi || c >= cgi)
+                            const int ih = 2 * (th * M + r) + rp - a.xph;
+                            if(ih < 0 || ih >= a.xh || 2 * cp[q] >= cgi)
                                 continue;
-                            const long long e = cbase + static_cast<long long>(ih) * a.wi + iw0;
-                            // Only the first row of the tensor with left padding starts before it.
+                            const long long e = cbase + static_cast<long long>(ih) * a.xw + iw0;
                             anyNeg = anyNeg || e < 0;
-                            voff[q][r][v] = static_cast<int>((e & ~1LL) * 2);
-                            shf[q] |= static_cast<unsigned>(e & 1) << (2 * r + v);
+                            voff[q][r][0] = static_cast<int>((e & ~1LL) * 2);
+                            voff[q][r][1] = voff[q][r][0] + 12;
+                            shf[q] |= static_cast<unsigned>(e & 1) << (2 * r);
+                        }
+#pragma unroll
+                        for(int j = 0; j < 4; ++j)
+                        {
+                            // Per channel (half): the column's half of each channel, or 0 (0x0c).
+                            const int iw = iw0 + 2 * j;
+                            const unsigned odd = (j & 1) ? 0x0202u : 0u;
+                            const unsigned lo = iw >= 0 && iw < a.xw ? 0x0100u + odd : 0x0c0cu;
+                            const unsigned hi
+                                = iw + 1 >= 0 && iw + 1 < a.xw ? 0x0504u + odd : 0x0c0cu;
+                            selc[q][j] = lo | (hi << 16);
                         }
                     }
-#pragma unroll
-                    for(int j = 0; j < 4; ++j)
+                    else
                     {
-                        const int iw = iw0 + j;
-                        if(iw >= 0 && iw < a.wi)
-                            selc[q][j] = (j & 1) ? 0x07060302u : 0x05040100u;
+                        const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
+#pragma unroll
+                        for(int v = 0; v < 2; ++v)
+                        {
+                            const int c = 2 * cp[q] + v;
+                            const long long cbase
+                                = (static_cast<long long>(img) * a.ci + g * cgi + c) * chanStride;
+#pragma unroll
+                            for(int r = 0; r < 4; ++r)
+                            {
+                                const int ih = ih0 + r;
+                                if(ih < 0 || ih >= a.hi || c >= cgi)
+                                    continue;
+                                const long long e = cbase + static_cast<long long>(ih) * a.wi + iw0;
+                                // Only the first row of the tensor with left padding starts before it.
+                                anyNeg = anyNeg || e < 0;
+                                voff[q][r][v] = static_cast<int>((e & ~1LL) * 2);
+                                shf[q] |= static_cast<unsigned>(e & 1) << (2 * r + v);
+                            }
+                        }
+#pragma unroll
+                        for(int j = 0; j < 4; ++j)
+                        {
+                            const int iw = iw0 + j;
+                            if(iw >= 0 && iw < a.wi)
+                                selc[q][j] = (j & 1) ? 0x07060302u : 0x05040100u;
+                        }
                     }
                 }
             }
-        }
-        // The slow path for the rare lanes whose first row element is before the tensor start:
-        // per-element loads (chunk 0 only; later chunks are 16 planes further on).
-        const bool negWave = __any(anyNeg) != 0; // wave-uniform
+            // The slow path for the rare lanes whose first row element is before the tensor start:
+            // per-element loads (chunk 0 only; later chunks are 16 planes further on).
+            return __any(anyNeg) != 0; // wave-uniform
+        };
+        if(PF == 0 || item == blockIdx.x)
+            negWave = setupJobs(t0, g);
 
-        typedef unsigned k5u3 __attribute__((ext_vector_type(3)));
-        k5u3 raw[JT][4][2]; // the next chunk's input
         // negWave: the offsets of some lane are negative in chunk 0 (that chunk goes through the
         // slow path); later chunks add the chunk offset per lane.
         // Branch-free: the per-lane offset carries the chunk offset (a lane's chunk-0 offset may be
@@ -638,8 +658,12 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         const int kRow0 = k0 + kw * 16 * MT;
         // Unit (g, bin 4 row + b, k block kRow0 / 16 + m, chunk ch).
         const int nChU = cgiPad / 16;
-        const unsigned uWave
-            = static_cast<unsigned>(((g * 16 + 4 * row) * kbs + kRow0 / 16) * nChU) * UNIT;
+        const auto uOf = [&](int g, int kRow0) __attribute__((always_inline))
+        {
+            return static_cast<unsigned>(((g * 16 + 4 * row) * kbs + kRow0 / 16) * nChU) * UNIT;
+        };
+        if(PF == 0 || item == blockIdx.x)
+            uWave = uOf(g, kRow0);
         const unsigned binBytes = static_cast<unsigned>(kbs * nChU) * UNIT;
         frag ufr[4][MT];
         auto loadU = [&](int ch, int b) __attribute__((always_inline))
@@ -660,13 +684,18 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             return W::loadB(p);
         };
 
-        // Prologue: chunk 0 in, transformed into buffer 0; U of chunk 0.
-        loadIn(0);
+        // Prologue: chunk 0 in, transformed into buffer 0; U of chunk 0 (PF 1: but the first
+        // item's were loaded by the previous item).
+        if(PF == 0 || item == blockIdx.x)
+            loadIn(0);
         if(negWave)
             loadInSlow();
+        if(PF == 0 || item == blockIdx.x)
+        {
 #pragma unroll
-        for(int b = 0; b < 4; ++b)
-            loadU(0, b);
+            for(int b = 0; b < 4; ++b)
+                loadU(0, b);
+        }
         transform(0, negWave);
         __syncthreads();
         // Chunk ch (parity P): V buffer P holds it; load chunk ch + 1's input, run the WMMAs, then
@@ -675,7 +704,31 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         {
             constexpr int P = decltype(parTag)::value;
             const int last = nCh - 1;
-            const int nx = ch + 1 < last ? ch + 1 : last; // the last chunk reloads itself
+            int nx = ch + 1 < last ? ch + 1 : last; // the last chunk reloads itself
+            if constexpr(PF == 1)
+            {
+                // ... or loads the next item's chunk 0 (and the U loads below its U).
+                const long long next = item + gridDim.x;
+                if(ch == last && next < items)
+                {
+                    int kb2, tb2, g2;
+                    if(a.order == 1)
+                    {
+                        tb2 = static_cast<int>(next % nTB);
+                        kb2 = static_cast<int>(next / nTB % nKB);
+                        g2 = static_cast<int>(next / nTB / nKB);
+                    }
+                    else
+                    {
+                        kb2 = static_cast<int>(next % nKB);
+                        tb2 = static_cast<int>(next / nKB % nTB);
+                        g2 = static_cast<int>(next / nKB / nTB);
+                    }
+                    negWave = setupJobs(tb2 * BT, g2);
+                    uWave = uOf(g2, kb2 * BK + kw * 16 * MT);
+                    nx = 0;
+                }
+            }
             loadIn(nx);
             K5_SCHED_BARRIER();
             const unsigned* Vs = Vd + P * (VB / 2);
