@@ -392,6 +392,22 @@ CK_TILE_DEVICE void amd_tdm_load([[maybe_unused]] const TDM_GROUP0& group0,
 #endif
 }
 
+/// amd_tdm_load of groups built once, with group 0's LDS and global addresses and the extent of
+/// dimension Dim replaced: the fields that change from one load of a tile to the next.
+template <index_t Dim,
+          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
+CK_TILE_DEVICE void
+amd_tdm_load(TDMGroups groups, uint32_t lds_addr, uint64_t global_addr, uint32_t extent)
+{
+    static_assert(Dim == 0 || Dim == 1, "TDM: groups hold the extents of dimensions 0 and 1");
+    groups.g0 = TDM_GROUP0{lds_addr, global_addr, 0, 0};
+    if constexpr(Dim == 0)
+        groups.g1.tensorDim0(extent);
+    else
+        groups.g1.tensorDim1(extent);
+    amd_tdm_load<coherence>(groups.g0, groups.g1, groups.g2);
+}
+
 union TDM_GROUP3_MODE0
 {
     struct

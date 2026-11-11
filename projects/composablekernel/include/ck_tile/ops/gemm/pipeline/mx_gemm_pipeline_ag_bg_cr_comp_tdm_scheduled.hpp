@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
@@ -92,6 +93,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     using CLayout        = remove_cvref_t<typename Problem::CLayout>;
     using AElementWise   = remove_cvref_t<typename Problem::AElementWise>;
     using BElementWise   = remove_cvref_t<typename Problem::BElementWise>;
+
+    using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
 
     static_assert(mx_tdm_scheduled::InvalidTuning<Policy::template GetReason<Problem>()>::value,
                   "comp_tdm_scheduled: the Problem and tuning break a rule of rocKE's validate()");
@@ -617,22 +620,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             const index_t k_byte      = integer_divide_nonnegative<kKPerByte>(k0);
             const index_t remaining_k = packed_k - k_byte;
-            TDMGroups d               = data;
-            d.g0 = TDM_GROUP0{data_lds + static_cast<uint32_t>(BufferBase(parity)),
-                              data_global + static_cast<uint32_t>(k_byte),
-                              0,
-                              0};
-            d.g1.tensorDim0(static_cast<uint32_t>(remaining_k));
-            amd_tdm_load(d.g0, d.g1, d.g2);
+            PipelineImplBase::template GlobalPrefetchTDM<0>(
+                data,
+                data_lds + static_cast<uint32_t>(BufferBase(parity)),
+                data_global + static_cast<uint32_t>(k_byte),
+                static_cast<uint32_t>(remaining_k));
             const index_t k_step     = integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
-            TDMGroups s              = scale;
-            s.g0 = TDM_GROUP0{scale_lds + static_cast<uint32_t>(BufferBase(parity)),
-                              scale_global + static_cast<uint32_t>(k_step * scale_stride),
-                              0,
-                              0};
-            s.g1.tensorDim1(static_cast<uint32_t>(steps_left));
-            amd_tdm_load(s.g0, s.g1, s.g2);
+            PipelineImplBase::template GlobalPrefetchTDM<1>(
+                scale,
+                scale_lds + static_cast<uint32_t>(BufferBase(parity)),
+                scale_global + static_cast<uint32_t>(k_step * scale_stride),
+                static_cast<uint32_t>(steps_left));
         }
 
         // ---------------------------------------------------------------- Gl2Prefetcher

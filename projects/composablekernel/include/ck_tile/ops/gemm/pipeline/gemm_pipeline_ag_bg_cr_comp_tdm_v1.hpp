@@ -1175,27 +1175,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                        void* __restrict__ p_smem,
                                        BlockGemmT block_gemm = {}) const
         {
-            // TODO: tdm config will update with problem and policy; currently use default value
-            TDMConfig tdm_config_a;
-            TDMConfig tdm_config_b;
-            // set tdm's lds padding config
-            constexpr auto LdsPaddingConfigA =
-                Policy::template GetLdsPaddingConfig<Problem, true>();
-            constexpr auto IsAPadding            = LdsPaddingConfigA[I0{}];
-            constexpr auto APaddingAmount        = LdsPaddingConfigA[I1{}];
-            constexpr auto APaddingInterval      = LdsPaddingConfigA[I2{}];
-            tdm_config_a.pad_enable              = IsAPadding;
-            tdm_config_a.pad_config.pad_amount   = APaddingAmount;
-            tdm_config_a.pad_config.pad_interval = APaddingInterval;
-
-            constexpr auto LdsPaddingConfigB =
-                Policy::template GetLdsPaddingConfig<Problem, false>();
-            constexpr auto IsBPadding            = LdsPaddingConfigB[I0{}];
-            constexpr auto BPaddingAmount        = LdsPaddingConfigB[I1{}];
-            constexpr auto BPaddingInterval      = LdsPaddingConfigB[I2{}];
-            tdm_config_b.pad_enable              = IsBPadding;
-            tdm_config_b.pad_config.pad_amount   = BPaddingAmount;
-            tdm_config_b.pad_config.pad_interval = BPaddingInterval;
+            TDMConfig tdm_config_a = Base::template MakeTdmConfig<true>();
+            TDMConfig tdm_config_b = Base::template MakeTdmConfig<false>();
 
             // NOTE: this is used only for data cache prefetch in current implementation when
             // enabled. Maybe move it somewhere else
@@ -1327,27 +1308,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                    index_t num_loop,
                    void* __restrict__ p_smem) const
         {
-            // TODO: tdm config will update with problem and policy; currently use default value
-            TDMConfig tdm_config_a;
-            TDMConfig tdm_config_b;
-            // set tdm's lds padding config
-            constexpr auto LdsPaddingConfigA =
-                Policy::template GetLdsPaddingConfig<Problem, true>();
-            constexpr auto IsAPadding            = LdsPaddingConfigA[I0{}];
-            constexpr auto APaddingAmount        = LdsPaddingConfigA[I1{}];
-            constexpr auto APaddingInterval      = LdsPaddingConfigA[I2{}];
-            tdm_config_a.pad_enable              = IsAPadding;
-            tdm_config_a.pad_config.pad_amount   = APaddingAmount;
-            tdm_config_a.pad_config.pad_interval = APaddingInterval;
-
-            constexpr auto LdsPaddingConfigB =
-                Policy::template GetLdsPaddingConfig<Problem, false>();
-            constexpr auto IsBPadding            = LdsPaddingConfigB[I0{}];
-            constexpr auto BPaddingAmount        = LdsPaddingConfigB[I1{}];
-            constexpr auto BPaddingInterval      = LdsPaddingConfigB[I2{}];
-            tdm_config_b.pad_enable              = IsBPadding;
-            tdm_config_b.pad_config.pad_amount   = BPaddingAmount;
-            tdm_config_b.pad_config.pad_interval = BPaddingInterval;
+            TDMConfig tdm_config_a = Base::template MakeTdmConfig<true>();
+            TDMConfig tdm_config_b = Base::template MakeTdmConfig<false>();
 
             // NOTE: this is used only for data cache prefetch in current implementation when
             // enabled. Maybe move it somewhere else

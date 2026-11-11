@@ -378,26 +378,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             TDMConfig tdm_config_a[2];
             TDMConfig tdm_config_b[2];
 
-            // set tdm's lds padding config
-            constexpr auto LdsPaddingConfigA =
-                Policy::template GetLdsPaddingConfig<Problem, true>();
-            constexpr auto APaddingEnabled  = LdsPaddingConfigA[I0{}];
-            constexpr auto APaddingAmount   = LdsPaddingConfigA[I1{}];
-            constexpr auto APaddingInterval = LdsPaddingConfigA[I2{}];
-
-            constexpr auto LdsPaddingConfigB =
-                Policy::template GetLdsPaddingConfig<Problem, false>();
-            constexpr auto BPaddingEnabled  = LdsPaddingConfigB[I0{}];
-            constexpr auto BPaddingAmount   = LdsPaddingConfigB[I1{}];
-            constexpr auto BPaddingInterval = LdsPaddingConfigB[I2{}];
             static_for<0, 2, 1>{}([&](auto i) {
-                tdm_config_a[i].pad_enable              = APaddingEnabled;
-                tdm_config_a[i].pad_config.pad_amount   = APaddingAmount;
-                tdm_config_a[i].pad_config.pad_interval = APaddingInterval;
-
-                tdm_config_b[i].pad_enable              = BPaddingEnabled;
-                tdm_config_b[i].pad_config.pad_amount   = BPaddingAmount;
-                tdm_config_b[i].pad_config.pad_interval = BPaddingInterval;
+                tdm_config_a[i] = Base::template MakeTdmConfig<true>();
+                tdm_config_b[i] = Base::template MakeTdmConfig<false>();
             });
 
             if constexpr(UseClusterLaunch)
