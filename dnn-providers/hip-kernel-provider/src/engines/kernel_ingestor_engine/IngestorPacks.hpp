@@ -48,9 +48,9 @@ void resetPointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
-/// @see packs/HipConvFwdRdnaNative.cpp
-void registerHipConvFwdRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
-void resetHipConvFwdRdnaModuleCache();
+/// @see packs/HipConvFwdFmaIgemmRdnaNative.cpp
+void registerHipConvFwdFmaIgemmRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetHipConvFwdFmaIgemmRdnaModuleCache();
 
 /// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
 /// own log lines and the descriptor census (which looks the loaded set up by this name)

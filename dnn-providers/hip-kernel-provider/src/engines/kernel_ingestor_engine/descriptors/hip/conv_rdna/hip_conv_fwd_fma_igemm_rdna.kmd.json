@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-  "name": "hip_conv_fwd_rdna variant fields",
+  "id": "d74910ca-3b89-405c-a097-e4081d265470",
+  "name": "hip_conv_fwd_fma_igemm_rdna variant fields",
   "fields": [
     {
       "name": "kernel_family",

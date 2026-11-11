@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "c23365da-5c1e-4550-abc8-cdee9ba54b18",
+  "name": "hip_conv_fwd_fma_igemm_rdna selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.hip_conv_fwd_fma_igemm_rdna.score"
+  }
+}

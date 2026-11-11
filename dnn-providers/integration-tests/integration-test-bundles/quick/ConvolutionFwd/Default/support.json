@@ -99,7 +99,7 @@
         }
       }
     ],
-    "hipkernel:hip_conv_fwd_rdna": [
+    "hipkernel:hip_conv_fwd_fma_igemm_rdna": [
       {
         "cases": [
           "1_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",

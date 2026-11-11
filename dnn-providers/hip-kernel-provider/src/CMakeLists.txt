@@ -662,39 +662,39 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created the FlyDSL external integration targets (one per engine and architecture)")
     endif()
 
-    # hipkernel:hip_conv_fwd_rdna against the shared ConvolutionFwd sweeps, one entry per
+    # hipkernel:hip_conv_fwd_fma_igemm_rdna against the shared ConvolutionFwd sweeps, one entry per
     # RDNA arch the product pack ships it for: the shape of the gfx950 attention entries
     # above -- routed into the arch's shard, GTEST_FILTER and ENVIRONMENT kept out of the
     # categorization-only argument list.
     foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
                            gfx1200 gfx1201)
-        set(_hkp_hip_conv_fwd_rdna FALSE)
+        set(_hkp_hip_conv_fwd_fma_igemm_rdna FALSE)
         if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-            hkp_product_ships_engine_for_arch(_hkp_hip_conv_fwd_rdna
-                                              "hipkernel:hip_conv_fwd_rdna" ${_arch})
+            hkp_product_ships_engine_for_arch(_hkp_hip_conv_fwd_fma_igemm_rdna
+                                              "hipkernel:hip_conv_fwd_fma_igemm_rdna" ${_arch})
         endif()
-        if(NOT _hkp_hip_conv_fwd_rdna OR NOT TARGET hipdnn_integration_tests)
+        if(NOT _hkp_hip_conv_fwd_fma_igemm_rdna OR NOT TARGET hipdnn_integration_tests)
             continue()
         endif()
-        set(_target ${PROJECT_NAME}-${_arch}-hip-conv-fwd-rdna-external-integration-check)
+        set(_target ${PROJECT_NAME}-${_arch}-hip-conv-fwd-fma-igemm-rdna-external-integration-check)
         _hkp_census_external_test_file(_shard_ctest ${_arch})
         set(_category_args "")
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
-           AND DEFINED HIPKERNELPROVIDER_HIP_CONV_FWD_RDNA_INTEGRATION_CATEGORIES_YAML)
+           AND DEFINED HIPKERNELPROVIDER_HIP_CONV_FWD_FMA_IGEMM_RDNA_INTEGRATION_CATEGORIES_YAML)
             list(APPEND _category_args
-                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_HIP_CONV_FWD_RDNA_INTEGRATION_CATEGORIES_YAML}"
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_HIP_CONV_FWD_FMA_IGEMM_RDNA_INTEGRATION_CATEGORIES_YAML}"
                 INSTALL_TEST_FILE "${_shard_ctest}"
-                TEST_NAME_PREFIX ${PROJECT_NAME}-${_arch}-hip-conv-fwd-rdna-external-integration
+                TEST_NAME_PREFIX ${PROJECT_NAME}-${_arch}-hip-conv-fwd-fma-igemm-rdna-external-integration
             )
         endif()
         # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
         # says why.
-        set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_hip_conv_fwd_rdna.toml")
+        set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_hip_conv_fwd_fma_igemm_rdna.toml")
         hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_config}")
         add_external_integration_test_target(
             TARGET_NAME    ${_target}
             PLUGIN_TARGET  hip_kernel_provider
-            ENGINE_NAME    "hipkernel:hip_conv_fwd_rdna"
+            ENGINE_NAME    "hipkernel:hip_conv_fwd_fma_igemm_rdna"
             INSTALL_SUBDIR hip_kernel_provider
             INSTALL_DESTINATION "${_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_${_arch}

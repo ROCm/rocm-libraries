@@ -19,14 +19,14 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/HipConvFwdRdnaLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/HipConvFwdFmaIgemmRdnaLaunchValues.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
- * @file TestHipConvFwdRdnaPack.cpp
- * @brief Host-only checks of `hipkernel:hip_conv_fwd_rdna`: the graphs its matcher accepts
+ * @file TestHipConvFwdFmaIgemmRdnaPack.cpp
+ * @brief Host-only checks of `hipkernel:hip_conv_fwd_fma_igemm_rdna`: the graphs its matcher accepts
  *        and refuses, the tokens it binds, the one kernel its kernel matcher admits per graph,
- *        and its saved launch values. The device cases are IntegrationGpuHipConvFwdRdna.
+ *        and its saved launch values. The device cases are IntegrationGpuHipConvFwdFmaIgemmRdna.
  */
 namespace
 {
@@ -39,15 +39,16 @@ using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-constexpr PackSymbols HIP_CONV_FWD_RDNA{"hipkernel:hip_conv_fwd_rdna",
-                                        "hipkernel.hip_conv_fwd_rdna.graph_match",
-                                        "",
-                                        "hipkernel.hip_conv_fwd_rdna.kernel_match",
-                                        "hipkernel.hip_conv_fwd_rdna.score",
-                                        "hipkernel.hip_conv_fwd_rdna.dispatch",
-                                        "conv_fwd.x.uid",
-                                        "conv_fwd.w.uid",
-                                        "conv_fwd.y.uid"};
+constexpr PackSymbols HIP_CONV_FWD_FMA_IGEMM_RDNA{
+    "hipkernel:hip_conv_fwd_fma_igemm_rdna",
+    "hipkernel.hip_conv_fwd_fma_igemm_rdna.graph_match",
+    "",
+    "hipkernel.hip_conv_fwd_fma_igemm_rdna.kernel_match",
+    "hipkernel.hip_conv_fwd_fma_igemm_rdna.score",
+    "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch",
+    "conv_fwd.x.uid",
+    "conv_fwd.w.uid",
+    "conv_fwd.y.uid"};
 
 constexpr int64_t X_UID = 1;
 constexpr int64_t W_UID = 2;
@@ -154,7 +155,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        attributes.Union()));
 
-    auto name = builder.CreateString("hip_conv_fwd_rdna_test");
+    auto name = builder.CreateString("hip_conv_fwd_fma_igemm_rdna_test");
     auto tensorsVector = builder.CreateVector(tensors);
     auto nodesVector = builder.CreateVector(nodes);
     data_objects::GraphBuilder graphBuilder(builder);
@@ -168,7 +169,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 bool matches(const GraphSpec& spec)
 {
     const GraphFixture fixture(buildGraph(spec));
-    return matchesGraph(HIP_CONV_FWD_RDNA, fixture.context()).has_value();
+    return matchesGraph(HIP_CONV_FWD_FMA_IGEMM_RDNA, fixture.context()).has_value();
 }
 
 /// A 3-D variant of @p spec: depth 4 in front, a 3x3x3 filter, unit depth stride, dilation
@@ -198,14 +199,14 @@ KernelDefinition fmaKernel(const std::string& dtype,
 bool admits(const GraphSpec& spec, const KernelDefinition& kernel)
 {
     const GraphFixture fixture(buildGraph(spec));
-    return matchesKernel(HIP_CONV_FWD_RDNA, fixture.context(), kernel);
+    return matchesKernel(HIP_CONV_FWD_FMA_IGEMM_RDNA, fixture.context(), kernel);
 }
 
 // ---------------------------------------------------------------------------
 // Graph matcher
 // ---------------------------------------------------------------------------
 
-TEST(TestHipConvFwdRdnaGraphMatcher, AcceptsEveryServedShape)
+TEST(TestHipConvFwdFmaIgemmRdnaGraphMatcher, AcceptsEveryServedShape)
 {
     GraphSpec nhwc;
     nhwc.channelsLast = true;
@@ -252,7 +253,7 @@ TEST(TestHipConvFwdRdnaGraphMatcher, AcceptsEveryServedShape)
     EXPECT_TRUE(matches(rank3));
 }
 
-TEST(TestHipConvFwdRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
+TEST(TestHipConvFwdFmaIgemmRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
 {
     GraphSpec depthwise;
     depthwise.c = 8;
@@ -300,17 +301,17 @@ TEST(TestHipConvFwdRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
     EXPECT_FALSE(matches(rank2)) << "rank 2";
 }
 
-TEST(TestHipConvFwdRdnaBinding, BindsTheOperandsAndTheGroupedFlops)
+TEST(TestHipConvFwdFmaIgemmRdnaBinding, BindsTheOperandsAndTheGroupedFlops)
 {
     GraphSpec spec = threeD(GraphSpec{});
     spec.groups = 2;
     const GraphFixture fixture(buildGraph(spec));
-    const auto bound = matchesGraph(HIP_CONV_FWD_RDNA, fixture.context());
+    const auto bound = matchesGraph(HIP_CONV_FWD_FMA_IGEMM_RDNA, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_RDNA.inputAToken), X_UID);
-    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_RDNA.inputBToken), W_UID);
-    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_RDNA.outputToken), Y_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_FMA_IGEMM_RDNA.inputAToken), X_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_FMA_IGEMM_RDNA.inputBToken), W_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_FMA_IGEMM_RDNA.outputToken), Y_UID);
     // 2 x N x K x (D x H x W out) x (C / groups) x taps; padding 1 keeps the output size.
     EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"),
               int64_t{2} * 2 * 32 * 4 * 9 * 11 * (8 / 2) * 27);
@@ -320,7 +321,7 @@ TEST(TestHipConvFwdRdnaBinding, BindsTheOperandsAndTheGroupedFlops)
 // Kernel matcher
 // ---------------------------------------------------------------------------
 
-TEST(TestHipConvFwdRdnaKernelMatcher, AdmitsOnlyTheGraphsFamilyDtypeLayoutAndTile)
+TEST(TestHipConvFwdFmaIgemmRdnaKernelMatcher, AdmitsOnlyTheGraphsFamilyDtypeLayoutAndTile)
 {
     const GraphSpec spec; // fp32, channels-first, 32 output channels: tile 32.
 
@@ -337,12 +338,12 @@ TEST(TestHipConvFwdRdnaKernelMatcher, AdmitsOnlyTheGraphsFamilyDtypeLayoutAndTil
     EXPECT_FALSE(admits(nhwcHalf, fmaKernel("HALF", "CHANNELS_FIRST", 32)));
 }
 
-class TestHipConvFwdRdnaTile : public ::testing::TestWithParam<std::pair<int64_t, int64_t>>
+class TestHipConvFwdFmaIgemmRdnaTile : public ::testing::TestWithParam<std::pair<int64_t, int64_t>>
 {
 };
 
 // The narrowest of 32, 64 and 128 that holds one group's output channels, and exactly one.
-TEST_P(TestHipConvFwdRdnaTile, PicksTheNarrowestTileHoldingAGroup)
+TEST_P(TestHipConvFwdFmaIgemmRdnaTile, PicksTheNarrowestTileHoldingAGroup)
 {
     const auto [outChannelsPerGroup, expectedTile] = GetParam();
     GraphSpec spec;
@@ -357,7 +358,7 @@ TEST_P(TestHipConvFwdRdnaTile, PicksTheNarrowestTileHoldingAGroup)
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestHipConvFwdRdnaTile,
+                         TestHipConvFwdFmaIgemmRdnaTile,
                          ::testing::Values(std::make_pair(16, 32),
                                            std::make_pair(32, 32),
                                            std::make_pair(33, 64),
@@ -388,13 +389,13 @@ hip_kernel_provider::kernel_ingestor_engine::conv_rdna::ConvProblem distinctProb
 
 SavedLaunchInputs savedValid()
 {
-    return SavedLaunchInputs{std::string(HIP_CONV_FWD_RDNA_DISPATCH_SYMBOL_V1),
-                             hipConvFwdRdnaLaunchValues({21, 22, 23}, distinctProblem())};
+    return SavedLaunchInputs{std::string(HIP_CONV_FWD_FMA_IGEMM_RDNA_DISPATCH_SYMBOL_V1),
+                             hipConvFwdFmaIgemmRdnaLaunchValues({21, 22, 23}, distinctProblem())};
 }
 
-TEST(TestHipConvFwdRdnaLaunchValues, RoundTripThroughTheirValues)
+TEST(TestHipConvFwdFmaIgemmRdnaLaunchValues, RoundTripThroughTheirValues)
 {
-    const auto read = readHipConvFwdRdnaLaunchInputs(savedValid());
+    const auto read = readHipConvFwdFmaIgemmRdnaLaunchInputs(savedValid());
     const auto expected = distinctProblem();
 
     EXPECT_EQ(read.binding.x, 21);
@@ -412,7 +413,7 @@ TEST(TestHipConvFwdRdnaLaunchValues, RoundTripThroughTheirValues)
     EXPECT_EQ(read.problem.dilation, expected.dilation);
 }
 
-TEST(TestHipConvFwdRdnaLaunchValues, SavesTheV1ValueNames)
+TEST(TestHipConvFwdFmaIgemmRdnaLaunchValues, SavesTheV1ValueNames)
 {
     const auto values = savedValid().values;
     for(const auto* name :
@@ -426,16 +427,16 @@ TEST(TestHipConvFwdRdnaLaunchValues, SavesTheV1ValueNames)
     EXPECT_EQ(values.size(), 25U);
 }
 
-TEST(TestHipConvFwdRdnaLaunchValues, RefusesMalformedValues)
+TEST(TestHipConvFwdFmaIgemmRdnaLaunchValues, RefusesMalformedValues)
 {
     const auto refused = [](const SavedLaunchInputs& inputs, const char* what) {
-        EXPECT_THROW(readHipConvFwdRdnaLaunchInputs(inputs),
+        EXPECT_THROW(readHipConvFwdFmaIgemmRdnaLaunchInputs(inputs),
                      hipdnn_plugin_sdk::HipdnnPluginException)
             << what;
     };
 
     auto otherContract = savedValid();
-    otherContract.dispatchSymbol = "hipkernel.hip_conv_fwd_rdna.dispatch.v2";
+    otherContract.dispatchSymbol = "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch.v2";
     refused(otherContract, "another contract");
 
     auto missing = savedValid();

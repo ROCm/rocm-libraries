@@ -158,13 +158,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
     )
     # The HIP-source RDNA conv forward engine ships from descriptors/hip/conv_rdna/.
-    hkp_product_offers_engine(_hkp_hip_conv_fwd_rdna_bundle "hipkernel:hip_conv_fwd_rdna")
-    if(_hkp_hip_conv_fwd_rdna_bundle)
+    hkp_product_offers_engine(_hkp_hip_conv_fwd_fma_igemm_rdna_bundle "hipkernel:hip_conv_fwd_fma_igemm_rdna")
+    if(_hkp_hip_conv_fwd_fma_igemm_rdna_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuHipConvFwdRdna.cpp
+            kernel_ingestor_engine/IntegrationGpuHipConvFwdFmaIgemmRdna.cpp
         )
         target_compile_definitions(hip_kernel_provider_integration_tests
-            PRIVATE HKP_TEST_HIP_CONV_FWD_RDNA=1
+            PRIVATE HKP_TEST_HIP_CONV_FWD_FMA_IGEMM_RDNA=1
         )
     endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE

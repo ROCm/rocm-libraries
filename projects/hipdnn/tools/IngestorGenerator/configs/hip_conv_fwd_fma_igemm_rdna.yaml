@@ -1,10 +1,10 @@
-# Source of truth for the shipped hipkernel:hip_conv_fwd_rdna catalog: an FMA implicit-GEMM
+# Source of truth for the shipped hipkernel:hip_conv_fwd_fma_igemm_rdna catalog: an FMA implicit-GEMM
 # forward convolution for the gfx11 (RDNA3/3.5) and gfx12 (RDNA4) targets, compiled from HIP
 # source (kernels/ConvFwdFmaIgemm.cpp). One kernel per dtype x layout x output-channel tile.
 # Batch, channels, groups, every spatial extent, stride, dilation and padding are launch
 # arguments; 2D runs as 3D with depth 1.
 #
-# The native matcher (HipConvFwdRdnaNative.cpp) admits one conv_fprop node and picks the
+# The native matcher (HipConvFwdFmaIgemmRdnaNative.cpp) admits one conv_fprop node and picks the
 # tile from the output channels per group, so each graph has one candidate. The RDNA
 # targets are listed one by one rather than as gfx11-generic / gfx12-generic, so each
 # shard compiles its own targets and is stamped with its architecture.
@@ -12,7 +12,7 @@
 dialect: packaged
 authored_subpath: hip/conv_rdna
 engine:
-  name: hipkernel:hip_conv_fwd_rdna
+  name: hipkernel:hip_conv_fwd_fma_igemm_rdna
   sdk_version: "1.0.0"
   knobs: []
   heuristic: native
@@ -35,10 +35,10 @@ kernel_source_kind: hip
 workspace_policy: none
 
 packs:
-- name: hip_conv_fwd_rdna
+- name: hip_conv_fwd_fma_igemm_rdna
   arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
   kernels:
-  - name: hip_conv_fwd_rdna.fma_f32_nchw_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nchw_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -47,7 +47,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f32_nchw_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nchw_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -56,7 +56,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f32_nchw_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nchw_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -65,7 +65,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 128}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f32_nhwc_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nhwc_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -74,7 +74,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f32_nhwc_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nhwc_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -83,7 +83,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f32_nhwc_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f32_nhwc_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -92,7 +92,7 @@ packs:
         defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 128}
     metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 128}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nchw_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nchw_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -101,7 +101,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nchw_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nchw_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -110,7 +110,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nchw_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nchw_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -119,7 +119,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 128}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nhwc_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nhwc_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -128,7 +128,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nhwc_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nhwc_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -137,7 +137,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_f16_nhwc_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_f16_nhwc_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -146,7 +146,7 @@ packs:
         defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 128}
     metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 128}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nchw_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nchw_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -155,7 +155,7 @@ packs:
         defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nchw_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nchw_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -164,7 +164,7 @@ packs:
         defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nchw_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nchw_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -173,7 +173,7 @@ packs:
         defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128}
     metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 128}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n32
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nhwc_tile_n32
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -182,7 +182,7 @@ packs:
         defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32}
     metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_LAST, tile_n: 32}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n64
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nhwc_tile_n64
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
@@ -191,7 +191,7 @@ packs:
         defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64}
     metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_LAST, tile_n: 64}
     priority: 0
-  - name: hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n128
+  - name: hip_conv_fwd_fma_igemm_rdna.fma_bf16_nhwc_tile_n128
     kernel_source:
       kind: hip
       source: kernels/ConvFwdFmaIgemm.cpp
