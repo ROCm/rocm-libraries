@@ -2486,8 +2486,9 @@ Tests:
   unit_check: 1
   gpu_arch: '942|1250'
 
-# The norm check of a bias gradient from B compares its N values, one per column
-# of D. Strongly rectangular shapes catch a check that uses M instead.
+# Exercise default solution selection for rectangular BGRADB on gfx942.
+# BenchVerify.smoke_BiasGradientNormLength tests the verifier independently of
+# GEMM kernels, including wrong tail values and reads beyond the bias vector.
 - name: matmul_bgradb_bf16_NT_norm_rectangular
   category: pre_checkin
   function:
