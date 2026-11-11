@@ -57,13 +57,21 @@ def golden_bundle_root() -> Path | None:
 
 
 def sdpa_fwd_golden_graphs() -> list[Path]:
-    """The checked-in SdpaFwd graphs (not their meta, support or sweep files)."""
+    """The checked-in SdpaFwd graphs.
+
+    Excludes meta, support, and sweep files, and sweep-bundle templates
+    (``graph.template.json``). A template still carries ``${case.x}``
+    placeholders filled per case from the bundle's ``sweep.json``, so it is
+    not a complete graph.
+    """
     bundles = golden_bundle_root()
     if bundles is None:
         return []
     return sorted(
         p
         for p in bundles.glob("*/SdpaFwd*/**/*.json")
-        if not p.name.endswith(("meta.json", "support.json", "sweep.json"))
+        if not p.name.endswith(
+            ("meta.json", "support.json", "sweep.json", "graph.template.json")
+        )
         and "Default" not in p.parts
     )

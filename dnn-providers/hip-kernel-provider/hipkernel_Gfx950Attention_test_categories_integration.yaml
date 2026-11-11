@@ -11,6 +11,8 @@
 # pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
 # claimed case the engine declines fails its lane, an unclaimed one it declines skips,
 # and an unclaimed one it accepts runs and is reported as unclaimed support.
+# It also selects the SdpaFwdPlan suites: the generic SDPA forward tests every SDPA
+# engine runs (integration-tests/docs/test-plans/sdpa-fwd.md).
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick +
 # standard + comprehensive; only "full" runs the full-tier bundles.
 
@@ -23,6 +25,7 @@ test_categories:
     description: "Quick gfx950 attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwdPlan_*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -34,6 +37,8 @@ test_categories:
     test_patterns:
       - "quick_SdpaFwd_Default.*"
       - "standard_SdpaFwd_Default.*"
+      - "quick_SdpaFwdPlan_*"
+      - "standard_SdpaFwdPlan_*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -46,6 +51,9 @@ test_categories:
       - "quick_SdpaFwd_Default.*"
       - "standard_SdpaFwd_Default.*"
       - "comprehensive_SdpaFwd_Default.*"
+      - "quick_SdpaFwdPlan_*"
+      - "standard_SdpaFwdPlan_*"
+      - "comprehensive_SdpaFwdPlan_*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -56,6 +64,7 @@ test_categories:
     description: "Full gfx950 attention coverage"
     test_patterns:
       - "*_SdpaFwd_Default.*"
+      - "*_SdpaFwdPlan_*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -65,6 +74,7 @@ test_categories:
     description: "Fast-feedback quick tier: BSHD quick bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwdPlan_*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

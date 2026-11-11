@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "import_mode": {
+    "grouping": [
+      "skeleton-value-form",
+      "superset-templates",
+      "template-alignment",
+      "template-attributes"
+    ],
+    "format": "compact"
+  },
+  "cases": [
+    {
+      "id": "bf16_028f0cece2d45412",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [128, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "bfloat16"},
+          {"uid": 1, "dims": [2, 1, 64, 1], "strides": [64, 64, 1, 1], "data_type": "int32"},
+          {"uid": 2, "dims": [2, 1, 64, 1], "strides": [64, 64, 1, 1], "data_type": "int32"},
+          {"uid": 3, "dims": [2, 8, 64, 128], "strides": [65536, 128, 1024, 1], "data_type": "bfloat16", "ragged_offset_multiplier": 1},
+          {"uid": 4, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 6, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 128, 1024, 1], "data_type": "bfloat16", "ragged_offset_multiplier": 1},
+          {"uid": 8, "dims": [2, 8, 64, 1], "strides": [64, 128, 1, 1], "data_type": "float", "ragged_offset_multiplier": 1},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 11, "dims": [128, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16, "11": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 64, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "028f0cece2d45412", "csv_case_id": "lv-1114", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"3": {"seed": 857566542}, "6": {"kind": "values", "repeat": false, "seed": 2557966108, "values": [0, 64, 128]}, "0": {"seed": 760297858}, "11": {"seed": 678176171}, "5": {"kind": "values", "repeat": false, "seed": 2331779757, "values": [0, 65536, 131072]}, "10": {"kind": "values", "repeat": true, "seed": 1142788650, "values": [64]}, "9": {"kind": "values", "repeat": true, "seed": 619502360, "values": [64]}, "1": {"kind": "values", "repeat": false, "seed": 4140102054, "values": [57, 50, 25, 1, 35, 9, 37, 29, 10, 62, 27, 17, 42, 41, 36, 55, 8, 11, 20, 0, 5, 45, 7, 23, 40, 56, 32, 44, 19, 16, 63, 47, 51, 48, 6, 52, 61, 2, 13, 60, 49, 30, 26, 4, 28, 12, 22, 34, 3, 15, 33, 43, 46, 21, 18, 14, 58, 53, 38, 39, 24, 31, 59, 54, 80, 106, 105, 77, 84, 69, 118, 120, 81, 96, 78, 104, 68, 122, 102, 111, 119, 100, 115, 71, 97, 126, 98, 89, 74, 125, 109, 83, 85, 103, 66, 86, 110, 82, 72, 116, 112, 92, 64, 70, 124, 99, 117, 127, 79, 76, 121, 67, 108, 90, 75, 93, 107, 91, 87, 101, 88, 113, 65, 95, 73, 94, 123, 114]}, "2": {"kind": "values", "repeat": false, "seed": 1272734687, "values": [57, 50, 25, 1, 35, 9, 37, 29, 10, 62, 27, 17, 42, 41, 36, 55, 8, 11, 20, 0, 5, 45, 7, 23, 40, 56, 32, 44, 19, 16, 63, 47, 51, 48, 6, 52, 61, 2, 13, 60, 49, 30, 26, 4, 28, 12, 22, 34, 3, 15, 33, 43, 46, 21, 18, 14, 58, 53, 38, 39, 24, 31, 59, 54, 80, 106, 105, 77, 84, 69, 118, 120, 81, 96, 78, 104, 68, 122, 102, 111, 119, 100, 115, 71, 97, 126, 98, 89, 74, 125, 109, 83, 85, 103, 66, 86, 110, 82, 72, 116, 112, 92, 64, 70, 124, 99, 117, 127, 79, 76, 121, 67, 108, 90, 75, 93, 107, 91, 87, 101, 88, 113, 65, 95, 73, 94, 123, 114]}, "4": {"kind": "values", "repeat": false, "seed": 376238103, "values": [0, 65536, 131072]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 42929388}
+    },
+    {
+      "id": "bf16_bfb64e2b4507a3bd",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [10, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"},
+          {"uid": 1, "dims": [2, 1, 5, 1], "strides": [5, 5, 1, 1], "data_type": "int32"},
+          {"uid": 2, "dims": [2, 1, 5, 1], "strides": [5, 5, 1, 1], "data_type": "int32"},
+          {"uid": 3, "dims": [2, 8, 64, 128], "strides": [65536, 128, 1024, 1], "data_type": "bfloat16", "ragged_offset_multiplier": 1},
+          {"uid": 4, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 6, "dims": [3, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 128, 1024, 1], "data_type": "bfloat16", "ragged_offset_multiplier": 1},
+          {"uid": 8, "dims": [2, 8, 64, 1], "strides": [64, 128, 1, 1], "data_type": "float", "ragged_offset_multiplier": 1},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 11, "dims": [10, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16, "11": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 80, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "bfb64e2b4507a3bd", "csv_case_id": "lv-1095", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"3": {"seed": 572013739}, "6": {"kind": "values", "repeat": false, "seed": 3040920823, "values": [0, 64, 128]}, "0": {"seed": 3217578056}, "11": {"seed": 3830672353}, "5": {"kind": "values", "repeat": false, "seed": 2232830361, "values": [0, 65536, 131072]}, "10": {"kind": "values", "repeat": true, "seed": 4268662989, "values": [64]}, "9": {"kind": "values", "repeat": true, "seed": 76759237, "values": [64]}, "1": {"kind": "values", "repeat": false, "seed": 711929094, "values": [0, 1, 2, 3, 4, 0, 6, 7, 8, 9]}, "2": {"kind": "values", "repeat": false, "seed": 1425734687, "values": [0, 1, 2, 3, 4, 0, 6, 7, 8, 9]}, "4": {"kind": "values", "repeat": false, "seed": 3197605919, "values": [0, 65536, 131072]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1068912171}
+    }
+  ]
+}

@@ -1,0 +1,234 @@
+{
+  "version": 2,
+  "import_mode": {
+    "grouping": [
+      "skeleton-value-form",
+      "superset-templates",
+      "template-alignment",
+      "template-attributes"
+    ],
+    "format": "compact"
+  },
+  "cases": [
+    {
+      "id": "fp8_e4m3_0a314bf6ec8c1393",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [1], "strides": [1], "data_type": "float", "value": 0.25},
+          {"uid": 1, "dims": [1], "strides": [1], "data_type": "float", "value": 0.5},
+          {"uid": 2, "dims": [1], "strides": [1], "data_type": "float", "value": 2.0},
+          {"uid": 3, "dims": [132, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 4, "dims": [4, 1, 33, 1], "strides": [33, 33, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [4, 8, 512, 1], "strides": [4096, 512, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [132, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 528, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "0a314bf6ec8c1393", "csv_case_id": "lv-12369", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3310440990}, "3": {"seed": 2346159442}, "10": {"seed": 1636920032}, "9": {"kind": "values", "repeat": true, "seed": 3795019450, "values": [512]}, "8": {"kind": "values", "repeat": true, "seed": 1305902643, "values": [512]}, "1": {"seed": 3217482065}, "0": {"seed": 557550279}, "2": {"seed": 2900337464}, "4": {"kind": "values", "repeat": false, "seed": 2280353913, "values": [25, 22, 15, 7, 5, 28, 9, 10, 31, 27, 2, 19, 16, 30, 29, 12, 3, 14, 23, 32, 26, 11, 21, 24, 8, 20, 13, 17, 1, 18, 0, 4, 6, 57, 53, 56, 41, 49, 65, 59, 45, 50, 46, 35, 63, 37, 54, 55, 52, 33, 39, 61, 42, 62, 43, 34, 48, 36, 40, 44, 64, 38, 58, 47, 51, 60, 95, 94, 97, 93, 98, 78, 76, 86, 69, 85, 73, 71, 77, 79, 84, 88, 90, 75, 92, 72, 80, 91, 96, 87, 89, 81, 66, 83, 82, 67, 70, 68, 74, 128, 111, 102, 99, 130, 119, 127, 106, 123, 125, 129, 103, 108, 104, 116, 115, 114, 110, 117, 112, 105, 118, 124, 126, 100, 131, 107, 121, 120, 122, 101, 113, 109]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 171002870}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_e2bd1796dd4deb43",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [1], "strides": [1], "data_type": "float", "value": 0.25},
+          {"uid": 1, "dims": [1], "strides": [1], "data_type": "float", "value": 0.5},
+          {"uid": 2, "dims": [1], "strides": [1], "data_type": "float", "value": 2.0},
+          {"uid": 3, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 4, "dims": [2, 1, 17, 1], "strides": [17, 17, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 32, 256, 1], "strides": [8192, 256, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 272, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e2bd1796dd4deb43", "csv_case_id": "lv-11809", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2459785033}, "3": {"seed": 2482197186}, "10": {"seed": 4162578948}, "9": {"kind": "values", "repeat": true, "seed": 505814938, "values": [256]}, "8": {"kind": "values", "repeat": true, "seed": 3691478226, "values": [256]}, "1": {"seed": 1325439254}, "0": {"seed": 2957674116}, "2": {"seed": 1776047544}, "4": {"kind": "values", "repeat": false, "seed": 3642518206, "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1656559510}
+    },
+    {
+      "id": "bf16_1f6995e4ee824170",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "bfloat16"},
+          {"uid": 4, "dims": [2, 1, 17, 1], "strides": [17, 17, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "bfloat16"},
+          {"uid": 6, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "float"},
+          {"uid": 7, "dims": [2, 32, 256, 1], "strides": [8192, 256, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 272, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "1f6995e4ee824170", "csv_case_id": "lv-11705", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 111619448}, "3": {"seed": 4043537492}, "10": {"seed": 2810233368}, "9": {"kind": "values", "repeat": true, "seed": 2844943300, "values": [256]}, "8": {"kind": "values", "repeat": true, "seed": 2814079356, "values": [256]}, "4": {"kind": "values", "repeat": false, "seed": 3386917056, "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 527013348}
+    },
+    {
+      "id": "fp16_3f25266a5c799493",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "half"},
+          {"uid": 4, "dims": [2, 1, 17, 1], "strides": [17, 17, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "half"},
+          {"uid": 6, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "float"},
+          {"uid": 7, "dims": [2, 32, 256, 1], "strides": [8192, 256, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [34, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "half"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 272, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "3f25266a5c799493", "csv_case_id": "lv-11710", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 878633536}, "3": {"seed": 3444188404}, "10": {"seed": 610184676}, "9": {"kind": "values", "repeat": true, "seed": 2108239355, "values": [256]}, "8": {"kind": "values", "repeat": true, "seed": 4001427256, "values": [256]}, "4": {"kind": "values", "repeat": false, "seed": 549227800, "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1059399274}
+    },
+    {
+      "id": "bf16_4542b623ac3f99d2",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [128, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"},
+          {"uid": 4, "dims": [4, 1, 32, 1], "strides": [32, 32, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 6, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [4, 8, 512, 1], "strides": [4096, 512, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [128, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 512, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "4542b623ac3f99d2", "csv_case_id": "lv-11921", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 895753457}, "3": {"seed": 2800594112}, "10": {"seed": 3673753177}, "9": {"kind": "values", "repeat": true, "seed": 2816792003, "values": [512]}, "8": {"kind": "values", "repeat": true, "seed": 673863133, "values": [512]}, "4": {"kind": "values", "repeat": false, "seed": 1749478149, "values": [3, 14, 17, 18, 5, 16, 1, 0, 25, 28, 10, 8, 29, 4, 9, 2, 21, 11, 30, 23, 12, 7, 26, 31, 24, 13, 15, 27, 6, 19, 20, 22, 38, 35, 44, 59, 56, 43, 42, 40, 57, 52, 47, 61, 58, 46, 63, 32, 45, 54, 36, 48, 41, 39, 49, 62, 55, 60, 37, 53, 50, 34, 51, 33, 92, 83, 81, 90, 93, 75, 71, 78, 72, 89, 64, 82, 68, 67, 94, 91, 84, 66, 70, 69, 86, 76, 79, 88, 85, 77, 74, 65, 80, 87, 73, 95, 121, 113, 112, 122, 115, 104, 120, 126, 96, 101, 99, 116, 127, 103, 106, 105, 97, 107, 109, 118, 125, 102, 98, 123, 111, 117, 119, 110, 124, 114, 100, 108]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1161999907}
+    },
+    {
+      "id": "bf16_4e2fd47c21376bfe",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [32, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "bfloat16"},
+          {"uid": 4, "dims": [2, 1, 16, 1], "strides": [16, 16, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "bfloat16"},
+          {"uid": 6, "dims": [2, 32, 256, 128], "strides": [1048576, 32768, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 32, 256, 1], "strides": [139264, 4352, 17, 1], "data_type": "float"},
+          {"uid": 8, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [32, 32, 16, 128], "strides": [65536, 2048, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 256, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "4e2fd47c21376bfe", "csv_case_id": "lv-11682", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1379964245}, "3": {"seed": 1908556126}, "10": {"seed": 3424562677}, "9": {"kind": "values", "repeat": true, "seed": 2695055659, "values": [256]}, "8": {"kind": "values", "repeat": true, "seed": 71237604, "values": [256]}, "4": {"kind": "values", "repeat": false, "seed": 2478550486, "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1311757436}
+    },
+    {
+      "id": "bf16_8237a625203b3460",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [2052, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "bfloat16"},
+          {"uid": 4, "dims": [4, 1, 513, 1], "strides": [513, 513, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 6, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [4, 8, 512, 1], "strides": [8, 1, 32, 1], "data_type": "float"},
+          {"uid": 8, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [2052, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 1, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 513, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "8237a625203b3460", "csv_case_id": "lv-14730", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3720242793}, "3": {"seed": 1696949731}, "10": {"seed": 4260500619}, "9": {"kind": "values", "repeat": true, "seed": 546758695, "values": [512]}, "8": {"kind": "values", "repeat": true, "seed": 2742784696, "values": [512]}, "4": {"kind": "values", "repeat": false, "seed": 3350609161, "values": [159, 497, 205, 476, 12, 338, 490, 424, 136, 271, 117, 24, 114, 444, 415, 239, 309, 451, 35, 75, 67, 365, 100, 400, 472, 343, 256, 270, 221, 208, 139, 416, 456, 341, 489, 418, 188, 480, 414, 502, 463, 38, 276, 405, 330, 409, 19, 215, 260, 96, 86, 148, 92, 73, 453, 162, 267, 133, 356, 264, 238, 397, 57, 266, 112, 412, 45, 269, 181, 372, 196, 445, 202, 44, 83, 426, 149, 312, 499, 396, 315, 253, 438, 123, 324, 127, 32, 361, 345, 354, 138, 37, 164, 81, 511, 283, 336, 304, 76, 102, 142, 294, 3, 342, 314, 235, 374, 103, 387, 275, 395, 11, 417, 26, 218, 259, 245, 295, 464, 84, 48, 7, 225, 194, 360, 169, 377, 413, 145, 40, 161, 122, 287, 457, 207, 500, 182, 368, 495, 449, 493, 217, 292, 115, 390, 317, 335, 486, 301, 293, 411, 224, 62, 447, 498, 484, 394, 388, 383, 510, 325, 171, 386, 74, 363, 186, 93, 261, 482, 263, 42, 214, 28, 175, 219, 421, 132, 240, 244, 237, 211, 268, 329, 198, 167, 344, 31, 450, 364, 280, 448, 118, 151, 289, 429, 6, 199, 249, 23, 381, 436, 357, 362, 177, 41, 307, 432, 346, 435, 392, 331, 277, 9, 16, 106, 10, 306, 90, 252, 25, 220, 82, 131, 233, 190, 298, 60, 46, 487, 477, 303, 512, 176, 351, 66, 5, 241, 355, 318, 166, 120, 401, 59, 380, 130, 391, 203, 206, 29, 465, 257, 353, 168, 158, 63, 72, 285, 87, 384, 422, 91, 491, 193, 408, 273, 254, 64, 473, 126, 462, 299, 107, 94, 180, 478, 339, 124, 505, 458, 189, 258, 209, 434, 227, 226, 506, 359, 170, 85, 423, 379, 420, 172, 1, 471, 200, 428, 231, 22, 281, 99, 143, 366, 371, 108, 446, 300, 328, 79, 340, 433, 68, 467, 110, 290, 503, 77, 195, 492, 89, 308, 229, 305, 78, 378, 369, 483, 385, 232, 155, 49, 282, 213, 370, 243, 479, 147, 178, 36, 262, 191, 250, 475, 485, 376, 327, 302, 459, 30, 179, 440, 406, 348, 125, 310, 501, 291, 113, 58, 105, 488, 334, 437, 156, 407, 461, 279, 469, 95, 508, 135, 43, 234, 313, 33, 97, 352, 185, 375, 443, 34, 128, 65, 389, 460, 321, 54, 228, 399, 474, 265, 247, 504, 50, 236, 454, 165, 71, 212, 441, 56, 452, 333, 201, 39, 427, 150, 382, 393, 470, 230, 468, 153, 119, 350, 398, 187, 14, 163, 160, 288, 403, 402, 192, 80, 410, 347, 21, 349, 109, 404, 116, 496, 255, 278, 70, 222, 367, 216, 61, 286, 223, 134, 53, 297, 419, 27, 322, 129, 442, 494, 197, 323, 111, 316, 20, 251, 272, 13, 69, 332, 248, 320, 137, 121, 152, 174, 17, 154, 246, 204, 439, 183, 319, 173, 326, 140, 51, 431, 242, 311, 455, 296, 430, 466, 157, 425, 509, 55, 358, 0, 210, 52, 184, 8, 284, 144, 2, 47, 146, 274, 101, 507, 104, 88, 98, 481, 337, 373, 18, 15, 4, 141, 693, 1006, 997, 559, 614, 821, 612, 815, 623, 765, 532, 544, 553, 770, 801, 952, 694, 576, 785, 592, 613, 875, 739, 763, 867, 774, 1001, 526, 982, 634, 601, 692, 520, 778, 973, 700, 667, 740, 991, 811, 724, 1003, 703, 654, 878, 552, 533, 947, 714, 690, 637, 602, 622, 760, 839, 722, 522, 855, 877, 975, 1002, 1024, 764, 729, 794, 822, 554, 782, 791, 561, 910, 996, 679, 736, 937, 750, 759, 993, 894, 584, 853, 971, 709, 558, 893, 969, 660, 990, 805, 753, 619, 1012, 892, 735, 589, 945, 1008, 929, 916, 868, 666, 593, 848, 767, 962, 701, 626, 921, 598, 862, 737, 814, 784, 515, 649, 949, 583, 671, 870, 897, 529, 807, 710, 582, 635, 713, 1000, 836, 719, 967, 1016, 628, 633, 918, 788, 675, 650, 717, 858, 846, 854, 939, 959, 817, 944, 683, 933, 741, 812, 658, 1021, 677, 728, 546, 607, 695, 823, 646, 831, 986, 907, 656, 585, 746, 923, 951, 983, 976, 752, 733, 754, 960, 987, 687, 579, 708, 664, 718, 824, 661, 1015, 883, 766, 621, 685, 720, 924, 825, 861, 547, 935, 543, 608, 747, 864, 985, 783, 636, 577, 539, 781, 596, 963, 743, 528, 629, 802, 936, 943, 757, 682, 789, 1025, 516, 780, 828, 813, 518, 827, 977, 889, 796, 799, 523, 886, 1004, 995, 908, 574, 809, 663, 704, 941, 994, 761, 1009, 902, 850, 926, 830, 835, 565, 749, 843, 847, 605, 762, 678, 903, 732, 731, 906, 672, 931, 769, 1020, 841, 686, 688, 755, 816, 665, 586, 542, 597, 882, 541, 988, 514, 537, 899, 535, 940, 696, 590, 849, 702, 606, 530, 564, 1018, 668, 758, 531, 845, 1023, 919, 934, 804, 808, 572, 818, 568, 638, 712, 786, 1007, 534, 525, 874, 680, 873, 792, 631, 562, 555, 950, 655, 521, 925, 840, 738, 913, 980, 670, 726, 618, 876, 563, 1014, 795, 857, 609, 922, 1022, 798, 513, 706, 647, 898, 911, 643, 734, 826, 573, 681, 745, 591, 890, 603, 837, 648, 673, 570, 600, 844, 640, 955, 856, 885, 972, 806, 751, 1019, 580, 594, 742, 865, 998, 715, 519, 642, 756, 651, 966, 888, 953, 961, 536, 810, 957, 851, 662, 545, 860, 723, 954, 768, 588, 639, 698, 611, 551, 684, 820, 697, 772, 938, 909, 915, 871, 895, 641, 881, 927, 863, 691, 578, 979, 965, 942, 777, 981, 540, 829, 1010, 800, 912, 1011, 595, 652, 548, 617, 803, 604, 599, 615, 674, 773, 984, 872, 779, 566, 914, 905, 620, 560, 567, 891, 557, 948, 625, 797, 970, 776, 879, 707, 610, 884, 748, 968, 771, 645, 775, 834, 624, 524, 711, 904, 869, 616, 992, 587, 832, 669, 517, 744, 727, 571, 556, 787, 928, 632, 964, 725, 1005, 917, 716, 705, 689, 569, 575, 538, 974, 730, 676, 699, 790, 920, 842, 793, 989, 946, 866, 958, 956, 653, 644, 978, 1017, 880, 833, 932, 527, 887, 721, 630, 852, 999, 1013, 659, 819, 581, 896, 550, 549, 900, 627, 657, 838, 901, 859, 930, 1437, 1508, 1229, 1183, 1365, 1474, 1272, 1147, 1442, 1061, 1319, 1511, 1340, 1462, 1120, 1484, 1465, 1152, 1460, 1206, 1112, 1203, 1470, 1381, 1193, 1138, 1339, 1227, 1463, 1256, 1329, 1332, 1354, 1518, 1491, 1212, 1502, 1423, 1057, 1158, 1433, 1225, 1134, 1218, 1199, 1192, 1452, 1529, 1409, 1222, 1184, 1105, 1330, 1029, 1050, 1103, 1311, 1355, 1237, 1145, 1487, 1114, 1133, 1260, 1149, 1479, 1349, 1500, 1043, 1058, 1144, 1052, 1268, 1445, 1113, 1471, 1279, 1477, 1155, 1315, 1080, 1234, 1242, 1323, 1110, 1466, 1102, 1065, 1314, 1468, 1287, 1305, 1467, 1097, 1041, 1202, 1312, 1170, 1150, 1209, 1178, 1033, 1220, 1031, 1536, 1408, 1480, 1449, 1036, 1372, 1492, 1426, 1230, 1499, 1153, 1283, 1219, 1118, 1104, 1313, 1210, 1213, 1310, 1425, 1447, 1026, 1428, 1469, 1117, 1326, 1526, 1353, 1396, 1116, 1092, 1060, 1373, 1299, 1250, 1416, 1444, 1280, 1132, 1345, 1532, 1156, 1053, 1397, 1140, 1438, 1257, 1087, 1519, 1358, 1403, 1062, 1530, 1101, 1450, 1045, 1297, 1382, 1182, 1248, 1290, 1081, 1295, 1308, 1143, 1495, 1245, 1344, 1350, 1535, 1247, 1251, 1166, 1127, 1151, 1201, 1176, 1038, 1406, 1320, 1325, 1476, 1048, 1275, 1427, 1413, 1267, 1169, 1379, 1270, 1510, 1096, 1291, 1391, 1316, 1384, 1368, 1261, 1108, 1265, 1200, 1039, 1301, 1512, 1037, 1084, 1146, 1435, 1124, 1194, 1142, 1440, 1343, 1361, 1538, 1533, 1424, 1119, 1224, 1216, 1165, 1390, 1086, 1377, 1254, 1490, 1123, 1461, 1107, 1398, 1369, 1233, 1271, 1255, 1360, 1422, 1537, 1324, 1448, 1410, 1217, 1282, 1520, 1126, 1162, 1527, 1482, 1383, 1497, 1513, 1121, 1252, 1204, 1321, 1364, 1309, 1493, 1303, 1292, 1076, 1181, 1366, 1030, 1214, 1517, 1064, 1205, 1507, 1100, 1386, 1175, 1418, 1259, 1475, 1207, 1375, 1432, 1228, 1082, 1288, 1407, 1253, 1429, 1089, 1246, 1392, 1070, 1186, 1531, 1478, 1051, 1238, 1196, 1122, 1241, 1281, 1211, 1163, 1047, 1472, 1235, 1168, 1362, 1401, 1221, 1098, 1504, 1075, 1115, 1067, 1173, 1441, 1244, 1455, 1367, 1049, 1189, 1346, 1342, 1294, 1528, 1088, 1180, 1483, 1157, 1473, 1042, 1266, 1215, 1456, 1421, 1085, 1417, 1412, 1198, 1226, 1451, 1505, 1191, 1160, 1059, 1179, 1034, 1481, 1404, 1389, 1486, 1274, 1411, 1079, 1093, 1370, 1341, 1125, 1488, 1286, 1090, 1385, 1496, 1347, 1371, 1106, 1348, 1068, 1458, 1453, 1078, 1258, 1334, 1293, 1359, 1459, 1066, 1128, 1523, 1494, 1236, 1521, 1380, 1028, 1317, 1072, 1356, 1148, 1304, 1139, 1378, 1167, 1376, 1136, 1174, 1055, 1273, 1516, 1498, 1094, 1514, 1032, 1285, 1276, 1277, 1187, 1420, 1318, 1337, 1240, 1302, 1525, 1141, 1239, 1363, 1063, 1263, 1129, 1436, 1534, 1164, 1434, 1489, 1430, 1298, 1278, 1161, 1054, 1095, 1394, 1232, 1137, 1069, 1040, 1197, 1073, 1457, 1395, 1443, 1284, 1402, 1439, 1071, 1419, 1249, 1506, 1515, 1393, 1171, 1269, 1300, 1262, 1135, 1485, 1414, 1431, 1501, 1190, 1503, 1208, 1374, 1333, 1289, 1446, 1524, 1351, 1099, 1231, 1044, 1522, 1464, 1388, 1357, 1338, 1130, 1296, 1056, 1177, 1331, 1077, 1111, 1352, 1336, 1131, 1243, 1172, 1159, 1264, 1083, 1415, 1188, 1328, 1387, 1046, 1091, 1027, 1035, 1322, 1335, 1509, 1454, 1109, 1405, 1074, 1185, 1327, 1306, 1307, 1154, 1195, 1400, 1399, 1223, 1958, 1597, 1647, 1949, 1730, 1572, 1997, 1775, 1576, 1998, 1692, 1881, 2019, 1614, 1983, 1716, 1643, 1726, 1711, 1630, 1839, 1651, 2023, 1925, 1539, 1676, 1601, 1815, 1749, 1565, 1560, 1628, 1803, 1650, 1697, 1759, 1742, 2003, 1774, 1981, 1580, 1873, 1919, 1959, 1611, 1907, 1562, 1977, 2016, 1641, 1785, 1732, 1976, 1847, 1686, 1912, 1918, 1945, 1644, 1752, 1750, 1792, 1800, 1578, 1657, 2041, 1820, 1860, 1568, 1541, 1831, 2002, 1969, 1762, 1575, 1579, 1706, 1753, 1853, 1693, 1571, 1542, 1854, 1845, 1825, 1928, 1902, 1608, 1950, 1882, 2032, 1819, 1549, 2042, 1917, 1782, 1889, 2051, 1787, 1987, 1710, 1746, 1927, 1700, 1842, 1620, 1832, 1896, 1811, 1764, 1975, 2000, 1637, 1756, 1784, 1895, 1926, 1661, 1582, 1783, 1605, 1859, 1724, 1875, 2035, 1674, 1556, 1665, 1629, 1675, 1932, 1606, 1654, 1858, 1916, 1653, 1680, 1813, 1623, 1828, 1914, 1921, 1645, 1715, 1743, 1898, 1602, 1635, 2038, 1846, 1681, 1967, 2011, 1622, 1551, 1698, 1656, 1543, 1660, 1677, 1755, 1904, 1893, 1972, 1814, 1773, 1758, 1961, 1968, 1829, 1617, 1593, 1806, 1870, 1920, 1776, 1612, 1868, 1931, 1978, 1745, 1992, 1564, 2039, 1555, 1751, 2046, 1702, 1613, 1735, 1795, 1940, 1936, 2031, 2025, 1857, 1942, 2014, 1999, 1878, 1588, 1908, 1649, 1849, 1833, 1587, 2027, 1865, 1581, 1900, 1887, 1836, 1791, 2040, 1923, 2044, 1910, 1591, 1929, 1771, 1616, 1817, 1985, 1624, 1729, 1739, 1941, 1566, 2028, 1610, 1734, 1946, 1930, 1652, 2018, 1666, 1957, 1888, 1823, 1694, 1659, 1768, 1615, 1722, 1869, 1770, 1995, 1777, 1719, 1683, 1866, 1586, 1980, 1805, 1714, 1712, 1913, 1953, 1574, 1705, 1673, 2006, 1834, 1966, 1835, 1547, 1850, 1837, 1801, 1691, 1727, 1963, 1965, 1618, 1738, 1943, 1658, 1668, 1701, 1696, 2012, 1766, 1609, 1886, 1996, 1664, 1717, 1679, 2034, 1638, 1569, 1994, 2024, 1708, 1585, 1816, 1558, 1876, 1790, 1733, 1935, 1577, 1584, 2045, 1827, 1723, 1948, 1670, 1892, 1639, 2050, 1561, 1922, 2049, 1678, 1713, 1843, 1559, 1598, 1594, 1973, 1952, 1736, 1991, 1951, 1901, 1754, 1690, 1689, 1788, 1780, 1986, 1808, 1862, 1740, 1911, 1695, 1633, 1933, 2008, 1955, 2033, 1909, 1567, 1984, 1687, 1802, 2036, 1760, 1894, 1596, 1789, 1600, 2029, 1769, 1905, 1863, 1993, 1669, 1553, 2013, 1725, 1786, 1880, 1781, 1979, 1884, 1851, 1848, 2043, 1830, 1765, 1570, 1974, 1731, 1971, 1871, 2017, 2005, 1544, 1778, 1809, 1903, 1548, 1779, 1682, 1672, 1906, 1718, 1709, 1879, 2015, 1794, 1852, 1897, 1861, 2048, 1826, 1855, 1703, 1915, 1824, 1899, 2001, 1822, 1793, 1970, 1947, 1625, 1721, 1807, 1720, 1883, 1663, 1563, 1890, 1796, 1763, 1962, 1797, 1799, 1607, 1546, 1707, 1646, 1804, 1626, 2010, 1688, 1767, 2026, 1684, 1632, 1988, 1552, 1744, 1642, 1874, 1772, 1885, 1891, 1573, 1648, 1636, 1699, 1554, 1821, 1944, 1844, 1960, 1798, 1640, 1603, 1856, 1655, 1583, 1990, 1840, 1864, 1954, 1545, 1557, 1550, 1924, 1728, 2022, 1812, 1634, 1671, 1964, 1621, 1590, 1737, 1747, 1627, 1938, 2047, 1841, 1589, 1667, 1540, 1761, 2037, 1592, 1662, 1631, 1838, 2030, 1818, 1748, 1604, 2004, 1599, 2007, 1877, 1810, 2009, 1685, 1619, 1982, 1934, 1704, 1867, 1989, 1595, 1757, 2020, 1872, 2021, 1939, 1937, 1956, 1741]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 37201445, "start_offsets": [{"start_offset": 1, "uid": 7}]}
+    },
+    {
+      "id": "fp16_8812283c055b2ac5",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [132, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "half"},
+          {"uid": 4, "dims": [4, 1, 33, 1], "strides": [33, 33, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "half"},
+          {"uid": 6, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "half"},
+          {"uid": 7, "dims": [4, 8, 512, 1], "strides": [4096, 512, 1, 1], "data_type": "float"},
+          {"uid": 8, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [132, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "half"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 16, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 528, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "8812283c055b2ac5", "csv_case_id": "lv-12266", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 148857863}, "3": {"seed": 491806945}, "10": {"seed": 3478729524}, "9": {"kind": "values", "repeat": true, "seed": 3084641148, "values": [512]}, "8": {"kind": "values", "repeat": true, "seed": 2103662568, "values": [512]}, "4": {"kind": "values", "repeat": false, "seed": 1419996959, "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 0, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 135407676}
+    },
+    {
+      "id": "bf16_e4b651a96deefae1",
+      "absent_tensors": [0, 1, 2],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 3, "dims": [128, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"},
+          {"uid": 4, "dims": [4, 1, 32, 1], "strides": [32, 32, 1, 1], "data_type": "int32"},
+          {"uid": 5, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 6, "dims": [4, 8, 512, 128], "strides": [524288, 65536, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [4, 8, 512, 1], "strides": [8192, 2, 16, 1], "data_type": "float"},
+          {"uid": 8, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 9, "dims": [4, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "int32"},
+          {"uid": 10, "dims": [128, 8, 16, 128], "strides": [16384, 2048, 128, 1], "data_type": "bfloat16"}
+        ],
+        "alignment": {"3": 16, "4": 16, "5": 16, "6": 16, "7": 4, "8": 16, "9": 16, "10": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": true, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": 512, "attributes__mma_core_mode": "unset", "attributes__padding_mask": true, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e4b651a96deefae1", "csv_case_id": "lv-11972", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 714501012}, "3": {"seed": 3502367050}, "10": {"seed": 1238178839}, "9": {"kind": "values", "repeat": true, "seed": 3649040157, "values": [512]}, "8": {"kind": "values", "repeat": true, "seed": 2742654293, "values": [512]}, "4": {"kind": "values", "repeat": false, "seed": 4285534730, "values": [3, 14, 17, 18, 5, 16, 1, 0, 25, 28, 10, 8, 29, 4, 9, 2, 21, 11, 30, 23, 12, 7, 26, 31, 24, 13, 15, 27, 6, 19, 20, 22, 38, 35, 44, 59, 56, 43, 42, 40, 57, 52, 47, 61, 58, 46, 63, 32, 45, 54, 36, 48, 41, 39, 49, 62, 55, 60, 37, 53, 50, 34, 51, 33, 92, 83, 81, 90, 93, 75, 71, 78, 72, 89, 64, 82, 68, 67, 94, 91, 84, 66, 70, 69, 86, 76, 79, 88, 85, 77, 74, 65, 80, 87, 73, 95, 121, 113, 112, 122, 115, 104, 120, 126, 96, 101, 99, 116, 127, 103, 106, 105, 97, 107, 109, 118, 125, 102, 98, 123, 111, 117, 119, 110, 124, 114, 100, 108]}}, "live_rows": [{"axis": 2, "lengths": 9, "uid": 7}], "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1689670057, "start_offsets": [{"start_offset": 4, "uid": 7}]}
+    }
+  ]
+}

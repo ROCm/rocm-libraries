@@ -181,9 +181,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # checks' CTest suites select from each engine's
     # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
     # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
+    # The SdpaFwdPlan bundles are the generic SDPA forward tests every SDPA engine runs.
     string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
         "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
-        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")
+        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*"
+        "quick_SdpaFwdPlan_*" "standard_SdpaFwdPlan_*"
+        "comprehensive_SdpaFwdPlan_*" "full_SdpaFwdPlan_*")
     # Plus the dense BSHD stats (LSE) bundles: no other SdpaFwd bundle binds a stats
     # output Gfx942AttentionDense serves.
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
@@ -575,18 +578,26 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 if(NOT HIPDNN_ENABLE_SDPA)
                     continue()
                 endif()
-                set(_bundle SdpaFwd)
+                # The SdpaFwdPlan bundles are the generic SDPA forward tests every SDPA engine runs.
+                set(_bundles SdpaFwd SdpaFwdPlan)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_sdpa_test_categories_integration.yaml")
             elseif(_op STREQUAL "rmsnorm")
-                set(_bundle RMSNorm)
+                set(_bundles RMSNorm)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_test_categories_integration.yaml")
             else()
-                set(_bundle RMSNormBackward)
+                set(_bundles RMSNormBackward)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml")
             endif()
             set(_engine "hipkernel:flydsl_${_op}")
             string(REPLACE "_" "-" _op_dash "${_op}")
             set(_archs "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}}")
+            set(_filter "")
+            foreach(_tier IN ITEMS quick standard comprehensive full)
+                foreach(_bundle IN LISTS _bundles)
+                    list(APPEND _filter "${_tier}_${_bundle}_*.*")
+                endforeach()
+            endforeach()
+            list(JOIN _filter ":" _filter)
 
             foreach(_arch IN LISTS _archs)
                 set(_others "${_flydsl_all_archs}")
@@ -626,7 +637,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     INSTALL_STAGING_KEY hkp_census_${_arch}
                     TEST_CONFIG    "${_toml}"
                     REFERENCE_EXECUTOR gpu
-                    GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
+                    GTEST_FILTER   "${_filter}"
                     ENVIRONMENT    ${TEST_ENVIRONMENT}
                     ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                     ${_category_args}
