@@ -76,7 +76,8 @@ MFMA; a compiler built from another source may lack them.
 Every knob value builds, validates and lowers; the barrier waits, the DMA
 placement and the operand packing are checked against host models,
 including the 16x16x128 path's lane maps, packers and VMEM stream; the
-tuner's search is checked on synthetic scores:
+tuner's search is checked on synthetic scores, and the Gaussian inputs
+against an independent OCP quantization:
 
 ```bash
 python -m pytest tests/instances/test_gfx950_block_scaled_gemm_tiled.py \
@@ -97,7 +98,8 @@ times it:
   1024 x 2^n; `bench.py` checks one trip, K = 1024;
 - the **sampled gate** checks a sampled block of the target-shape output
   (edge rows and columns plus random ones) against the float64 reference
-  within a BF16 tolerance; it runs with `--data random` only;
+  within a BF16 tolerance; it runs with `--data random` and
+  `--data gaussian`;
 - **timing** runs back-to-back launches for `--sustain-ms` first, so the
   clock has settled, then takes the median of `--repeats` timed loops.
 
@@ -106,8 +108,29 @@ with `--data zero` the sampled gate is `skipped`. `--skip-checks` times
 without the gates (`status` `timing`). The default shape is
 `4096,4096,65536` (`--shape M,N,K`).
 
+`--data` picks the operands. `random` draws uniform random FP6 bytes and
+`zero` zero codes, both with random E8M0 scales near unity. `gaussian`
+quantizes N(0, 1) samples per 32-element K block by the OCP MX rule: the
+block's E8M0 scale is 2^(floor(log2 amax) - emax), and each element over
+it rounds to the nearest FP6 value, ties to the even code, saturating at
+the largest. The samples come from fixed counters, seeded per operand
+(`bench.gaussian_samples`), so every run sees the same operands. Inputs
+are cached in `MXFP6_CACHE` per data kind, formats and shape; the first
+Gaussian run at a shape generates them on the CPU, which takes longer than
+the random draw. **Gaussian data is the reference metric for the timing.**
+The operand values change the power the MFMAs draw, and so the clock under
+the board power limit: compare timings only within one data set. For a
+reference timing, sustain the load for a minute first (`--sustain-ms
+60000`): the clock takes about that long to settle under the limit, and a
+shorter sustain reads faster or slower depending on the board's state.
+
 ```bash
 E3M2=$(python -c "import json,sys; c=json.load(open(sys.argv[1])); c.update(dtype_a='fp6e3m2', dtype_b='fp6e3m2'); print(json.dumps(c))" $EX/best_config.json)
+# Gaussian data, the reference for the timing: exact gate (one trip), sampled gate, timing after a minute of load
+python -m rocke.examples.gfx950.gemm.mxfp6_tiled.bench --cache "$MXFP6_CACHE" --data gaussian \
+  --config "$BEST" --sustain-ms 60000 --repeats 5 --out "$MXFP6_OUT/best_gaussian.json"
+python -m rocke.examples.gfx950.gemm.mxfp6_tiled.bench --cache "$MXFP6_CACHE" --data gaussian \
+  --config "$E3M2" --sustain-ms 60000 --repeats 5 --out "$MXFP6_OUT/best_gaussian_e3m2.json"
 # random data: exact gate (one trip), sampled gate at the target shape, sustained timing
 python -m rocke.examples.gfx950.gemm.mxfp6_tiled.bench --cache "$MXFP6_CACHE" \
   --config "$BEST" --sustain-ms 1500 --repeats 5 --out "$MXFP6_OUT/best_random.json"
@@ -151,10 +174,9 @@ for fmt in ("fp6e2m3", "fp6e3m2"):
 EOF
 ```
 
-`bench.py` draws uniform random (`--data random`) or all-zero operand data.
 Some decisions in the case study, among them the move to the 16x16x128
-path, were taken with Gaussian-distributed operand data, which `bench.py`
-does not generate.
+path, were taken with Gaussian operand data, the data `--data gaussian`
+generates.
 
 ## 4. Baselines
 

@@ -225,24 +225,99 @@ def _launcher(dev: Device, hsaco: Path, spec, ptrs):
 
 
 def random_inputs(spec, data: str, cache: Path):
-    """Random FP6 bytes (every code is finite) and E8M0 scales near unity."""
+    """The inputs for `--data`, cached per data kind and shape: random FP6
+    bytes (every code is finite) or zero codes, with E8M0 scales near unity,
+    or Gaussian operands (`gaussian_operand`, A on stream 1, B on stream 2)."""
     m, n, k = spec.M, spec.N, spec.K
-    path = cache / f"inputs_{data}_m{m}n{n}k{k}.npz"
+    kind = f"{data}_{spec.dtype_a}_{spec.dtype_b}" if data == "gaussian" else data
+    path = cache / f"inputs_{kind}_m{m}n{n}k{k}.npz"
     if path.exists():
         z = np.load(path)
         return z["a"], z["b"], z["sa"], z["sb"]
-    rng = np.random.default_rng(0x6E6)
-    if data == "zero":
-        a = np.zeros((m, k * 3 // 4), np.uint8)
-        b = np.zeros((n, k * 3 // 4), np.uint8)
+    if data == "gaussian":
+        a, sa = gaussian_operand(m, k, spec.dtype_a, stream=1)
+        b, sb = gaussian_operand(n, k, spec.dtype_b, stream=2)
+        sb = np.ascontiguousarray(sb.T)
     else:
-        a = rng.integers(0, 256, size=(m, k * 3 // 4), dtype=np.uint8)
-        b = rng.integers(0, 256, size=(n, k * 3 // 4), dtype=np.uint8)
-    sa = rng.integers(124, 131, size=(m, k // 32), dtype=np.uint8)
-    sb = rng.integers(124, 131, size=(k // 32, n), dtype=np.uint8)
+        rng = np.random.default_rng(0x6E6)
+        if data == "zero":
+            a = np.zeros((m, k * 3 // 4), np.uint8)
+            b = np.zeros((n, k * 3 // 4), np.uint8)
+        else:
+            a = rng.integers(0, 256, size=(m, k * 3 // 4), dtype=np.uint8)
+            b = rng.integers(0, 256, size=(n, k * 3 // 4), dtype=np.uint8)
+        sa = rng.integers(124, 131, size=(m, k // 32), dtype=np.uint8)
+        sb = rng.integers(124, 131, size=(k // 32, n), dtype=np.uint8)
     cache.mkdir(parents=True, exist_ok=True)
     np.savez(path, a=a, b=b, sa=sa, sb=sb)
     return a, b, sa, sb
+
+
+# Seed of the Gaussian operands; streams tell the operands apart.
+GAUSS_SEED = 42
+# The exponent of each FP6 format's largest normal value (7.5 and 28).
+_FP6_EMAX = {"fp6e2m3": 2, "fp6e3m2": 4}
+
+
+def gaussian_operand(rows: int, k: int, dtype: str, stream: int, seed: int = GAUSS_SEED):
+    """Packed FP6 codes [rows][k*3/4] and E8M0 scales [rows][k/32] of
+    `gaussian_samples` quantized by `_mx_quantize`, 32 rows at a time."""
+    codes = np.empty((rows, k * 3 // 4), np.uint8)
+    scales = np.empty((rows, k // 32), np.uint8)
+    for r in range(0, rows, 32):
+        c, s = _mx_quantize(gaussian_samples(np.arange(r, min(rows, r + 32)), k, stream, seed), dtype)
+        codes[r : r + len(c)] = _pack_fp6(c.reshape(len(c), k))
+        scales[r : r + len(c)] = s
+    return codes, scales
+
+
+def gaussian_samples(rows, k: int, stream: int, seed: int = GAUSS_SEED) -> np.ndarray:
+    """float32 N(0, 1) samples [len(rows)][k/32][32] of the given rows, so a
+    row does not depend on the row count. Element i of K32 block j of row r
+    is sqrt(-2 ln u1) cos(2 pi u2) in float64, with u = ((h >> 11) + 1/2) / 2^53
+    for h = splitmix64(2 (c + i) + 1) and splitmix64(2 (c + i) + 2), and the
+    block's counter c = splitmix64(seed ^ stream << 56 ^ (r k/32 + j) * 0x100000001B3)."""
+    nblk = k // 32
+    blk = (np.asarray(rows, dtype=np.int64)[:, None] * nblk + np.arange(nblk)).astype(np.uint64)
+    with np.errstate(over="ignore"):
+        c = _splitmix64(np.uint64(seed) ^ (np.uint64(stream) << np.uint64(56)) ^ (blk * np.uint64(0x100000001B3)))
+        h = (c[..., None] + np.arange(32, dtype=np.uint64)) * np.uint64(2)
+    u1, u2 = (((_splitmix64(h + np.uint64(j)) >> np.uint64(11)).astype(np.float64) + 0.5) / 2.0**53 for j in (1, 2))
+    return (np.sqrt(-2.0 * np.log(u1)) * np.cos(2.0 * np.pi * u2)).astype(np.float32)
+
+
+def _mx_quantize(x: np.ndarray, dtype: str) -> tuple[np.ndarray, np.ndarray]:
+    """OCP MX quantization of float32 K32 blocks x [...][32], each with a
+    nonzero element, to FP6 `dtype`: (codes [...][32], E8M0 scales [...]).
+    A block's scale is 2^(floor(log2 amax) - emax), log2 rounded to float32;
+    each element over the scale rounds to the nearest FP6 value, ties to the
+    even code, saturating at the largest."""
+    mag = decode_fp6(pack_fp6_codes(np.arange(32, dtype=np.uint8)[None]), dtype)[0].astype(np.float32)
+    amax = np.abs(x).max(axis=-1)
+    se = np.floor(np.log2(amax.astype(np.float64)).astype(np.float32)).astype(np.int64) - _FP6_EMAX[dtype]
+    v = np.ldexp(x, (-se)[..., None].astype(np.int32))
+    a = np.abs(v)
+    lo = (np.searchsorted(mag, a, side="right") - 1).clip(0, 31)
+    hi = np.minimum(lo + 1, 31)
+    dl, dh = a - mag[lo], mag[hi] - a
+    c = np.where(dl < dh, lo, np.where(dh < dl, hi, np.where(lo & 1, hi, lo)))
+    c = np.where(a < mag[31], c, 31)
+    return (c | np.where(np.signbit(v), 32, 0)).astype(np.uint8), (se + 127).astype(np.uint8)
+
+
+def _pack_fp6(codes: np.ndarray) -> np.ndarray:
+    """`pack_fp6_codes`, vectorized: code k of a row at bits [6k, 6k + 6)."""
+    q = codes.reshape(codes.shape[0], -1, 4).astype(np.uint32)
+    w = q[..., 0] | q[..., 1] << 6 | q[..., 2] << 12 | q[..., 3] << 18
+    return np.stack([w, w >> 8, w >> 16], axis=-1).astype(np.uint8).reshape(codes.shape[0], -1)
+
+
+def _splitmix64(x: np.ndarray) -> np.ndarray:
+    with np.errstate(over="ignore"):
+        x = x + np.uint64(0x9E3779B97F4A7C15)
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return x ^ (x >> np.uint64(31))
 
 
 def dyadic_inputs(spec, seed=0xB10C):
@@ -455,6 +530,9 @@ def exact_check(spec, cache: Path) -> dict:
 
 
 def sampled_check(spec, got_fn, inputs) -> dict:
+    """Sampled outputs against the float64 reference, within 2^-7 |ref| (twice
+    BF16's rounding bound) plus 2^-16 sum |a b| (FP32 accumulation): both terms
+    scale with the operands, so random and Gaussian data share the tolerance."""
     rng = np.random.default_rng(7)
     edges = np.array([0, 1, 31, 32, spec.block_m - 1, spec.block_m, spec.M - 1])
     rows = np.unique(np.concatenate([edges[edges < spec.M], rng.choice(spec.M, 40, replace=False)]))
@@ -508,7 +586,7 @@ def evaluate(args) -> dict:
         record["sustain_ms"] = args.sustain_ms
         record["sampled_check"] = (
             sampled_check(spec, lambda: dev.download_16bit(c_ptr, (spec.M, spec.N), spec.dtype_c), inputs)
-            if args.data == "random" and not unchecked
+            if args.data in ("random", "gaussian") and not unchecked
             else {"status": "skipped"}
         )
         module.unload()
@@ -554,7 +632,8 @@ def main(argv=None) -> int:
     p.add_argument("--mode", choices=("eval", "profile"), default="eval")
     p.add_argument("--config", default="{}", help="JSON object of TiledBlockScaledGemmSpec knobs")
     p.add_argument("--shape", default="4096,4096,65536")
-    p.add_argument("--data", choices=("random", "zero"), default="random")
+    p.add_argument("--data", choices=("random", "zero", "gaussian"), default="random",
+                   help="uniform random FP6 bytes, zero codes, or OCP-quantized N(0, 1) per K32 block")
     p.add_argument("--cache", required=True, help="HSACO and input cache directory")
     p.add_argument("--out", help="JSON record path (eval mode)")
     p.add_argument("--warmup", type=int, default=3)

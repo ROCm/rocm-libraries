@@ -6,15 +6,18 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import re
 import struct
 from dataclasses import replace
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.verify import verify
+from rocke.examples.common.scaled_gemm_reference import decode_fp6
 from rocke.examples.gfx950.gemm.mxfp6_tiled import bench, tune
 from rocke.instances.gfx950.block_scaled_gemm_tiled import (
     _LOOP_PAD_MAX,
@@ -2348,3 +2351,148 @@ def test_lookback_retries_failed_knobs(tmp_path, monkeypatch):
     # setprio was evaluated (and failed) before stages=3 was accepted.
     tried = [json.loads(k) for k in tuner.records]
     assert any(c["setprio"] and c["stages"] == 2 for c in tried)
+
+
+def _splitmix64(x: int) -> int:
+    mask = (1 << 64) - 1
+    x = (x + 0x9E3779B97F4A7C15) & mask
+    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & mask
+    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & mask
+    return x ^ (x >> 31)
+
+
+def _gauss_sample(seed: int, stream: int, k: int, row: int, block: int, i: int) -> np.float32:
+    """One sample of bench.gaussian_samples from its docstring, in Python integers and floats."""
+    mask = (1 << 64) - 1
+    c = _splitmix64(seed ^ (stream << 56) ^ ((row * (k // 32) + block) * 0x100000001B3 & mask))
+    u1, u2 = (((_splitmix64((2 * (c + i) + j) & mask) >> 11) + 0.5) / 2.0**53 for j in (1, 2))
+    return np.float32(math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2))
+
+
+def _fp6_grid(dtype: str) -> np.ndarray:
+    """The 32 FP6 magnitudes in code order, from the format's bit fields."""
+    mant, bias = (3, 1) if dtype == "fp6e2m3" else (2, 3)
+    e, m = np.arange(32) >> mant, np.arange(32) & ((1 << mant) - 1)
+    return np.where(e == 0, m * 2.0 ** (1 - bias - mant), (1 + m / 2**mant) * 2.0 ** (e - bias))
+
+
+def _ocp_quantized(x: np.ndarray, dtype: str) -> np.ndarray:
+    """The values of the OCP MX quantization of K32 blocks x [...][32], by
+    exhaustive search: scale 2^(floor(log2 amax) - emax), each element over it
+    taken to the nearest FP6 magnitude, ties to the even code."""
+    grid = _fp6_grid(dtype)
+    emax = math.floor(math.log2(grid[-1]))
+    _, e = np.frexp(np.abs(x).max(axis=-1, keepdims=True).astype(np.float64))
+    scale = np.ldexp(1.0, e - 1 - emax)
+    d = np.abs((np.abs(x) / scale)[..., None] - grid)
+    near = d == d.min(axis=-1, keepdims=True)
+    even = near & (np.arange(32) % 2 == 0)
+    code = np.where(even.any(axis=-1), even.argmax(axis=-1), near.argmax(axis=-1))
+    return np.copysign(grid[code] * scale, x)
+
+
+def test_gaussian_samples_follow_their_definition():
+    """Each sample is its documented counter-based Box-Muller draw, whichever
+    rows are asked for, and the samples are N(0, 1)."""
+    k, rows = 1024, np.array([0, 5, 4095])
+    for stream in (1, 2):
+        x = bench.gaussian_samples(rows, k, stream)
+        assert x.dtype == np.float32 and x.shape == (3, k // 32, 32)
+        for (r, row), j, i in itertools.product(enumerate(rows), (0, 17, 31), (0, 9, 31)):
+            assert x[r, j, i] == _gauss_sample(bench.GAUSS_SEED, stream, k, int(row), j, i)
+        assert np.array_equal(bench.gaussian_samples(rows[1:], k, stream), x[1:])
+    x = bench.gaussian_samples(np.arange(64), 4096, 1)
+    assert abs(x.mean(dtype=np.float64)) < 0.01 and abs(x.std(dtype=np.float64) - 1) < 0.01
+    assert not np.array_equal(x, bench.gaussian_samples(np.arange(64), 4096, 2))
+
+
+@pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2"])
+def test_gaussian_operand_is_the_ocp_quantization_of_its_samples(dtype):
+    rows, k, stream = 72, 1024, 2
+    codes, scales = bench.gaussian_operand(rows, k, dtype, stream)
+    assert (codes.shape, scales.shape) == ((rows, k * 3 // 4), (rows, k // 32))
+    assert codes.dtype == scales.dtype == np.uint8
+    elems = decode_fp6(codes, dtype).reshape(rows, k // 32, 32)
+    assert np.isfinite(elems).all() and not np.any(scales == 0xFF)
+    values = elems * np.ldexp(1.0, scales.astype(np.int32) - 127)[..., None]
+    assert np.array_equal(values, _ocp_quantized(bench.gaussian_samples(np.arange(rows), k, stream), dtype))
+    # Every block's largest element sits in the format's top binade, so the
+    # scales are near unity: 2^(-1 - emax) .. 2^(2 - emax) for N(0, 1) blocks.
+    grid = _fp6_grid(dtype)
+    emax = math.floor(math.log2(grid[-1]))
+    top = np.abs(elems).max(axis=-1)
+    assert 2.0**emax <= top.min() and top.max() <= grid[-1]
+    assert 126 - emax <= scales.min() and scales.max() <= 129 - emax
+    assert np.array_equal(bench.gaussian_operand(rows, k, dtype, stream)[0], codes)
+
+
+@pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2"])
+def test_mx_quantize_rounds_ties_to_even_and_saturates(dtype):
+    """Grid points, midpoints and their neighbours, and values past the
+    largest magnitude, in blocks whose largest element makes the scale 2^0."""
+    grid = _fp6_grid(dtype).astype(np.float32)
+    emax = math.floor(math.log2(grid[-1]))
+    mids = ((grid[:-1].astype(np.float64) + grid[1:]) / 2).astype(np.float32)
+    probes = np.concatenate([grid, mids, np.nextafter(mids, np.float32(0)), np.nextafter(mids, np.float32(np.inf)),
+                             np.linspace(grid[-1], 2.0 ** (emax + 1), 9, endpoint=False, dtype=np.float32)])
+    probes = np.concatenate([probes, -probes, np.zeros((-2 * len(probes)) % 31, np.float32)]).reshape(-1, 31)
+    x = np.concatenate([np.full((len(probes), 1), grid[-1], np.float32), probes], axis=1)
+    codes, scales = bench._mx_quantize(x, dtype)
+    assert np.all(scales == 127)
+    got = decode_fp6(bench._pack_fp6(codes.reshape(len(x), 32)), dtype).reshape(x.shape)
+    assert np.array_equal(got, _ocp_quantized(x, dtype))
+
+
+def test_gaussian_inputs_are_cached_per_data_kind(tmp_path):
+    e2m3, e3m2 = (TiledBlockScaledGemmSpec(M=72, N=40, K=512, dtype_a=d, dtype_b=d) for d in ("fp6e2m3", "fp6e3m2"))
+    a, b, sa, sb = bench.random_inputs(e2m3, "gaussian", tmp_path)
+    assert [x.shape for x in (a, b, sa, sb)] == [(72, 384), (40, 384), (72, 16), (16, 40)]
+    assert all(x.dtype == np.uint8 for x in (a, b, sa, sb))
+    assert (tmp_path / "inputs_gaussian_fp6e2m3_fp6e2m3_m72n40k512.npz").exists()
+    # A is stream 1, B stream 2 with its scales K-major; rows do not depend on the row count.
+    want_a, want_b = bench.gaussian_operand(40, 512, "fp6e2m3", 1), bench.gaussian_operand(40, 512, "fp6e2m3", 2)
+    assert np.array_equal(a[:40], want_a[0]) and np.array_equal(sa[:40], want_a[1])
+    assert np.array_equal(b, want_b[0]) and np.array_equal(sb, want_b[1].T)
+    assert not np.array_equal(a[:40], b)
+    assert all(np.array_equal(x, y) for x, y in zip(bench.random_inputs(e2m3, "gaussian", tmp_path), (a, b, sa, sb)))
+    other = bench.random_inputs(e3m2, "gaussian", tmp_path)
+    assert (tmp_path / "inputs_gaussian_fp6e3m2_fp6e3m2_m72n40k512.npz").exists()
+    assert not np.array_equal(other[0], a)
+
+
+def test_bench_cli_accepts_gaussian_data(tmp_path, monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(bench, "evaluate", lambda args: seen.append(args.data) or {"status": "stub"})
+    assert bench.main(["--data", "gaussian", "--cache", str(tmp_path)]) == 0
+    assert seen == ["gaussian"] and json.loads(capsys.readouterr().out) == {"status": "stub"}
+    with pytest.raises(SystemExit):
+        bench.main(["--data", "normal", "--cache", str(tmp_path)])
+
+
+@pytest.mark.parametrize("error", [0.0, 2.0**-6])
+def test_eval_runs_the_sampled_gate_on_gaussian_data(tmp_path, monkeypatch, error):
+    """With --data gaussian, eval checks the sampled block: the reference
+    rounded to BF16 passes, the same output off by 2^-6 does not."""
+    from rocke.runtime import launcher
+
+    out = {}
+
+    def run_case(dev, hsaco, spec, inputs):
+        bits = bench.reference(spec, *inputs)[0].astype(np.float32).view(np.uint32).astype(np.uint64)
+        bf16 = (((bits + 0x7FFF + ((bits >> 16) & 1)) >> 16) << 16).astype(np.uint32).view(np.float32)
+        out["c"] = bf16 * np.float32(1 + error)
+        return SimpleNamespace(unload=lambda: None), lambda: None, 0
+
+    device = SimpleNamespace(rt=SimpleNamespace(sync=lambda: None), close=lambda: None,
+                             download_16bit=lambda ptr, shape, dtype: out["c"])
+    monkeypatch.setattr(bench, "compile_cached", lambda spec, cache: (tmp_path / "k.hsaco", {}))
+    monkeypatch.setattr(bench, "exact_check", lambda spec, cache: {"status": "pass"})
+    monkeypatch.setattr(bench, "Device", lambda: device)
+    monkeypatch.setattr(bench, "run_case", run_case)
+    monkeypatch.setattr(launcher, "time_launches", lambda launch, warmup, iters: 1.0)
+    args = SimpleNamespace(shape="512,512,1152", config="{}", data="gaussian", cache=str(tmp_path),
+                           skip_checks=False, sustain_ms=0, warmup=1, iters=1, repeats=1)
+    record = bench.evaluate(args)
+    assert record["sampled_check"]["n"] > 0 and record["sampled_check"]["nonfinite"] == 0
+    assert record["sampled_check"]["status"] == ("pass" if error == 0 else "fail")
+    assert record["status"] == ("ok" if error == 0 else "wrong")
