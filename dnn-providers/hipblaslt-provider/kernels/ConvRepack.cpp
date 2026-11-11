@@ -465,7 +465,7 @@ __device__ void col2imDisjointWidth(const Col2ImArgs& args)
 /// Disjoint col2im into a channel-contiguous dx (channels-last): one thread per run of V
 /// elements along channels, or, when dx packs (width, channels) (args.launch.rows = 1), along
 /// both -- so few channels still make whole runs. Sources along depth and height are found once
-/// per run, along width once per position; channels step without dividing. As above, bit for
+/// per run; width and channels step without dividing. As above, bit for
 /// bit the generic kernel's result.
 template <typename Bits, int V>
 __device__ void col2imDisjointChannels(const Col2ImArgs& args)
@@ -516,16 +516,33 @@ __device__ void col2imDisjointChannels(const Col2ImArgs& args)
     const int c0 = fused ? f0 - ix * channels : f0;
     int group = c0 / cg;
     int cIn = c0 - group * cg;
-    int ox = 0;
-    int ex = 0;
-    bool read = rowRead && disjointSource(g, 2, ix, ox, ex);
-    int positionIndex = rowOffset + ex * columns.elementStep + ox * columns.outputStep;
+    // The position's source along width, stepped with the position (offset < 0: the leading
+    // padding), as in the width kernel.
+    const int stride = static_cast<int>(g.stride[2]);
+    const int dilation = static_cast<int>(g.dilation[2]);
+    const int s0 = ix + static_cast<int>(g.prePadding[2]);
+    int ox = s0 >= 0 ? s0 / stride : 0;
+    int offset = s0 >= 0 ? s0 - ox * stride : s0;
+    bool read = false;
+    int positionIndex = 0;
+    const auto source = [&]() {
+        int tap = offset;
+        read = rowRead && offset >= 0 && ox < ow && tap < kw;
+        if(dilation != 1)
+        {
+            tap = offset / dilation;
+            read = rowRead && offset >= 0 && ox < ow && offset == tap * dilation && tap < kw;
+        }
+        positionIndex = rowOffset + disjointElement(g, 2, tap) * columns.elementStep
+                        + ox * columns.outputStep;
+    };
+    source();
+    int channelIndex = columns.base(g, n, group, cIn);
     Bits values[V];
 #pragma unroll
     for(int j = 0; j < V; ++j)
     {
-        values[j]
-            = read && j < count ? col[columns.base(g, n, group, cIn) + positionIndex] : Bits(0);
+        values[j] = read && j < count ? col[channelIndex + positionIndex] : Bits(0);
         if(++cIn == cg)
         {
             cIn = 0;
@@ -533,11 +550,15 @@ __device__ void col2imDisjointChannels(const Col2ImArgs& args)
             {
                 // Fused runs: on to the next position's channel 0.
                 group = 0;
-                ++ix;
-                read = rowRead && disjointSource(g, 2, ix, ox, ex);
-                positionIndex = rowOffset + ex * columns.elementStep + ox * columns.outputStep;
+                if(++offset == stride)
+                {
+                    offset = 0;
+                    ++ox;
+                }
+                source();
             }
         }
+        channelIndex = columns.base(g, n, group, cIn);
     }
     const int target = n * static_cast<int>(g.xStrides[0]) + iz * static_cast<int>(g.xStrides[2])
                        + iy * static_cast<int>(g.xStrides[3])
