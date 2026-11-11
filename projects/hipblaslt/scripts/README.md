@@ -82,4 +82,10 @@ python scripts/rocroller_unbuildable_configs.py write records.csv \
     --records-out scripts/rocroller_build_records.csv
 ```
 
+`tensilelite/tensilelite/Tests/unit/test_rocroller_unbuildable_record.py` compares the table's `rocRoller tree` line with `git rev-parse HEAD:shared/rocroller`. When they differ, the test skips and its message gives the commands above, so a `shared/rocroller` change does not fail unrelated pull requests; the table stays in use until it is rebuilt. Set `HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1` to make the mismatch a failure instead, as a maintainer check before a release or after a rocRoller update. From `tensilelite/`, in the environment the unit tests run in (rocisa importable):
+
+```bash
+HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1 python -m pytest tensilelite/Tests/unit/test_rocroller_unbuildable_record.py
+```
+
 `build` builds each configuration with the ON build's `hipblaslt-bench` (one rocRoller solution index each, with temporal loads, on a problem of twice the tile in M and N and four times in K) and appends one record per configuration. It takes the rocRoller tree from the checkout the ON build was configured from (`--rocroller-tree` overrides it). `write` takes records from `build`, as CSV or JSONL (`--source` and `--rocroller-tree` are then required), or from any other log of rocRoller's build attempts in the same format, and records every configuration that failed to build. To add configurations, append them to the `--configs` list.
