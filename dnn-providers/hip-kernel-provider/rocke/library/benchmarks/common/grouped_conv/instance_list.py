@@ -4,27 +4,25 @@
 
 A list (``dispatch/grouped_convolution_instances/<arch>_<direction>.json``)
 holds one JSON record per instance. For dgrad it is a set, not a priority
-order: the dispatcher's default pick (no ``ranker``) is the first by a
-deterministic key (the instance's label), not by position in the file, and a
-canonically written list (``format``, or any write this tool makes) is
-sorted by that same key. Any other direction (fwd) keeps the file's own
-on-disk order, a hand-tuned priority this formatter does not disturb (see
-:func:`dispatch.grouped_convolution.format_instance_list`). The fields each
+order (:func:`dispatch.grouped_convolution.instance_list_is_set`): the
+dispatcher's default pick (no ``ranker``) is the first by a deterministic key
+(the instance's label), not by position in the file, and a canonically
+written list (``format``, or any write this tool makes) is sorted by that
+same key. Any other direction (fwd) is a priority order: the default pick is
+the first admitted instance in the file's own hand-tuned order, which every
+command here keeps. The fields each
 record spells are the ones that leave the family's baseline (format:
 :class:`dispatch.grouped_convolution.InstanceList`). Benchmark tables and
 logs name kernels by their lossless labels instead; this tool moves between
 the two.
 
   labels LIST                 print the instances' labels: sorted for a set
-                              direction (dgrad), in on-disk priority order
-                              otherwise (fwd)
-  add LIST [LABEL...]         add the labelled kernels; for a set direction
-                              (dgrad) position does not matter -- the write
-                              sorts. For a priority-order direction (fwd) a
-                              new kernel is appended (lowest priority) unless
-                              --at N inserts it at position N instead.
-                              --from FILE reads one label per line, '#'
-                              starting a comment
+                              (dgrad), in file (priority) order for fwd
+  add LIST [LABEL...]         add the labelled kernels; --from FILE reads one
+                              label per line, '#' starting a comment. For fwd
+                              they are appended (lowest priority) unless
+                              --at N inserts them at position N; a set (dgrad)
+                              is written sorted, so --at is refused there
   new LIST [LABEL...]         write a new list of the labelled kernels; arch
                               and direction come from the labels, and the
                               LLVM flavor and wave size they share become the
@@ -34,7 +32,7 @@ the two.
 
 Examples:
   python instance_list.py labels ../../../dispatch/grouped_convolution_instances/gfx950_fwd.json
-  python instance_list.py add gfx950_fwd.json \\
+  python instance_list.py add gfx950_fwd.json --at 0 \\
       fwd-implicit_gemm-fp16-2d-t64x64x64-w2x2-a32x32x16-v8x8x8-mem-cshuffle-grp-wave64-gfx950-llvm22
 """
 
@@ -50,7 +48,7 @@ from pathlib import Path
 from dispatch.grouped_convolution import (
     InstanceList,
     format_instance_list,
-    has_set_semantics,
+    instance_list_is_set,
     load_instance_list,
 )
 from kernels.conv.kernel_identity import KernelIdentity
@@ -109,33 +107,28 @@ def _write(path: Path, lst: InstanceList) -> None:
 
 def _cmd_labels(args: argparse.Namespace) -> None:
     lst = load_instance_list(args.list)
-    identities = (
-        sorted(lst.identities, key=lambda i: i.label())
-        if has_set_semantics(lst.direction)
-        else lst.identities
-    )
-    for identity in identities:
-        print(identity.label())
+    labels = [i.label() for i in lst.identities]
+    for label in sorted(labels) if instance_list_is_set(lst.direction) else labels:
+        print(label)
 
 
 def _cmd_add(args: argparse.Namespace) -> None:
     lst = load_instance_list(args.list)
     current = list(lst.identities)
+    if args.at is not None:
+        if instance_list_is_set(lst.direction):
+            raise SystemExit(
+                f"error: --at: a {lst.direction} list is a set, written sorted "
+                "by label; position carries no meaning"
+            )
+        if not 0 <= args.at <= len(current):
+            raise SystemExit(f"error: --at {args.at} is not in 0..{len(current)}")
     added = _identities(_labels(args))
-    if args.at is not None and has_set_semantics(lst.direction):
-        raise SystemExit(
-            f"error: --at makes no sense on {lst.direction}, a set direction "
-            "sorted on write"
-        )
-    if args.at is not None and len(added) != 1:
-        raise SystemExit("error: --at takes exactly one LABEL")
     for identity in added:
-        if identity in current:
+        if identity in current or added.count(identity) > 1:
             raise SystemExit(f"error: {identity.label()} is already listed")
-        if args.at is None:
-            current.append(identity)
-        else:
-            current.insert(args.at, identity)
+    at = len(current) if args.at is None else args.at
+    current[at:at] = added
     _write(args.list, dataclasses.replace(lst, identities=tuple(current)))
 
 
@@ -196,11 +189,7 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument(
                 "--at",
                 type=int,
-                default=None,
-                help="insert the one LABEL at this position in a "
-                "priority-order list (fwd); default: append (lowest "
-                "priority). Rejected on a set-direction list (dgrad), "
-                "which sorts on write regardless of position.",
+                help="insert at this position (priority-ordered lists only)",
             )
         p.set_defaults(run=run)
 

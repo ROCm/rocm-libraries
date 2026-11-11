@@ -356,6 +356,13 @@ def engine_slug(engine_name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
 
 
+#: The shipped engine's dotted native-symbol namespace (``hipkernel.gfx950_conv_fwd_aot``):
+#: what another engine states verbatim as its ``native_symbols_from``.
+PRODUCT_NATIVE_NAMESPACE = (
+    f"{PRODUCT_ENGINE.split(':', 1)[0]}.{engine_slug(PRODUCT_ENGINE)}"
+)
+
+
 #: How :func:`build_config` splits a catalog into packs, one KDP each.
 #: ``dtype``: one pack per dtype. ``k-loop``: one pack per dtype, implicit-GEMM
 #: pipeline and K loop (``plain``, ``unroll`` or ``async``), and one per dtype for
@@ -483,7 +490,7 @@ def build_config(
         "heuristic": "native",
     }
     if engine_name != PRODUCT_ENGINE:
-        engine["native_symbols_from"] = PRODUCT_ENGINE
+        engine["native_symbols_from"] = PRODUCT_NATIVE_NAMESPACE
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",

@@ -46,7 +46,7 @@ engine:
   - prefetch_rows
   - w_fold
   heuristic: native
-  native_symbols_from: hipkernel:Gfx950ConvFwdAot
+  native_symbols_from: hipkernel.gfx950_conv_fwd_aot
 kmd_fields:
 - name: dtype
   type: string

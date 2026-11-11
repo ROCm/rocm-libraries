@@ -1,7 +1,7 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileCreateLibrary.Run — helper layer.
+# Characterization tests for tensilelite.create_library.run — helper layer.
 #
-# ADD-ONLY. Run.py is the TensileCreateLibrary driver: most of it is asm codegen
+# ADD-ONLY. create_library/run.py is the TensileCreateLibrary driver: most of it is asm codegen
 # (processKernelSource / writeAssembly / writeSolutionsAndKernels / run()) using
 # KernelWriterAssembly + the toolchain, which is out of scope. This suite pins
 # the pure / stubbable helpers: libraryDir, the result NamedTuples,
@@ -17,7 +17,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileCreateLibrary.Run")
+M = importlib.import_module("tensilelite.create_library.run")
 SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 

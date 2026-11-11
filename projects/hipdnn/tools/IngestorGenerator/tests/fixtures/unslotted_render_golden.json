@@ -1,7 +1,7 @@
 {
   "binary_ops.yaml": "57428bfbea63a762ee830255f7061dba13274dbe03f58129487f3b8b75346de5",
-  "gfx1151_wmma_attention.yaml": "4eff8385f83790217131d235ac117db798a2829da0da437ab13a75a24d1e04f6",
-  "gfx950_attention_dense.yaml": "8326e518fc89d69116f3987f3c6bdb66b9aba028e11a0868bfd94ec73fe845a1",
+  "gfx1151_wmma_attention.yaml": "42b96fc87f7361738bd8a4ec722ed0e4d2197cb56da9a936501faffab5eaa9a0",
+  "gfx950_attention_dense.yaml": "d250fe2b8a6d9078a1aebdc6d150c1fbf7d34190cb43424bcab21dae920b2a73",
   "heuristic_free": "f07f9e0335c3b0293d2039d6c0709e8cac3c6ebfb55a9beb011392f1f36df835",
   "scale_add.yaml": "ee2066d92a981ccbc4bae8567365d0268368303edf5f757e6251e8d8e8adc8bf",
   "verify_multi_launch": "f8c5b14dbf73798359a9adc927d3f43cd0cd5702aab1f0d13f8cfbea60074431"

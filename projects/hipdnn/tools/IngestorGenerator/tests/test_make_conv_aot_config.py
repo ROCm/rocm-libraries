@@ -212,7 +212,7 @@ def test_every_bundle_runs_the_shipped_engines_native_code():
 def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
     config = tool.build_config(seed_specs, _SEED_ENGINE)
     assert config["engine"]["name"] == _SEED_ENGINE
-    assert config["engine"]["native_symbols_from"] == tool.PRODUCT_ENGINE
+    assert config["engine"]["native_symbols_from"] == tool.PRODUCT_NATIVE_NAMESPACE
     assert config["authored_subpath"] == "rocKE/gfx950_conv_fwd_aot_seed"
     assert "native_symbols_from" not in tool.build_config(seed_specs)["engine"]
     # Both engines load into one process, so neither a document id nor a kernel id
@@ -420,9 +420,18 @@ _DIRECT_GRID = {
 }
 #: Forward identities per dtype and algorithm of the direct sweep the packaged launch
 #: does not run, and the start of the reason the adapter refuses them with: the
-#: split-C fold, which ships as the second launch of each split-C instance.
+#: split-C fold, which ships as the second launch of each split-C instance, and the
+#: two MFMA small-channel direct families, not yet in AOT_DIRECT_ALGORITHMS.
 _DIRECT_REFUSED = {
     "direct_split_reduce": (4, "'direct_split_reduce' is not packaged"),
+    "direct_fwd_smallc_mfma": (
+        222,
+        "direct algorithm 'direct_fwd_smallc_mfma' has no packaged launch",
+    ),
+    "direct_fwd_smallk_mfma": (
+        44,
+        "direct algorithm 'direct_fwd_smallk_mfma' has no packaged launch",
+    ),
 }
 
 
