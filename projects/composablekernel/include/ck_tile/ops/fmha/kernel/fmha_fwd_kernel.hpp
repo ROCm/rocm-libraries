@@ -1580,11 +1580,6 @@ struct FmhaFwdKernel
                 if(kargs.sink_ptr != nullptr)
                     return reject("sink_ptr is not supported.");
             }
-            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
-            {
-                if(kargs.block_scale_size_q <= 0 || kargs.block_scale_size_kv <= 0)
-                    return reject("block_scale_size_q and block_scale_size_kv must be positive.");
-            }
             if constexpr(kMergeNumHeadGroupsSeqLenQ)
             {
                 // Merged heads must form one row stride: a single query, or seqlen_q-row heads.
