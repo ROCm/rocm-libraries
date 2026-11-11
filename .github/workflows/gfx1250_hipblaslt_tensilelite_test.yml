@@ -216,10 +216,12 @@ jobs:
           # lives in the runner's tool cache, which persists across jobs, and its exported
           # LD_LIBRARY_PATH and Python_ROOT_DIR steer CMake away from this venv.
           # python3-dev provides the headers hipBLASLt's Development.Module needs; the rest is
-          # for the hipBLASLt build.
+          # for the hipBLASLt build. liblzma-dev: the SDK's LLVMSupport links LibLZMA::LibLZMA,
+          # which TensileLite's find_package(LLVM) needs to resolve.
           apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
           apt-get install -y -qq python3-venv python3-dev \
-            ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev
+            ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev \
+            liblzma-dev
           # --clear: a venv left by an earlier job (e.g. one killed before the final
           # chown, so the runner couldn't empty RUNNER_TEMP) is emptied, not reused.
           python3 -m venv --clear "$RUNNER_TEMP/venv"
