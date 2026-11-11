@@ -778,6 +778,15 @@ class FmhaFwdApiPool:
                         for trait in traits
                         if trait.pipeline_tag == "qr_tdm_cr" and trait.bm0 == 64
                     )
+                    if any(trait.pipeline_tag != "qr_tdm_cr" for trait in traits):
+                        preferred_cr = [
+                            replace(
+                                trait,
+                                constraint=trait.constraint
+                                & CppConstraint("fmha_fwd_cr_preferred_args(a)"),
+                            )
+                            for trait in preferred_cr
+                        ]
                     traits = preferred_cr + traits
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()

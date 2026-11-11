@@ -104,7 +104,12 @@ struct ForwardTestOptions
     InputPattern input_pattern = InputPattern::Rescaling;
     bool output_head_major     = false;
     int output_padding         = 0;
+    int output_offset          = 0;
+    int input_padding          = 0;
+    int input_offset           = 0;
     int repeats                = 1;
+    float scale_s              = std::numeric_limits<float>::quiet_NaN();
+    bool fixed_tolerance       = false;
 };
 
 // Rescaling inputs use exact multiples of 1/16 and a later K tile with larger
@@ -131,7 +136,9 @@ void CheckForward(
     const int output_stride       = (output_head_major ? V : H * V) + output_padding;
     const int output_head_stride  = output_head_major ? (Group ? B * sq : sq) * output_stride : V;
     const int output_batch_stride = sq * output_stride * (output_head_major ? H : 1);
-    std::vector<Data> o(B * output_batch_stride, ck_tile::type_convert<Data>(NAN));
+    const int output_offset       = options.output_offset;
+    std::vector<Data> o(B * output_batch_stride + 2 * output_offset,
+                        ck_tile::type_convert<Data>(NAN));
     std::vector<float> lse(B * H * sq, NAN);
     for(std::size_t i = 0; i < q.size(); ++i)
         q[i] = ck_tile::type_convert<Data>((int(i % 13) - 6) / 16.f);
@@ -162,16 +169,33 @@ void CheckForward(
             for(auto& value : *input)
                 value = ck_tile::type_convert<Data>(normal(engine));
     }
-    ck_tile::DeviceMem dq(q.size() * sizeof(Data)),
-        dk(std::max(k.size(), std::size_t{1}) * sizeof(Data));
-    ck_tile::DeviceMem dv(std::max(v.size(), std::size_t{1}) * sizeof(Data)),
+    const int input_padding = options.input_padding, input_offset = options.input_offset;
+    const int q_stride = H * D + input_padding, k_stride = kv_heads * D + input_padding,
+              v_stride = kv_heads * V + input_padding;
+    ck_tile::DeviceMem dq((B * sq * q_stride + 2 * input_offset) * sizeof(Data)),
+        dk(std::max(B * sk * k_stride + 2 * input_offset, 1) * sizeof(Data));
+    ck_tile::DeviceMem dv(std::max(B * sk * v_stride + 2 * input_offset, 1) * sizeof(Data)),
         dout(o.size() * sizeof(Data));
     ck_tile::DeviceMem dlse(lse.size() * sizeof(float));
-    dq.ToDevice(q.data());
+    auto upload = [&](ck_tile::DeviceMem& device, const auto& data, int rows, int width) {
+        if(input_padding == 0 && input_offset == 0)
+            device.ToDevice(data.data());
+        else
+        {
+            std::vector<Data> padded(rows * (width + input_padding) + 2 * input_offset,
+                                     ck_tile::type_convert<Data>(NAN));
+            for(int row = 0; row < rows; ++row)
+                std::copy_n(data.begin() + row * width,
+                            width,
+                            padded.begin() + input_offset + row * (width + input_padding));
+            device.ToDevice(padded.data());
+        }
+    };
+    upload(dq, q, B * sq, H * D);
     if(sk)
     {
-        dk.ToDevice(k.data());
-        dv.ToDevice(v.data());
+        upload(dk, k, B * sk, kv_heads * D);
+        upload(dv, v, B * sk, kv_heads * V);
     }
     ASSERT_EQ(hipMemset(dout.GetDeviceBuffer(), 0xff, o.size() * sizeof(Data)), hipSuccess);
     dlse.ToDevice(lse.data());
@@ -188,10 +212,10 @@ void CheckForward(
     dlq.ToDevice(lengths_q.data());
     dlk.ToDevice(lengths_k.data());
     fmha_fwd_args a{};
-    a.q_ptr        = dq.GetDeviceBuffer();
-    a.k_ptr        = dk.GetDeviceBuffer();
-    a.v_ptr        = dv.GetDeviceBuffer();
-    a.o_ptr        = dout.GetDeviceBuffer();
+    a.q_ptr        = static_cast<Data*>(dq.GetDeviceBuffer()) + input_offset;
+    a.k_ptr        = static_cast<Data*>(dk.GetDeviceBuffer()) + input_offset;
+    a.v_ptr        = static_cast<Data*>(dv.GetDeviceBuffer()) + input_offset;
+    a.o_ptr        = static_cast<Data*>(dout.GetDeviceBuffer()) + output_offset;
     a.lse_ptr      = StoreLSE ? dlse.GetDeviceBuffer() : nullptr;
     a.batch        = B;
     a.nhead_q      = H;
@@ -201,17 +225,19 @@ void CheckForward(
     a.seqlen_q     = Group ? 2 * sq : sq;
     a.max_seqlen_q = sq;
     a.seqlen_k     = Group ? 2 * sk : sk;
-    a.scale_s  = options.input_pattern == InputPattern::Random ? 1.f / std::sqrt(float(D)) : 0.5f;
-    a.stride_q = H * D;
-    a.stride_k = kv_heads * D;
-    a.stride_v = kv_heads * V;
-    a.stride_o = output_stride;
+    a.scale_s = options.input_pattern == InputPattern::Random ? 1.f / std::sqrt(float(D)) : 0.5f;
+    if(std::isfinite(options.scale_s))
+        a.scale_s = options.scale_s;
+    a.stride_q       = q_stride;
+    a.stride_k       = k_stride;
+    a.stride_v       = v_stride;
+    a.stride_o       = output_stride;
     a.nhead_stride_q = a.nhead_stride_k = D;
     a.nhead_stride_v                    = V;
     a.nhead_stride_o                    = output_head_stride;
-    a.batch_stride_q                    = sq * H * D;
-    a.batch_stride_k                    = sk * kv_heads * D;
-    a.batch_stride_v                    = sk * kv_heads * V;
+    a.batch_stride_q                    = sq * q_stride;
+    a.batch_stride_k                    = sk * k_stride;
+    a.batch_stride_v                    = sk * v_stride;
     a.batch_stride_o                    = output_batch_stride;
     // Group LSE is [head, total physical Q], batch LSE is [batch, head, Q].
     a.nhead_stride_lse  = Group ? B * sq : sq;
@@ -227,9 +253,10 @@ void CheckForward(
         a.seqlen_k_ptr   = dlk.GetDeviceBuffer();
     }
     ASSERT_TRUE(Kernel::IsSupportedInput(a));
-    using Strided = typename Kernel::StridedKernel;
-    auto native   = Strided::MakeKargs(a);
-    ASSERT_TRUE(Strided::IsSupportedArgument(native));
+    using Strided          = typename Kernel::StridedKernel;
+    auto native            = Strided::MakeKargs(a);
+    const bool vector_path = a.scale_s > 0 && ck_tile::detail::fmha_fwd_cr_vector_output(a);
+    EXPECT_EQ(Strided::IsSupportedArgument(native), vector_path);
     native.stride_o += 1;
     EXPECT_FALSE(Strided::IsSupportedArgument(native));
     // A direct typed adapter forces CR even in a build containing other pipelines.
@@ -275,9 +302,15 @@ void CheckForward(
     }
     // Padding between output rows must not be touched by TDM iteration.
     if(output_padding)
-        for(std::size_t row = 0; row < o.size() / output_stride; ++row)
+        for(int row = 0; row < B * output_batch_stride / output_stride; ++row)
             for(int col = output_stride - output_padding; col < output_stride; ++col)
-                ASSERT_TRUE(std::isnan(ck_tile::type_convert<float>(o[row * output_stride + col])));
+                ASSERT_TRUE(std::isnan(
+                    ck_tile::type_convert<float>(o[output_offset + row * output_stride + col])));
+    for(int i = 0; i < output_offset; ++i)
+    {
+        EXPECT_TRUE(std::isnan(ck_tile::type_convert<float>(o[i])));
+        EXPECT_TRUE(std::isnan(ck_tile::type_convert<float>(o[o.size() - 1 - i])));
+    }
     for(int b = 0; b < B; ++b)
     {
         // Long regressions execute the full B32/H8 grid; sample its first and
@@ -339,13 +372,20 @@ void CheckForward(
                 for(int d = 0; d < V; ++d)
                 {
                     const double actual = ck_tile::type_convert<float>(
-                        o[(Group ? b * sq * output_stride : b * output_batch_stride) +
+                        o[output_offset +
+                          (Group ? b * sq * output_stride : b * output_batch_stride) +
                           row * output_stride + head * output_head_stride + d]);
                     // P and O are rounded to the input dtype (7 BF16 fraction bits).
                     // The dominant late V values have magnitude <1, allowing 1/64
                     // error. Dense early V=32 amplifies a missing output rescale;
                     // its correct contribution after the logit jump is negligible.
-                    EXPECT_NEAR(actual, sum ? expected[d] / sum : 0, 1.0 / 64)
+                    const double expected_value = sum ? expected[d] / sum : 0;
+                    const double tolerance =
+                        options.fixed_tolerance
+                            ? (std::is_same_v<Data, ck_tile::half_t> ? 0.001 : 0.01) *
+                                  (1 + std::abs(expected_value))
+                            : 1.0 / 64;
+                    EXPECT_NEAR(actual, expected_value, tolerance)
                         << "b=" << b << " h=" << head << " q=" << row << " d=" << d;
                 }
                 if constexpr(StoreLSE)
@@ -359,6 +399,34 @@ void CheckForward(
                 }
             }
     }
+}
+
+template <typename Data, int D>
+void CheckGeneralViews()
+{
+    ForwardTestOptions options;
+    options.input_pattern   = InputPattern::Random;
+    options.repeats         = 8;
+    options.fixed_tolerance = true;
+    // Zero and negative scales must preserve mask sentinels and handle tails.
+    for(float scale : {0.f, -0.25f})
+    {
+        options.scale_s = scale;
+        CheckForward<Data, D, false, true, 64>(257, 130, 2, 2, 31, options);
+        // The empty/valid boundary cuts through a tile. M128 also exercises
+        // both query fragments and the D192 rectangular geometry.
+        CheckForward<Data, D, false, true, 128>(257, 130, 2, 2, 31, options);
+        CheckForward<Data, D, true, false, 64>(129, 257, 2, 0, -1, options);
+    }
+    options.scale_s           = 0.125f;
+    options.output_offset     = 1;
+    options.output_padding    = 1;
+    options.output_head_major = true;
+    CheckForward<Data, D, false, true, 64>(257, 129, 2, 2, 31, options);
+    CheckForward<Data, D, false, true, 128>(257, 130, 2, 2, 31, options);
+    options.output_offset = options.output_padding = 0;
+    options.input_offset = options.input_padding = 1;
+    CheckForward<Data, D, false, true, 64>(257, 129, 2, 2, 31, options);
 }
 
 #if defined(CK_TILE_TEST_CR_LONG)
@@ -379,6 +447,12 @@ TEST_F(CrForward, Static32768Causal)
     CheckForward<ck_tile::bf16_t, 128, false, true, 128, false, 32>(32768, 32768, 8);
 }
 #elif defined(CK_TILE_TEST_CR_D64)
+TEST_F(CrForward, GeneralScaleAndOutputViews)
+{
+    CheckGeneralViews<ck_tile::half_t, 64>();
+    CheckGeneralViews<ck_tile::bf16_t, 64>();
+}
+
 TEST_F(CrForward, RepeatedCausalOutputWithoutLse)
 {
     ForwardTestOptions options;
@@ -398,6 +472,14 @@ TEST_F(CrForward, GroupAndEmptyKeys)
     CheckForward<ck_tile::half_t, 64, true, false, 64>(129, 257, 2);
 }
 #else
+TEST_F(CrForward, GeneralScaleAndOutputViews)
+{
+    CheckGeneralViews<ck_tile::half_t, 128>();
+    CheckGeneralViews<ck_tile::bf16_t, 128>();
+    CheckGeneralViews<ck_tile::half_t, 192>();
+    CheckGeneralViews<ck_tile::bf16_t, 192>();
+}
+
 // Exercise the output descriptor independently of attention: incorrect iteration
 // units, row counts or LDS pitches must corrupt either the values or the canaries.
 template <int Width, int Pitch>

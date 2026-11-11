@@ -170,7 +170,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     function(add_qr_tdm_sched_gtest target source)
         add_gtest_executable(${target} ${source})
         if(TARGET ${target})
-            target_link_libraries(${target} PRIVATE utility)
             target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
             set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES
                 ${FMHA_QR_TDM_SCHED_GPU_TARGETS})
@@ -197,10 +196,33 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(fmha_test_dispatch "${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_test_dispatch.cpp")
+        set(fmha_test_sources "${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_test_sources.txt")
+        file(GENERATE OUTPUT "${fmha_test_sources}"
+            CONTENT "$<JOIN:$<TARGET_PROPERTY:${FMHA_FWD_INSTANCES},SOURCES>,\n>\n")
+        file(GLOB_RECURSE fmha_test_codegen CONFIGURE_DEPENDS
+            "${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha/codegen/*.py")
+        add_custom_command(OUTPUT "${fmha_test_dispatch}"
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_CURRENT_SOURCE_DIR}/generate_fmha_fwd_test_dispatch.py"
+                --sources "${fmha_test_sources}" --output "${fmha_test_dispatch}"
+            DEPENDS "${fmha_test_sources}" ${fmha_test_codegen}
+                "${CMAKE_CURRENT_SOURCE_DIR}/generate_fmha_fwd_test_dispatch.py"
+            VERBATIM)
+        # Like the production dispatcher, these declarations are specialized in
+        # the instance translation units linked below.
+        set_source_files_properties("${fmha_test_dispatch}" PROPERTIES
+            LANGUAGE HIP COMPILE_OPTIONS -Wno-undefined-func-template)
+    endif()
+
     foreach(dtype IN ITEMS bf16 fp16)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})
             add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_fwd.cpp)
+            target_sources(${target} PRIVATE "${fmha_test_dispatch}")
+            target_include_directories(${target} PRIVATE
+                "${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha")
             target_link_libraries(${target} PRIVATE ${FMHA_FWD_INSTANCES})
             if(dtype STREQUAL "fp16")
                 target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdFp16)

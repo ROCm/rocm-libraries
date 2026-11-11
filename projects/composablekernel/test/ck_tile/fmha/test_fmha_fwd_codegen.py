@@ -4,6 +4,7 @@
 """FMHA codegen and real rendered-dispatch regression tests (CPU only)."""
 
 import json
+import itertools
 import os
 import re
 import shutil
@@ -163,6 +164,7 @@ int main() {
     fmha_fwd_args a;
     int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, o_offset, bshd;
     int lse_offset, lse_head_stride, lse_batch_stride, has_seqstart, has_sq_ptr, has_cu_sq;
+    int input_offset, input_padding;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
@@ -171,7 +173,7 @@ int main() {
          >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
          >> a.nhead_stride_o >> a.batch_stride_o >> bshd
          >> lse_offset >> lse_head_stride >> lse_batch_stride >> has_seqstart
-         >> has_sq_ptr >> has_cu_sq)) return 2;
+         >> has_sq_ptr >> has_cu_sq >> a.scale_s >> input_offset >> input_padding)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -186,11 +188,22 @@ int main() {
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
     a.o_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + o_offset);
     if(bshd) {
-        a.q_ptr = a.k_ptr = a.v_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096});
-        a.stride_q = a.stride_k = a.stride_v = a.nhead_q * 128;
-        a.nhead_stride_q = a.nhead_stride_k = a.nhead_stride_v = 128;
+        a.q_ptr = a.k_ptr = a.v_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + input_offset);
+        a.stride_q = a.nhead_q * a.hdim_q + input_padding;
+        a.stride_k = a.nhead_k * a.hdim_q + input_padding;
+        a.stride_v = a.nhead_k * a.hdim_v + input_padding;
+        a.nhead_stride_q = a.nhead_stride_k = a.hdim_q;
+        a.nhead_stride_v = a.hdim_v;
         a.batch_stride_q = a.stride_q * a.seqlen_q;
-        a.batch_stride_k = a.batch_stride_v = a.stride_k * a.seqlen_k;
+        a.batch_stride_k = a.stride_k * a.seqlen_k;
+        a.batch_stride_v = a.stride_v * a.seqlen_k;
+        if(bshd == 2) {
+            a.stride_q = a.stride_k = a.hdim_q;
+            a.stride_v = a.hdim_v;
+            a.nhead_stride_q = a.seqlen_q * a.hdim_q;
+            a.nhead_stride_k = a.seqlen_k * a.hdim_q;
+            a.nhead_stride_v = a.seqlen_k * a.hdim_v;
+        }
         a.lse_ptr = t.has_lse ? reinterpret_cast<const void*>(std::uintptr_t{4096} + lse_offset) : nullptr;
         a.nhead_stride_lse = lse_head_stride < 0 ? a.seqlen_q : lse_head_stride;
         a.batch_stride_lse = lse_batch_stride < 0 ? a.nhead_q * a.seqlen_q : lse_batch_stride;
@@ -327,6 +340,9 @@ class _CompiledDispatcher:
             has_seqstart=0,
             has_sq_ptr=0,
             has_cu_sq=0,
+            scale_s=0.08838835,
+            input_offset=0,
+            input_padding=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -353,6 +369,141 @@ class _CompiledDispatcher:
 
 
 class TestGfx125TdmCrCodegen(unittest.TestCase):
+    def test_scalar_views_preserve_default_pipeline_preference(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_[bf][fp]16_*_nlogits_nbias*_ndropout_nskip_nqscale*",
+            0,
+            [64, 128, 192],
+            "simplified",
+        )
+        default = _CompiledDispatcher(self, pool, kernels)
+        fallback = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda t: t.pipeline_tag != "qr_tdm_cr"
+        )
+        cr_only = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda t: t.pipeline_tag == "qr_tdm_cr"
+        )
+        # Scalar views are supported by CR, but their long-sequence performance
+        # does not justify replacing the existing default pipeline preference.
+        for dtype, (dq, dv), mask, lse, view, group, (sq, sk) in itertools.product(
+            ("fp16", "bf16"),
+            ((64, 64), (128, 128), (192, 128)),
+            (0, 2),
+            (0, 1),
+            ("qkv", "o"),
+            (0, 1),
+            ((256, 512), (8192, 8192)),
+        ):
+            args = dict(
+                dtype=dtype,
+                hdim_q=dq,
+                hdim_v=dv,
+                bshd=1,
+                batch=2,
+                nhead_q=2,
+                nhead_k=1,
+                seqlen_q=sq,
+                seqlen_k=sk,
+                group=group,
+                has_seqstart=group,
+                mask=mask,
+                window_size_right=0 if mask else -1,
+                lse=lse,
+                stride_o=2 * dv + (view == "o"),
+                nhead_stride_o=dv,
+                batch_stride_o=sq * (2 * dv + (view == "o")),
+                o_offset=2 if view == "o" else 0,
+                input_offset=2 if view == "qkv" else 0,
+                input_padding=1 if view == "qkv" else 0,
+            )
+            with self.subTest(**args):
+                selected = fallback.run(**args)[0]
+                self.assertGreater(selected, 0)
+                expected = next(k.name for k, i in fallback.kernel_ids if i == selected)
+                selected = default.run(**args)[0]
+                self.assertGreater(selected, 0)
+                actual = next(k.name for k, i in default.kernel_ids if i == selected)
+                self.assertEqual(actual, expected)
+                self.assertGreater(cr_only.run(**args)[0], 0)
+                if view == "qkv" and (sq <= 2048 or mask):
+                    aligned = args | dict(input_offset=0, input_padding=0)
+                    selected = default.run(**aligned)[0]
+                    kernel = next(k for k, i in default.kernel_ids if i == selected)
+                    self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                    if dq == 192 and sq >= 8192 and not group:
+                        self.assertEqual(kernel.F_tile.F_bm0, 128)
+                    # Within measured preference ranges, nonpositive scales
+                    # must reach the CR path that scales before masking.
+                    for scale in (0, -0.19):
+                        self.assertEqual(
+                            default.run(**(aligned | dict(scale_s=scale))), [selected]
+                        )
+
+    def test_sched_supported_inputs_select_cr(self):
+        dispatchers = {}
+        for pipeline in ("qr_tdm_sched", "qr_tdm_cr"):
+            pool, kernels = get_fwd_blobs(
+                ["gfx1250"], f"*_{pipeline}_*", 0, [64, 128, 192], "simplified"
+            )
+            dispatchers[pipeline] = _CompiledDispatcher(self, pool, kernels)
+        sched, cr = (dispatchers[p] for p in ("qr_tdm_sched", "qr_tdm_cr"))
+        covered = set()
+        # Exercise generated predicates, including GQA, independent strides,
+        # physical/logical lengths, both mask origins and finite windows.
+        for dtype, (dq, dv), group, mask, lse, variant in itertools.product(
+            ("fp16", "bf16"),
+            ((64, 64), (128, 128), (192, 128)),
+            (0, 1),
+            (0, 1, 2, 3),
+            (0, 1),
+            range(8),
+        ):
+            sq, sk = ((128, 512), (256, 513), (512, 4096), (4096, 512))[variant % 4]
+            heads, kv_heads = ((8, 8), (8, 2), (8, 1), (2, 1))[variant % 4]
+            bhsd = variant == 2
+            row_stride = dv if bhsd else heads * dv + 8
+            if variant == 5:
+                row_stride += 1
+            args = dict(
+                dtype=dtype,
+                hdim_q=dq,
+                hdim_v=dv,
+                group=group,
+                bshd=2 if bhsd else 1,
+                batch=2,
+                nhead_q=heads,
+                nhead_k=kv_heads,
+                seqlen_q=sq,
+                seqlen_k=sk,
+                mask=mask,
+                lse=lse,
+                stride_o=row_stride,
+                nhead_stride_o=sq * dv if bhsd else dv,
+                batch_stride_o=sq * row_stride * (heads if bhsd else 1),
+                has_seqstart=group,
+                has_sq_ptr=int(group and variant == 1),
+                has_sk_ptr=int(group and variant == 1),
+                has_cu_sq=int(variant == 3),
+                has_cu_sk=int(variant == 3),
+                window_size_left=31 if mask == 3 else -1,
+                window_size_right=7 if mask == 3 else (0 if mask else -1),
+                scale_s=0.19,
+                o_offset=2 if variant == 4 else 0,
+                input_offset=2 if variant == 6 else 0,
+                input_padding=1 if variant == 7 else 0,
+            )
+            with self.subTest(**args):
+                selected = sched.run(**args)[0]
+                if selected == -1:
+                    continue
+                covered.add((dtype, dq, group, mask, lse))
+                selected_cr = cr.run(**args)[0]
+                self.assertGreater(selected_cr, 0)
+                kernel = next(k for k, i in cr.kernel_ids if i == selected_cr)
+                self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+        self.assertEqual(len(covered), 2 * 3 * 2 * 4 * 2)
+
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_scheduling_flags(self):
         _, kernels = get_fwd_blobs(
@@ -792,8 +943,9 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     dict(dropout=1),
                     dict(bias=1),
                     dict(has_sink_ptr=1),
-                    dict(o_offset=2),
-                    dict(batch_stride_o=1),
+                    dict(o_offset=1),
+                    dict(input_offset=1),
+                    dict(batch_stride_o=-1),
                     dict(has_sk_ptr=1),
                     dict(has_sq_ptr=1),
                     dict(qscale=1),
@@ -818,6 +970,11 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     dict(seqlen_k=0),
                     dict(lse_head_stride=sq + 1),
                     dict(lse_batch_stride=sq * 8 + 1),
+                    dict(o_offset=2),
+                    dict(stride_o=1025, batch_stride_o=sq * 1025),
+                    dict(batch_stride_o=sq * 1024 + 1),
+                    dict(scale_s=0),
+                    dict(scale_s=-0.19),
                 ):
                     with self.subTest(changes=changes):
                         self.assertIn(dispatch.run(**(args | changes))[0], family)

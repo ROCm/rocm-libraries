@@ -25,6 +25,9 @@
 #define DataTypeConfig FmhaFwdFp16
 #endif
 
+float fmha_fwd_sched_for_test(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
+float fmha_fwd_cr_for_test(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
+
 namespace {
 
 using Data = typename FmhaFwdTypeConfig<DataTypeConfig>::QDataType;
@@ -759,15 +762,18 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
     return name + "_nsink";
 }
 
-class QrTdmSchedForward : public ck_tile::test::Gfx125FmhaTest,
-                          public ::testing::WithParamInterface<std::tuple<int, bool, ValuePattern>>
+class QrTdmSchedForward
+    : public ck_tile::test::Gfx125FmhaTest,
+      public ::testing::WithParamInterface<std::tuple<int, bool, ValuePattern, bool>>
 {
 };
 
 TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
 {
-    const auto [case_index, lse, value_pattern] = GetParam();
-    const auto& c                               = GetCase(case_index);
+    const auto [case_index, lse, value_pattern, cr] = GetParam();
+    if(cr && ck_tile::get_device_name().compare(0, 7, "gfx1250") != 0)
+        GTEST_SKIP() << "CR requires gfx1250";
+    const auto& c = GetCase(case_index);
     SCOPED_TRACE(c.name);
     int device = 0;
     hipDeviceProp_t properties{};
@@ -1004,7 +1010,11 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     // A runtime V=0 sink does not request compile-time real-prefix sink tokens.
     ASSERT_FALSE(traits.has_sink);
     const ck_tile::stream_config stream{nullptr, false, 1, 0, 1};
-    const float result = fmha_fwd(traits, args, stream);
+    // Both dispatchers retain the generated predicates and link the production
+    // instances. A default-selection change must not turn a parity test into a
+    // comparison of a pipeline against itself.
+    const float result = cr ? fmha_fwd_cr_for_test(traits, args, stream)
+                            : fmha_fwd_sched_for_test(traits, args, stream);
     std::cout << '\n'
               << "generated_dispatch case=" << c.name << " dtype=" << kDataType << " lse=" << lse
               << " value_pattern=" << static_cast<int>(value_pattern)
@@ -1014,7 +1024,10 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     ASSERT_GE(result, 0) << "Generated dispatcher has no supported instance";
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    ASSERT_EQ(selected_kernel, ExpectedKernel(c, lse, sequences.group));
+    if(cr)
+        ASSERT_NE(selected_kernel.find("_qr_tdm_cr_"), std::string::npos);
+    else
+        ASSERT_EQ(selected_kernel, ExpectedKernel(c, lse, sequences.group));
     o_device.FromDevice(o.data());
     if(lse)
         lse_device.FromDevice(lse_data.data());
@@ -1075,9 +1088,15 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     // Empty sampled_query_rows means every logical row. The oracle retains FP32
     // softmax probabilities; it does not quantize P to match the device pipeline.
     const auto expected = reference::Compute(reference_sequences);
-    const reference::AccuracyContract contract{
-        std::is_same_v<DataTypeConfig, FmhaFwdFp16> ? 10 : 7,
-        static_cast<std::size_t>(c.virtual_sink ? 64 : c.expected_n)};
+    // The error bound accounts for tile-local probability rounding and depends
+    // on N; use the selected geometry for either forced pipeline.
+    const auto geometry = selected_kernel.find(sequences.group ? "_group_b" : "_batch_b");
+    ASSERT_NE(geometry, std::string::npos);
+    const auto n_begin = selected_kernel.find('x', geometry) + 1;
+    const auto tile_n  = std::stoul(selected_kernel.substr(n_begin));
+    ASSERT_TRUE(tile_n == 64 || tile_n == 128);
+    const reference::AccuracyContract contract{std::is_same_v<DataTypeConfig, FmhaFwdFp16> ? 10 : 7,
+                                               tile_n};
     const auto metrics = reference::Compare(reference_sequences, expected, outputs, {}, contract);
     std::cout << std::setprecision(10) << "independent_fp32 checked_rows=" << metrics.checked_rows
               << " checked_o=" << metrics.checked_elements
@@ -1124,15 +1143,30 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     EXPECT_EQ(stray_o, 0u);
 }
 
+std::vector<QrTdmSchedForward::ParamType> ForwardParameters()
+{
+    std::vector<QrTdmSchedForward::ParamType> result;
+    for(int index = 0; index < kCaseCount; ++index)
+        for(bool lse : {false, true})
+            for(auto pattern :
+                {ValuePattern::Signed, ValuePattern::Constant, ValuePattern::Nonnegative})
+            {
+                result.emplace_back(index, lse, pattern, false);
+                // Virtual sinks are qr_tdm fallback tests, outside sched's
+                // generated support. CR also covers sched's short-Q fallback.
+                if(!GetCase(index).virtual_sink)
+                    result.emplace_back(index, lse, pattern, true);
+            }
+    return result;
+}
+
 INSTANTIATE_TEST_SUITE_P(
     SmallGeneratedDispatch,
     QrTdmSchedForward,
-    ::testing::Combine(
-        ::testing::Range(0, kCaseCount),
-        ::testing::Bool(),
-        ::testing::Values(ValuePattern::Signed, ValuePattern::Constant, ValuePattern::Nonnegative)),
+    ::testing::ValuesIn(ForwardParameters()),
     [](const ::testing::TestParamInfo<QrTdmSchedForward::ParamType>& case_info) {
-        return std::string{GetCase(std::get<0>(case_info.param)).name} +
+        return std::string{std::get<3>(case_info.param) ? "Cr" : "Sched"} +
+               GetCase(std::get<0>(case_info.param)).name +
                (std::get<1>(case_info.param) ? "Lse" : "NoLse") +
                (std::get<2>(case_info.param) == ValuePattern::Signed     ? "SignedV"
                 : std::get<2>(case_info.param) == ValuePattern::Constant ? "ConstantV"

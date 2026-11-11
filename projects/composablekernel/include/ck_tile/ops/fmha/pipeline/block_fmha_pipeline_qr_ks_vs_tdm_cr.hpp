@@ -24,6 +24,10 @@ struct FmhaTdmCrTuning
     static constexpr bool kTailFragments = false;
 };
 
+struct FmhaTdmCrGeneralTuning : FmhaTdmCrTuning<>
+{
+};
+
 // Reuse dense schedules across batch sizes. With KeyTiles == 0, only the
 // query grid and head count are fixed; padded sequence lengths stay dynamic.
 // The launcher checks the geometry; tensor pointers and scale stay dynamic.

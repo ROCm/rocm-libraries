@@ -33,6 +33,12 @@ struct StridedArguments : Arguments
     bool group;
 };
 
+// The general path scales scores before masking and uses scalar-aligned O
+// stores. Keep it separate so the vector/TDM path retains its schedule and ABI.
+struct GeneralArguments : StridedArguments
+{
+};
+
 using F8 = float __attribute__((ext_vector_type(8)));
 using F2 = float __attribute__((ext_vector_type(2)));
 
@@ -128,6 +134,7 @@ CK_TILE_DEVICE void run(Args a)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
     constexpr bool Generic = !std::is_same_v<Args, Arguments>;
+    constexpr bool General = std::is_same_v<Args, GeneralArguments>;
     constexpr int D = DQ, QM = Tile / 64, Waves = 4, BM = Tile, BN = KeyTile;
     constexpr int Pitch = DQ + (DQ == 192 ? 24 : 8), VP = DV + 16;
     constexpr int QKFragments = DQ / 16, VFragments = DV / 16;
@@ -264,7 +271,7 @@ CK_TILE_DEVICE void run(Args a)
             end = a.sk;
         if(begin >= end)
         {
-            if constexpr(DQ == 128 || DQ == 192)
+            if constexpr(!General && (DQ == 128 || DQ == 192))
             {
                 for(int i = threadIdx.x; i < BM * (DV / 8); i += 128)
                 {
@@ -362,7 +369,7 @@ CK_TILE_DEVICE void run(Args a)
         __syncthreads();
     }
 
-    const float scale2 = a.scale * 1.4426950408889634f;
+    const float scale2 = General ? 1.f : a.scale * 1.4426950408889634f;
     // Traverse all key columns before returning to an accumulator on long
     // fixed shapes, increasing the distance between dependent QK instructions.
     constexpr bool DenseRectangle = !Generic && !Causal && QueryTiles == 16 && KeyTiles == 8;
@@ -517,6 +524,16 @@ CK_TILE_DEVICE void run(Args a)
         for(int qm = 0; qm < QM; ++qm)
         {
             const int row = row0 + qm * 16 * Waves;
+            // A nonpositive scale cannot be applied to the -infinity mask
+            // sentinel. Scale finite QK scores first on the general path.
+            if constexpr(General)
+            {
+#pragma unroll
+                for(int n = 0; n < BN / 16; ++n)
+#pragma unroll
+                    for(int i = 0; i < 8; ++i)
+                        s[qm][n][i] *= a.scale * 1.4426950408889634f;
+            }
             if constexpr(Generic && Causal)
             {
                 if(mask.IsEdgeTile(tile * BM, start, number<BM>{}, number<BN>{}))
@@ -786,7 +803,7 @@ CK_TILE_DEVICE void run(Args a)
 
     __builtin_amdgcn_s_setprio(0);
 
-    constexpr bool DirectOutput = Generic && DQ == 128 && BM == 64;
+    constexpr bool DirectOutput = General || (Generic && DQ == 128 && BM == 64);
     if constexpr(DirectOutput)
     {
         // The WMMA result already holds eight contiguous values per row/lane.
@@ -807,11 +824,12 @@ CK_TILE_DEVICE void run(Args a)
 #pragma unroll
                     for(int i = 0; i < 8; ++i)
                         result[i] = T(out[qm][d][i] * inv);
-                    __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
-                                                                  d * 16 + lane / 16 * 8,
-                                                              16),
-                                     &result,
-                                     sizeof(result));
+                    auto* destination = o + int64_t(row) * row_stride + d * 16 + lane / 16 * 8;
+                    if constexpr(General)
+                        __builtin_memcpy(destination, &result, sizeof(result));
+                    else
+                        __builtin_memcpy(
+                            __builtin_assume_aligned(destination, 16), &result, sizeof(result));
                 }
             }
         }

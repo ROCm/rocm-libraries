@@ -20,11 +20,13 @@ template <typename Pipeline_,
           bool Strided_    = !Pipeline_::kCompact>
 struct FmhaFwdTdmCrKernel
 {
-    using FmhaPipeline                   = Pipeline_;
-    using Tuning                         = Tuning_;
-    using Kargs                          = std::conditional_t<Strided_,
-                                                              detail::fmha_cr::StridedArguments,
-                                                              typename FmhaPipeline::Arguments>;
+    using FmhaPipeline             = Pipeline_;
+    using Tuning                   = Tuning_;
+    static constexpr bool kGeneral = std::is_same_v<Tuning, FmhaTdmCrGeneralTuning>;
+    using TensorArguments          = std::conditional_t<kGeneral,
+                                                        detail::fmha_cr::GeneralArguments,
+                                                        detail::fmha_cr::StridedArguments>;
+    using Kargs = std::conditional_t<Strided_, TensorArguments, typename FmhaPipeline::Arguments>;
     static constexpr index_t kBlockSize  = FmhaPipeline::kBlockSize;
     static constexpr index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
 
@@ -44,6 +46,10 @@ struct FmhaFwdTdmCrKernel
         using Problem  = typename Pipeline::Problem;
         if(ck_tile::get_device_name().compare(0, 7, "gfx1250") != 0 || !Kernel::IsSupportedInput(a))
             return -1;
+
+        if(a.scale_s <= 0 || !detail::fmha_fwd_cr_vector_output(a))
+            return visitor(
+                FmhaFwdTdmCrKernel<Pipeline_, Epilogue_, FmhaTdmCrGeneralTuning, true>{});
 
         auto launch_strided = [&] { return visitor(typename Kernel::StridedKernel{}); };
         if constexpr(!Pipeline::kCompact)
@@ -298,7 +304,8 @@ struct FmhaFwdTdmCrKernel
                 if(a.sq % 16 != 15 || a.sk <= 512 || a.sk >= 640 || a.sk % 128 <= 112)
                     return false;
         }
-        return IsSupportedInput(view);
+        return IsSupportedInput(view) &&
+               (kGeneral || (view.scale_s > 0 && detail::fmha_fwd_cr_vector_output(view)));
     }
 
     CK_TILE_HOST static dim3 BlockSize() { return dim3(128); }

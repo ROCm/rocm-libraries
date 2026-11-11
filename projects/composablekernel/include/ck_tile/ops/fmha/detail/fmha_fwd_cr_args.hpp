@@ -77,7 +77,36 @@ bool fmha_fwd_cr_compact_args(const Args& a)
             a.window_size_left < 0 && a.window_size_right == 0);
 }
 
-// General tensor views retain contiguous head elements and vector-aligned rows.
+template <typename Args>
+bool fmha_fwd_cr_vector_output(const Args& a)
+{
+    return reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o % 8 == 0 &&
+           a.nhead_stride_o % 8 == 0 && (a.seqstart_q_ptr || a.batch_stride_o % 8 == 0);
+}
+
+// Default preference is measured for vector-aligned views. Scalar views remain
+// eligible fallbacks without replacing a faster existing pipeline selection.
+template <typename Args>
+bool fmha_fwd_cr_preferred_args(const Args& a)
+{
+    if(!fmha_fwd_cr_vector_output(a) ||
+       ((reinterpret_cast<uintptr_t>(a.q_ptr) | reinterpret_cast<uintptr_t>(a.k_ptr) |
+         reinterpret_cast<uintptr_t>(a.v_ptr)) &
+        15))
+        return false;
+    for(auto stride :
+        {a.stride_q, a.stride_k, a.stride_v, a.nhead_stride_q, a.nhead_stride_k, a.nhead_stride_v})
+        if(stride % 8)
+            return false;
+    if(!a.seqstart_q_ptr)
+        for(auto stride : {a.batch_stride_q, a.batch_stride_k, a.batch_stride_v})
+            if(stride % 8)
+                return false;
+    return true;
+}
+
+// TDM loads accept scalar-aligned Q/K/V views with contiguous head elements.
+// O may also use scalar-aligned views through the general epilogue.
 template <typename Args>
 bool fmha_fwd_cr_supported_args(const Args& a)
 {
@@ -85,8 +114,7 @@ bool fmha_fwd_cr_supported_args(const Args& a)
     if(!a.q_ptr || !a.o_ptr || ((group || a.seqlen_k > 0) && (!a.k_ptr || !a.v_ptr)) ||
        a.batch <= 0 || a.nhead_q <= 0 || a.nhead_k <= 0 || a.nhead_q % a.nhead_k ||
        a.seqlen_q < 0 || a.seqlen_k < 0 || a.max_seqlen_q < 1 || !std::isfinite(a.scale_s) ||
-       a.scale_s <= 0 || a.sink_ptr || group != (a.seqstart_k_ptr != nullptr) || a.mask_type < 0 ||
-       a.mask_type > 3)
+       a.sink_ptr || group != (a.seqstart_k_ptr != nullptr) || a.mask_type < 0 || a.mask_type > 3)
         return false;
     // Batch mode represents logical lengths with cumulative pointers only.
     // Per-sequence length pointers are part of the group-mode contract.
@@ -111,19 +139,22 @@ bool fmha_fwd_cr_supported_args(const Args& a)
                     a.cu_seqlen_k_ptr})
         if(reinterpret_cast<uintptr_t>(ptr) % alignof(int32_t))
             return false;
-    for(auto stride : {a.stride_q, a.stride_k, a.stride_v, a.stride_o})
-        if(stride < 0 || stride > limit || stride % 8)
+    if(a.stride_o < 0 || a.stride_o > limit || a.nhead_stride_o < 0 ||
+       (!group && a.batch_stride_o < 0) || reinterpret_cast<uintptr_t>(a.o_ptr) % 2)
+        return false;
+    for(auto stride : {a.stride_q, a.stride_k, a.stride_v})
+        if(stride < 0 || stride > limit)
             return false;
-    for(auto stride : {a.nhead_stride_q, a.nhead_stride_k, a.nhead_stride_v, a.nhead_stride_o})
-        if(stride < 0 || stride % 8)
+    for(auto stride : {a.nhead_stride_q, a.nhead_stride_k, a.nhead_stride_v})
+        if(stride < 0)
             return false;
     if(!group)
-        for(auto stride : {a.batch_stride_q, a.batch_stride_k, a.batch_stride_v, a.batch_stride_o})
-            if(stride < 0 || stride % 8)
+        for(auto stride : {a.batch_stride_q, a.batch_stride_k, a.batch_stride_v})
+            if(stride < 0)
                 return false;
     if((reinterpret_cast<uintptr_t>(a.q_ptr) | reinterpret_cast<uintptr_t>(a.k_ptr) |
-        reinterpret_cast<uintptr_t>(a.v_ptr) | reinterpret_cast<uintptr_t>(a.o_ptr)) &
-       15)
+        reinterpret_cast<uintptr_t>(a.v_ptr)) &
+       1)
         return false;
     return !a.lse_ptr || (reinterpret_cast<uintptr_t>(a.lse_ptr) % alignof(float) == 0 &&
                           a.nhead_stride_lse >= 0 && a.batch_stride_lse >= 0);
