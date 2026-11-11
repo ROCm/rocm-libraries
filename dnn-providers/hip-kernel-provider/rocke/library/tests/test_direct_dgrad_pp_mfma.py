@@ -90,6 +90,23 @@ def test_transposed_problem_flips_explicit_column_padding():
     assert dgrad_pp_mfma_problem(_dgrad()).pad_w == -1
 
 
+def test_transposed_problem_flips_dilated_padding():
+    """The flipped padding is dil*(K-1)-PAD per axis, so the transposed
+    problem maps a dilated dgrad's dY back to its dX extents (the validators
+    still refuse the dilation)."""
+    for KH, PAD, dh, dw, pad_w in ((3, 2, 2, 3, 3), (5, 4, 2, 2, -1), (3, 0, 3, 1, 1)):
+        d = replace(_dgrad(H=20, W=24, KH=KH), PAD=PAD, dil_h=dh, dil_w=dw, pad_w=pad_w)
+        tp = dgrad_pp_mfma_problem(d)
+        assert tp.PAD == dh * (KH - 1) - PAD, (d, tp)
+        if pad_w < 0:
+            assert tp.pad_w == -1
+        else:
+            assert tp.pad_w == dw * (KH - 1) - pad_w, (d, tp)
+        assert (tp.H, tp.W) == (d.Ho, d.Wo)
+        assert (tp.Ho, tp.Wo) == (d.H, d.W), (d, tp)
+        assert dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=tp)) == "dilation must be 1"
+
+
 def test_reasons():
     ok = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
     assert dgrad_pp_mfma_reason(ok) is None
