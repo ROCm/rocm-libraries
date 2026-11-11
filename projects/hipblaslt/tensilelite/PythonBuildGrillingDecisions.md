@@ -2410,7 +2410,9 @@ state (follow-up F5).
 F2 validation phases for the pip SDK and native packages (the CPU-only pip-SDK
 smoke check is its first slice); F3 moving `rocisa_stinkytofu_adaptor` out of
 the source tree; F4 rocisa packaging (D6); F5 the client in the runtime artifact;
-F6 kernel-library compatibility with hipBLASLt (parked).
+F6 kernel-library compatibility with hipBLASLt (parked); F7 saying whether each
+TensileLite job validates generated kernels or the shipped hipBLASLt, and widening
+provenance; F8 following Origami's packaging stage.
 
 ### Q133 — Is the compatibility package kept?
 
