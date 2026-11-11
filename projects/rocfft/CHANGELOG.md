@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Resolved issues
+
+* Fixed `rocfft_setup` failing when a kernel cache file is corrupt or not a database.  The bad file is now skipped
+  and the next cache location is used; the skip is logged when RTC logging is enabled in `ROCFFT_LAYER`.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
