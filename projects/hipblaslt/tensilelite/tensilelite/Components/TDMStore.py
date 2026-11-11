@@ -48,7 +48,6 @@ from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, 
   VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
-from ..Common.Utilities import persistentMulticast
 from ..ExecutionPolicy import isPersistent, isStreamK
 from .NonTemporal import tdmCacheModifiers
 
@@ -82,10 +81,6 @@ def tdmStoreRejectReason(state):
   directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than atomic StreamK, which
   stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
   split evenly across the waves.
-  Persistent spatial clusters need no special case: a peer's next-tile multicast into this workgroup's
-  LDS waits on the cluster barrier, which this workgroup arrives at when it closes the persistent loop,
-  after its TDM store has completed, and a phantom peer tile skips the store. That holds while
-  persistent multicast uses the cluster barrier, which Solution derives together with it.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
   epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
@@ -112,8 +107,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
     return "TDMStoreInst does not support atomic StreamK"
-  if persistentMulticast(state) and not state.get("ClusterBarrier", True):
-    return "TDMStoreInst requires the cluster barrier with persistent multicast"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
     return "TDMStoreInst requires GlobalSplitU=1 or -1"
   if state["UseSubtileImpl"]:
