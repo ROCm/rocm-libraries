@@ -17,6 +17,8 @@ struct RocRollerSelectedTile
     bool nonTemporalA     = false;
     bool nonTemporalB     = false;
     int  unroll           = 0;
+    // rocRoller fails to build this configuration, so it never runs it.
+    bool unbuildable = false;
 };
 
 // What a checked-in rocRoller kernel declares in its custom.config: the

@@ -5,6 +5,7 @@
 // chooseSolutionIndexParameters, which is what rocRoller calls before codegen.
 
 #include "include/rocroller_selected.hpp"
+#include "include/rocroller_unbuildable.hpp"
 
 #include "solution_selection.hpp"
 
@@ -88,6 +89,7 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         tile.nonTemporalB     = params.nonTemporalB;
         tile.unroll           = preferredUnrolling(
             kernelType.typeA, kernelType.typeB, params.workgroupTile, hasPreSwizzle, hasPreTile);
+        tile.unbuildable = rocRollerTileUnbuildable(kernelType, tile);
         tiles.push_back(tile);
     }
     return rocblaslt_status_success;

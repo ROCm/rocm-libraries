@@ -14,5 +14,6 @@
 // Same rejects and the same rank order as getRocRollerBestSolutions.
 // Implemented by calling chooseSolutionIndexParameters. A problem with an
 // operand of 4 GiB or more gets no tiles: rocRoller refuses it at every tile.
+// A tile is marked unbuildable when unbuildable_configs.def records it.
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
                                             std::vector<RocRollerSelectedTile>& tiles);

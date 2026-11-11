@@ -224,6 +224,19 @@ every launch and selection path refuses a problem with at least twice as many
 tiles as the grid has workgroups. `Tests/unit/test_rocroller_streamk_corpus.py`
 pins these properties.
 
+rocRoller passes over a ranked tile it fails to build. A build without rocRoller
+cannot build anything, so `rocroller/unbuildable_configs.def` records those
+configurations (transposes, types, tile, workgroup mapping, Stream-K) and the
+walk passes over a recorded tile too; a tile that is neither recorded nor
+checked in still ends the walk. `scripts/rocroller_unbuildable_configs.py`
+writes the table from the build records in `scripts/rocroller_build_records.csv`,
+made on a rocRoller JIT build; `scripts/README.md` gives the commands.
+`Tests/unit/test_rocroller_unbuildable_record.py` checks that no recorded
+configuration is checked in, that the table is what the records render, and
+that `shared/rocroller` is still the tree the records were built with. A
+changed tree skips that check with the commands that rebuild the records;
+`HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1` makes it fail (`scripts/README.md`).
+
 The GridBased logic files that register the `RR_GEMM_*` kernels are
 `library/.../Logic/asm_full/gfx950/gfx950/GridBased/*_MXAE8B32_MXBE8B32_BH_UserArgs.yaml`.
 They declare `DeviceNames: [Device 75a3, Device 75a2, Device 75a0]`, the list
