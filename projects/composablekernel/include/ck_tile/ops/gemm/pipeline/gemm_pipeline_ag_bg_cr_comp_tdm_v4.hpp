@@ -7,7 +7,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_policy.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma_impl.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
 namespace ck_tile {
 
@@ -334,18 +334,24 @@ struct GemmPipelineAgBgCrCompTDMV4
     CK_TILE_DEVICE static void Mma(CVec& c, const AFrag& a, const BFrag& b, int32_t as, int32_t bs)
     {
 #if defined(__gfx125__)
-        using Op = WmmaTraits<gfx125_t,
-                              typename Problem::ADataType,
-                              typename Problem::BDataType,
-                              float,
-                              kAtomM,
-                              kAtomN,
-                              128>;
-        c = bit_cast<CVec>(Op::template wmma_intrinsic<>(MmaOperand<typename Op::AVecType>(a),
-                                                         as,
-                                                         MmaOperand<typename Op::BVecType>(b),
-                                                         bs,
-                                                         bit_cast<typename Op::CVecType>(c)));
+        using WarpGemm    = WarpGemmDispatcher<ADataType,
+                                               BDataType,
+                                               float,
+                                               kAtomM,
+                                               kAtomN,
+                                               mx_tdm_v4::kAtomK,
+                                               false>;
+        using AVec        = typename WarpGemm::WarpGemmAttribute::AVecType;
+        using BVec        = typename WarpGemm::WarpGemmAttribute::BVecType;
+        constexpr auto I0 = number<0>{};
+        typename WarpGemm::AWarpTensor a_warp;
+        typename WarpGemm::BWarpTensor b_warp;
+        typename WarpGemm::CWarpTensor c_warp;
+        a_warp.get_thread_buffer().template set_as<AVec>(I0, MmaOperand<AVec>(a));
+        b_warp.get_thread_buffer().template set_as<BVec>(I0, MmaOperand<BVec>(b));
+        c_warp.get_thread_buffer().template set_as<CVec>(I0, c);
+        WarpGemm{}(c_warp, a_warp, b_warp, as, bs);
+        c = c_warp.get_thread_buffer().template get_as<CVec>()[I0];
 #else
         ignore = c;
         ignore = a;
