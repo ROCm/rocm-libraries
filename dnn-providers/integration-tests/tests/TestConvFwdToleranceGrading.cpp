@@ -135,7 +135,11 @@ std::string pointwiseJson(const char* name,
 
 std::string graphJson(const Spec& spec)
 {
-    const std::string dtype = spec.isFloat ? "float" : spec.isHalf ? "half" : "bfloat16";
+    std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    if(spec.isFloat)
+    {
+        dtype = "float";
+    }
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
@@ -808,12 +812,12 @@ summation_order = 9.0
 } // namespace
 
 // A float output is graded with the dynamic tolerance and, when the engine sets nothing, the base
-// coefficient of the SDK (3).
+// coefficient of the SDK (4).
 TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheBaseCoefficient)
 {
     Spec spec;
     spec.isFloat = true;
-    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 3.0));
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 4.0));
 }
 
 // The engine's TOML coefficient replaces the base one.
@@ -829,9 +833,9 @@ TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheCoefficient
 // and passes under the engine's wider coefficient; one inside the base band passes either way.
 TEST_F(TestConvFwdToleranceGradingFixture, EngineCoefficientDecidesAFloatOutputBetweenTheBands)
 {
-    const auto base = floatTolerance(defaultFillScale(), 3.0);
+    const auto base = floatTolerance(defaultFillScale(), 4.0);
     const auto wide = floatTolerance(defaultFillScale(), 9.0);
-    const double reference = static_cast<double>(K_REFERENCE);
+    const auto reference = static_cast<double>(K_REFERENCE);
     const double baseBand = base.atol + base.rtol * reference;
     const double wideBand = wide.atol + wide.rtol * reference;
     ASSERT_LT(1.6 * baseBand, wideBand);

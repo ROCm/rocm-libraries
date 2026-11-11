@@ -334,10 +334,11 @@ struct AbsRelTolerance
     double rtol = 0.0;
 };
 
-/// The summation-order coefficient of a float output when nothing sets it: the smallest constant
-/// that no solver MIOpen runs, Winograd aside, exceeds on the calibration data (see tolerances.md).
-/// An engine whose solvers err more sets its own.
-inline constexpr double DEFAULT_FLOAT_SUMMATION_ORDER = 3.0;
+/// The summation-order coefficient of a float output when nothing sets it: the smallest whole
+/// number that leaves a headroom of at least 1.5 over the largest need of any solver MIOpen runs,
+/// Winograd aside (2.46 on the calibration data, see tolerances.md). An engine whose solvers err
+/// more sets its own.
+inline constexpr double DEFAULT_FLOAT_SUMMATION_ORDER = 4.0;
 
 /// The coefficients of the output tolerance an engine may set; an unset one keeps the default of
 /// the output type.
@@ -399,7 +400,7 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
             return validMoment(p.epsilon) && validMoment(p.magnitude) && validMoment(p.slope);
         });
     if(coefficients.summationOrder.has_value()
-       && !(std::isfinite(*coefficients.summationOrder) && *coefficients.summationOrder > 0.0))
+       && (!std::isfinite(*coefficients.summationOrder) || !(*coefficients.summationOrder > 0.0)))
     {
         throw std::invalid_argument("calculateConvFpropOutputTolerance: the summation-order "
                                     "coefficient must be finite and positive.");
