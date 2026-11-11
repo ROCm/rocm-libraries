@@ -837,3 +837,11 @@ def test_cluster_supersedes_repoints_chains_and_refuses_a_superseded_keep(
     assert run(ledger, "cluster", ev, 1, "CORR-2", "CORR-3") == 1
     assert "CORR-2 is itself superseded" in capsys.readouterr().err
     assert run(ledger, "cluster", ev, 1, "CORR-3", "CORR-9") == 1
+
+
+def test_ids_fails_on_findings_without_a_findings_heading(ledger, ev, capsys):
+    seeded(ledger, ev)
+    text = report("CORR1", [finding("CORR1-p1")]).replace("## Findings", "## Results")
+    with_reports(ledger, ev, CORR1=text)
+    assert run(ledger, "ids", ev) == 1
+    assert "CORR1.md" in capsys.readouterr().err

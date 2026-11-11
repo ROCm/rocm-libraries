@@ -139,7 +139,9 @@ two `numstat.txt` rows; a binary file `-<TAB>-<TAB>path` is one owned file of ze
 It cannot judge context: edit `owners.tsv` by hand for what only judgment decides.
 
 - A total at or under the target is one lane. Split only for distinct contexts (areas that
-  share no contracts) and record why in the ledger Lanes table.
+  share no contracts) and record why in the ledger Lanes table. When one `CORR<k>` would own
+  two or more separate implementations of the same contract (say a Python and a native
+  runtime path), split it by subsystem even under the target and record why there.
 - Keep a header with its implementation and a producer with its consumer. `plan` keeps a changed test with its changed source:
   `test_<x>.py` or `Test<X>.cpp` pairs with every changed non-test file whose stem is `<x>` (case-insensitive) when they share a directory (`X.cpp` and `X.hpp`),
   in their area group; a test with no such file, or same-stem files in several directories, stays where its own area puts it. A pair over the target gets its own lane.
@@ -301,7 +303,7 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate
    row per finding; re-running keeps assigned IDs; it exits 1 when a report sits below a nested `r<k>/`
-   directory, holds a finding block it cannot parse, cites a provisional ID no report of the round
+   directory, holds a finding block it cannot parse or `ID:` lines but no Findings section, cites a provisional ID no report of the round
    writes as a block, or reports a provisional ID not of the form `<LANE>-p<n>`.
    Cluster findings with the same location and claim, and those a verifier reported as
    `ORCH: cluster <ID> with <ID>` under **Handoffs**: `ledger.py cluster "$EVIDENCE" <N> <kept ID>
