@@ -11,7 +11,17 @@ from pathlib import Path
 import pytest
 
 from rocke.core.arch.wmma_scale import scaled_matrix_layout
-from rocke.core.ir import F16, FP8E4M3, I8, I32, I64, IRBuilder, PtrType, VectorType
+from rocke.core.ir import (
+    F16,
+    FP8E4M3,
+    I8,
+    I32,
+    I64,
+    IRBuilder,
+    PtrType,
+    VectorType,
+    dtype_to_ir_type,
+)
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.lower_hip import HIP_PROLOGUE, lower_kernel_to_hip
@@ -22,8 +32,11 @@ from rocke.core.storage import (
 )
 from rocke.helpers.mma_io import (
     load_matrix_fragment,
+    mma_operand_ir_type,
     pack_fragment_bits,
+    storage_element_type,
     storage_ir_type,
+    storage_vector_type,
 )
 
 
@@ -459,3 +472,79 @@ def test_96bit_loads_copy_exact_payload(dtype):
     ):
         assert int(size) == 12
         assert int(actual_align) <= max_align
+
+
+@pytest.mark.parametrize(
+    "dtype, count, operand",
+    [
+        ("fp16", 4, "vec<f16x4>"),
+        ("tf32", 2, "vec<tf32x2>"),
+        ("i8", 16, "vec<i8x16>"),
+        ("fp8e4m3", 32, "vec<fp8e4m3x32>"),
+        ("fp4e2m1", 32, "vec<i32x4>"),
+        ("fp6e2m3", 32, "vec<i32x6>"),
+        ("i4", 16, "vec<i32x2>"),
+    ],
+)
+def test_mma_operand_ir_type(dtype, count, operand):
+    # A dtype of a byte or more is the logical vector; a sub-byte dtype has no IR value type, so
+    # its elements are packed into 32-bit words. The count is logical elements either way.
+    assert mma_operand_ir_type(dtype, count).name == operand
+
+
+def test_mma_operand_ir_type_refuses_a_partial_register():
+    with pytest.raises(ValueError, match="not a whole number of 32-bit registers"):
+        mma_operand_ir_type("fp4e2m1", 4)
+
+
+@pytest.mark.parametrize(
+    "dtype, count, storage",
+    [
+        ("fp4e2m1", 32, "vec<i32x4>"),
+        ("fp6e2m3", 16, "vec<i32x3>"),
+        ("i4", 8, "vec<i32x1>"),
+        ("fp8e4m3", 32, "vec<fp8e4m3x32>"),
+        ("tf32", 8, "vec<i32x8>"),
+        ("e8m0", 4, "vec<i8x4>"),
+        ("fp16", 4, "vec<f16x4>"),
+    ],
+)
+def test_storage_vector_type_holds_the_registers_of_a_dtype(dtype, count, storage):
+    # A sub-byte dtype's elements sit in 32-bit words; tf32 and e8m0 have no arithmetic of their
+    # own and are held in the integer of their width; every other dtype is its logical vector.
+    assert storage_vector_type(dtype_to_ir_type(dtype), count).name == storage
+
+
+@pytest.mark.parametrize(
+    "dtype, element",
+    [
+        ("fp4e2m1", "i32"),
+        ("i4", "i32"),
+        ("tf32", "i32"),
+        ("e5m3", "i8"),
+        ("bf16", "bf16"),
+    ],
+)
+def test_storage_element_type_is_the_scalar_registers_and_lds_hold(dtype, element):
+    assert storage_element_type(dtype_to_ir_type(dtype)).name == element
+
+
+def test_storage_vector_type_refuses_a_partial_register():
+    with pytest.raises(ValueError, match="not a whole number of 32-bit registers"):
+        storage_vector_type(dtype_to_ir_type("fp6e2m3"), 8)
+
+
+@pytest.mark.parametrize(
+    "dtype, pointer",
+    [
+        ("fp4e2m1", "i8"),
+        ("fp6e2m3", "i8"),
+        ("tf32", "i32"),
+        ("e8m0", "i8"),
+        ("fp16", "f16"),
+    ],
+)
+def test_storage_ir_type_is_the_byte_for_a_sub_byte_dtype(dtype, pointer):
+    # Memory is byte addressed, so a pointer to sub-byte data addresses bytes; every other dtype
+    # is addressed in its storage element, the one registers and LDS hold it in.
+    assert storage_ir_type(dtype).name == pointer

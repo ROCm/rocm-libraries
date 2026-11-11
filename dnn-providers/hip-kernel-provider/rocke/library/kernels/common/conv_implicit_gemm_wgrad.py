@@ -99,7 +99,7 @@ from rocke.core.ir import (
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
-from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
+from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
@@ -113,7 +113,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
 )
 from kernels.common.conv_abi import conv_arg_names
-
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -1750,9 +1750,9 @@ def wgrad_streamk_default_pool(reduction: str, arch: str) -> int:
     Lets selection policy size the pool a launch will use before any spec
     exists.
     """
-    from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
+    from rocke.helpers.split_k import num_cus as arch_num_cus
 
-    num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
+    num_cus = arch_num_cus(arch)
     if reduction in ("linear", "tree"):
         return num_cus
     return num_cus * _STREAMK_CTAS_PER_CU
@@ -3177,7 +3177,9 @@ def build_implicit_gemm_conv_wgrad(
     # unconditionally would add IR ops to every existing config and move the
     # golden. Guarded so the default path stays byte-identical.
     if spec.lds_k_outer:
-        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size, arch=arch).bind(
+            b, lane
+        )
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.

@@ -50,6 +50,14 @@
     {
       "name": "has_sink",
       "type": "int"
+    },
+    {
+      "name": "has_dropout",
+      "type": "int"
+    },
+    {
+      "name": "v_mask",
+      "type": "int"
     }
   ]
 }

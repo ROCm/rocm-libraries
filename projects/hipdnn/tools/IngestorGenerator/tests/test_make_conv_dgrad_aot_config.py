@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from codegen.config_loader import load_config
+from codegen.models import EngineSpec
 
 pytest.importorskip("numpy", reason="the rocKE builders need numpy")
 
@@ -22,7 +23,7 @@ _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
-import make_conv_aot_config as fwd_tool  # noqa: E402
+import conv_aot_common  # noqa: E402
 import make_conv_dgrad_aot_config as tool  # noqa: E402
 
 _REPO = launch_surface.find_repo_root(_TOOLS)
@@ -211,12 +212,20 @@ def test_the_bundle_names_its_own_native_symbols():
     assert "instance_id" not in ued["knobs"] and "max_sub_gemms" not in ued["knobs"]
 
 
-def test_the_config_borrows_no_native_symbols(specs):
+def test_the_config_borrows_no_native_symbols(tmp_path, specs):
     config = tool.build_config(specs)
     assert "native_symbols_from" not in config["engine"]
     assert config["workspace_policy"] == "derived"
     other = tool.build_config(specs[:3], "hipkernel:Gfx950ConvDgradAotSeed")
-    assert other["engine"]["native_symbols_from"] == tool.PRODUCT_ENGINE
+    assert other["engine"]["native_symbols_from"] == tool.PRODUCT_NATIVE_NAMESPACE
+    # The stated namespace is the one the product engine registers.
+    path = tmp_path / "dgrad.yaml"
+    path.write_text(tool.dump_config(tool.build_config(specs[:3])))
+    product = load_config(path)
+    assert product.native_symbol_namespace == tool.PRODUCT_NATIVE_NAMESPACE
+    assert tool.PRODUCT_NATIVE_NAMESPACE == (
+        EngineSpec(name=tool.PRODUCT_ENGINE).own_native_symbol_namespace
+    )
     assert tool.kernel_uuid(specs[0].instance_id, "hipkernel:X") != tool.kernel_uuid(
         specs[0].instance_id
     )
@@ -522,10 +531,12 @@ def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(tmp_path)
     kdp.write_text(json.dumps(document, indent=2) + "\n")
     assert tool.stabilize_ids(kdp) == len(document["kernelDescriptors"])
     assert json.loads(kdp.read_text()) == json.loads(shipped.read_text())
-    # The forward tool's default product engine would derive other ids.
+    # Another product engine (the forward one) would derive other ids.
     for kernel in document["kernelDescriptors"]:
-        assert fwd_tool.kernel_uuid(
-            kernel["metadata"]["instance_id"], tool.PRODUCT_ENGINE
+        assert conv_aot_common.kernel_uuid(
+            kernel["metadata"]["instance_id"],
+            tool.PRODUCT_ENGINE,
+            "hipkernel:Gfx950ConvFwdAot",
         ) != tool.kernel_uuid(kernel["metadata"]["instance_id"])
 
 

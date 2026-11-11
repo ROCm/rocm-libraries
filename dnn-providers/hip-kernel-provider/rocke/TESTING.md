@@ -343,7 +343,11 @@ and by both engines is green in both. The **emitted-IR validity gate**,
 question: it lowers every case in the representative corpus
 ([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
 the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
-hsaco.
+hsaco. Library families keep their representative cases beside their own golden
+(convolution: [`library/tests/test_conv_ir_golden.py`](library/tests/test_conv_ir_golden.py));
+`--cases <file>` points this gate, and the arch-domain gate below, at such a
+corpus, and [`library/tests/run_all.py`](library/tests/run_all.py) runs both over
+every library corpus.
 
 Three design points, each of them load-bearing:
 
@@ -520,8 +524,9 @@ and selected library host/GPU suites. Build-tree C++ test registration is
 orchestrated by
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
 [concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
-under `platform/tests/cmake/`. Installed Python and library CTest registration
-remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+under `platform/tests/cmake/`. Installed Python CTest registration remains in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), which includes the library
+suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.cmake). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
@@ -541,6 +546,14 @@ uses an independently qualified bundle to run its enrolled cases without Torch.
 The published convolution lane uses the same workflow for its forward cohort.
 Inspect collection and GPU comparison counts separately from host-test passes;
 directory coverage alone does not establish GPU correctness.
+
+**Embedded host-test assets.** The rocKE umbrella CMake project, not the
+standalone `platform/` project, stages external assets used by installed library
+tests. The hipDNN SDPA assets and provider geometry headers are optional and
+independent. Missing content preserves the tests' skip behavior; staged SDPA
+assets make the installed test require them. The umbrella resolves the asset
+repository from `ROCM_LIBRARIES_ROOT`, with a source-relative fallback for an
+in-repository build. Standalone platform builds have no external-asset dependency.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read
@@ -668,6 +681,30 @@ ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'
 checks that the parts split `tests/` by directory with no directory in two
 parts.
 
+The tiling package's tests (`rocke/tests/helpers/tiling`) live outside `tests/`
+and run in three entries of their own:
+
+| Entry | Runs | Tier | CI jobs that run it |
+|---|---|---|---|
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | pull-request, develop push and nightly |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | pull-request, develop push and nightly |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | nightly only |
+
+The tree's `conftest.py` says which tests carry the `gpu` marker. TheRock picks
+the tier per run: pull-request CI runs `ctest -L '^standard$'` or `-L
+'^quick$'`, develop push CI runs `-L '^quick$'`, and the scheduled nightly
+rocm-libraries run (`therock-multi-arch-ci-nightly.yml`) runs `-L
+'^comprehensive$'`. A quick entry carries every tier's label, so all three CI
+jobs run it; a comprehensive entry carries only the comprehensive and full
+labels, so **pull-request CI does not run the visualization tests**; the nightly
+run does. `tests/run_all.py` does not run them either (it collects
+`platform/tests`). Run them before merging a change to the visualization
+package, from `platform/`:
+
+```bash
+PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
+```
+
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
 that `rocke.__file__` is under the relocated artifact and `rocke_engine` is absent.
@@ -781,10 +818,11 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every `rocke_pytest_*` part and `rocke_library_mla_pytest` with and without a
-synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
-than reusing the production CMake lists; otherwise production and test can
-repeat the same mistake.
+of every `rocke_pytest_*` part, the three tiling entries (`rocke_tiling_pytest`,
+`rocke_tiling_visualization_pytest` and `rocke_tiling_gpu_pytest`) and
+`rocke_library_mla_pytest` with and without a synthetic `ROCM_PATH`. Keep the
+expectations independently constructed rather than reusing the production CMake
+lists; otherwise production and test can repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 
