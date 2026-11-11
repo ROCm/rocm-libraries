@@ -48,6 +48,15 @@
 # rocke/platform/tests/test_engine_linkage.py checks that every registered
 # part gets the same labels, including the quick, standard and ffm-quick
 # tiers.
+#
+# Each shard of a TheRock CI job runs every installed pytest entry. The
+# entry keeps only this shard's share of its tests (rocke.tests.ctest_shard;
+# see rocke/TESTING.md). This relies on TheRock running every
+# hipkernelprovider entry on every shard (GTEST_ONLY_SHARDING_COMPONENTS).
+# If TheRock also divides the entries between the shards, about 3/4 of these
+# tests do not run. A pytest entry that no category here lists never runs in
+# CI. rocke/platform/tests/test_engine_linkage.py checks that every installed
+# pytest entry gets a tier.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -110,6 +119,7 @@ test_categories:
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_attention_pytest"
       # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
       # parser ignores a listed name that has no registered test.
@@ -190,6 +200,7 @@ test_categories:
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_attention_pytest"
       # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
       # parser ignores a listed name that has no registered test.

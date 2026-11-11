@@ -380,6 +380,21 @@ def test_installed_pytest_entries_load_the_ctest_shard_plugin(
         assert properties.get("SKIP_RETURN_CODE") == 77, test["name"]
 
 
+@requires_cmake
+def test_every_installed_pytest_entry_is_in_a_provider_tier(tmp_path):
+    """TheRock CI selects provider tests by tier label, so an installed pytest
+    entry that no tier of the provider categories lists never runs there."""
+    _, ctest_dir = configure_installed_ctest(tmp_path)
+    names = [
+        test["name"] for test in list_installed_ctests(ctest_dir) if runs_pytest(test)
+    ]
+    assert names, "no installed pytest entries are registered"
+    labels = provider_category_labels(names, tmp_path)
+    tiers = {"quick", "standard", "comprehensive", "full"}
+    untiered = sorted(name for name in names if not labels.get(name, set()) & tiers)
+    assert not untiered, f"no provider tier lists {untiered}"
+
+
 def split_ignored_files(selection):
     """Split a part's pytest selection into its leading paths and the files its
     trailing ``--ignore`` pairs name."""
