@@ -22,6 +22,64 @@
 
 /* Fill the config for index `idx`.  Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
+/* TF32 compute (mma_dtype "tf32"): fp32 dY / W / dX, each LDS fragment bitcast
+ * to vec<tf32xN> for the arch's TF32 atom -- native XF32 on gfx942 (16x16x8,
+ * 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16). N=2 16x16 C=K=64
+ * 3x3 pad 1, 64x64 tile, 2x2 warps. Keep in lockstep with _tf32_spec() in
+ * conv_implicit_gemm_dgrad_emit.py (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    static const struct
+    {
+        const char* arch;
+        int m;
+        int k;
+        int tile_k;
+        int stride;
+        const char* pipeline;
+        const char* epilogue;
+        int split_k;
+    } cfgs[] = {
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 57 */
+        {"gfx950", 32, 16, 32, 2, "compv4", "cshuffle", 1}, /* 58 */
+        {"gfx942", 16, 8, 32, 1, "compv3", "cshuffle", 1}, /* 59 */
+        {"gfx942", 32, 4, 32, 2, "mem", "default", 1}, /* 60 */
+        {"gfx950", 16, 32, 64, 2, "mem", "cshuffle", 2}, /* 61 */
+        {"gfx942", 16, 8, 32, 1, "mem", "default", 2}, /* 62: groups=2 */
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 63: tap_outer_k + dy_halo */
+        {"gfx942", 32, 4, 32, 2, "compv4", "default", 1}, /* 64: uniform_k_decode */
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 65: lds_k_outer, rejected */
+        {"gfx950", 16, 8, 32, 1, "mem", "default", 1}, /* 66: gfx942's atom, rejected */
+    };
+    const int i = idx - 57;
+    const int groups = (idx == 62) ? 2 : 1;
+    const int s = cfgs[i].stride;
+    spec->problem
+        = rocke_conv_problem_make(2, 16, 16, 64 * groups, 64 * groups, 3, 3, s, s, 1, 1, 1, 1);
+    spec->problem.groups = groups;
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_k = cfgs[i].tile_k;
+    spec->warp_tile_m = cfgs[i].m;
+    spec->warp_tile_n = cfgs[i].m;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->split_k = cfgs[i].split_k;
+    if(idx == 63)
+    {
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+    }
+    spec->uniform_k_decode = (idx == 64);
+    spec->lds_k_outer = (idx == 65);
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_dgrad_conv_spec_default();
@@ -35,6 +93,9 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
     spec->warp_tile_k = 16;
     spec->pipeline = "mem";
     spec->epilogue = "default";
+
+    if(idx >= 57 && idx <= 66)
+        return make_cfg_tf32(idx, spec, arch);
 
     switch(idx)
     {
@@ -389,6 +450,200 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->problem = rocke_conv_problem_make(2, 30, 30, 4, 32, 2, 2, 3, 3, 0, 0, 1, 1);
         spec->tile_k = 32;
         spec->patch = true;
+        *arch = "gfx950";
+        return 0;
+    case 36:
+        /* Rejected: the dgrad builder has no K-unrolled loop. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->unroll_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 37:
+        /* Rejected: 512 fp32 accumulators per lane (> 256). */
+        spec->problem = rocke_conv_problem_make(4, 12, 12, 384, 384, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        *arch = "gfx950";
+        return 0;
+    case 38:
+        /* Accepted: compv4 is charged one A and one B tile, so 128x128x64
+         * fits gfx942's LDS. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_k = 8;
+        spec->pipeline = "compv4";
+        *arch = "gfx942";
+        return 0;
+    case 39:
+        /* Accepted: a non-default A row pad reaches the kernel name ("_kp0"). */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 0;
+        *arch = "gfx950";
+        return 0;
+    case 40:
+        /* Stride 1, dilation 2: folded record, tilde epilogue. */
+        spec->problem = rocke_conv_problem_make(4, 20, 20, 64, 64, 3, 3, 1, 1, 2, 2, 2, 2);
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 41:
+        /* Grouped 5x5, pad 0: K-outer, uniform_k_decode, cshuffle, widths. */
+        spec->problem = rocke_conv_problem_make(2, 24, 20, 128, 256, 5, 5, 1, 1, 0, 0, 1, 1);
+        spec->problem.groups = 2;
+        spec->tile_m = 128;
+        spec->pipeline = "compv3";
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->uniform_k_decode = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        *arch = "gfx950";
+        return 0;
+    case 42:
+        /* Stride 1 split-K: folded gemm_k_padded. */
+        spec->problem = rocke_conv_problem_make(4, 14, 14, 64, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_k = 32;
+        spec->epilogue = "cshuffle";
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
+    case 43:
+        /* gfx942, grouped 1x3 filter with pad (0, 1). */
+        spec->problem = rocke_conv_problem_make(2, 12, 16, 64, 128, 1, 3, 1, 1, 0, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->warp_tile_k = 8;
+        *arch = "gfx942";
+        return 0;
+    case 44:
+        /* tap_outer_k, grouped 3x3: K-outer, cshuffle, widths. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 45:
+        /* tap_outer_k, ungrouped 5x5 pad 2, M-outer, several chunks per tap. */
+        spec->problem = rocke_conv_problem_make(2, 13, 9, 64, 128, 5, 5, 1, 1, 2, 2, 1, 1);
+        spec->tile_k = 32;
+        spec->pipeline = "compv4";
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 46:
+        /* tap_outer_k, gfx942, grouped 1x3 filter with pad (0, 1). */
+        spec->problem = rocke_conv_problem_make(2, 12, 16, 64, 128, 1, 3, 1, 1, 0, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->warp_tile_k = 8;
+        spec->tap_outer_k = true;
+        *arch = "gfx942";
+        return 0;
+    case 47:
+        /* Rejected: tap_outer_k with kpg = 96 not a multiple of tile_k = 64. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 48:
+        /* Rejected: tap_outer_k at stride 2. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 49:
+    case 50:
+        /* XCD-contiguous tile order, grouped 3x3 stride 1 on gfx950: 49
+         * emits the remap (the default), 50 is the launch-order build. */
+        spec->problem = rocke_conv_problem_make(1, 8, 8, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->xcd_tile_order = (idx == 49);
+        *arch = "gfx950";
+        return 0;
+    /* 51-56: the dY halo mode of the tap-outer loop. 55 (no tap-outer loop)
+     * and 56 (Wo > halo_max_wo) are rejected by both validators. */
+    case 51:
+        spec->problem = rocke_conv_problem_make(2, 10, 14, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+        *arch = "gfx950";
+        return 0;
+    case 52:
+        spec->problem = rocke_conv_problem_make(1, 9, 20, 64, 128, 5, 5, 1, 1, 2, 2, 1, 1);
+        spec->tile_m = 128;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 1;
+        spec->dy_halo_setprio = 1;
+        spec->dy_halo_kouter_pad = 32;
+        spec->halo_max_wo = 32;
+        *arch = "gfx950";
+        return 0;
+    case 53:
+        spec->problem = rocke_conv_problem_make(2, 8, 8, 64, 64, 7, 7, 1, 1, 3, 3, 1, 1);
+        spec->tile_m = 256;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->dy_halo_setprio = 2;
+        spec->halo_max_wo = 8;
+        *arch = "gfx950";
+        return 0;
+    case 54:
+        spec->problem = rocke_conv_problem_make(1, 6, 19, 256, 256, 3, 5, 1, 1, 1, 2, 1, 1);
+        spec->problem.groups = 4;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 24;
+        *arch = "gfx950";
+        return 0;
+    case 55:
+        spec->problem = rocke_conv_problem_make(2, 10, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->lds_k_outer = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+        *arch = "gfx950";
+        return 0;
+    case 56:
+        spec->problem = rocke_conv_problem_make(2, 10, 40, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 32;
         *arch = "gfx950";
         return 0;
     default:

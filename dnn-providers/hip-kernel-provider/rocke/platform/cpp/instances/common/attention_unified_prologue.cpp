@@ -10,8 +10,8 @@
  *
  *   rocke_attn_unified_ctx_init            -- zero/populate ctx, derive geometry
  *   rocke_attn_unified_declare_scalar_params (Python _declare_scalar_attn_params)
- *   rocke_attn_unified_emit_find_seq_idx   (Python _emit_find_seq_idx_scan +
- *                                         the 2D inline linear cu_q scan)
+ *   rocke_attn_unified_emit_find_seq_idx   (the 2D inline linear cu_q scan;
+ *                                         3D: Python _emit_find_seq_idx_scan)
  *   rocke_attn_unified_emit_prologue       -- grid ids + per-seq geometry +
  *                                         SSA constants + (3D) segment span
  *
@@ -30,6 +30,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
 #include "rocke/instance_attention_unified_internal.h"
 
 /* ===================================================================== *
@@ -40,8 +41,7 @@
  *      if p.dtype not in ("fp16", "bf16"): raise ValueError(...)   (2D only)
  *      dtype = spec.dtype_ir
  *  plus deriving num_queries_per_kv (= p.num_query_heads // num_kv_heads, which
- *  raises on a non-divisible ratio) and max_blocks
- *  (= ceil(max_seqlen_k / block_size)).
+ *  raises on a non-divisible ratio).
  *
  *  Zero-inits the ctx, copies the problem/spec slice into it, mirrors `p` into
  *  the selector-helper problem shape (ctx->sel_p) so the ported emit/descriptor
@@ -120,18 +120,6 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
     if(!rocke_ir_builder_ok(b))
     {
         return false;
-    }
-
-    /* max_blocks = ceil(max_seqlen_k / block_size). Python folds this inline as
-     * (p.max_seqlen_k + p.block_size - 1) // p.block_size when computing the
-     * block_tables row stride. */
-    if(p->block_size > 0)
-    {
-        ctx->max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    }
-    else
-    {
-        ctx->max_blocks = 0;
     }
 
     return true;
@@ -229,19 +217,27 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
  *      seq_idx = scan.results[0]
  *
  *  Python (3D): _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) delegates to
- *  binary_search_seq_idx (per_token, 32 iterations). That helper is not yet
- *  exported to the C layer; per the helper-header note the 3D scan falls back to
- *  the SAME inline linear cu_q scan (numerically identical seq_idx) until
- *  rocke_binary_search_seq_idx lands. So both kinds emit the inline linear scan.
+ *  binary_search_seq_idx(b, cu_q, q_tok, num_seqs, block_q=1, iterations=32,
+ *  per_token=True); the 3D kind emits the same helper so both engines produce
+ *  the same binary search.
  *
  *  Fills ctx->seq_idx.
  * ===================================================================== */
 void rocke_attn_unified_emit_find_seq_idx(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* seq_init = rocke_b_const_i32(b, 0);
+    rocke_value_t* seq_init;
     rocke_iter_arg_t iter[1];
     rocke_for_t scan;
+
+    if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)
+    {
+        ctx->seq_idx
+            = rocke_binary_search_seq_idx(b, ctx->abi_cu_q, ctx->q_tok, ctx->num_seqs, 1, 32, true);
+        return;
+    }
+
+    seq_init = rocke_b_const_i32(b, 0);
 
     iter[0].name = "seq_idx";
     iter[0].init = seq_init;
@@ -360,11 +356,15 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
             rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
 
         /* seg_stop_i = b.mul(b.add(segm_idx, 1),
-         *                    b.mul(tiles_per_segment, const_i32(block_size))) */
-        seg_stop_raw = rocke_b_mul(
-            b,
-            rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1)),
-            rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+         *                    b.mul(tiles_per_segment, const_i32(block_size)))
+         * C leaves argument evaluation order unspecified: emit the add before the
+         * inner mul, as Python does. */
+        {
+            rocke_value_t* seg_next = rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1));
+            rocke_value_t* seg_span
+                = rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size));
+            seg_stop_raw = rocke_b_mul(b, seg_next, seg_span);
+        }
 
         /* seg_stop_i = b.select(b.cmp_lt(seg_stop_i, kv_len), seg_stop_i, kv_len) */
         lt = rocke_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);

@@ -1,0 +1,545 @@
+# Packaged-dialect (`variants`) config for the hipkernel:Gfx942AttentionDense catalog: a
+# reduced snapshot of configs/gfx942_attention_dense.engine.yaml's full enumeration
+# (tools/registry_enumerator.py, 1,500 kernels).
+#
+# Snapshot: tools/variant_reduce.py over an autotune sweep of all 1,500 kernels on MI300X
+# (gfx942, 304 CUs), two timed rounds over the 814 non-windowed served graphs and 153
+# stats graphs, eps 0.01: 224 kernels, 144 of them floor kernels (tile divisibility and
+# declared defaults; window cells are floor-only) and 80 measured wins. The swept install
+# was built at cde4c65f980; its 1,500 kernels lower to the same LLVM IR as at 645da438945.
+# A change to the manifest's space or to the kernel body needs a new sweep and reduction,
+# not an edit here.
+#
+# To regenerate the descriptors after a new reduction, from the IngestorGenerator root:
+#     .venv/bin/python tools/registry_enumerator.py \
+#         --manifest configs/gfx942_attention_dense.engine.yaml --out <full.yaml> --strict
+#     # variant_reduce.py --selection <full.yaml> ... --out configs/gfx942_attention_dense.yaml
+#     .venv/bin/python generate.py --config configs/gfx942_attention_dense.yaml \
+#         --output-dir <scratch> --ids-from <live bundle> --strict
+# Copy the scratch KMD over the live one and the scratch KDP into the live artifacts/
+# (a reduction drops kernels, so the KDP is replaced, not spliced), then `dvc add
+# artifacts` there and `dvc push -r ingestor <bundle>/artifacts.dvc`. Copy the generated
+# tests/TestGfx942AttentionDensePacks.cpp over the live census test and rerun
+# src/integration_tests/kernel_ingestor_engine/gen_gfx942_attention_dense_knob_classes.py.
+# tests/test_registry_regeneration.py gates this file against the manifest (g3 as a
+# subset). The generated packs/Gfx942AttentionDenseNative.cpp and
+# tests/TestGfx942AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained.
+#
+dialect: packaged
+authored_subpath: rocKE/gfx942_attention_dense
+engine:
+  name: hipkernel:Gfx942AttentionDense
+  census_name_symbol: GFX942_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - block_m
+  - block_n
+  - lds_row_pad
+  - pv_priority
+  - persistent
+  - persist_decode
+  - nonpersist_decode
+  - lds_num_buffers
+  - v_reg_prefetch
+  - causal_diag_split
+  - o_store_width
+  - pv_loop_order
+  - use_cfvst
+  - use_exp2_fast
+  - lds_k_group_pad
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: emit_lse
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+- name: lds_row_pad
+  type: int
+  default_value: 8
+- name: pv_priority
+  type: int
+  default_value: 0
+- name: persistent
+  type: int
+  default_value: 0
+- name: num_persistent
+  type: int
+  default_value: 304
+- name: persist_decode
+  type: string
+  default_value: auto
+- name: nonpersist_decode
+  type: string
+  default_value: qb_minor
+- name: kv_segments
+  type: int
+  default_value: 1
+- name: lds_num_buffers
+  type: int
+  default_value: 1
+- name: v_reg_prefetch
+  type: int
+  default_value: 0
+- name: causal_diag_split
+  type: int
+  default_value: 0
+- name: o_store_width
+  type: int
+  default_value: 4
+- name: pv_loop_order
+  type: string
+  default_value: d_major
+- name: lds_k_group_pad
+  type: int
+  default_value: 8
+- name: use_cfvst
+  type: int
+- name: use_exp2_fast
+  type: int
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - emit_lse
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  - lds_row_pad
+  - pv_priority
+  - persistent
+  - num_persistent
+  - persist_decode
+  - nonpersist_decode
+  - kv_segments
+  - lds_num_buffers
+  - v_reg_prefetch
+  - causal_diag_split
+  - o_store_width
+  - pv_loop_order
+  - lds_k_group_pad
+  - use_cfvst
+  - use_exp2_fast
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    emit_lse:
+      field: emit_lse
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+    lds_row_pad:
+      field: lds_row_pad
+    pv_priority:
+      field: pv_priority
+    persistent:
+      field: persistent
+    num_persistent:
+      field: num_persistent
+    persist_decode:
+      field: persist_decode
+    nonpersist_decode:
+      field: nonpersist_decode
+    kv_segments:
+      field: kv_segments
+    lds_num_buffers:
+      field: lds_num_buffers
+    v_reg_prefetch:
+      field: v_reg_prefetch
+    causal_diag_split:
+      field: causal_diag_split
+    o_store_width:
+      field: o_store_width
+    pv_loop_order:
+      field: pv_loop_order
+    lds_k_group_pad:
+      field: lds_k_group_pad
+    use_cfvst:
+      method: resolved_use_cfvst
+    use_exp2_fast:
+      method: resolved_use_exp2_fast
+kernel_source_kind: rocke
+workspace_policy: none
+reduction:
+  fields:
+    feature:
+    - dtype
+    - head_size
+    - num_query_heads
+    - num_kv_heads
+    - causal
+    - sliding_window
+    - emit_lse
+    - ragged
+    - batch
+    - seqlen_q
+    - seqlen_kv
+    performance:
+    - name: block_m
+      divides: seqlen_q
+    - name: block_n
+      divides: seqlen_kv
+    - name: lds_row_pad
+    - name: pv_priority
+    - name: persistent
+    - name: persist_decode
+    - name: nonpersist_decode
+    - name: lds_num_buffers
+    - name: v_reg_prefetch
+    - name: causal_diag_split
+    - name: o_store_width
+    - name: pv_loop_order
+    - name: use_cfvst
+      unset_resolves_by: resolved_use_cfvst
+    - name: use_exp2_fast
+      unset_resolves_by: resolved_use_exp2_fast
+    - name: lds_k_group_pad
+    ignored:
+    - waves_per_eu
+    - num_persistent
+    - interleave
+    - iglp
+    - iglp_mode
+    - pv_sched_fence_mask
+    - v_row_pad
+    - use_v_swizzle
+    - kv_segments
+    - window_wave_skip
+    - chiplet_num_xcds
+  aot_budget_per_arch: 1600
+packs:
+- name: gfx942_attention_dense
+  arch:
+  - gfx942
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx942/attention_dense.py
+    builder: build_attention_dense
+  variants:
+  - name: attention_dense.bf16_d64_c{causal}_swa0_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad8_pv_priority{pv_priority}_persistent0_persist_decodeauto_nonpersist_{tag}_lds_num_buffers1_v_reg_prefetch0_causal_diag_split{causal_diag_split}_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: bf16, head_size: 64, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, sliding_window: 0, ragged: false, varlen: false, paged: false, waves_per_eu: 4, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: hq_minor_swz, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: true, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: hq_minor_swz, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 2, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 3, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: 'decode{md_nonpersist_decode}'}
+    shapes:
+    - {causal: true, emit_lse: false, knobs: knobs0, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: false, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+  - name: attention_dense.bf16_d64_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad8_pv_priority0_persistent0_persist_decodeauto_nonpersist_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: bf16, head_size: 64, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, ragged: false, varlen: false, paged: false, waves_per_eu: 4, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: hq_minor_swz, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodehq_minor_swz_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 24, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad24.gfx942}
+      - {block_m: 256, block_n: 128, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942}
+    shapes:
+    - {causal: false, sliding_window: 0, emit_lse: true, knobs: knobs0, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: false, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: false, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: false, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: false, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+  - name: attention_dense.fp16_d64_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad8_pv_priority0_persistent0_persist_decodeauto_nonpersist_{tag}_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu0_use_exp2_fastu1_lds_k_group_pad8.gfx942
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: fp16, head_size: 64, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, ragged: false, varlen: false, paged: false, waves_per_eu: 2, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv}
+      - {block_m: 256, block_n: 128, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb}
+    shapes:
+    - {causal: true, sliding_window: 0, emit_lse: false, knobs: knobs0, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 0, emit_lse: true, knobs: knobs0, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: false, sliding_window: 0, emit_lse: false, knobs: knobs1, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: false, sliding_window: 0, emit_lse: true, knobs: knobs0, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 0, use_exp2_fast: 1}}
+  - name: attention_dense.bf16_d128_c1_swa0_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad8_pv_priority0_persistent{persistent}_persist_{tag}_minor_lds_num_buffers1_v_reg_prefetch{v_reg_prefetch}_causal_diag_split{causal_diag_split}_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu{persistent}_lds_k_group_pad8.gfx942
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: bf16, head_size: 128, num_query_heads: 8, num_kv_heads: 8, causal: true, batch: 1, seqlen_q: 512, seqlen_kv: 512, sliding_window: 0, ragged: false, varlen: false, paged: false, waves_per_eu: 2, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodebt_hkv'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: true, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: true, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hkv_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hq_minor_swz, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: true, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: true, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: 'decode{md_persist_decode}_nonpersist_decodeqb'}
+    shapes:
+    - {emit_lse: false, knobs: knobs0, resolved: {use_cfvst: 1}}
+    - {emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 1}}
+  - name: attention_dense.bf16_d128_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad{lds_row_pad}_pv_priority0_persistent{persistent}_persist_{tag}_lds_k_group_pad8.gfx942
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: bf16, head_size: 128, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, ragged: false, varlen: false, paged: false, waves_per_eu: 2, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 4, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, use_exp2_fast: true, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fast1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hkv_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodehkv_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hq_minor_swz, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodehq_minor_swz_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 0}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, use_exp2_fast: true, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fast1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hkv_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodehkv_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, metadata: {use_exp2_fast: 1}, tag: decodeqb_major_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor_lds_num_buffers1_v_reg_prefetch0_causal_diag_split0_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu0}
+    shapes:
+    - {causal: false, sliding_window: 0, emit_lse: false, knobs: knobs0, resolved: {use_cfvst: 1}}
+    - {causal: false, sliding_window: 0, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 128, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 512, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 512, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 1024, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 1024, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 2048, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+    - {causal: true, sliding_window: 2048, emit_lse: true, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 0}}
+  - name: attention_dense.fp16_d128_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}_lds_row_pad{lds_row_pad}_pv_priority0_persistent{persistent}_persist_{tag}_lds_num_buffers1_v_reg_prefetch0_causal_diag_split{causal_diag_split}_o_store_width4_pv_loop_orderd_major_use_cfvstu1_use_exp2_fastu1_lds_k_group_pad8.gfx942
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, emit_lse, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority, persistent, num_persistent, persist_decode, nonpersist_decode, kv_segments, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, lds_k_group_pad, use_cfvst, use_exp2_fast]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_v_swizzle, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+    policy_knobs: [use_cfvst, use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {dtype: fp16, head_size: 128, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, ragged: false, varlen: false, paged: false, waves_per_eu: 2, lazy_rescale: true, interleave: false, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_v_swizzle: null, iglp: false, iglp_mode: 0, pv_sched_fence_mask: null, kv_segments: 1, window_wave_skip: false, chiplet_num_xcds: 8}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodebt_hkv_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: hq_minor_swz, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodehq_minor_swz}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: true, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hq_minor_swz, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodehq_minor_swz_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: bt_hkv_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodebt_hkv_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: bt_hkv_minor, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: true, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodebt_hkv_minor_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hq_minor_swz, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodehq_minor_swz_nonpersist_decodeqb_minor}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      knobs3:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: true, persist_decode: hq_minor_swz, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodehq_minor_swz_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, persistent: true, persist_decode: qb_major, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeqb_major_nonpersist_decodeqb_minor}
+      knobs4:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, persistent: false, persist_decode: auto, nonpersist_decode: qb_minor, lds_num_buffers: 1, v_reg_prefetch: false, causal_diag_split: false, o_store_width: 4, pv_loop_order: d_major, lds_k_group_pad: 8, tag: decodeauto_nonpersist_decodeqb_minor}
+    shapes:
+    - {causal: true, sliding_window: 0, emit_lse: false, knobs: knobs0, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 0, emit_lse: true, knobs: knobs1, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: false, sliding_window: 0, emit_lse: false, knobs: knobs2, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: false, sliding_window: 0, emit_lse: true, knobs: knobs3, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: false, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 128, emit_lse: true, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: false, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 512, emit_lse: true, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: false, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 1024, emit_lse: true, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: false, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}
+    - {causal: true, sliding_window: 2048, emit_lse: true, knobs: knobs4, resolved: {use_cfvst: 1, use_exp2_fast: 1}}

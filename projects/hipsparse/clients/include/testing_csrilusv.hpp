@@ -27,6 +27,7 @@
 
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -47,8 +48,7 @@ void testing_csrilusv(Arguments argus)
     hipsparseIndexBase_t idx_base = argus.baseA;
     std::string          filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr_M(new descr_struct);
     hipsparseMatDescr_t           descr_M = unique_ptr_descr_M->descr;
@@ -320,8 +320,10 @@ void testing_csrilusv(Arguments argus)
     pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info_L, d_position);
 
     // Host csrsv
+    int             device_id;
     hipDeviceProp_t prop{};
-    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
+    CHECK_HIP_ERROR(hipGetDevice(&device_id));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, device_id));
 
     position_gold = csr_lsolve(HIPSPARSE_OPERATION_NON_TRANSPOSE,
                                m,

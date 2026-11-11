@@ -11,7 +11,7 @@ from tensilelite.SolutionStructs.Naming import (
     getKernelCompileKey,
     getKernelNameMin,
 )
-from tensilelite.TensileCreateLibrary.Run import (
+from tensilelite.create_library.run import (
     groupKernelRecords,
     passPostKernelInfoToSolution,
 )
@@ -154,7 +154,7 @@ def test_wgmxcc_names_follow_codegen_categories():
 
 
 def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
-    import tensilelite.TensileCreateLibrary.Run as run
+    import tensilelite.create_library.run as run
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["ISA"] = (9, 4, 2)
@@ -165,6 +165,41 @@ def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Distinct kernel compile keys"):
         run.groupKernelRecords(kernels, False)
+
+
+def _register_allocation_warnings(capsys):
+    return [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if "StinkyTofuRegisterAllocation" in line
+    ]
+
+
+def test_register_allocation_configs_with_one_mode_share_a_kernel(capsys):
+    # The name records only the mode, so these are one kernel, built with the
+    # first config. classes=vs is the default, and the two spellings of the
+    # scalar config are one warning.
+    kernels = [_kernel(), _kernel(), _kernel()]
+    kernels[0]["StinkyTofuRegisterAllocation"] = "2,classes=vs"
+    kernels[1]["StinkyTofuRegisterAllocation"] = "2,classes=s"
+    kernels[2]["StinkyTofuRegisterAllocation"] = "apply,classes=s"
+
+    [group] = groupKernelRecords(kernels, False)
+
+    assert group.representative is kernels[0]
+    assert group.aliases == tuple(kernels)
+    [warning] = _register_allocation_warnings(capsys)
+    assert "'2,classes=s' is not built for 2 kernel(s)" in warning
+    assert "an earlier kernel with 2," in warning
+
+
+def test_spellings_of_one_register_allocation_config_are_not_merges(capsys):
+    kernels = [_kernel(), _kernel()]
+    kernels[0]["StinkyTofuRegisterAllocation"] = "apply"
+    kernels[1]["StinkyTofuRegisterAllocation"] = 2
+
+    assert len(groupKernelRecords(kernels, False)) == 1
+    assert _register_allocation_warnings(capsys) == []
 
 
 def test_metadata_fans_out_to_all_placement_aliases():
@@ -197,7 +232,7 @@ def test_thread_tile_distinguishes_non_matrix_kernels():
 
 
 def test_collection_preserves_all_placement_aliases():
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["codeObjectFile"] = "other"

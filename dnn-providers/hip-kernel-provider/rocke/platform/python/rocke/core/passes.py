@@ -10,6 +10,7 @@ Loads, stores, barriers, async copies, and MFMA ops are never moved or removed.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Tuple
 
@@ -144,10 +145,21 @@ def _cse_key(op: Op) -> Tuple:
 
 
 def _freeze_attr(v):
+    """``v`` as a hashable key that is equal only for attrs that lower the same.
+
+    Python's ``==`` would merge values the C++ engine keeps apart (it compares
+    an attr's kind, and a float's bits): ``-0.0 == 0.0``, ``1 == 1.0 == True``,
+    and a NaN never equals itself. So a float is keyed by its bit pattern and a
+    bool by its kind; two constants ``0.0`` and ``-0.0`` stay two values.
+    """
     if isinstance(v, (tuple, list)):
         return tuple(_freeze_attr(x) for x in v)
     if isinstance(v, dict):
         return tuple(sorted((k, _freeze_attr(x)) for k, x in v.items()))
+    if isinstance(v, bool):
+        return ("bool", v)
+    if isinstance(v, float):
+        return ("float", struct.pack("<d", v))
     return v
 
 
@@ -159,16 +171,25 @@ def _constant_ity(t: Type) -> str:
     return "i32"
 
 
-def _const_int(v: Value) -> Optional[int]:
-    op = v.op
+def constant_int(value: Value | int) -> int | None:
+    """The compile-time integer ``value`` is, or None.
+
+    An int (not a bool) is itself. A Value is read from its defining integer
+    ``arith.constant`` (i1, i32 or i64), at the constant's width as the folder
+    holds it: an i32 literal 0x80000000 and a folded i32 sum of the same bits are
+    one value, -2**31. A float constant, a bool, or a runtime value is None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    op = value.op
     if op is None or op.name != "arith.constant":
         return None
     ity = op.attrs.get("ity", "i32")
     if ity not in ("i1", "i32", "i64"):
         return None
-    # Read at the constant's width, as folded results are written: an i32
-    # literal 0x80000000 and a folded i32 sum of the same bits are one value.
-    return _wrap_to_width(int(op.attrs["value"]), v.type)
+    return _wrap_to_width(int(op.attrs["value"]), value.type)
 
 
 def _int_width(t: Type) -> int:
@@ -217,8 +238,8 @@ def _try_fold(op: Op) -> Optional[int]:
     if op.name == "arith.assume_range":
         # The marker is its first operand; a runtime end (operand 1) does not
         # stop a constant marked value from folding.
-        return _const_int(op.operands[0])
-    ints = [_const_int(v) for v in op.operands]
+        return constant_int(op.operands[0])
+    ints = [constant_int(v) for v in op.operands]
     if any(v is None for v in ints):
         return None
 

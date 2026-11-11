@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,11 @@ hipsparseStatus_t hipsparseScsr2csru(hipsparseHandle_t         handle,
                                      csru2csrInfo_t            info,
                                      void*                     pBuffer);
 
+/*! \ingroup conv_module
+*  \brief
+*  This function converts the sorted CSR format to the unsorted CSR format. The required
+*  temporary storage has to be allocated by the user.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsr2csru(hipsparseHandle_t         handle,
@@ -61,6 +66,11 @@ hipsparseStatus_t hipsparseDcsr2csru(hipsparseHandle_t         handle,
                                      csru2csrInfo_t            info,
                                      void*                     pBuffer);
 
+/*! \ingroup conv_module
+*  \brief
+*  This function converts the sorted CSR format to the unsorted CSR format. The required
+*  temporary storage has to be allocated by the user.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsr2csru(hipsparseHandle_t         handle,
@@ -74,6 +84,11 @@ hipsparseStatus_t hipsparseCcsr2csru(hipsparseHandle_t         handle,
                                      csru2csrInfo_t            info,
                                      void*                     pBuffer);
 
+/*! \ingroup conv_module
+*  \brief
+*  This function converts the sorted CSR format to the unsorted CSR format. The required
+*  temporary storage has to be allocated by the user.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsr2csru(hipsparseHandle_t         handle,

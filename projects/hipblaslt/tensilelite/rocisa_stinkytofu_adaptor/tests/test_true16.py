@@ -35,6 +35,8 @@ import shutil
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
@@ -88,7 +90,7 @@ def _assembler_path():
 _ASM_PATH = _assembler_path()
 
 
-class _IsaCase(unittest.TestCase):
+class _IsaCase(AdaptorTestCase):
     """Base restoring the process-global ISA state after each test.
 
     ``rocisa_stinkytofu_adaptor.base`` is a module-level singleton, so a test
@@ -179,6 +181,19 @@ class TestHalfSelectRender(_IsaCase):
         holder = HolderContainer("v", 0, 1)
         holder.setHalfSelect(HighBitSel.HIGH)
         self.assertEqual(str(holder.getCopiedRC()), "v0.h")
+
+    def test_holder_survives_pickle(self):
+        # ParallelMap2 workers receive holders by pickle and then call
+        # getCopiedRC on them through replaceHolder.
+        self.use_isa(TRUE16_ISA)
+
+        holder = HolderContainer("v", 0, 1)
+        holder.setHalfSelect(HighBitSel.LOW)
+        revived = pickle.loads(pickle.dumps(holder))
+        self.assertEqual(str(revived.getCopiedRC()), "v0.l")
+
+        plain = pickle.loads(pickle.dumps(HolderContainer("v", 0, 1)))
+        self.assertEqual(str(plain.getCopiedRC()), "v0")
 
 
 class TestT16Gating(_IsaCase):

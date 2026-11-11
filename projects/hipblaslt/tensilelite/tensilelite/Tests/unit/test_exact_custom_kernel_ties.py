@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.LibraryLogic import (
+from tensilelite.LibraryLogic import (
     LogicAnalyzer,
     customKernelTile,
     isCustomKernelSolution,
@@ -285,7 +285,7 @@ def test_least_important_solution_skips_must_keep_kernels():
 
 def test_must_keep_indices_follow_removed_solutions(monkeypatch):
     monkeypatch.setattr(
-        "Tensile.LibraryLogic.getSolutionNameMin",
+        "tensilelite.LibraryLogic.getSolutionNameMin",
         lambda solution, splitGSU: solution["CustomKernelName"],
     )
     f6 = "FP6_FP6_Half_Half_Float"

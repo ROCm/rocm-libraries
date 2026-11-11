@@ -26,6 +26,14 @@ class _BuildIdFunction:
         return self.value.encode()
 
 
+_TABLE_INPUTS = (
+    "python/rocke/core/arch/data/intrinsic_arch_domain.llvm22.json",
+    "python/rocke/core/arch/data/arch_domain_waivers.json",
+    "python/rocke/core/arch/domain.py",
+    "tools/gen_arch_domain_cpp.py",
+)
+
+
 class _Library:
     def __init__(self, build_id: str):
         self.rocke_build_id = _BuildIdFunction(build_id)
@@ -41,9 +49,14 @@ class TestSourceBuildId(unittest.TestCase):
                 "cpp/include/rocke/a.h": b"h\n",
                 "cpp/include/rocke/b.hpp": b"hpp\n",
                 "cpp/core/private.h": b"private\n",
+                "python/rocke/core/arch/data/intrinsic_arch_domain.llvm22.json": b"column\n",
+                "python/rocke/core/arch/data/arch_domain_waivers.json": b"waivers\n",
+                "python/rocke/core/arch/domain.py": b"reader\n",
+                "tools/gen_arch_domain_cpp.py": b"generator\n",
                 "tests/portable_ir/replay_cli.cpp": b"cli\n",
                 "CMakeLists.txt": b"root recipe\n",
-                "tests/CMakeLists.txt": b"CLI recipe\n",
+                "tests/CMakeLists.txt": b"test orchestrator\n",
+                "tests/cmake/PortableIrTests.cmake": b"CLI recipe\n",
                 "cmake/rocke_build_id.cmake": b"hash recipe\n",
                 "cmake/generate_rocke_build_id.cmake": b"header recipe\n",
             }
@@ -76,6 +89,20 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.write_text("second\n")
             self.assertNotEqual(first, online.source_build_id(root))
 
+    def test_each_arch_domain_table_input_changes_the_bundle_id(self):
+        for relative in _TABLE_INPUTS:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                engine = root / "cpp" / "engine.cpp"
+                engine.parent.mkdir(parents=True)
+                engine.write_text("engine\n")
+                table_input = root / relative
+                table_input.parent.mkdir(parents=True, exist_ok=True)
+                table_input.write_text("first\n")
+                first = online.source_build_id(root)
+                table_input.write_text("second\n")
+                self.assertNotEqual(first, online.source_build_id(root))
+
     def test_build_recipe_changes_the_bundle_id(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -83,6 +110,19 @@ class TestSourceBuildId(unittest.TestCase):
             engine.parent.mkdir(parents=True)
             engine.write_text("engine\n")
             recipe = root / "CMakeLists.txt"
+            recipe.write_text("first\n")
+            first = online.source_build_id(root)
+            recipe.write_text("second\n")
+            self.assertNotEqual(first, online.source_build_id(root))
+
+    def test_replay_cli_recipe_changes_the_bundle_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            engine = root / "cpp" / "engine.cpp"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("engine\n")
+            recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            recipe.parent.mkdir(parents=True)
             recipe.write_text("first\n")
             first = online.source_build_id(root)
             recipe.write_text("second\n")
@@ -104,7 +144,14 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.parent.mkdir(parents=True)
             replay_cli.write_text("replay CLI\n")
             (root / "CMakeLists.txt").write_text("root recipe\n")
-            (root / "tests" / "CMakeLists.txt").write_text("CLI recipe\n")
+            (root / "tests" / "CMakeLists.txt").write_text("test orchestrator\n")
+            cli_recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            cli_recipe.parent.mkdir()
+            cli_recipe.write_text("CLI recipe\n")
+            for relative in _TABLE_INPUTS:
+                table_input = root / relative
+                table_input.parent.mkdir(parents=True, exist_ok=True)
+                table_input.write_text(f"{relative}\n")
             binding = root / "cpp" / "bindings" / "ignored.cpp"
             binding.parent.mkdir(parents=True)
             binding.write_text("not a bundle input\n")
@@ -141,6 +188,98 @@ class TestSourceBuildId(unittest.TestCase):
             self.assertIn(f"#define ROCKE_BUILD_ID {refreshed_id}", refreshed)
             self.assertNotEqual(first_manifest, manifest.read_text())
             self.assertEqual(manifest.read_text(), f"test {refreshed_id}\n")
+
+    def test_library_cpp_mirror_changes_the_bundle_id(self):
+        # Library-owned C++ (../library/cpp, e.g. the conv mirrors) is built
+        # into rocke_library_engine, whose build_id() reports this ID.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "platform"
+            engine = root / "cpp" / "engine.cpp"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("engine\n")
+            platform_only = online.source_build_id(root)
+            library = Path(td) / "library" / "cpp"
+            for relative in (
+                "CMakeLists.txt",
+                "instances/common/conv_family.cpp",
+                "include/rocke/instance_conv_family.h",
+                "bindings/rocke_library_engine_conv.cpp",
+                "tests/conv_family_host.cpp",
+            ):
+                path = library / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"{relative}\n")
+            first = online.source_build_id(root)
+            self.assertNotEqual(platform_only, first)
+            for relative in (
+                "instances/common/conv_family.cpp",
+                "include/rocke/instance_conv_family.h",
+                "CMakeLists.txt",
+            ):
+                with self.subTest(relative=relative):
+                    path = library / relative
+                    original = path.read_text()
+                    path.write_text("changed\n")
+                    self.assertNotEqual(first, online.source_build_id(root))
+                    path.write_text(original)
+            # Pybind glue and host tests are not bundle inputs, as cpp/bindings.
+            for relative in (
+                "bindings/rocke_library_engine_conv.cpp",
+                "tests/conv_family_host.cpp",
+            ):
+                with self.subTest(relative=relative):
+                    (library / relative).write_text("changed\n")
+                    self.assertEqual(first, online.source_build_id(root))
+            # Without the sibling tree's recipe there is nothing library-owned.
+            (library / "CMakeLists.txt").unlink()
+            self.assertEqual(platform_only, online.source_build_id(root))
+
+    def test_python_id_matches_the_cmake_generator_with_library_cpp(self):
+        source_cmake = Path(online._platform_root()) / "cmake"
+        script_names = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
+        if not shutil.which("cmake") or not all(
+            (source_cmake / name).is_file() for name in script_names
+        ):
+            self.skipTest("CMake and rocKE build-ID generator scripts required")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "platform"
+            engine = root / "cpp" / "engine.cpp"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("engine\n")
+            for relative in _TABLE_INPUTS:
+                table_input = root / relative
+                table_input.parent.mkdir(parents=True, exist_ok=True)
+                table_input.write_text(f"{relative}\n")
+            library = Path(td) / "library" / "cpp"
+            conv = library / "instances" / "common" / "conv_family.cpp"
+            conv.parent.mkdir(parents=True)
+            conv.write_text("conv\n")
+            (library / "CMakeLists.txt").write_text("library recipe\n")
+            binding = library / "bindings" / "ignored.cpp"
+            binding.parent.mkdir()
+            binding.write_text("not a bundle input\n")
+            cmake_dir = root / "cmake"
+            cmake_dir.mkdir()
+            for name in script_names:
+                shutil.copy2(source_cmake / name, cmake_dir / name)
+            header = root / "generated" / "values.h"
+            command = [
+                "cmake",
+                f"-DROCKE_SOURCE_ROOT={root}",
+                f"-DROCKE_BUILD_ID_HEADER={header}",
+                "-DROCKE_ENGINE_VERSION=test",
+                "-P",
+                str(cmake_dir / "generate_rocke_build_id.cmake"),
+            ]
+            subprocess.run(command, check=True)
+            first = online.source_build_id(root)
+            self.assertIn(f"#define ROCKE_BUILD_ID {first}", header.read_text())
+
+            conv.write_text("changed conv\n")
+            subprocess.run(command, check=True)
+            refreshed = online.source_build_id(root)
+            self.assertNotEqual(first, refreshed)
+            self.assertIn(f"#define ROCKE_BUILD_ID {refreshed}", header.read_text())
 
     def test_installed_tree_without_cpp_sources_has_no_expected_id(self):
         with tempfile.TemporaryDirectory() as td:

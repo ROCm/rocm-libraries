@@ -12,6 +12,22 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
+# Negative test for a zero-sized matrix.
+- name: compress_stream_cleanup
+  category: smoke
+  function:
+    compress: *hpa_half_precision
+  M: 0
+  N: 128
+  K: 128
+  lda: 128
+  ldb: 128
+  ldc: 128
+  ldd: 128
+  transA: N
+  transB: N
+  sparse_b: false
+
 - name: compress_bad_arg
   category: pre_checkin
   function:

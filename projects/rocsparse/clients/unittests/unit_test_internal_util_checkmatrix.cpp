@@ -61,9 +61,9 @@ class CheckMatrixCsc : public HandleTest
 TEST_F(CheckMatrixCsc, buffer_size_then_check)
 {
     // 2x2 identity in CSC: col_ptr = {0,1,2}, row_ind = {0,1}, val = {1,1}.
-    device_vector<int32_t> col_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> row_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(col_ptr.ptr && row_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -97,10 +97,10 @@ TEST_F(CheckMatrixCsc, buffer_size_then_check)
 // / null value array on the buffer-size query, and null temp buffer on the check.
 TEST_F(CheckMatrixCsc, bad_args)
 {
-    device_vector<int32_t> col_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> row_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
-    size_t                 bs = 0;
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    size_t                       bs = 0;
 
     EXPECT_EQ(rocsparse_scheck_matrix_csc_buffer_size(
                   nullptr, 2, 2, 2, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &bs),
@@ -132,6 +132,69 @@ TEST_F(CheckMatrixCsc, bad_args)
         rocsparse_status_invalid_pointer);
 }
 
+// check_matrix_csc with an empty dimension. csc_col_ptr has n + 1 entries, so a null
+// csc_col_ptr is rejected for m = 0 and n > 0. A matrix with n = 0 has no columns to check,
+// and one with m = 0 and empty columns is valid.
+TEST_F(CheckMatrixCsc, empty_dimensions)
+{
+    size_t                bs = 0;
+    rocsparse_data_status ds;
+    device_vector<char>   tmp{size_t(1024)};
+    ASSERT_TRUE(tmp.ptr);
+
+    EXPECT_EQ(rocsparse_scheck_matrix_csc_buffer_size(
+                  handle, 0, 2, 0, nullptr, nullptr, nullptr, BASE, GENERAL, LOWER, SORTED, &bs),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_csc(
+            handle, 0, 2, 0, nullptr, nullptr, nullptr, BASE, GENERAL, LOWER, SORTED, &ds, tmp.ptr),
+        rocsparse_status_invalid_pointer);
+
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 0, 0}};
+    ASSERT_TRUE(col_ptr.ptr);
+    for(rocsparse_storage_mode storage : {SORTED, rocsparse_storage_mode_unsorted})
+    {
+        for(const auto& mn :
+            std::vector<std::pair<rocsparse_int, rocsparse_int>>{{0, 2}, {2, 0}, {0, 0}})
+        {
+            SCOPED_TRACE("m " + std::to_string(mn.first) + " n " + std::to_string(mn.second)
+                         + " storage " + std::to_string(storage));
+            bs = 0;
+            ASSERT_EQ(rocsparse_scheck_matrix_csc_buffer_size(handle,
+                                                              mn.first,
+                                                              mn.second,
+                                                              0,
+                                                              nullptr,
+                                                              col_ptr,
+                                                              nullptr,
+                                                              BASE,
+                                                              GENERAL,
+                                                              LOWER,
+                                                              storage,
+                                                              &bs),
+                      rocsparse_status_success);
+            device_vector<char> buffer{bs ? bs : size_t(1)};
+            ASSERT_TRUE(buffer.ptr);
+            ds = rocsparse_data_status_invalid_fill;
+            EXPECT_EQ(rocsparse_scheck_matrix_csc(handle,
+                                                  mn.first,
+                                                  mn.second,
+                                                  0,
+                                                  nullptr,
+                                                  col_ptr,
+                                                  nullptr,
+                                                  BASE,
+                                                  GENERAL,
+                                                  LOWER,
+                                                  storage,
+                                                  &ds,
+                                                  buffer.ptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(ds, rocsparse_data_status_success);
+        }
+    }
+}
+
 // ===========================================================================
 // check_matrix_ell  (own device validation kernel)
 // ===========================================================================
@@ -144,8 +207,8 @@ class CheckMatrixEll : public HandleTest
 TEST_F(CheckMatrixEll, buffer_size_then_check)
 {
     // 2x2 identity in ELL: ell_width = 1, val = {1,1}, col_ind = {0,1}.
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(col_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -168,9 +231,9 @@ TEST_F(CheckMatrixEll, buffer_size_then_check)
 // restriction that non-general / invalid matrix_type enums are rejected.
 TEST_F(CheckMatrixEll, bad_args)
 {
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
-    size_t                 bs = 0;
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    size_t                       bs = 0;
 
     EXPECT_EQ(rocsparse_scheck_matrix_ell_buffer_size(
                   nullptr, 2, 2, 1, val, col_ind, BASE, GENERAL, LOWER, SORTED, &bs),
@@ -217,9 +280,9 @@ class CheckMatrixGebsr : public HandleTest
 TEST_F(CheckMatrixGebsr, buffer_size_then_check)
 {
     // 2x2 block identity, 1x1 blocks: row_ptr = {0,1,2}, col_ind = {0,1}, val = {1,1}.
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     const rocsparse_direction dir         = rocsparse_direction_row;
@@ -269,11 +332,11 @@ TEST_F(CheckMatrixGebsr, buffer_size_then_check)
 // size, and null buffer-size pointer are each rejected.
 TEST_F(CheckMatrixGebsr, bad_args)
 {
-    device_vector<int32_t>    row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t>    col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>      val{std::vector<float>{1.0f, 1.0f}};
-    const rocsparse_direction dir = rocsparse_direction_row;
-    size_t                    bs  = 0;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    size_t                       bs  = 0;
 
     EXPECT_EQ(
         rocsparse_scheck_matrix_gebsr_buffer_size(
@@ -329,9 +392,9 @@ class CheckMatrixGebsc : public HandleTest
 TEST_F(CheckMatrixGebsc, buffer_size_then_check)
 {
     // 2x2 block identity in GEBSC, 1x1 blocks: col_ptr={0,1,2}, row_ind={0,1}.
-    device_vector<int32_t> col_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> row_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(col_ptr.ptr && row_ind.ptr && val.ptr);
 
     const rocsparse_direction dir         = rocsparse_direction_row;
@@ -381,11 +444,11 @@ TEST_F(CheckMatrixGebsc, buffer_size_then_check)
 // rejected by the buffer-size query.
 TEST_F(CheckMatrixGebsc, bad_args)
 {
-    device_vector<int32_t>    col_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t>    row_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>      val{std::vector<float>{1.0f, 1.0f}};
-    const rocsparse_direction dir = rocsparse_direction_row;
-    size_t                    bs  = 0;
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    size_t                       bs  = 0;
 
     EXPECT_EQ(
         rocsparse_scheck_matrix_gebsc_buffer_size(
@@ -422,9 +485,9 @@ class CheckMatrixHyb : public HandleTest
 TEST_F(CheckMatrixHyb, build_then_check)
 {
     // 3x3 identity CSR -> HYB (auto partition).
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2, 3}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1, 2}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f, 1.0f}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f, 1.0f}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     rocsparse_mat_descr descr = nullptr;

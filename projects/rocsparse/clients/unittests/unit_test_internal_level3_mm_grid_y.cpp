@@ -109,21 +109,6 @@
 #include <type_traits>
 #include <vector>
 
-namespace rocsparse_ut
-{
-    template <>
-    inline rocsparse_datatype dt_of<_Float16>()
-    {
-        return rocsparse_datatype_f16_r;
-    }
-
-    template <>
-    inline rocsparse_datatype dt_of<rocsparse_bfloat16>()
-    {
-        return rocsparse_datatype_bf16_r;
-    }
-}
-
 using namespace rocsparse_ut;
 
 namespace
@@ -307,7 +292,8 @@ namespace
         ~SpMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_spmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(d));
         }
     };
 
@@ -317,7 +303,8 @@ namespace
         ~DnMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_dnmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(d));
         }
     };
 

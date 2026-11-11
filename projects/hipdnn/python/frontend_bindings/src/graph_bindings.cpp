@@ -160,6 +160,12 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     return {results, outcome};
 }
 
+template <typename T>
+std::shared_ptr<graph::TensorAttributes> tensorScalar(T value, graph::ScalarType scalarType)
+{
+    return graph::Graph::tensor(value, scalarType);
+}
+
 } // namespace
 
 void graphBindings(nb::module_& m)
@@ -249,8 +255,15 @@ void graphBindings(nb::module_& m)
         .def("build_plans",
              &graph::Graph::build_plans,
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-             "Finalize execution plans. HEURISTICS_CHOICE compiles only the "
-             "active plan; ALL compiles every plan.")
+             "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan (the "
+             "preferred engine's plan when it is among the ranked candidates, otherwise the "
+             "top-ranked plan). If that plan fails to finalize for any reason, the other "
+             "ranked plans are tried, from the top of the list; the first that finalizes "
+             "becomes active. Candidates barred by deselect_engines() or over the "
+             "deselect_workspace_greater_than() limit are skipped. If no plan finalizes, an "
+             "error listing every attempted engine and its failure is returned and the active "
+             "plan is unchanged. An active plan that finalizes but is over the workspace limit "
+             "is an error. ALL compiles every plan, skipping any that fail.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -534,8 +547,10 @@ void graphBindings(nb::module_& m)
              "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
              "built with build_plans(BuildPlanPolicy.ALL), sized with "
              "get_autotune_workspace_size(). The winning plan is left active, so a "
-             "following execute() uses it, and get_plan_name() reports it. Raises "
-             "RuntimeError if autotuning fails.\n"
+             "following execute() uses it, and get_plan_name() reports it. The winning "
+             "plan executes last and the call waits for it, so the caller's buffers hold "
+             "its output unless the graph writes one of its own inputs. Raises "
+             "RuntimeError if autotuning fails, including a failure of that final run.\n"
              "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
              "argument exists for cuDNN signature compatibility and is ignored, so calling "
              "this method covers them.")
@@ -598,7 +613,10 @@ void graphBindings(nb::module_& m)
              "The cached order is keyed on this graph's serialized content and the "
              "handle's device. Returns a (results, cache_write_outcome) tuple: the "
              "per-engine AutotuneResult list and the AutotuneCacheWriteOutcome reporting "
-             "whether that write happened. Raises RuntimeError if the sweep fails.")
+             "whether that write happened. The winning plan executes last and the call "
+             "waits for it, so the caller's buffers hold its output unless the graph writes "
+             "one of its own inputs. Raises RuntimeError if the sweep fails, including a "
+             "failure of that final run.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
@@ -743,10 +761,18 @@ void graphBindings(nb::module_& m)
         .def("set_preferred_engine_id_ext",
              nb::overload_cast<std::optional<int64_t>>(&graph::Graph::set_preferred_engine_id_ext),
              nb::arg("engineId") = std::nullopt,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference_internal,
+             "Prefer an engine ID for plan selection (None clears it). The preference is soft: "
+             "if the preferred engine's plan fails to finalize for any reason, build_plans() "
+             "falls back to another ranked engine (the list is scanned from the top). Read "
+             "the serving engine with get_execution_plan_engine_id() or get_plan_name().")
         .def("set_preferred_engine_id_ext",
              nb::overload_cast<const std::string&>(&graph::Graph::set_preferred_engine_id_ext),
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference_internal,
+             "Prefer an engine by name (an empty string clears it). The preference is soft: "
+             "if the preferred engine's plan fails to finalize for any reason, build_plans() "
+             "falls back to another ranked engine (the list is scanned from the top). Read "
+             "the serving engine with get_execution_plan_engine_id() or get_plan_name().")
         .def("set_ranking_metric",
              &graph::Graph::set_ranking_metric,
              nb::arg("metric"),
@@ -782,6 +808,24 @@ void graphBindings(nb::module_& m)
             "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
             "A host (cpu) producer becomes a runtime pass-by-value tensor "
             "whose value is passed to execute() as a host tensor.")
+        .def_static("tensor_scalar",
+                    &tensorScalar<float>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"),
+                    "Create a pass-by-value scalar tensor. scalar_type selects a compile-time "
+                    "constant or a runtime parameter with a default value.")
+        .def_static("tensor_scalar",
+                    &tensorScalar<double>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
+        .def_static("tensor_scalar",
+                    &tensorScalar<int32_t>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
+        .def_static("tensor_scalar",
+                    &tensorScalar<int64_t>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
         .def(
             "to_json",
             [](graph::Graph& g) {

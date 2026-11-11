@@ -19,7 +19,7 @@ Target missing ranges in tensilelite/Components/LocalRead.py (miss=489, 54%):
 
 Strategy (two config families):
   A. gfx1250 + LDSTrInst=True: covers HasWMMA_V3=1 arm of enableLDSTr block
-     (Tensile lines 784+). Uses:
+     (TensileLite lines 784+). Uses:
        - HHS NN (bpeDS=2) -> lines 884-942
        - F8HS TN (bpeDS=1) -> lines 835-883
   B. gfx950 + ConvertAfterDS=1 (F8HS TN/NT): covers lines 1163-1320.

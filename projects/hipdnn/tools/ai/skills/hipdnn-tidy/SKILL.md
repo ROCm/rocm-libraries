@@ -72,7 +72,8 @@ Infer from the user request:
    core is roughly 554 translation units and takes minutes, so say so before
    starting one, and prefer changed-file scope when a branch is the subject.
 
-2. Run the script from the repository root:
+2. Run the script from the repository root, where `<skill-directory>` is the
+   directory holding this `SKILL.md`:
 
    ```bash
    python <skill-directory>/scripts/tidy_changed.py --build-dir <build-dir> [options]

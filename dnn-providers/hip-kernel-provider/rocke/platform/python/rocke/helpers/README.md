@@ -18,6 +18,9 @@ top-level skeleton that names what's special about the kernel (the
 shape, the atom, the descriptor for non-bijective addressing) and
 leaves the boilerplate to the helpers.
 
+That only holds if kernels add and fix helpers as they go, with
+tests: [platform/AGENTS.md](../../../AGENTS.md#helpers-placement).
+
 ## What's here
 
 ```text
@@ -52,6 +55,8 @@ rocke/helpers/
 │ # the (Y, P) decomposition is non-trivial.
 ├── io.py # io_ir_type, load_vec, load_vec_as_f32, pack_f32_to,
 │ # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
+│ # smem_load_fragment: an LDS fragment read in <= 16-byte
+│ # pieces joined in K order by concat_tree (fp32 / TF32 conv).
 ├── reduction.py # block_lds_reduce (sum/max/min/prod) -- canonical
 │ # LDS tree reduction shared by norm/reduce/pool
 │ # kernels. Min and prod are also supported.
@@ -813,6 +818,14 @@ reversal) followed by `super_tile_swizzle` (WGM-style Hilbert order
 inside each XCD). Together they restore L2 locality on the multi-die
 MI300X / MI350X by ensuring every contiguous stripe of workgroups
 shares one XCD's L2 slice.
+
+`chiplet_transform_chunked_dynamic` takes a runtime `num_wgs` with a
+compile-time chunk. Shape-generic (AOT) kernels whose locality unit follows
+the problem use `chiplet_transform_chunked_runtime`, where the chunk is an
+i32 SSA value as well: `max(1, num_wgs / num_xcds)` by default (one
+contiguous run of the launch per XCD), or the caller's `chunk_size` (e.g. the
+workgroups of one image row band, computed from the kernargs). Its pure-Python
+model is `python_chiplet_transform_chunked_runtime`.
 
 ### XOR-based LDS swizzles (`helpers/layouts.py`)
 

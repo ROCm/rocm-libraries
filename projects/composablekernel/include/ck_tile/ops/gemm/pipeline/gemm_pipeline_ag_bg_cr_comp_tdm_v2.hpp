@@ -21,7 +21,9 @@ struct GemmPipelineAgBgCrCompTDMV1;
  * specialization.
  *
  */
+#ifndef BARRIER_ATOMIC_IN_TDM
 #define BARRIER_ATOMIC_IN_TDM 0
+#endif
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMDefaultPolicy<true>>
 struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
 {
@@ -121,6 +123,8 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             bool is_warp2 = (warp_id == 2);
             bool is_warp3 = (warp_id == 3);
 #if BARRIER_ATOMIC_IN_TDM
+            // Define smem_size from problem policy
+            constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
             // currently lds config is set to 29; so phase width is 3
             LdsAtomicBarrier<3>* barriers[2];
             barriers[0] = reinterpret_cast<LdsAtomicBarrier<3>*>(
@@ -169,10 +173,10 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 tdm_config_a[i].atomic_barrier_enable = true;
                 tdm_config_b[i].atomic_barrier_enable = true;
 
-                tdm_config_a[i].atomic_barrier_address =
-                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i])) >> 3;
-                tdm_config_b[i].atomic_barrier_address =
-                    static_cast<uint16_t>(reinterpret_cast<uintptr_t>(barriers[i])) >> 3;
+                const auto barrier_address = static_cast<uint16_t>(
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(barriers[i])) >> 3);
+                tdm_config_a[i].atomic_barrier_address = barrier_address;
+                tdm_config_b[i].atomic_barrier_address = barrier_address;
 #endif
             });
 
@@ -1460,6 +1464,28 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 p_smem);
         };
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+    }
+
+    // Stream-K call form (see GemmPipelineAgBgCrCompTDMV1). V2's operator() overloads hide V1's,
+    // so V2 restates it to bind its own PipelineImpl.
+    template <typename ADramBlockWindowTmp,
+              typename BDramBlockWindowTmp,
+              typename std::enable_if_t<!is_detected<is_tuple, ADramBlockWindowTmp>::value &&
+                                            !is_detected<is_tuple, BDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const BDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   const index_t num_loop,
+                                   const bool /*has_hot_loop*/,
+                                   const TailNumber /*tail_number*/,
+                                   void* __restrict__ p_smem) const
+    {
+        return operator()(make_tuple(a_dram_block_window_tmp),
+                          element_wise::PassThrough{},
+                          make_tuple(b_dram_block_window_tmp),
+                          element_wise::PassThrough{},
+                          num_loop,
+                          p_smem);
     }
 
     template <typename ADramBlockWindowTmp,

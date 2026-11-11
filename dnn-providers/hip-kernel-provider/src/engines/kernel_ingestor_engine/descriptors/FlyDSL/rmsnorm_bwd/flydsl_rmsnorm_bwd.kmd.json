@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "id": "68946940-ac32-5de0-85fe-92a8e85157dc",
+  "name": "flydsl rmsnorm_bwd variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "N",
+      "type": "int"
+    },
+    {
+      "name": "n_max",
+      "type": "int"
+    },
+    {
+      "name": "scale_f32",
+      "type": "int"
+    },
+    {
+      "name": "reduce_symbol",
+      "type": "string"
+    }
+  ]
+}

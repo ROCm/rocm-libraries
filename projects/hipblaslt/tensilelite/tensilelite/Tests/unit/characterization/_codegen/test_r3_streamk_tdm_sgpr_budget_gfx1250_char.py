@@ -136,7 +136,7 @@ def _emit_with_reg_state(config_path, arch, limit):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -160,7 +160,7 @@ def _emit_with_reg_state(config_path, arch, limit):
             results.append(
                 {
                     "base": base,
-                    "src": src or "",
+                    "src": _cfgh.with_symbol_names(src or ""),
                     "variant": _variant_key(lambda param: kernel[param]),
                     "waveSeparated": bool(
                         kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1

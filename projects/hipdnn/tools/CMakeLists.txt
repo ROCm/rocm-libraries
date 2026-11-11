@@ -1,6 +1,29 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Headers both command-line tools below share; tools-internal, never installed.
+    add_library(hipdnn_tools_common INTERFACE)
+    target_include_directories(hipdnn_tools_common
+        INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
+    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk)
+
+    # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
+    # training tooling.
+    add_subdirectory(bench)
+
+    # Both evaluate UHD descriptor expressions through plugin_sdk's heuristics/uhd/, which
+    # exists only with the kernel ingestor.
+    add_subdirectory(corpus_gen)
+
+    add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
+    target_compile_options(hipdnn_uhd_features PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
+    clang_tidy_check(hipdnn_uhd_features)
+    install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
@@ -14,6 +37,103 @@ set_target_properties(
     hipdnn_list_engines PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
 )
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# uhd_gen's Python tests pin the features_hash contract against the C++ FeatureExtractor, and
+# mine_shapes mines the shapes the IngestorGenerator consumes; both are ingestor tooling, so
+# a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
+# when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
+# the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
+# uhd_gen/ load with `-p`) and a missing pytest into a configure error.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
+    set(_uhd_gen_missing_severity ${HIPDNN_UHD_GEN_MISSING_SEVERITY})
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        # Probe for pytest: `python -m pytest` exits 1 when it is missing, which is
+        # indistinguishable from a test failure.
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import pytest"
+            RESULT_VARIABLE UHD_GEN_PYTEST_PROBE
+            OUTPUT_QUIET ERROR_QUIET)
+        if(UHD_GEN_PYTEST_PROBE EQUAL 0)
+            add_test(
+                NAME uhd_gen_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            # pytest exits 5 when it collects nothing (the importorskip guards skipped
+            # everything).
+            set_tests_properties(uhd_gen_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            # Separate test because the suite above does not collect uhd_gen/dataset/tests,
+            # and this one needs no ML dependencies.
+            add_test(
+                NAME uhd_gen_dataset_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # Only this file: the rest of IngestorGenerator/tests needs PyYAML/Jinja2 via its
+            # conftest. --noconftest because test_mine_shapes.py must not inherit those
+            # imports.
+            add_test(
+                NAME mine_shapes_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider --noconftest -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # The hipdnn-uhd skill's scripts, against a fake hipdnn_bench. Its uhd_gen-backed
+            # cases (promotion into a candidate tree) need the evaluator too.
+            add_test(
+                NAME uhd_skill_scripts_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_skill_scripts_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+                set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                             uhd_skill_scripts_tests APPEND PROPERTY
+                             ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+            endif()
+            # LightGBM takes every core by default, which stalls these suites for many
+            # minutes beside a parallel ctest. Bytecode and pytest's cache stay out of the
+            # source tree.
+            set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                         uhd_skill_scripts_tests APPEND PROPERTY
+                         ENVIRONMENT "OMP_NUM_THREADS=4" "PYTHONDONTWRITEBYTECODE=1")
+
+            # The two suites that run hipdnn_uhd_features load the sanitizer, ROCm and build
+            # DLL directories the C++ tests do (PATH prepends on Windows, via
+            # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced).
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(uhd_gen_tests uhd_skill_scripts_tests PROPERTIES
+                                     ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+
+            # Build tree only: none of the four is installed.
+            _apply_hipdnn_test_category_labels(uhd_gen_tests)
+            _apply_hipdnn_test_category_labels(uhd_gen_dataset_tests)
+            _apply_hipdnn_test_category_labels(mine_shapes_tests)
+            _apply_hipdnn_test_category_labels(uhd_skill_scripts_tests)
+        else()
+            message(${_uhd_gen_missing_severity}
+                    "uhd_gen tests NOT registered: pytest is not importable by "
+                    "${Python3_EXECUTABLE}. These pin the features_hash contract between "
+                    "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
+                    "${HIPDNN_UHD_GEN_PYTHON_MODULES}) so they run.")
+        endif()
+    else()
+        message(${_uhd_gen_missing_severity}
+                "uhd_gen tests NOT registered: no Python3 interpreter found")
+    endif()
+endif()
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
 # own engine name rather than a hexadecimal fallback.
@@ -251,7 +371,13 @@ endif()
 
         # The role fixtures: the exit status, and every model_checks entry's role and verdict
         # in report order. HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS is a comma-separated list
-        # of <role>=<true|false>, comma rather than semicolon so it survives add_test().
+        # of <role>=<true|false>, comma rather than semicolon so it survives add_test(). A slot
+        # ranker's role is spelled <role>@<slot>. HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC, when
+        # set, is text some reported diagnostic must contain.
+        # HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY, when set, is a directory of files laid over a
+        # copy of ROOT in HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR, and the copy is what the tool
+        # validates. HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES, when set, is passed to the
+        # tool as --feature-samples.
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
    OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
@@ -264,9 +390,34 @@ if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
         "HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS are required")
 endif()
 
+set(validatedRoot "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}")
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY)
+    if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR)
+        message(FATAL_ERROR
+            "HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR is required with "
+            "HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY")
+    endif()
+    file(REMOVE_RECURSE "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+    file(COPY "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}/" DESTINATION "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+    # file(COPY) skips a file whose destination has the same modification time, which a
+    # checkout gives every fixture, so the overlay is copied file by file.
+    file(GLOB_RECURSE overlayFiles RELATIVE "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}"
+         "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}/*")
+    foreach(overlayFile IN LISTS overlayFiles)
+        file(COPY_FILE "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}/${overlayFile}"
+             "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}/${overlayFile}")
+    endforeach()
+    set(validatedRoot "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+endif()
+
+set(featureSamplesArgs)
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES)
+    set(featureSamplesArgs --feature-samples "${HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES}")
+endif()
+
 execute_process(
-    COMMAND "${HIPDNN_VALIDATE_DESCRIPTORS_TOOL}" "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}"
-            --expect-engine "${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}" --json
+    COMMAND "${HIPDNN_VALIDATE_DESCRIPTORS_TOOL}" "${validatedRoot}"
+            --expect-engine "${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}" ${featureSamplesArgs} --json
     OUTPUT_VARIABLE toolStdout
     ERROR_VARIABLE toolStderr
     RESULT_VARIABLE toolResult
@@ -278,7 +429,7 @@ message(STATUS "hipdnn_validate_descriptors stderr:\n${toolStderr}")
 if(NOT toolResult STREQUAL HIPDNN_VALIDATE_DESCRIPTORS_EXIT)
     message(FATAL_ERROR
         "hipdnn_validate_descriptors exited with '${toolResult}' on "
-        "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}; expected '${HIPDNN_VALIDATE_DESCRIPTORS_EXIT}'")
+        "${validatedRoot}; expected '${HIPDNN_VALIDATE_DESCRIPTORS_EXIT}'")
 endif()
 
 string(JSON engines ERROR_VARIABLE jsonError GET "${toolStdout}" engines)
@@ -306,6 +457,10 @@ foreach(expected IN LISTS expectedChecks)
     list(GET expectedPair 0 expectedRole)
     list(GET expectedPair 1 expectedSuccess)
     string(JSON role GET "${toolStdout}" model_checks ${index} role)
+    string(JSON slot ERROR_VARIABLE slotError GET "${toolStdout}" model_checks ${index} slot)
+    if(NOT slotError)
+        set(role "${role}@${slot}")
+    endif()
     string(JSON success GET "${toolStdout}" model_checks ${index} success)
     if(success)
         set(success true)
@@ -319,63 +474,105 @@ foreach(expected IN LISTS expectedChecks)
     endif()
     math(EXPR index "${index} + 1")
 endforeach()
+
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC)
+    string(FIND "${toolStdout}" "${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}" diagnosticPosition)
+    if(diagnosticPosition EQUAL -1)
+        message(FATAL_ERROR
+            "no diagnostic contains '${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}'")
+    endif()
+endif()
 ]])
         # cmake-format: on
 
-        add_test(
-            NAME hipdnn_validate_descriptors_smoke
-            COMMAND
-                ${CMAKE_COMMAND}
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT}"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
-                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS)
+        # <test suffix>|<root>|<engine>. The multi-launch bundle has its own engine: a validator
+        # that stopped declaring the pack's launch names has its kernels dropped with an ERROR
+        # and exits non-zero here, which the single-launch root cannot show.
+        foreach(
+            smokeCase
+            "smoke|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT}|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
+            "smoke_multi_launch|${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch|hipkernel:ValidateFixtureMultiLaunch"
         )
-        set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
+            string(REPLACE "|" ";" smokeCase "${smokeCase}")
+            list(GET smokeCase 0 smokeName)
+            list(GET smokeCase 1 smokeRoot)
+            list(GET smokeCase 2 smokeEngine)
+            add_test(
+                NAME hipdnn_validate_descriptors_${smokeName}
+                COMMAND
+                    ${CMAKE_COMMAND}
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${smokeRoot}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${smokeEngine}"
+                    -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+            )
+            list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${smokeName})
+        endforeach()
 
-        # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
-        # kernels and one naming a kernel under both launch names. It has its own engine,
-        # and the same driver script. A validator that stopped declaring the pack's launch
-        # names drops this engine and fails here, which the single-launch root cannot show.
-        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
-            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
-        )
-        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE "hipkernel:ValidateFixtureMultiLaunch")
-        add_test(
-            NAME hipdnn_validate_descriptors_smoke_multi_launch
-            COMMAND
-                ${CMAKE_COMMAND}
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT}"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE}"
-                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
-        )
-        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
-
-        # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
+        # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
+        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
         # features need a sample, run without one, is admitted with extraction skipped.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES
+            slotted_ranker_undeclared_field
+            slotted_ranker_unexposed_axis
+            slotted_ranker_reads_workspace_token
+            slotted_two_ws_tokens
+            slotted_ranker_names_other_slot
+            slotted_multi_launch
+        )
         foreach(
             roleFixture
             "l2_static_order:0:sort_kernel_catalog=true"
             "l2_dynamic_features:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
+            "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
+            "slotted_multi_launch:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
+            "slotted_ranker_undeclared_field:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature references an undeclared KMD field"
+            "slotted_ranker_unexposed_axis:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:which its UED does not expose as knobs"
+            "slotted_ranker_reads_workspace_token:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:a shared-workspace token a slotted engine reserves"
+            "slotted_two_ws_tokens:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature reads '$ws.a'"
+            "slotted_ranker_names_other_slot:1:sort_kernel_catalog@dkdv=false,sort_kernel_catalog@dq=true,predict_engine=true:but the ranker serves slot"
+            "slotted_feature_samples_ws:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
         )
             string(REPLACE ":" ";" roleFixture "${roleFixture}")
             list(GET roleFixture 0 fixtureName)
             list(GET roleFixture 1 fixtureExit)
             list(GET roleFixture 2 fixtureChecks)
+            set(fixtureDiagnosticArg)
+            list(LENGTH roleFixture roleFixtureLength)
+            if(roleFixtureLength GREATER 3)
+                list(GET roleFixture 3 fixtureDiagnostic)
+                set(fixtureDiagnosticArg "-DHIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC=${fixtureDiagnostic}")
+            endif()
+            set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}")
+            set(fixtureCaseArgs)
+            if(fixtureName IN_LIST HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES)
+                set(fixtureCaseArgs
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY=${fixtureRoot}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_WORKDIR=${CMAKE_CURRENT_BINARY_DIR}/vdo/${fixtureName}"
+                )
+                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            elseif(fixtureName STREQUAL "slotted_feature_samples_ws")
+                set(fixtureCaseArgs
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES=${fixtureRoot}/feature_samples.json"
+                )
+                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}
                 COMMAND
                     ${CMAKE_COMMAND}
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${fixtureRoot}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_EXIT=${fixtureExit}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS=${fixtureChecks}"
+                    ${fixtureDiagnosticArg}
+                    ${fixtureCaseArgs}
                     -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake"
             )
             list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${fixtureName})
@@ -436,6 +633,13 @@ endforeach()
             set(_hipdnn_ingestor_pytest_env
                 "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
             )
+
+            # test_verify_variant_sets_multi_launch_rocke.py packs with the real compiler and
+            # fails without one. Name the hipcc find_package(hip) resolved, as the packaging
+            # suite's own ctest entries do: the ROCm bin directory is not on every lane's PATH.
+            if(HIP_HIPCC_EXECUTABLE)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
+            endif()
 
             # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
             # follow ALIAS targets, so resolve to the real target.

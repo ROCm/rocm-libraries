@@ -3,9 +3,12 @@
 #
 # rocke project umbrella:
 #   - platform/ : the authoring SDK + engine (former rocKE/).
-# The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
-# editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
-# not added as a CMake subdirectory.
+#   - library/  : the kernel library. Its Python (kernels/builders/dispatch/
+#     benchmarks) is editable-installed and wheeled by the rocke-pyenv /
+#     rocke-wheels blocks below. Its C++ mirrors (library/cpp:
+#     librocke_library.a, exported as ckc::rocke_library, and the
+#     rocke_library_engine pybind module) are added by platform/CMakeLists.txt
+#     after rocke_core. library/ is not added as a subdirectory here.
 #
 # NOTE: add_subdirectory(platform) is deferred to after the ROCKE_BUILD_PYENV /
 # ROCKE_WHEEL_DIR / ROCKE_WHEEL_VERSION declarations below so that
@@ -80,9 +83,12 @@ if(ROCKE_BUILD_PYENV)
     # repack) is inert in exactly the case it exists for: someone editing a
     # kernel. There are two wheels and they need separate globs -- the kernel
     # bodies live under library/, so wiring only the platform wheel would leave
-    # the real case broken.
+    # the real case broken. The platform glob takes the package's JSON data too:
+    # the arch-domain columns ship in that wheel and drive the lowerer, so
+    # regenerating one has to rebuild it like any source edit.
     file(GLOB_RECURSE _rocke_platform_sources CONFIGURE_DEPENDS
-         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.py")
+         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.py"
+         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.json")
     file(GLOB_RECURSE _rocke_library_sources CONFIGURE_DEPENDS
          "${CMAKE_CURRENT_SOURCE_DIR}/library/*.py")
 

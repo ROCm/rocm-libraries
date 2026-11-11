@@ -54,23 +54,23 @@ template<unsigned int BlockSize,
          bool UseThreadCounter  = true,
          bool UseNativeOperator = true,
          bool KillNegativeZeros = false,
-         class BaseType = device_topk_air_impl<BlockSize,
-                                                   ItemsPerThread,
-                                                   RadixBits,
-                                                   CandidateBufferCoefficient,
-                                                   ThreadCounterLimit,
-                                                   SelectMin,
-                                                   Adaptive,
-                                                   KeysInputIterator,
-                                                   KeysOutputIterator,
-                                                   ValuesInputIterator,
-                                                   ValuesOutputIterator,
-                                                   SizeIn,
-                                                   SizeOut,
-                                                   Decomposer,
-                                                   UseThreadCounter,
-                                                   UseNativeOperator,
-                                                   KillNegativeZeros>>
+         class BaseType         = device_topk_air_impl<BlockSize,
+                                                       ItemsPerThread,
+                                                       RadixBits,
+                                                       CandidateBufferCoefficient,
+                                                       ThreadCounterLimit,
+                                                       SelectMin,
+                                                       Adaptive,
+                                                       KeysInputIterator,
+                                                       KeysOutputIterator,
+                                                       ValuesInputIterator,
+                                                       ValuesOutputIterator,
+                                                       SizeIn,
+                                                       SizeOut,
+                                                       Decomposer,
+                                                       UseThreadCounter,
+                                                       UseNativeOperator,
+                                                       KillNegativeZeros>>
 struct device_segmented_topk_air_impl : BaseType
 {
     using key_in_t =
@@ -128,8 +128,8 @@ struct device_segmented_topk_air_impl : BaseType
 
     // Using functions from the regular topk
     using BaseType::equal_last_n_bits;
-    using BaseType::less_last_n_bits;
     using BaseType::extract_digit_flip_xaxis;
+    using BaseType::less_last_n_bits;
     template<size_t HistogramSize>
     using histogram_t = typename BaseType::template histogram_t<HistogramSize>;
 
@@ -204,15 +204,16 @@ struct device_segmented_topk_air_impl : BaseType
 
         if constexpr(Iteration == 0) // First Iteration
         { // For first iteration, every thing from the input is input
-            record_to_histogram_fn(BaseType::template  extract_digit_of_cur_iteration<Iteration>(key, decomposer));
+            record_to_histogram_fn(
+                BaseType::template extract_digit_of_cur_iteration<Iteration>(key, decomposer));
         }
         else
         {
             const auto [category, candidate_digit]
                 = BaseType::template identify_candidate<Iteration>(key,
-                                                storage.chosen_bins,
-                                                load_adaptive,
-                                                decomposer);
+                                                                   storage.chosen_bins,
+                                                                   load_adaptive,
+                                                                   decomposer);
             // Items which are in the previous be is the input of this iteration
             switch(category)
             {
@@ -305,14 +306,15 @@ struct device_segmented_topk_air_impl : BaseType
             {
                 if(i < thread_counter_size)
                 {
-                    ::rocprim::detail::atomic_add(&storage.block_local_histogram[thread_digit[i]], thread_counter[i]);
+                    ::rocprim::detail::atomic_add(&storage.block_local_histogram[thread_digit[i]],
+                                                  thread_counter[i]);
                 }
             }
         }
         else
         {
-            auto record_to_histogram_fn
-                = [&](auto digit) { ::rocprim::detail::atomic_add(&storage.block_local_histogram[digit], 1); };
+            auto record_to_histogram_fn = [&](auto digit)
+            { ::rocprim::detail::atomic_add(&storage.block_local_histogram[digit], 1); };
             thread_histogram_and_filter_prev<Iteration>(storage,
                                                         keys_input,
                                                         keys_output,
@@ -325,56 +327,59 @@ struct device_segmented_topk_air_impl : BaseType
         }
     }
 
-
-    template<unsigned int Iteration, unsigned int HistogramSize, class SharedStorageType>
+    // HistogramSize is the number of valid bins in this iteration while ActualSize is the allocated size of `block_local_histogram`, deduced from the argument.
+template<unsigned int Iteration, unsigned int HistogramSize, unsigned int ActualSize, class SharedStorageType>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
-    choose_pivot_bin(
-        SharedStorageType& storage,
-        histogram_t<bins_per_thread> const& thread_bins,
-        histogram_t<HistogramSize> const& block_local_histogram,
-        SizeIn N,
-        SizeOut K,
-        unsigned int thread_id)
+choose_pivot_bin(
+    SharedStorageType& storage,
+    histogram_t<bins_per_thread> const& thread_bins,
+    histogram_t<ActualSize> const& block_local_histogram,
+    SizeIn N,
+    SizeOut K,
+    unsigned int thread_id)
+{
+
+    static_assert(HistogramSize <= ActualSize,
+                  "HistogramSize is larger than the size of input histogram");
+    ROCPRIM_UNROLL
+    for(std::remove_cv_t<decltype(bins_per_thread)> i = 0; i < bins_per_thread; ++i)
     {
-        ROCPRIM_UNROLL
-        for(std::remove_cv_t<decltype(bins_per_thread)> i = 0; i < bins_per_thread; ++i)
+        const auto global_i = i + (thread_id * bins_per_thread);
+        if(global_i >= HistogramSize)
         {
-            const auto global_i = i + (thread_id * bins_per_thread);
-            if(global_i >= HistogramSize)
-            {
-                break;
-            }
+            break;
+        }
 
-            // A pivot be should satisfy (cur >= K && prev < K)
-            // The code is writing like this because I don't want to load data from shared memory
-            // for each item, I want to load prev only when needed.
-            // cur == block_local_histogram[global_i], using thread_bins because it's faster
-            const auto cur = thread_bins[i];
-            if(cur < static_cast<decltype(cur)>(K))
-            {
-                continue;
-            }
+        // A pivot be should satisfy (cur >= K && prev < K)
+        // The code is writing like this because I don't want to load data from shared memory
+        // for each item, I want to load prev only when needed.
+        // cur == block_local_histogram[global_i], using thread_bins because it's faster
+        const auto cur = thread_bins[i];
+        if(cur < static_cast<decltype(cur)>(K))
+        {
+            continue;
+        }
 
-            const auto prev = global_i == 0 ? 0 : block_local_histogram[global_i - 1];
-            if(prev < static_cast<decltype(prev)>(K))
-            {
-                // Bin that contains pivot is found
-                K         = K - prev;
-                N         = cur - prev;
-                storage.K = K;
-                storage.N = N;
-                storage.chosen_bins.template set<Iteration>(global_i);
-                storage.stopped_at = static_cast<common_size_t>(K) == static_cast<common_size_t>(N)
-                                         ? Iteration
-                                         : num_iterations;
-                break;
-            }
+        const auto prev = global_i == 0 ? 0 : block_local_histogram[global_i - 1];
+        if(prev < static_cast<decltype(prev)>(K))
+        {
+            // Bin that contains pivot is found
+            K         = K - prev;
+            N         = cur - prev;
+            storage.K = K;
+            storage.N = N;
+            storage.chosen_bins.template set<Iteration>(global_i);
+            storage.stopped_at = static_cast<common_size_t>(K) == static_cast<common_size_t>(N)
+                                     ? Iteration
+                                     : num_iterations;
+            break;
         }
     }
+}
 
-    // TODO: This function is possible to be replaced by block_reduce or segmented_reduce
-    // But I tried to use segmented_reduce with counting_iteration, it didn't work, so this
-    // needs to be investigated further.
+// TODO: This function is possible to be replaced by block_reduce or segmented_reduce
+// But I tried to use segmented_reduce with counting_iteration, it didn't work, so this
+// needs to be investigated further.
     template<class RangeType, class UnaryFunc>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     block_for_in_range(RangeType range, UnaryFunc&& fn)
@@ -479,8 +484,10 @@ struct device_segmented_topk_air_impl : BaseType
             // It's actually faster to just directly extract all digits, instead of using runtime variable
             // last_iteration to determine how many iterations needs to be loaded
             rocprim::detail::constexpr_for_lt<0, num_iterations, 1>(
-                [&](const auto i)
-                { digits[i] = BaseType::template  extract_digit_of_cur_iteration<i>(key, decomposer); });
+                [&](const auto i) {
+                    digits[i]
+                        = BaseType::template extract_digit_of_cur_iteration<i>(key, decomposer);
+                });
 
             // Only check the iteration before last iteration
             if(last_iteration == 0)
@@ -488,9 +495,9 @@ struct device_segmented_topk_air_impl : BaseType
                 is_candidate_in_prev_iteration = true;
             }
             else if(load_adaptive
-               && !equal_last_n_bits(storage.chosen_bins.get(last_iteration - 1),
-                                     digits[last_iteration - 1],
-                                     bits_per_iteration))
+                    && !equal_last_n_bits(storage.chosen_bins.get(last_iteration - 1),
+                                          digits[last_iteration - 1],
+                                          bits_per_iteration))
             {
                 is_candidate_in_prev_iteration = false;
             }
@@ -575,10 +582,10 @@ struct device_segmented_topk_air_impl : BaseType
         {
             typename block_scan_t::storage_type scan;
 
-            SizeOut      output_pos; // Initialize at Iteration 0 -> init value 0
-            SizeOut      last_output_pos; // Initialize at Iteration 0 -> init value 0
+            SizeOut output_pos; // Initialize at Iteration 0 -> init value 0
+            SizeOut last_output_pos; // Initialize at Iteration 0 -> init value 0
             typename BaseType::digits_array chosen_bins; // Auto initialized
-            unsigned int stopped_at; // Initialize at Iteration 0 -> init value 0
+            unsigned int                    stopped_at; // Initialize at Iteration 0 -> init value 0
 
             histogram_t<num_buckets>
                     block_local_histogram; // Initialize in each Iteration -> init value 0
@@ -643,13 +650,14 @@ struct device_segmented_topk_air_impl : BaseType
                 histogram_t<bins_per_thread> thread_bins;
 
                 // Load data into register
-                block_load_direct_blocked(thread_id,
-                                          storage.block_local_histogram,
-                                          thread_bins,
-                                          histogram_size,
-                                          BaseType::template  extract_digit_of_cur_iteration<Iteration>(
-                                              key_codec::get_out_of_bounds_key(decomposer),
-                                              decomposer));
+                block_load_direct_blocked(
+                    thread_id,
+                    storage.block_local_histogram,
+                    thread_bins,
+                    histogram_size,
+                    BaseType::template extract_digit_of_cur_iteration<Iteration>(
+                        key_codec::get_out_of_bounds_key(decomposer),
+                        decomposer));
 
                 // Block scan
                 block_scan_t{}.inclusive_scan(thread_bins,
@@ -667,12 +675,12 @@ struct device_segmented_topk_air_impl : BaseType
                 ::rocprim::syncthreads();
 
                 // Chose the bin which contains the pivot
-                choose_pivot_bin<Iteration>(storage,
-                                           thread_bins,
-                                           storage.block_local_histogram,
-                                           N_this_iteration,
-                                           K_this_iteration,
-                                           thread_id);
+                choose_pivot_bin<Iteration, histogram_size>(storage,
+                                                            thread_bins,
+                                                            storage.block_local_histogram,
+                                                            N_this_iteration,
+                                                            K_this_iteration,
+                                                            thread_id);
                 ::rocprim::syncthreads();
             });
 

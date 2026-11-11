@@ -38,7 +38,7 @@ hipDNN has a plugin-based architecture in order to allow contributors and users 
 
 **Backend**: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to plugins that can solve them.
 
-**SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
+**SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides four SDKs: Data SDK (shared types and utilities), Flatbuffers SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
 
 **Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
 
@@ -73,25 +73,33 @@ fault. Each independent comparison therefore starts fresh.
 
 ### SDKs
 
-hipDNN provides three header-only SDK libraries that serve as the foundation for communication between different components.
+hipDNN provides four header-only SDK libraries that serve as the foundation for communication between different components.
 
 #### Data SDK (`data_sdk`)
 
-The Data SDK contains FlatBuffers schemas and data structures for graph representation.
+The Data SDK contains shared types and utilities.
 
-- **Dependencies**: FlatBuffers
-- **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations
-- **Expected Usage**: Consumed by Frontend, Backend, and Plugins for graph data handling
+- **Purpose**: Provides common types, logging, and utilities
+- **Expected Usage**: Consumed by Frontend, Backend, Plugins, and the other SDKs
 - **Core Functionality**:
-  - FlatBuffer schema definitions for graphs, nodes, and attributes
-  - Data structures for deserializing serialized graphs
   - Logging utilities and type helpers (half, bfloat16, etc.)
+
+#### Flatbuffers SDK (`flatbuffers_sdk`)
+
+The Flatbuffers SDK contains FlatBuffers schemas and data structures for graph representation.
+
+- **Dependencies**: Data SDK, FlatBuffers
+- **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations
+- **Expected Usage**: Consumed by Backend, Plugins, and the Test SDK for graph data handling
+- **Core Functionality**:
+  - FlatBuffer schema definitions for graphs, nodes, and attributes (`flatbuffers_sdk/schemas/`)
+  - Data structures for deserializing serialized graphs
 
 #### Plugin SDK (`plugin_sdk`)
 
 The Plugin SDK contains the plugin API and utilities for creating engine plugins.
 
-- **Dependencies**: Data SDK
+- **Dependencies**: Data SDK, Flatbuffers SDK
 - **Purpose**: Provides the interface and utilities for plugin development
 - **Expected Usage**: Consumed by plugin projects
 - **Core Functionality**:
@@ -103,7 +111,7 @@ The Plugin SDK contains the plugin API and utilities for creating engine plugins
 
 The Test SDK provides utilities for testing plugins.
 
-- **Dependencies**: Data SDK, Plugin SDK
+- **Dependencies**: Flatbuffers SDK, Plugin SDK, Frontend
 - **Purpose**: Provides testing infrastructure for plugin validation
 - **Expected Usage**: Consumed by plugin test suites
 - **Core Functionality**:
@@ -111,7 +119,7 @@ The Test SDK provides utilities for testing plugins.
   - Test utilities (tolerances, seeds, logging)
   - Mock objects for unit testing
 
-For the SDK development roadmap and planned features, see the [SDKs section in the Roadmap](./Roadmap.md#sdks).
+For the SDK development roadmap and planned features, see the [Roadmap](./Roadmap.md).
 
 ### Frontend
 
@@ -172,7 +180,7 @@ The Backend is the core engine of hipDNN, responsible for managing plugins and o
 
 #### Key Characteristics
 - **Installable library**: C API with ABI for language interoperability, dynamically loadable
-- **Dependencies**: Data SDK
+- **Dependencies**: Data SDK, Flatbuffers SDK, Plugin SDK
 - **Purpose**: Provides a stable graph based API for describing kernel fusions
 - **Expected Usage**: Library linked to the frontend API and expert user projects that provides access to the hipDNN backend API
 
@@ -243,7 +251,7 @@ hipdnnBackendFinalize(plan_desc);
 hipdnnBackendExecute(handle, plan_desc, variant_desc);
 ```
 
-For the backend development roadmap and planned features, see the [Backend section in the Roadmap](./Roadmap.md#backend).
+For the backend development roadmap and planned features, see the [Roadmap](./Roadmap.md).
 
 ### Engine Plugins
 
@@ -251,7 +259,7 @@ Engine plugins provide the actual computational implementations for hipDNN graph
 
 #### Key Characteristics
 - **Separate installable projects**: Independent development and deployment
-- **Dependencies**: Data SDK, Plugin SDK (and plugin-specific dependencies as needed)
+- **Dependencies**: Data SDK, Flatbuffers SDK, Plugin SDK (and plugin-specific dependencies as needed)
 - **Purpose**: Provides engines which are capable of solving graphs
 - **Expected Usage**: Loaded at runtime by hipDNN backend
 

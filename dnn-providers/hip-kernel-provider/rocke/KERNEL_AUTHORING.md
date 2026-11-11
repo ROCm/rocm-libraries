@@ -31,6 +31,8 @@ new policy.
   - [B. New knob / optimization](#b-new-knob--optimization)
   - [C. New feature / enablement](#c-new-feature--enablement)
   - [D. Perf optimization (no new feature)](#d-perf-optimization-no-new-feature)
+  - [E. New operator with a hipDNN graph node](#e-new-operator-with-a-hipdnn-graph-node)
+  - [F. New operand or output on an existing operator](#f-new-operand-or-output-on-an-existing-operator)
 - [Local testing matrix (platforms)](#local-testing-matrix-platforms)
 - [Appendix — Attention (SDPA/MHA) library process](#appendix--attention-sdpamha-library-process)
 - [See also](#see-also)
@@ -65,7 +67,13 @@ The two invariants that gate every process below:
    2D/3D bodies) exactly like every other family, and additionally carries
    `.py`/`.c` emitter pairs under
    [library/tests/parity/](library/tests/parity/) that are byte-compared per
-   config.
+   config. Convolution (`conv_*`, `img2col`, `deep_fused_conv_pool`) keeps its
+   C++ mirror in the library instead: [library/cpp/](library/cpp/)
+   (`rocke_library_core`, bound into `rocke_library_engine`, bridged by
+   `kernels/conv/engine_bridge.py`), gated by the same `check_byte_identity.py`.
+   New library families put theirs there too, so the library owns both halves.
+   Library families' byte-identity golden is
+   [library/tests/parity/golden/](library/tests/parity/golden/).
 2. **One-way dependency.** `library → platform` only. `platform` never imports
    `kernels` / `builders` / `dispatch`, and stays standalone-installable.
    Anything reusable across families belongs in platform (see
@@ -73,7 +81,7 @@ The two invariants that gate every process below:
 
 ## Run the checks
 
-One command runs the whole gate:
+One command runs the complete host gate and attempts the local numerical lanes:
 
 ```bash
 python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
@@ -81,7 +89,7 @@ python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
 
 It **auto-discovers** every `test_*.py` and every `<family>_emit.{py,c}` parity
 pair — so adding a new test needs **no** edit to any script or checklist. It runs,
-in order: relative-path guard → byte-identity gate (both `llvm20` and `llvm22`) →
+in order: relative-path guard → byte-identity gate (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) →
 platform + library parity → pytest (both suites) → on-GPU numeric (auto-skips
 when no device). Scope while iterating with:
 
@@ -91,7 +99,10 @@ when no device). Scope while iterating with:
   numeric, and the gate, e.g. `--steps numeric --op fmha_bwd`.
 - `--flavor <llvm>` — pin one LLVM flavor; `--list` — dry-run.
 
-This replaces hand-maintaining a list of tests to run.
+This replaces hand-maintaining a list of tests to run. A green result with a
+skipped numerical lane is not kernel-correctness evidence: verify that the
+affected on-device tests executed comparisons, or complete the required lane on
+a matching remote GPU before marking kernel work done.
 
 ## Core DoD — every change
 
@@ -122,6 +133,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 
 - [ ] Spec-driven `build_*()` builder (no one-off scripts); reuse existing
       helpers/atoms first.
+- [ ] **Helpers: write the missing ones, fix the broken ones, each with a
+      test, in this change.** A new family is not a reason to stay in raw
+      `IRBuilder` code. Rule: [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 - [ ] **C engine mirror** in the same change (byte-identity).
 - [ ] `.py`/`.c` parity pair added under `tests/parity/` (auto-picked up by the
       runner).
@@ -184,6 +198,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
       dashboard, and representative shapes are handed to benchmarking. Publish
       relative evidence only through a policy-qualified PR or result document.
+- [ ] **MMA ops** — an MMA op added, removed or rewired in `core.arch` comes with
+      the tiling package's regenerated backend coverage record
+      ([`extending.md` §5.5](platform/dsl_docs/development/extending.md#55-the-tiling-mma-catalog-and-its-backend-coverage-record)).
 
 ### D. Perf optimization (no new feature)
 
@@ -194,22 +211,98 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
 
+### E. New operator with a hipDNN graph node
+
+When the operator exists as a hipDNN graph node (its schema is in
+[flatbuffers_sdk/schemas/](../../../projects/hipdnn/flatbuffers_sdk/schemas/)),
+the dispatch request is the contract between that node and rocKE kernels. The
+worked example is SDPA forward:
+[dispatch/sdpa/](library/dispatch/sdpa/) and
+[tests/sdpa/](library/tests/sdpa/).
+
+- [ ] **Lossless request type.** Every field of the hipDNN node, and every
+      operand's dtype, dims, strides and ragged-offset descriptor, has a field
+      on the request.
+      A field no kernel implements yet is still represented. It is never dropped.
+- [ ] **Unsupported is a feature, not an error.** `__post_init__` rejects only
+      what the hipDNN frontend rejects. Valid but unimplemented fields are
+      reported by `features()`, so every candidate declines them through
+      `Capability.check` with a reason instead of silently ignoring them.
+- [ ] **Normalized identity.** Construction folds equivalent spellings
+      (deprecated flags, unset defaults, broadcast ranks) into one, so
+      `normalized()` is a stable cache key and round-trips back to the request.
+- [ ] **Translator from the graph.** A `from_hipdnn()` builds the request from
+      the node's flatbuffer JSON, applying hipDNN's own precedence and validation
+      rules. A key hipDNN does not write raises instead of being dropped. A test
+      runs it over the checked-in golden-bundle graphs for the operator when
+      they exist.
+- [ ] **Reference oracle with hipDNN semantics.** A numpy reference that
+      matches hipDNN's CPU reference and golden generator, including edge cases
+      (fully masked rows, padding), reusing the operator's existing array oracle
+      rather than a second copy of the math. For SDPA,
+      [tests/sdpa/request_reference.py](library/tests/sdpa/request_reference.py)
+      decodes the request (gating on its `features()`) and delegates to
+      [numeric/sdpa_reference.py](platform/python/rocke/numeric/sdpa_reference.py).
+      Features it does not implement raise `NotImplementedError` by name.
+- [ ] **Case table.** One shared list of requests that together report every
+      feature at least once, including the decline-only ones, so each
+      candidate's verdict on each feature is recorded. For SDPA this is
+      [tests/sdpa/request_cases.py](library/tests/sdpa/request_cases.py); the
+      kernel coverage table is [tests/sdpa/cases.py](library/tests/sdpa/cases.py).
+- [ ] **Coverage test.** For every hipDNN field, a test shows the field changes
+      `features()` or `normalized()`.
+
+### F. New operand or output on an existing operator
+
+Adding a kernel argument such as an additive bias, a scale tensor, sequence
+lengths, or an LSE output. The request field, the feature, and each family's
+handling of it must stay in step.
+
+- [ ] **Request field and feature.** The operand is a field on the request (see
+      [E](#e-new-operator-with-a-hipdnn-graph-node)), and `features()` reports a
+      named feature when it is set.
+- [ ] **Route only to families that implement it.** Each family that supports
+      the operand adds the feature to its candidates' `supports_features` and
+      binds the request field to its kernel argument. Every other family keeps
+      declining the feature. A family must never accept the request and drop
+      the operand.
+- [ ] **Default-off in the kernel.** The new argument sits behind a spec flag
+      whose default emits today's IR. Prefer a pointer that is absent from the
+      signature when the flag is off, so existing kernel ABIs do not change. The
+      gate stays GREEN with no re-bless.
+- [ ] **Shared emission, not per-family copies.** Use the shared hooks on the
+      common inner bodies or a shared helper, rather than re-implementing the
+      operand in each family. For attention: the score hook's query and key
+      positions in
+      [mfma_attention.py](platform/python/rocke/helpers/mfma_attention.py) for
+      bias, and `AttnFwdExt.epilogue_hook`
+      ([attention_fwd_ext.py](platform/python/rocke/helpers/attention_fwd_ext.py))
+      with the `_lse_store` factories
+      ([_lse_store.py](library/kernels/common/_lse_store.py)) for LSE.
+- [ ] **Numeric test against the reference.** For each family that admits the
+      feature, an on-GPU test compares the kernel to the reference oracle on the
+      case-table entries that use it, including broadcast and edge cases.
+- [ ] **Case table and support matrix.** A case for the operand exists in the
+      case table, and the support matrix lists which families now serve it.
+
 ## Local testing matrix (platforms)
 
-Run the local checks on the arches your change affects. The byte-identity gate
-enumerates all supported arches intrinsically (it is comgr-compile-only, no GPU
-needed); on-GPU numeric needs a device of that arch.
+Run the local checks on the architectures your change affects. Byte-identity is
+GPU-free, but its architecture coverage is **emitter-driven**: each family covers
+only the `(spec, arch)` configurations listed by its parity emitters. Most common
+families default to gfx950. Inspect the affected emitter configs and add each
+required architecture explicitly; a green gate makes no claim about an
+architecture the family did not enumerate. On-GPU numeric validation needs a
+device matching each required architecture.
 
-| Arch | Byte-identity gate (no GPU) | On-GPU numeric |
+| Architecture scope | Byte-identity gate (no GPU) | On-GPU numeric |
 |---|---|---|
-| gfx942 | required | if device available |
-| gfx950 (baseline default) | required | required for attention changes |
-| gfx1151 | required | if device available |
-| gfx1201 | required | if device available |
-| gfx1250 | required | if device available |
+| Every affected `(spec, arch)` pair | Must be explicitly enumerated by the family emitters | Required for kernel behavior changed on that architecture; use a matching remote lane when local hardware is absent |
+| gfx950 baseline defaults | Covered only where the emitter defaults or pins gfx950 | Required for attention changes that affect gfx950 |
 
-Both LLVM flavors (`llvm20`, `llvm22`) are part of "gate GREEN" — the runner does
-both by default. If you lack a device for an arch, use the remote GPU path rather
+All supported LLVM flavors (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) are part of
+"gate GREEN" — the runner does all four by default. If you lack a device for an
+arch, use the remote GPU path rather
 than faking the lane or using CPU torch.
 
 ---
@@ -234,6 +327,7 @@ down to [platform/](platform/). It distills the conventions already encoded in
 | Kernel emitters | [library/kernels/common/](library/kernels/common/), [library/kernels/gfx950/](library/kernels/gfx950/) | Build the typed SSA `KernelDef` (e.g. [attention_unified.py](library/kernels/common/attention_unified.py), [attention_tiled_2d.py](library/kernels/gfx950/attention_tiled_2d.py), [attention_tiled_3d.py](library/kernels/gfx950/attention_tiled_3d.py)) |
 | Spec seam | [library/builders/common/attention_spec_builder.py](library/builders/common/attention_spec_builder.py) | Maps `UnifiedAttentionProblem` → arch tiled-spec; owns every knob decision |
 | Dispatch | [library/dispatch/attention/](library/dispatch/attention/) | `ATTENTION_REGISTRY` + `dispatch_attention`; selects `(path, head_size, block_size)` |
+| Routed families | [library/dispatch/sdpa/](library/dispatch/sdpa/) | hipDNN SDPA request contract; routes to `dispatch.attention`'s unified/dense candidates via a gate per family ([H](#h-route-a-family-over-dispatchattention)) — registers no kernel of its own |
 | Builders / harnesses | [library/builders/gfx950/attention/](library/builders/gfx950/attention/) | Parity + benchmark drivers, captured shape JSONs, case studies |
 | Benchmarks | [library/benchmarks/](library/benchmarks/) | Standalone perf sweeps (e.g. [benchmark_rocke_unified_attention.py](library/benchmarks/common/benchmark_rocke_unified_attention.py)) |
 | Parity emitters | [library/tests/parity/](library/tests/parity/) | `.py`/`.c` emitter pairs, byte-compared |
@@ -248,9 +342,13 @@ scoped to library.
 1. **Decide the home.** SDPA/MHA product kernel → `library/`. Generic kernel →
    `platform/instances/`. If in doubt, it is a library kernel only if it is part
    of the attention product.
-2. **Research and reuse first.** Grep [library/kernels/common/](library/kernels/common/) and
-   [platform/Python/rocke/helpers/](platform/Python/rocke/helpers/) for an existing emitter,
+2. **Reuse first, then write what is missing.** Grep [library/kernels/common/](library/kernels/common/) and
+   [platform/python/rocke/helpers/](platform/python/rocke/helpers/) for an existing emitter,
    epilogue, atom, or loader before writing new SSA. Extend, don't duplicate.
+   What nothing covers becomes a new helper in
+   `library/kernels/common/_<family>_*.py`, with a test; a broken helper is
+   fixed where it lives, with a regression test. Rule:
+   [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 3. **Author the spec + `build_*()` emitter** under [library/kernels/](library/kernels/) as a
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
@@ -262,7 +360,11 @@ scoped to library.
    ([sweep coverage](#a-new-kernel-family)). If it introduces a new
    selection axis, extend `select_path` / `supports_native_unified_attention`
    (keep the decision a **pure** function of the problem so it mirrors on the C
-   side).
+   side). Registering it here is not enough by itself for a family routed over
+   `dispatch.attention` (SDPA) to reach it: the routed family's gate names
+   which algorithms it routes among, so the new candidate stays unreachable
+   through that family until it is added there too
+   ([H](#h-route-a-family-over-dispatchattention)).
 5. **Add the parity pair.** Create `tests/parity/<family>_emit.py` (Python
    reference, driven by `run_emit` from
    [platform/tests/instances/parity/_emit_common.py](platform/tests/instances/parity/_emit_common.py))
@@ -275,7 +377,7 @@ scoped to library.
    [numeric_attention.py](library/tests/differential/numeric_attention.py)
    (GPU), and a benchmark under [library/benchmarks/](library/benchmarks/).
 7. **Bless the golden** ([Process F](#f-parity-and-golden-re-bless)) and
-   run the gate GREEN at **both** LLVM flavors.
+   run the gate GREEN at **every** flavor in `LLVM_FLAVORS`.
 8. **Document** ([Process D](#d-update-the-docs-runbook-readmes-case-study)):
    an `ALGORITHM.md` if the math is new, plus a `README.md` harness/results doc.
 
@@ -408,8 +510,8 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
    and/or the extended parity harness spawned by
    [test_extended_parity_attention.py](library/tests/test_extended_parity_attention.py).
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
-   [test_attention_builds.py](library/tests/test_attention_builds.py) or the arch
-   smoke test ([test_gfx950_smoke_attention.py](library/tests/test_gfx950_smoke_attention.py)).
+   [test_attention_builds.py](library/tests/test_attention_builds.py) or the
+   closest architecture-specific builder test under `library/tests/`.
 5. **Run** `pytest library/tests` (add `platform/tests` if platform was touched);
    GPU numeric lanes need a HIP-visible device.
 
@@ -422,9 +524,10 @@ The gate is the emission definition-of-done. Run it from the **platform** tree
 cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
 export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
 
-python tools/check_byte_identity.py                            # llvm20, build engine + gate
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23 flavor
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24 flavor
 python tools/check_byte_identity.py --only attention           # scope to a family
 ```
 
@@ -439,20 +542,26 @@ Python emitter and the compiled C emitter for each config index and diffs the
    host, so a new flavor fails until re-blessed). The bless path is `--write` on
    the parity harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
    golden at
-   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
-   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
+   [rocke_representative_ir_sha256/](platform/tests/golden/rocke_representative_ir_sha256/),
+   one `<family>.json` shard per family; `--only <family>[,...]` rewrites just
+   those shards, so unrelated changes do not conflict in the golden);
+   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`
+   (the convolution families -- implicit-GEMM fwd/wgrad/dgrad, deep fused conv,
+   direct conv, Winograd -- live in
+   [test_conv_ir_golden.py](library/tests/test_conv_ir_golden.py) and its
+   [conv_representative_ir/](library/tests/golden/conv_representative_ir/) shards,
+   not the platform harness).
 3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
-> Known layout-independent residuals reproduce on `develop` and are **not** your
+> Known layout-independent residual reproduces on `develop` and is **not** your
 > regression: 7 `TestDatalayoutDriftGuard` subtests on a mismatched local clang
-> vintage, and 6 `conv/*` golden cases when the C++ engine is not built (see
-> [BUILDING.md](BUILDING.md)).
+> vintage (see [BUILDING.md](BUILDING.md)).
 
 ### G. Promote a common optimization to platform
 
-When an optimization proves reusable beyond attention, push it *down* into
+When a family helper or an optimization is needed beyond attention, push it *down* into
 [platform/](platform/) — respecting the one-way `library → platform`
 dependency. Use the `helpers/` placement rule from
 [AGENTS.md](platform/AGENTS.md).
@@ -465,19 +574,20 @@ dependency. Use the `helpers/` placement rule from
    loader, a transpose-LDS layout); a CK-Tile-parity primitive; or it prevents a
    class of silent bugs if duplicated (lane maps, barriers, pipelining).
 
-**Keep it in `library/` when ANY of:** it is single-family, or it is
-descriptor/addressing logic specific to attention's layout.
+**Keep it in a `library/` family module when ANY of:** it is single-family, or
+it is descriptor/addressing logic specific to attention's layout. It is still a
+helper there, not code inlined in the kernel.
 
 Promotion steps:
 
 1. **Move the reusable SSA emitter into `platform/helpers/`** (Python) and mirror
-   it in the **C++ engine** `platform/Cpp/` — a promoted SSA helper requires the
+   it in the **C++ engine** `platform/cpp/` — a promoted SSA helper requires the
    Python + C++ mirror + byte-identity in the **same** change.
 2. **Refactor the library caller** to import the platform helper (never the
    reverse). Library keeps only its attention-specific glue.
 3. **Add platform gate coverage** — a case in the platform parity harness
    ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py))
-   and its golden, run GREEN at both LLVM flavors.
+   and its golden, run GREEN at every flavor in `LLVM_FLAVORS`.
 4. **Promote the lesson to the runbook** — a new general lever goes in
    [optimization_runbook.md §12.1](platform/dsl_docs/optimization/optimization_runbook.md);
    a reusable tactic becomes/extends a skill doc under
@@ -492,9 +602,81 @@ paged addressing primitive (`global_ptr_add` / `offset_i64*`) — several of the
 already live in platform; new ones that recur across families follow the same
 path.
 
+### H. Route a family over `dispatch.attention`
+
+A family that has no kernel of its own but serves its requests by translating
+them into `AttentionRequest` and asking `ATTENTION_ROUTE_REGISTRY` — SDPA
+(`library/dispatch/sdpa/`) is the worked example — follows [E](#e-new-operator-with-a-hipdnn-graph-node)
+and [F](#f-new-operand-or-output-on-an-existing-operator) for its own request
+contract, plus this binding-layer checklist for the gate that sits in front of
+`dispatch.attention`:
+
+- [ ] **One `bind_<family>.py` per attention launch family** (e.g.
+      `bind_unified.py`, `bind_dense.py`), each exposing `<family>_admits`,
+      `<family>_candidates` and `<family>_bind` behind one shared reject
+      function, so admission and candidate enumeration cannot drift apart.
+      Translation only: the module adds no shape/dtype/head-size rule of its
+      own — "can it run" stays the attention candidates' own `admits()`. Dense
+      (opt-in) candidates are each probed with their own `algorithm` / `spec_id`
+      pinned (`opt_in_probe`), since they do not serve by default.
+- [ ] **Every feature classified once per family**, either carried
+      (`SDPA_<FAMILY>_FEATURES`) or declined with a reason; a shortcut decline
+      (a feature no candidate implements yet, as opposed to an ABI limit) is
+      tagged `NOT_YET_IMPLEMENTED:`. A test asserts carried ∪ declined covers
+      every feature, so a newly added request field cannot silently fall
+      through both sets.
+- [ ] **Check what the kernel computes, not just that it admits.** A candidate
+      that accepts the translated request may still build a different band
+      (e.g. bottom-right causal when top-left was asked) or the wrong scale
+      range; the gate must compare what gets computed against what was asked,
+      not only call `admits()`.
+- [ ] **Decline a pinned dispatch choice** (`algorithm`, `spec_id`, `tuning_id`,
+      `tuning_knobs`) rather than forwarding it — the family's launch takes
+      only the automatic route, so a pin would be silently ignored.
+- [ ] **The never-overclaim test**: nothing is admitted and then dropped. For
+      every admitted request, a kernel is actually reachable with it.
+- [ ] **Bind only what the request describes** (`bind_shared.py`): every
+      tensor's dtype is its descriptor's (`check_dtype`, operands, stats,
+      `seq_len_*` and ragged offsets alike); an operand is handed to the kernel
+      in place only when contiguous and 16-byte aligned (`usable_in_place`),
+      else copied through a workspace. K/V become the unified paged cache in
+      place only at full length with S_kv a multiple of the page
+      (`Operand.paged_view`): a masked row the kernel reads still reaches
+      P @ V, so a padded tail is copied into a zero-filled cache instead.
+      `launch(*, stream=None)` runs on the
+      current stream and refuses any other (`launch_stream`), since the
+      pack/unpack copies and the workspace belong to it. The family's
+      `dispatch_<family>_all` results are attention results; a family request
+      launches through its `<family>_bind`.
+- [ ] **Four test layers**: wiring (one decline case per declined feature, the
+      value checks, the band comparison), a case-table test (every entry in
+      the family's shared case table gets a verdict), a CPU binding test (the
+      kernel replaced with the reference oracle, every layout/length mode), and
+      a GPU numeric test (binds every admitted case, compares against the
+      reference), enrolled in the GPU test lane.
+- [F](#f-new-operand-or-output-on-an-existing-operator) **for a routed
+  family**: move the feature from the gate's decline table into
+  `SDPA_<FAMILY>_FEATURES`, and bind the request field in both the
+  `SdpaRequest` → `AttentionRequest` translation (`to_attention_request`) and
+  the launch plan that copies tensors through.
+- **[A](#a-new-kernel-family) step 4, for a routed family**: registering a new
+  candidate in `ATTENTION_ROUTE_REGISTRY` is not enough by itself — a routed
+  family's gate names which algorithms it routes among (e.g.
+  `bind_unified.py`'s `_UNIFIED_ALGORITHMS`, built from the exported
+  `dispatch.attention.UNIFIED_ALGORITHMS`; `bind_dense.py`'s
+  `_DENSE_ALGORITHMS`, built from `dispatch.attention.DENSE_ALGORITHMS`), so a
+  new route candidate stays unreachable through the family until it is added
+  there too.
+
+Known gaps in the current SDPA routing (tracked as "Not in this PR" on the
+introducing change, not silently): choosing between the unified and dense
+families for one request is not modeled — a request both admit goes to
+whichever the caller picks; `sdpa_dense_bind` always launches the first
+serving dense candidate in registry order, not the fastest.
+
 ### Attention specifics — quick reference
 
-- **Parity families:** the 20 `library/tests/parity/*_emit.{py,c}` pairs
+- **Parity families:** the 34 matched `library/tests/parity/*_emit.{py,c}` pairs
   (`attention_unified`, `fmha_*`, `gfx9xx_attention_tiled_*`, `sage`/`sparse`).
 - **Dispatcher feature gate:** `supports_native_unified_attention*` +
   `select_path` in [library/kernels/common/attention_unified.py](library/kernels/common/attention_unified.py) — the

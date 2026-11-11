@@ -409,6 +409,19 @@ namespace rocsparse
                 4, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
         }
 
+        // An unset or invalid operation is left to rocsparse_spgeam, which returns
+        // invalid_value; only the valid but unsupported operations are rejected here.
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_A() == rocsparse_operation_transpose
+                            || descr->get_operation_A() == rocsparse_operation_conjugate_transpose),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_B() == rocsparse_operation_transpose
+                            || descr->get_operation_B() == rocsparse_operation_conjugate_transpose),
+                           rocsparse_status_not_implemented);
+
         return rocsparse_status_continue;
     }
 
@@ -506,6 +519,16 @@ namespace rocsparse
                            descr,
                            rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
                            rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_A() != rocsparse_operation_none),
+                           rocsparse_status_not_implemented);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_B() != rocsparse_operation_none),
+                           rocsparse_status_not_implemented);
 
         const rocsparse_spgeam_stage previous_stage = descr->get_stage();
         // Validate the stage.
@@ -986,7 +1009,7 @@ namespace rocsparse
                                                              descr->get_operation_B(),
                                                              mat_A->rows,
                                                              mat_B->cols,
-                                                             descr->get_scalar_datatype(),
+                                                             descr->get_compute_datatype(),
                                                              local_alpha,
                                                              mat_A->descr,
                                                              mat_A->nnz,
@@ -996,7 +1019,7 @@ namespace rocsparse
                                                              mat_A->const_row_data,
                                                              mat_A->col_type,
                                                              mat_A->const_col_data,
-                                                             descr->get_scalar_datatype(),
+                                                             descr->get_compute_datatype(),
                                                              local_beta,
                                                              mat_B->descr,
                                                              mat_B->nnz,
@@ -1115,7 +1138,7 @@ namespace rocsparse
                                                                      descr->get_operation_B(),
                                                                      mat_A->rows,
                                                                      mat_B->cols,
-                                                                     descr->get_scalar_datatype(),
+                                                                     descr->get_compute_datatype(),
                                                                      local_alpha,
                                                                      mat_A->descr,
                                                                      mat_A->nnz,
@@ -1125,7 +1148,7 @@ namespace rocsparse
                                                                      mat_A->const_row_data,
                                                                      mat_A->col_type,
                                                                      mat_A->const_col_data,
-                                                                     descr->get_scalar_datatype(),
+                                                                     descr->get_compute_datatype(),
                                                                      local_beta,
                                                                      mat_B->descr,
                                                                      mat_B->nnz,
