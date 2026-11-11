@@ -1,4 +1,5 @@
-# Integration test configuration for hipkernel:flydsl_sdpa_bwd_split
+# Integration test configuration for hipkernel:flydsl_sdpa_bwd_split and hipkernel:flydsl_sdpa_bwd_merged
+# (one file for both engines: CMakeLists.txt writes each engine's shard copy with its own header line)
 # Filters use GTest-style globs: * matches any sequence of characters
 # Later entries take precedence over earlier ones when multiple filters match
 
@@ -18,14 +19,16 @@ version = 1
 # Generated sweep cases (their ids end in a tolerance class token) take the per-class
 # rows of the block below, as in ASM_SDPA_ENGINE.toml. The two rows before the block
 # cover the single-graph bundles (SdpaBackward/bhsd/{fp16,bf16}/..., whose test name is
-# the graph's file name and carries no class token): the bf16 row equals the default and
-# the fp16 row tightens it. They were calibrated against bundles that derive O and the
-# LSE from the forward, on gfx1100 (host input fill) and gfx950 (device and host input
-# fill), with both references: every case passes at fp16 2.5e-3 and bf16 5e-3 (bf16 dV
-# differs by up to 2 ulp from fp32 accumulation order); each value is one grid step
-# above that. The leading "_" in "_fp16_" keeps it from also matching "bfp16_".
+# the graph's file name and carries no class token) and the Golden suites
+# (quick_SdpaBackward_Golden_*, whose ids have no "." after the dtype token, so the fp16
+# row names them separately): the bf16 row equals the default (the Golden bf16 ids take
+# the default) and the fp16 row tightens it. They were calibrated against bundles that
+# derive O and the LSE from the forward, on gfx1100 (split engine only: merged has no
+# gfx11 objects; host input fill) and gfx950 (device and host input fill), with both
+# references: every case passes at fp16 2.5e-3 and bf16 5e-3 (bf16 dV differs by up to
+# 2 ulp from fp32 accumulation order); each value is one grid step above that. The leading "_" in "_fp16_" keeps it from also matching "bfp16_".
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_*_fp16_*.*"]
+filters = ["*_SdpaBackward_*_fp16_*.*", "*_SdpaBackward_Golden_*.*_fp16_*"]
 atol = 5e-3
 rtol = 5e-3
 

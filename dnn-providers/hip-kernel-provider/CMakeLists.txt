@@ -551,14 +551,14 @@ set(HKP_FLYDSL_SDPA_BWD_ARCHS gfx950 ${_hkp_bwd_gfx11_members})
 # hkp_flydsl_sdpa_bwd_arch_toml(<out_var> <engine> <arch>)
 #
 # Sets <out_var> to the integration-test config for hipkernel:flydsl_sdpa_bwd_<engine> on
-# the <arch> shard: config/hipkernel_flydsl_sdpa_bwd_<engine>.toml verbatim plus, when
-# the engine can run on another architecture, one [[test_skips]] entry naming every
+# the <arch> shard: config/hipkernel_flydsl_sdpa_bwd.toml (shared by both engines) under a header
+# naming the engine, plus, when the engine can run on another architecture, one [[test_skips]] entry naming every
 # other architecture in HKP_FLYDSL_SDPA_BWD_ARCHS (the harness has no "only on" form), so
 # on any runner only the entries for its own architecture run. The file is shared by
 # every registration for the (engine, arch) pair, and rewritten only when its content
 # changes.
 function(hkp_flydsl_sdpa_bwd_arch_toml out_var engine arch)
-    set(_static "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/config/hipkernel_flydsl_sdpa_bwd_${engine}.toml")
+    set(_static "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/config/hipkernel_flydsl_sdpa_bwd.toml")
     set(_toml "${PROJECT_BINARY_DIR}/flydsl_integration/hipkernel_flydsl_sdpa_bwd_${engine}_${arch}.toml")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_static}")
     file(READ "${_static}" _static_text)
