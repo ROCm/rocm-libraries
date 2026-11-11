@@ -184,6 +184,15 @@ def add(dtype, archs, cfgs):
         catalog[dtype].append((set(archs), c))
 
 
+# Backward data only (not the forward catalog).
+catalog_bwd = {"FLOAT": [], "HALF": [], "BFLOAT16": []}
+
+
+def add_bwd(dtype, archs, cfgs):
+    for c in cfgs:
+        catalog_bwd[dtype].append((set(archs), c))
+
+
 def x16(dt):
     return {"HALF": "f16", "BFLOAT16": "bf16"}[dt]
 
@@ -248,6 +257,21 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F33, 128, 128, 32, 2, 2, 8),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0),
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0),
+        ],
+    )
+    # gfx90a backward data only: 32x32 tiles past the 64 x 128 one (EXPERIMENT, A/B pending).
+    add_bwd(
+        dt,
+        ["gfx90a"],
+        [
+            M(f"mfma32_{e}", F33, 128, 128, 32, 2, 2, 8),
+            M(f"mfma32_{e}", F33, 128, 128, 32, 2, 2, 8, bl=1),
+            M(f"mfma32_{e}", F33, 64, 128, 32, 1, 4, 8, bl=1),
+            M(f"mfma32_{e}", F33, 128, 64, 32, 2, 2, 8),
+            M(f"mfma32_{e}", F33, 128, 256, 32, 2, 4, 8),
+            M(f"mfma32_{e}", F33, 256, 128, 32, 4, 2, 8),
+            M(f"mfma32_{e}", F33, 64, 128, 16, 1, 4, 8),
+            M(f"mfma32_{e}", F33, 64, 256, 32, 1, 4, 8),
         ],
     )
     # gfx11 / gfx12
@@ -539,6 +563,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     kernels = []
     for dtype, entries in catalog.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        if direction == "BWD":
+            entries = entries + catalog_bwd[dtype]
         for i, (archs, c) in enumerate(merged(entries)):
             groups = (
                 "any" if "any" in archs else ",".join(a for a in ORDER if a in archs)
