@@ -1507,6 +1507,14 @@ class TestBehaviorNotesVocabulary:
         config = load_config(path)
         assert config.engine.behavior_notes == ["runtime_compilation"]
 
+    def test_supports_graph_capture_accepted(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["behavior_notes"] = ["supports_graph_capture"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        config = load_config(path)
+        assert config.engine.behavior_notes == ["supports_graph_capture"]
+
 
 class TestDirectLoadAuthoredSubpath:
     """Each set under ``test_descriptors/`` is its own pack target, walked by directory
@@ -3190,12 +3198,27 @@ class TestEngineHeuristics:
             ),
             ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
             ({"predict_engine": [MODEL]}, "predict_engine"),
+            (
+                {"predict_applicable_kernels": {"gfx942": MODEL}},
+                r"predict_applicable_kernels\.gfx942",
+            ),
             ([MODEL], "engine.heuristics"),
         ],
     )
     def test_refusals_name_the_key(self, tmp_path, configs_dir, heuristics, match):
         with pytest.raises(ConfigError, match=match):
             self._load(tmp_path, configs_dir, heuristics)
+
+    def test_predict_applicable_kernels_binds_a_list(self, tmp_path, configs_dir):
+        # The candidate generators, for future JIT spaces: a list like every role.
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {"predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}},
+        )
+        assert config.engine.heuristics == {
+            "predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}
+        }
 
     def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):
         with pytest.raises(ConfigError, match="engine.heuristic is 'none'"):
