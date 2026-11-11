@@ -36,6 +36,9 @@ name: <short-slug>
 kind: pattern | insight | finding | threshold | procedure | memory
 status: candidate | confirmed     # not used by memories
 certainty: verified | measured | hypothesis   # for patterns, findings, insights
+triggers: <a few keywords, comma separated, that tell an agent when this entry applies>
+arch: <the architecture it was observed on, for example gfx1250, or `any` if it does not depend on one>
+elsewhere: unknown | likely | no   # does it hold on other architectures? `unknown` is the honest default
 source: <page URL, repo file path, PR or issue number, experiment id, or person; may be empty for a memory>
 source_revision: <the page's revision number when the entry was written, if the source is a page>
 confirmed_by: <name>              # set by a human, together with status
@@ -60,11 +63,19 @@ minute whether the entry is worth noting down. Everything after it is detail for
 - `measured`: seen in our runs, but the cause is not proven.
 - `hypothesis`: an explanation or a rule that has not been tested yet. Treat it as a place to start.
 
+**Architecture.** `arch` says where the evidence comes from, and `elsewhere` says what is believed about the
+other architectures. If the task's target is not in `arch`, treat the entry as a hint to check, not as a
+rule. Tell the developer that it was only observed on `<arch>`. For an entry that depends on an
+architecture, the card's "Not checked" line should say that the other architectures were not checked.
+
 Certainty is not status. `status` says whether a person reviewed the entry. `certainty` says how sure the
 claim is. A reviewed entry can still be a hypothesis.
 
-`index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <certainty> | <status>`.
-Use `-` for the certainty of a procedure or a memory.
+`index.md` is generated from the entries' frontmatter. Do not edit it by hand. It has one short line per
+entry: `- [<name>](<path>) | <kind> | <certainty> | <status> | <arch> | <triggers>`. Use `-` for the certainty of a
+procedure or a memory. When you add or change an entry, regenerate the index with the database's index
+script. If the database has no script, add or fix the line yourself in that format.
+
 **Entries from a page.** When you are about to use an entry that has `source_revision`, check the
 page's revision number (the count of saved edits, not a release number) with whatever access you have.
 `source` gives the page address. Use the site in that address, not your default site. The check
