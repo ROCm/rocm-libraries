@@ -81,18 +81,6 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
         return std::forward<T>(t) == std::forward<U>(u);
     }
 };
-
-// Restored for backward compatibility with code written against older hipCUB (e.g. PyTorch).
-// Deprecated: new code should use hip::maximum<> instead.
-struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum instead") Max
-{
-    template<class T, class U>
-    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
-        operator()(T&& t, U&& u) const
-    {
-        return (((u) > (t)) ? (u) : (t));
-    }
-};
 #endif // HIPCUB_USE_LEGACY_API
 
 struct ArgMax
