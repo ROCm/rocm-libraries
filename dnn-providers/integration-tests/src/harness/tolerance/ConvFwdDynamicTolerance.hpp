@@ -25,7 +25,7 @@
 
 #include "harness/input-init/FillRecipe.hpp"
 
-// The dynamic tolerance for convolution-forward outputs stored as half or bfloat16.
+// The dynamic tolerance for convolution-forward outputs stored as half, bfloat16 or float.
 //
 // The fixed per-op default (TestTolerances.hpp conv::getToleranceFwd, 0.1 for both atol and
 // rtol) is about 10% of a typical output from a reduction length of about 1,000 on: far looser
@@ -37,7 +37,8 @@
 // intermediates (the tensors one node writes and another reads, virtual or not) are half,
 // bfloat16, float or double: the roundings to half or bfloat16 between the convolution and the
 // output are rounding points that widen atol (ALMIOPEN-3239). A graph with a type the model does
-// not know keeps the per-op default, as does a float output (ALMIOPEN-3249).
+// not know keeps the per-op default. A float output is graded with the summation-order
+// coefficient the engine's TOML sets, or the default of the SDK (ALMIOPEN-3249).
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -596,28 +597,35 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     return scale;
 }
 
-/// Whether convFwdOutputTolerance() models an output stored as this type: half and bfloat16.
-/// A caller asks before it pays for the statistics of the graph's inputs.
+/// Whether convFwdOutputTolerance() models an output stored as this type: half, bfloat16 and
+/// float. A caller asks before it pays for the statistics of the graph's inputs.
 inline bool hasDynamicToleranceFor(hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    return outputType == DataType::HALF || outputType == DataType::BFLOAT16;
+    return outputType == DataType::HALF || outputType == DataType::BFLOAT16
+           || outputType == DataType::FLOAT;
 }
 
 /// The dynamic tolerance for one output tensor, or nullopt when its type is not modeled
-/// (see hasDynamicToleranceFor()).
-inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
-    convFwdOutputTolerance(const hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale& scale,
-                           hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
+/// (see hasDynamicToleranceFor()). `coefficients` are the ones the engine sets; an unset one keeps
+/// the default of the output type.
+inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> convFwdOutputTolerance(
+    const hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale& scale,
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+    const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients = {})
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     namespace conv = hipdnn_test_sdk::utilities::conv;
     switch(outputType)
     {
     case DataType::HALF:
-        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::half>(scale);
+        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::half>(scale,
+                                                                                     coefficients);
     case DataType::BFLOAT16:
-        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::bfloat16>(scale);
+        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::bfloat16>(
+            scale, coefficients);
+    case DataType::FLOAT:
+        return conv::calculateConvFpropOutputTolerance<float>(scale, coefficients);
     default:
         return std::nullopt;
     }

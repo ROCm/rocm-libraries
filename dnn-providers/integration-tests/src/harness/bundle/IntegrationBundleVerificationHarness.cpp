@@ -1410,7 +1410,7 @@ VerificationOutcome
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
     //
-    // A half or bfloat16 output of a convolution-forward graph is graded with the dynamic
+    // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
     // tolerance computed from the graph and its input statistics instead of the fixed per-op
     // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
     // inputs read from golden blobs are scanned on the host; a scalar baked into the graph is
@@ -1440,7 +1440,14 @@ VerificationOutcome
             }
             if(convScale->has_value())
             {
-                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
+                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                   && _deps.policy.testSettings != nullptr)
+                {
+                    coefficients.summationOrder
+                        = _deps.policy.testSettings->convFwdSummationOrder("float");
+                }
+                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType, coefficients);
             }
         }
         if(dynamic.has_value())

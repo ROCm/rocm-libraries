@@ -85,6 +85,7 @@ enum class ScaleSource
 struct Spec
 {
     bool isHalf = true;
+    bool isFloat = false; ///< a float graph; isHalf then does not matter
     Topology topology = Topology::PLAIN;
     ScaleSource scaleSource = ScaleSource::BAKED;
     double bakedValue = 0.5;
@@ -134,7 +135,7 @@ std::string pointwiseJson(const char* name,
 
 std::string graphJson(const Spec& spec)
 {
-    const std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    const std::string dtype = spec.isFloat ? "float" : spec.isHalf ? "half" : "bfloat16";
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
@@ -204,9 +205,13 @@ std::string graphJson(const Spec& spec)
     return graph.str();
 }
 
-void writeConstant(void* destination, size_t count, bool isHalf, float value)
+void writeConstant(void* destination, size_t count, bool isHalf, bool isFloat, float value)
 {
-    if(isHalf)
+    if(isFloat)
+    {
+        std::fill_n(static_cast<float*>(destination), count, value);
+    }
+    else if(isHalf)
     {
         std::fill_n(static_cast<half*>(destination), count, static_cast<half>(value));
     }
@@ -301,18 +306,19 @@ protected:
     {
         using ::testing::_;
         const bool isHalf = spec.isHalf;
+        const bool isFloat = spec.isFloat;
         const int64_t outUid = spec.outUid();
         testing_support::engineWrites(
             _mocks.engineRunner,
             [=](VariantPack& pack, float value) {
-                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, value);
+                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, value);
             },
             engineValue);
         for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
                 .WillByDefault([=](void*, size_t, const VariantPack& pack) {
-                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, referenceValue);
+                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, referenceValue);
                 });
         }
 
@@ -777,6 +783,100 @@ rtol = 0.25
 )");
     const Spec spec;
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, defaultFillScale()));
+}
+
+// ── Float outputs ───────────────────────────────────────────────────────────
+
+namespace
+{
+
+AbsRelTolerance floatTolerance(const ConvFpropErrorScale& scale, std::optional<double> coefficient)
+{
+    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    coefficients.summationOrder = coefficient;
+    return hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
+                                                                                      coefficients);
+}
+
+constexpr const char* K_ENGINE_COEFFICIENT_TOML = R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+)";
+
+} // namespace
+
+// A float output is graded with the dynamic tolerance and, when the engine sets nothing, the base
+// coefficient of the SDK (3).
+TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheBaseCoefficient)
+{
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 3.0));
+}
+
+// The engine's TOML coefficient replaces the base one.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheCoefficientOfTheEngine)
+{
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 9.0));
+}
+
+// An engine value 1.5 bands from the reference (at the base coefficient) fails with no setting
+// and passes under the engine's wider coefficient; one inside the base band passes either way.
+TEST_F(TestConvFwdToleranceGradingFixture, EngineCoefficientDecidesAFloatOutputBetweenTheBands)
+{
+    const auto base = floatTolerance(defaultFillScale(), 3.0);
+    const auto wide = floatTolerance(defaultFillScale(), 9.0);
+    const double reference = static_cast<double>(K_REFERENCE);
+    const double baseBand = base.atol + base.rtol * reference;
+    const double wideBand = wide.atol + wide.rtol * reference;
+    ASSERT_LT(1.6 * baseBand, wideBand);
+    const auto between = static_cast<float>(reference + 1.5 * baseBand);
+    const auto inside = static_cast<float>(reference + 0.5 * baseBand);
+    ASSERT_GT(static_cast<double>(between) - reference, baseBand);
+    ASSERT_LT(static_cast<double>(inside) - reference, baseBand);
+
+    Spec spec;
+    spec.isFloat = true;
+    EXPECT_TRUE(grade(spec, between, K_REFERENCE).failed);
+    EXPECT_FALSE(grade(spec, inside, K_REFERENCE).failed);
+
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    EXPECT_FALSE(grade(spec, between, K_REFERENCE).failed);
+    EXPECT_FALSE(grade(spec, inside, K_REFERENCE).failed);
+}
+
+// An explicit [[tolerance_overrides]] entry outranks the dynamic tolerance whatever coefficient
+// the engine sets.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlToleranceOverrideOutranksTheFloatCoefficient)
+{
+    useTomlSettings(std::string(K_ENGINE_COEFFICIENT_TOML) + R"(
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlToleranceOverrideOutranksTheFloat*"]
+atol = 0.5
+rtol = 0.25
+)");
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
+}
+
+// The coefficient is read for a float output only: half and bfloat16 keep their own.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatCoefficientOfTheEngineLeavesHalfAndBfloat16Alone)
+{
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
+                       dynamicTolerance(isHalf, defaultFillScale()));
+    }
 }
 
 // [[validator_overrides]] outranks [[tolerance_overrides]]: an rms entry grades the tensor by its
