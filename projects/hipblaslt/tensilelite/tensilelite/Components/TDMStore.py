@@ -86,6 +86,9 @@ def tdmStoreRejectReason(state):
   LDS waits on the cluster barrier, which this workgroup arrives at when it closes the persistent loop,
   after its TDM store has completed, and a phantom peer tile skips the store. That holds while
   persistent multicast uses the cluster barrier, which Solution derives together with it.
+  With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
+  so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
+  epilogue's memory token.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or
@@ -105,8 +108,8 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
     return "TDMStoreInst does not support atomic StreamK"
-  if state["PrefetchAcrossPersistent"] or state["ReuseAcrossPersistent"]:
-    return "TDMStoreInst does not support PrefetchAcrossPersistent or ReuseAcrossPersistent"
+  if state["ReuseAcrossPersistent"]:
+    return "TDMStoreInst does not support ReuseAcrossPersistent"
   if persistentMulticast(state) and not state.get("ClusterBarrier", True):
     return "TDMStoreInst requires the cluster barrier with persistent multicast"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
@@ -129,7 +132,7 @@ def tdmStoreRejectReason(state):
 
 
 def tdmStoreLdsBytes(state):
-  """Return the LDS bytes of the D tile the TDM block stages over the main-loop LDS (0 without TDMStoreInst).
+  """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
 
   The reservation follows the level, not the store blocks tdmStoreBlocks picks for the kernel.
   Reserving too much costs LDS only; reserving too little would stage over live LDS.
@@ -209,6 +212,14 @@ def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1):
   return gwb.tmpVgpr, offset & 0xFFFF
 
 
+def _stagedTileToken(gwb):
+  """The memory token of the staged tile's LDS accesses: that of the main-loop buffer the tile lies over or,
+  when it lies after the main-loop buffers (PrefetchAcrossPersistent), the epilogue's token, so StinkyTofu does
+  not order them after the next tile's loads into those buffers."""
+  states = gwb.parentWriter.states
+  return states.memTokenLdsBuffer0 if gwb.kernel["_TDMStoreOverMainLoop"] else states.memTokenEpilogue
+
+
 def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   """Read this element's C vector from the staged tile, where its D is staged later.
 
@@ -222,7 +233,7 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   bpl = kw.states.bpeCexternal * gwb.gwvw
   addr, offset = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1)
   comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
-  memToken = MemTokenData([kw.states.memTokenLdsBuffer0])
+  memToken = MemTokenData([_stagedTileToken(gwb)])
   if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and not kw.states.HHH_WMMA and vc0 % 2:
     inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
@@ -246,7 +257,7 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
     addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1)
     module.add(dsStore(bps, dstAddr=vgpr(addr), src=vgpr(formatting(sumIdx, "ValuC+", kw.states.c.startVgprValu), numRegs),
                        ds=DSModifiers(offset=offset), comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
-                       memToken=MemTokenData([kw.states.memTokenLdsBuffer0])))
+                       memToken=MemTokenData([_stagedTileToken(gwb)])))
   return module
 
 
@@ -312,7 +323,7 @@ def emitTDMStoreLoadC(gwb) -> Module:
   kw = gwb.parentWriter
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipLoad = Label(kw.labels.getNameInc("TDMStoreLoadCSkip"), "no column of this wave is inside C")
-  tdm = TensorDataMoverStore([kw.states.memTokenLdsBuffer0])
+  tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
   with kw.allocTmpSgpr(12, alignment=8, tag="tdmLoadCDesc") as desc:
     with kw.allocTmpSgpr(4, alignment=2, tag="tdmLoadCTmp") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, desc.idx + 8, desc.idx, tmp, "C")
@@ -338,7 +349,7 @@ def emitTDMStoreFlush(gwb) -> Module:
   kw = gwb.parentWriter
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipStore = Label(kw.labels.getNameInc("TDMStoreSkip"), "no column of this wave is inside D")
-  tdm = TensorDataMoverStore([kw.states.memTokenLdsBuffer0])
+  tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
   # group1 (8 SGPRs) must be 8-aligned, so it goes first; group0 (4 SGPRs) follows.
   with kw.allocTmpSgpr(12, alignment=8, tag="tdmStoreDesc") as desc:
     with kw.allocTmpSgpr(4, alignment=2, tag="tdmStoreTmp") as tmp:
