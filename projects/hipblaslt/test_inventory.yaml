@@ -849,7 +849,7 @@ suites:
         archs: [linux-cpu]
         gates: true
         required_check: Component CI Summary
-        notes: "On any change under Tensile/Logic/, the TensileLogic validators, or the corpus test plumbing. Runs these tests with the corpus required, after TensileLogic --check-all on the changed architectures. Changed logic files are also compared with HEAD^: a new file must be dict format, a SolutionUID that existed in the base revision must remain, and solution keys must stay in the order the logic writers emit."
+        notes: "On any change under Tensile/Logic/, the TensileLogic validators, or the corpus test plumbing. Runs these tests with the corpus required, after TensileLogic --check-all on the changed architectures. Changed logic files are also compared with HEAD^: a new file must be dict format, a SolutionUID that existed in the base revision must remain, and solution keys must stay in the order the logic writers emit. Each changed file must also keep the dict header keys and a LibraryType that matches its folder; an edited file reports only errors HEAD^ did not have."
         evidence: ["repo:.github/workflows/component-ci-logic-corpus.yml", "doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests"]
         action: keep
     target:

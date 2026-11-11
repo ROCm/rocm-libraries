@@ -165,7 +165,10 @@ _ORDERED = (
     ids=["tail", "lead", "internal-params", "second-solution"],
 )
 def test_added_file_with_keys_out_of_order_fails(tmp_path: Path, text: str) -> None:
-    """A new dict file fails once, at the first solution out of order.
+    """A new dict file gets one key-order error, at the first solution out of order.
+
+    The minimal file also lacks the dict header keys, so its shape errors are
+    left out of the comparison.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -178,11 +181,11 @@ def test_added_file_with_keys_out_of_order_fails(tmp_path: Path, text: str) -> N
         AssertionError: If the ordered file fails or the mistake is missed.
     """
     rel = _place(tmp_path, "ordered.yaml", _ORDERED)
-    assert _run(tmp_path, [rel], {}) == []
+    order = "not in canonical order"
+    assert not [error for error in _run(tmp_path, [rel], {}) if order in error]
     _place(tmp_path, "ordered.yaml", text)
-    errors = _run(tmp_path, [rel], {})
+    errors = [error for error in _run(tmp_path, [rel], {}) if order in error]
     assert len(errors) == 1
-    assert "not in canonical order" in errors[0]
     position = 1 if "MT: 1}" in text else 0
     assert errors[0].endswith(f"solution position {position}.")
 
@@ -249,6 +252,94 @@ def test_loading_needs_pyyaml(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(change, "yaml", None)
     with pytest.raises(RuntimeError, match="PyYAML is required"):
         change._load("a: 1\n")
+
+
+_GRID = (
+    "ArchitectureName: gfx950\nProblemType: {OperationType: GEMM}\n"
+    "Solutions: []\nLibraryType: GridBased\n"
+)
+
+
+def _place_in(repo: Path, folder: str, text: str) -> str:
+    """Write one logic file below a library-type folder.
+
+    Args:
+        repo: Temporary repository root.
+        folder: Library-type folder name.
+        text: YAML contents.
+
+    Returns:
+        Repository-relative posix path.
+
+    Raises:
+        OSError: If the file cannot be written.
+    """
+    return _place(repo, f"{folder}/lib.yaml", text)
+
+
+def test_shape_error_in_a_new_file_fails(tmp_path: Path) -> None:
+    """A new GridBased library in an Equality folder fails.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the misplaced file passes.
+    """
+    rel = _place_in(tmp_path, "Equality", _GRID)
+    assert _run(tmp_path, [rel], {}) == [
+        f"{rel}: LibraryType GridBased does not match folder Equality."
+    ]
+
+
+def test_shape_error_already_in_the_base_does_not_fail(tmp_path: Path) -> None:
+    """Editing a file that was already misplaced reports nothing new.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the existing error is reported.
+    """
+    rel = _place_in(tmp_path, "Equality", _GRID + "ExactLogic: []\n")
+    assert _run(tmp_path, [rel], {rel: _GRID}) == []
+
+
+def test_shape_error_that_the_change_adds_fails(tmp_path: Path) -> None:
+    """Dropping ProblemType from a complete dict fails.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the new structure error is missed.
+    """
+    broken = _GRID.replace("ProblemType: {OperationType: GEMM}\n", "")
+    rel = _place_in(tmp_path, "GridBased", broken)
+    assert _run(tmp_path, [rel], {rel: _GRID}) == [
+        f"{rel}: Dict library is missing ProblemType."
+    ]
+
+
+def test_introduced_counts_each_repeated_message() -> None:
+    """A message repeated more often than in the base is reported once per extra copy.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If repeats are collapsed.
+    """
+    assert change._introduced(["a", "a", "b"], ["a"]) == ["a", "b"]
 
 
 def test_unrelated_path_is_ignored(tmp_path: Path) -> None:
