@@ -23,7 +23,7 @@ from _tensilelite_client_binding import (
 def configure(client: Path, *, ensure: bool = False) -> Path:
     installation = current_installation()
     client = Path(os.path.abspath(client.expanduser()))
-    validate_client(client, installation.version)
+    validate_client(client, installation)
     if ensure and read_binding(installation) == client:
         return client
     destination = binding_path(installation)
