@@ -54,10 +54,17 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
 
 /// The plan for @p problem: a direct row (directGemmCalls) when one applies; for a 1x1
 /// channels-first backward weights of several images, batched partials or a channels-last
-/// staging (@p layout); IM2COL otherwise; or nullopt when none does.
+/// staging (@p layout); IM2COL otherwise; or nullopt when none does. @p splitReduction: a
+/// backward weights whose GEMMs leave too few output tiles to fill a GPU (fewer than
+/// SPLIT_TARGET_TILES) runs its reduction as enough fp32 partials to fill one, summed in order
+/// and rounded once -- a choice for the benchmarking builder, which times it against the default.
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
                                                size_t maxWorkspaceBytes
                                                = MAX_REPACK_WORKSPACE_BYTES,
-                                               ColumnLayout layout = ColumnLayout::FOLLOW_Y);
+                                               ColumnLayout layout = ColumnLayout::FOLLOW_Y,
+                                               bool splitReduction = false);
+
+/// The output tiles (128 x 128) a split reduction aims to fill a GPU with.
+inline constexpr int64_t SPLIT_TARGET_TILES = 512;
 
 } // namespace hipblaslt_plugin

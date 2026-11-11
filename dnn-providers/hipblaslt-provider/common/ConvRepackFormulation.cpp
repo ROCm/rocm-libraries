@@ -957,9 +957,26 @@ struct ReductionAxis
 /// images and chunks are parallel work. Each call batches the longest of the three axes and the
 /// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
 /// not qualify or the partials do not fit @p maxWorkspaceBytes.
+/// The chunks a split reduction cuts a reduction of @p k into: enough that @p tiles output tiles
+/// per chunk reach SPLIT_TARGET_TILES, each chunk at least CHUNK_PIXELS long and the count
+/// dividing k; 1 when no such count above 1 exists.
+int64_t splitChunksFor(int64_t k, int64_t tiles)
+{
+    const int64_t wanted = (SPLIT_TARGET_TILES + tiles - 1) / std::max<int64_t>(tiles, 1);
+    for(int64_t chunks = std::min({wanted, MAX_CHUNKS, k / CHUNK_PIXELS}); chunks > 1; --chunks)
+    {
+        if(k % chunks == 0)
+        {
+            return chunks;
+        }
+    }
+    return 1;
+}
+
 ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
                                        ConvGemmPlanCalls plan,
-                                       size_t maxWorkspaceBytes)
+                                       size_t maxWorkspaceBytes,
+                                       bool splitReduction)
 {
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS)
     {
@@ -1013,7 +1030,11 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     {
         return plan;
     }
-    const int64_t chunks = groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
+    // Split: chunks by the output's tiles (fewer than SPLIT_TARGET_TILES), whatever its size.
+    const int64_t tiles = groups * ((first.m + 127) / 128) * ((first.n + 127) / 128);
+    const int64_t chunks = splitReduction
+                               ? (tiles < SPLIT_TARGET_TILES ? splitChunksFor(first.k, tiles) : 1)
+                               : (groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1);
     if(images < 2 && chunks < 2)
     {
         return plan;
@@ -1182,8 +1203,10 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
 
 } // namespace
 
-std::optional<ConvGemmPlanCalls>
-    convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
+std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
+                                               size_t maxWorkspaceBytes,
+                                               ColumnLayout layout,
+                                               bool splitReduction)
 {
     auto plan = directGemmCalls(problem);
     if(!plan.has_value())
@@ -1200,7 +1223,7 @@ std::optional<ConvGemmPlanCalls>
     }
     return sumLongReductionsInFp32(
         problem,
-        batchReductionChains(problem, std::move(*plan), maxWorkspaceBytes),
+        batchReductionChains(problem, std::move(*plan), maxWorkspaceBytes, splitReduction),
         maxWorkspaceBytes);
 }
 

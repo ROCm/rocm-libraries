@@ -36,10 +36,13 @@ public:
     /// @p maxRepackWorkspaceBytes bounds the repack workspace of a plan (convGemmCalls); tests
     /// lower it to exercise image slicing on small shapes. @p tf32 lets every fp32 GEMM run as
     /// TF32 where the backend can (GemmCall::tf32), and declines convolutions with no fp32 GEMM:
-    /// the builder of a TF32 engine (ConvTf32.hpp).
+    /// the builder of a TF32 engine (ConvTf32.hpp). @p splitReduction makes the split reduction
+    /// (convGemmCalls) the default plan rather than only a benchmarking candidate; tests use it
+    /// to check that plan.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
-                                 bool tf32 = false);
+                                 bool tf32 = false,
+                                 bool splitReduction = false);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -57,7 +60,8 @@ private:
     /// The plan calls for @p opGraph in whichever direction it is, or nullopt.
     std::optional<ConvGemmPlanCalls>
         callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 ColumnLayout layout = ColumnLayout::FOLLOW_Y) const;
+                 ColumnLayout layout = ColumnLayout::FOLLOW_Y,
+                 bool splitReduction = false) const;
 
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,
@@ -66,6 +70,7 @@ private:
     PlanFactory _factory;
     size_t _maxRepackWorkspaceBytes;
     bool _tf32;
+    bool _splitReduction;
 };
 
 } // namespace hipblaslt_plugin

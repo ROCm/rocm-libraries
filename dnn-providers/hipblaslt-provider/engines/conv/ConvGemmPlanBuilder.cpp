@@ -24,15 +24,19 @@ namespace hipblaslt_plugin
 
 ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          size_t maxRepackWorkspaceBytes,
-                                         bool tf32)
+                                         bool tf32,
+                                         bool splitReduction)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
+    , _splitReduction(splitReduction)
 {
 }
 
 std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph, ColumnLayout layout) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    ColumnLayout layout,
+    bool splitReduction) const
 {
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
@@ -42,7 +46,7 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         {
             continue;
         }
-        auto calls = convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout);
+        auto calls = convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout, splitReduction);
         if(calls.has_value() && _tf32)
         {
             // A TF32 engine serves only convolutions with an fp32 GEMM; for the rest it would
@@ -72,7 +76,7 @@ bool ConvGemmPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph);
+    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
     if(!calls.has_value())
     {
         return false;
@@ -93,7 +97,7 @@ size_t ConvGemmPlanBuilder::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph);
+    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
     if(!calls.has_value())
     {
         return 0;
@@ -106,7 +110,7 @@ void ConvGemmPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    auto calls = callsFor(opGraph);
+    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
     if(!calls.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -118,8 +122,9 @@ void ConvGemmPlanBuilder::buildPlan(
                            << calls->workspaceBytes << " workspace bytes");
 
     // Benchmarking: when the plan has a choice of layout (an IM2COL column matrix; a 1x1
-    // channels-first backward weights' batched partials or channels-last staging), time every
-    // distinct one on the first execute and keep the fastest: none wins every shape.
+    // channels-first backward weights' batched partials or channels-last staging) or of a
+    // backward weights' reduction split, time every distinct one on the first execute and keep
+    // the fastest: none wins every shape.
     if(executionContext.benchmarking())
     {
         std::vector<BenchmarkedPlan::Candidate> candidates;
@@ -140,6 +145,15 @@ void ConvGemmPlanBuilder::buildPlan(
                 seen.push_back(signature(*other));
                 candidates.push_back({name, planFor(handle, std::move(*other))});
             }
+        }
+        // A reduction split into enough fp32 partials to fill the GPU: the libraries' own
+        // long-k kernels leave a small output's few tiles on a few CUs (backward weights only).
+        auto split = callsFor(opGraph, ColumnLayout::FOLLOW_Y, true);
+        if(split.has_value()
+           && std::find(seen.begin(), seen.end(), signature(*split)) == seen.end())
+        {
+            seen.push_back(signature(*split));
+            candidates.push_back({"split_reduction", planFor(handle, std::move(*split))});
         }
         if(candidates.size() > 1)
         {

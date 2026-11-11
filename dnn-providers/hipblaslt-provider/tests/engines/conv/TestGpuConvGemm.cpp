@@ -467,7 +467,8 @@ void runCase(ConvCase convCase,
              Backend backend,
              Slicing slicing = Slicing::NONE,
              bool benchmarking = false,
-             bool tf32 = false)
+             bool tf32 = false,
+             bool splitReduction = false)
 {
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -496,7 +497,7 @@ void runCase(ConvCase convCase,
         }
         cap = *banding;
     }
-    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32);
+    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32, splitReduction);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -883,6 +884,70 @@ TEST_P(TestGpuConvGemmBenchmarked, Bfp16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmBenchmarked,
                          ::testing::Combine(::testing::ValuesIn(benchmarkedCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// Backward weights with the split reduction as the plan: long reductions behind few output tiles
+/// (a 1x1 channels-last one, grouped, channels-first images, a 3x3 im2col), each long enough for
+/// at least two chunks of 4096.
+std::vector<ConvCase> splitCases()
+{
+    std::vector<ConvCase> cases;
+    // 272 x 272 (past the default's 64 K output elements, so only the split chunks it).
+    ConvGemmShape nhwc = channelsLast({});
+    nhwc.n = 1;
+    nhwc.c = 272;
+    nhwc.k = 272;
+    nhwc.input = {64, 128};
+    cases.push_back({"OneByOneNhwcWrw", nhwc, ConvDirection::BACKWARD_WEIGHTS});
+    ConvGemmShape grouped = nhwc;
+    grouped.n = 2;
+    grouped.input = {64, 96};
+    grouped.c = 12;
+    grouped.k = 18;
+    grouped.groups = 3;
+    cases.push_back({"OneByOneNhwcGroupedWrw", grouped, ConvDirection::BACKWARD_WEIGHTS});
+    ConvGemmShape nchw;
+    nchw.n = 3;
+    nchw.c = 16;
+    nchw.k = 20;
+    nchw.input = {96, 128};
+    cases.push_back({"OneByOneNchwWrw", nchw, ConvDirection::BACKWARD_WEIGHTS});
+    ConvGemmShape padded = channelsLast({});
+    padded.n = 2;
+    padded.c = 8;
+    padded.k = 16;
+    padded.input = {64, 80};
+    padded.filter = {3, 3};
+    padded.prePadding = padded.postPadding = {1, 1};
+    cases.push_back({"Padded3x3NhwcWrw", padded, ConvDirection::BACKWARD_WEIGHTS});
+    return cases;
+}
+
+class TestGpuConvGemmSplit : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmSplit, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, false, false, true);
+}
+
+TEST_P(TestGpuConvGemmSplit, Bfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, false, false, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmSplit,
+                         ::testing::Combine(::testing::ValuesIn(splitCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"

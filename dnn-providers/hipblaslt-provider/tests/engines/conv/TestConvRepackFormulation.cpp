@@ -291,6 +291,48 @@ TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
     EXPECT_EQ(sum->batches, 4);
 }
 
+TEST(TestConvRepackFormulation, SplitReductionFillsTheGpuWithFp32Partials)
+{
+    // A 1x1 channels-last 320 -> 320 backward weights over 8 x 128 x 128 positions: one GEMM of
+    // 9 output tiles behind a 131072 reduction. Split, it is 32 chunks of 4096 (32 x 9 tiles
+    // toward SPLIT_TARGET_TILES), fp32 partials summed into w; by default, the one GEMM.
+    ConvGemmShape shape = channelsLast({});
+    shape.n = 8;
+    shape.c = shape.k = 320;
+    shape.input = {128, 128};
+    shape.dataType = conv_data_objects::DataType::BFLOAT16;
+    const auto problem = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto direct = convGemmCalls(problem);
+    ASSERT_TRUE(direct.has_value());
+    ASSERT_EQ(direct->stages.size(), 1u);
+    EXPECT_EQ(direct->stages[0].calls.at(0).k, 131072);
+    EXPECT_TRUE(direct->workspace.empty());
+
+    const auto split
+        = convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, true);
+    ASSERT_TRUE(split.has_value());
+    const auto& stage = split->stages.at(0);
+    ASSERT_EQ(stage.calls.size(), 1u);
+    EXPECT_EQ(stage.calls[0].batchCount, 32);
+    EXPECT_EQ(stage.calls[0].k, 4096);
+    EXPECT_EQ(stage.calls[0].d.dataType, conv_data_objects::DataType::FLOAT);
+    const auto* sum = stepArgs<StridedCastArgs>(stage.after.at(0));
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->batches, 32);
+    EXPECT_EQ(split->workspaceBytes, 32u * 320 * 320 * sizeof(float));
+
+    // Enough tiles already (4096 x 4096 is 1024): split leaves the plan as it is.
+    shape.c = shape.k = 4096;
+    shape.input = {16, 16};
+    const auto wide = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto wideSplit
+        = convGemmCalls(wide, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, true);
+    ASSERT_TRUE(wideSplit.has_value());
+    EXPECT_EQ(wideSplit->workspaceBytes, convGemmCalls(wide)->workspaceBytes);
+    EXPECT_EQ(wideSplit->stages.at(0).calls.at(0).k,
+              convGemmCalls(wide)->stages.at(0).calls.at(0).k);
+}
+
 TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImages)
 {
     // A 1x1 channels-first backward weights of several images: one strided-batched GEMM over the
