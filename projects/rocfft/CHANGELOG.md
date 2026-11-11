@@ -5,6 +5,13 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Added
+
+* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
+  `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
+  one device; otherwise the existing MPI paths remain. Set the
+  `ROCFFT_RCCL_DISABLE` environment variable to `1` to force the MPI fallback.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
