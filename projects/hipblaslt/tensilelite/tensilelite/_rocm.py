@@ -16,9 +16,17 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
 
+from . import _build_rocm
+
 # Diagnostic source label for an active Python rocm-sdk-core installation.
 _PYTHON_SDK_SOURCE = "active Python rocm_sdk_core"
 _THEROCK_CI_SOURCE = "TheRock CI build"
+
+# Internal marker set only by hipBLASLt's CMake, in the environment of its own
+# code-generation commands, when it builds under TheRock. It alone selects the
+# TheRock build-time adapter, so an installed wheel can never enter that mode.
+_ADAPTER_ENV = "TENSILELITE_ROCM_ADAPTER"
+_THEROCK_CI_ADAPTER = "therock-ci"
 
 # Temporary compatibility gates. Keep the implementation below intact so the
 # version and Python-SDK paths can be re-enabled once TheRock provides them.
@@ -31,12 +39,20 @@ class TensileLiteRuntimeError(ImportError):
 
 @dataclass(frozen=True)
 class ValidatedRocm:
-    """A ROCm installation selected and validated for this process."""
+    """A ROCm installation selected and validated for this process.
+
+    ``version`` is the selected installation's identity: the full published
+    identity (``identity_kind == "full"``), only its ``X.Y.Z`` base when that
+    is all the installation records (``"base"``), or None when it is unknown,
+    as in a TheRock build that passed no version. It is used for comparisons
+    and diagnostics only.
+    """
 
     path: Path
-    version: str
+    version: str | None
     executable_search_paths: tuple[Path, ...]
     source: str
+    identity_kind: str | None = "full"
 
 
 @dataclass(frozen=True)
@@ -72,10 +88,9 @@ def validate_distribution(
         if _ENABLE_ROCM_VERSION_VALIDATION
         else "BYPASS"
     )
-    therock_ci_version = _therock_ci_version()
-    if therock_ci_version is not None:
+    if _therock_ci_selected():
         return _validate_therock_ci(
-            distribution, distribution_version, expected, therock_ci_version
+            distribution, distribution_version, expected, _therock_ci_version()
         )
     if _ENABLE_PYTHON_ROCM_RUNTIME:
         python_sdk_version = _python_sdk_version()
@@ -88,17 +103,55 @@ def validate_distribution(
 # Shared validation
 # ---------------------------------------------------------------------------
 
+_DEV_IDENTITY_RE: re.Pattern[str] = re.compile(
+    r"^(?P<release>[0-9]+(?:\.[0-9]+){2}(?:(?:a|b|rc)[0-9]+)?\.dev[0-9]+)"
+    r"\.(?P<commit>[a-z0-9]+)(?P<variants>(?:\.[a-z0-9]+)*)$"
+)
+
+
+def comparable_identity(identity: str, *, base_only: bool = False) -> str:
+    """Return the part of a canonical ROCm identity that must match.
+
+    - ``base_only``: only ``X.Y.Z``, for installations that record no more
+      (``.info/version``).
+    - TheRock development identities (``X.Y.Z.devN+<commit>[.<variant>...]``):
+      everything except the leading commit token of the local segment. It names
+      the CI run, not the ROCm content, and stage reuse from a baseline run
+      mixes runs within one build. Variant tokens (``asan``, ...) still count.
+    - Release, rc and nightly identities: the whole identity.
+    """
+    if base_only:
+        return _rocm_base_version(identity)
+    match = _DEV_IDENTITY_RE.fullmatch(identity)
+    if match:
+        return match["release"] + match["variants"]
+    return identity
+
+
+def identities_match(expected: str, actual: str, *, base_only: bool = False) -> bool:
+    return comparable_identity(expected, base_only=base_only) == comparable_identity(
+        actual, base_only=base_only
+    )
+
+
 def _validate_compatibility(
     *,
     distribution: str,
     distribution_version: str | None,
-    expected_version: str,
-    actual_version: str,
+    expected_version: str | None,
+    actual_version: str | None,
     path: Path,
     source: str,
+    base_only: bool = False,
 ) -> None:
-    """Raise when the selected ROCm version does not match the wheel."""
-    if actual_version == expected_version:
+    """Raise when the selected ROCm identity does not match the wheel's claim.
+
+    A wheel without a ROCm claim (a ``+g<commit>`` development build), or an
+    installation whose identity is unknown, has nothing to compare.
+    """
+    if expected_version is None or actual_version is None:
+        return
+    if identities_match(expected_version, actual_version, base_only=base_only):
         return
     shown_version = distribution_version or package_version(distribution)
     raise TensileLiteRuntimeError(
@@ -112,8 +165,14 @@ def _validate_compatibility(
     )
 
 
-def _expected_rocm_version(distribution: str, distribution_version: str | None = None) -> str:
-    """Extract the wheel's canonical ROCm release from its version tag."""
+def _expected_rocm_version(
+    distribution: str, distribution_version: str | None = None
+) -> str | None:
+    """Extract the wheel's canonical ROCm identity from its version label.
+
+    Returns None for a development build (``+g<commit>[.dirty]``, or no label),
+    which makes no ROCm claim.
+    """
     if distribution_version is None:
         try:
             distribution_version = package_version(distribution)
@@ -122,12 +181,11 @@ def _expected_rocm_version(distribution: str, distribution_version: str | None =
                 f"{distribution} must be installed as a ROCm-versioned wheel; "
                 "direct source-tree imports are unsupported."
             ) from exc
-    try:
-        local = distribution_version.split("+", 1)[1]
-    except IndexError as exc:
-        raise TensileLiteRuntimeError(
-            f"{distribution} {distribution_version!r} has no '+rocmX.Y.Z' release tag."
-        ) from exc
+    if "+" not in distribution_version:
+        return None
+    local = distribution_version.split("+", 1)[1]
+    if re.fullmatch(r"g[0-9a-f]{40}(?:\.dirty)?", local):
+        return None
     if local.startswith("devrocm"):
         return _canonical_rocm_version(local[len("devrocm") :])
     if not local.startswith("rocm"):
@@ -165,15 +223,29 @@ def _rocm_base_version(value: str) -> str:
 # TheRock CI adapter
 # ---------------------------------------------------------------------------
 
-def _therock_ci_version() -> str | None:
-    """Return the command-scoped TheRock package identity, when selected."""
-    if "THEROCK_PACKAGE_VERSION" not in os.environ:
-        return None
-    value = os.environ["THEROCK_PACKAGE_VERSION"]
-    if not value or value == "git":
+def _therock_ci_selected() -> bool:
+    """Return whether hipBLASLt's TheRock build selected the build-time adapter."""
+    value = os.environ.get(_ADAPTER_ENV)
+    if value is None:
+        return False
+    if value != _THEROCK_CI_ADAPTER:
         raise TensileLiteRuntimeError(
-            "TheRock CI requires a release THEROCK_PACKAGE_VERSION."
+            f"{_ADAPTER_ENV}={value!r} is not a TensileLite ROCm adapter. It is an "
+            f"internal variable set only by hipBLASLt's TheRock build "
+            f"({_ADAPTER_ENV}={_THEROCK_CI_ADAPTER}); unset it."
         )
+    return True
+
+
+def _therock_ci_version() -> str | None:
+    """Return TheRock's package identity, or None for a development build.
+
+    TheRock passes THEROCK_PACKAGE_VERSION only when it knows a real version;
+    a missing value or local builds' "git" means a development build.
+    """
+    value = os.environ.get("THEROCK_PACKAGE_VERSION")
+    if not value or value == "git":
+        return None
     return value
 
 
@@ -194,10 +266,14 @@ def _validate_therock_ci(
     distribution: str,
     distribution_version: str | None,
     expected: str,
-    therock_package_version: str,
+    therock_package_version: str | None,
 ) -> TheRockCIRocm:
     """Validate a wheel against TheRock's graph-owned build identity."""
-    version = _canonical_rocm_version(therock_package_version)
+    version = (
+        _canonical_rocm_version(therock_package_version)
+        if therock_package_version is not None
+        else None
+    )
     executable_search_paths = _therock_ci_executable_search_paths()
     selected_path = executable_search_paths[0]
     if expected != "BYPASS":
@@ -213,6 +289,7 @@ def _validate_therock_ci(
         path=selected_path,
         version=version,
         executable_search_paths=executable_search_paths,
+        identity_kind="full" if version is not None else None,
     )
 
 
@@ -315,16 +392,7 @@ def _validate_system_rocm(
 ) -> SystemRocm:
     """Validate a conventional ROCm prefix against the TensileLite wheel."""
     resolved = _resolve_system_rocm()
-    version_file = resolved.root / ".info" / "version"
-    try:
-        actual = _canonical_rocm_version(version_file.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise TensileLiteRuntimeError(
-            "The resolved ROCm installation has no readable release metadata.\n"
-            f"  selected root: {resolved.root}\n"
-            f"  selected by: {resolved.source}\n"
-            f"  expected file: {version_file}"
-        ) from exc
+    actual, identity_kind = _system_rocm_identity(resolved)
     path = resolved.root
     executable_search_paths = (
         path / "bin",
@@ -335,16 +403,49 @@ def _validate_system_rocm(
         _validate_compatibility(
             distribution=distribution,
             distribution_version=distribution_version,
-            expected_version=_rocm_base_version(expected),
+            expected_version=expected,
             actual_version=actual,
             path=path,
             source=resolved.source,
+            base_only=identity_kind == "base",
         )
     return SystemRocm(
         path=path,
         version=actual,
         source=resolved.source,
         executable_search_paths=executable_search_paths,
+        identity_kind=identity_kind,
+    )
+
+
+def _system_rocm_identity(resolved: SystemRocmRoot) -> tuple[str, str]:
+    """Return a conventional prefix's identity and whether it is full or base.
+
+    TheRock-built roots record the full published identity in
+    share/therock/therock_manifest.json; it is used only if it is a release
+    identity (local builds record "git"). Pre-TheRock roots have only
+    .info/version, whose X.Y.Z base is compared base to base.
+    """
+    root = resolved.root
+    manifest = _build_rocm.manifest_identity(root)
+    info = _build_rocm.info_version(root)
+    if manifest is not None and info is not None and _build_rocm.base_version(manifest) != info:
+        raise TensileLiteRuntimeError(
+            "Inconsistent ROCm installation: its two version records disagree.\n"
+            f"  {root / _build_rocm.MANIFEST_RELPATH}: {manifest}\n"
+            f"  {root / _build_rocm.INFO_VERSION_RELPATH}: {info}\n"
+            f"  selected by: {resolved.source}\n"
+            "Repair or reinstall the ROCm installation."
+        )
+    if manifest is not None:
+        return _canonical_rocm_version(manifest), "full"
+    if info is not None:
+        return info, "base"
+    raise TensileLiteRuntimeError(
+        "The resolved ROCm installation has no readable release metadata.\n"
+        f"  selected root: {root}\n"
+        f"  selected by: {resolved.source}\n"
+        f"  expected file: {root / _build_rocm.INFO_VERSION_RELPATH}"
     )
 
 
