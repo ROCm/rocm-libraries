@@ -66,7 +66,6 @@ BenchmarkProblems:
     - StoreVectorWidth: [4]
     - SwInstructionPrefetch: [-1]
     - TDMInst: [3]
-    - TemporalHintB: [1]
     - ThreadTile: [[1, 1]]
     - TransposeLDS: [1]
     - UseCustomMainLoopSchedule: [0]
