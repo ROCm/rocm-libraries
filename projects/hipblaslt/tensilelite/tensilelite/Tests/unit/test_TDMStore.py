@@ -101,6 +101,8 @@ def test_accepts_dynamic_gsu(algorithm, aga):
 @pytest.mark.parametrize("overrides", [
   {"AdaptiveGemm": 1},
   {"StoreRemapVectorWidth": -1},
+  {"StoreRemapVectorWidth": 4},
+  {"StoreRemapVectorWidth": 8},
   {"UseBias": 1},
   {"UseScaleAlphaVec": 1},
   {"UseScaleAlphaVec": 5},
@@ -120,7 +122,7 @@ def test_accepts_dynamic_gsu(algorithm, aga):
    "TileProcessingStrategy": "StreamK", "GlobalSplitU": 0},
 ])
 def test_accepts_supported_options(overrides):
-  """AdaptiveGemm, the automatic StoreRemapVectorWidth (-1, which Solution resolves and checks), the
+  """AdaptiveGemm, StoreRemapVectorWidth (-1, which Solution resolves, 4 and 8), the
   epilogue vectors along M, N or either, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB,
   ScaleCD, GroupedGemm and the activations."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
@@ -149,7 +151,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   (dict(_STREAMK, ReuseAcrossPersistent=1), _ACROSS_TILES),
   (dict(_STREAMK, ClusterDim=[2, 1], ClusterBarrier=False), _CLUSTER_BARRIER),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
-  ({"StoreRemapVectorWidth": 4}, "TDMStoreInst does not support StoreRemapVectorWidth"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
   ({"UseE": True}, _SIDE_EFFECTS),
@@ -598,17 +599,40 @@ def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, a
 
 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """StoreRemapVectorWidth=-1 resolves to 0 with SourceSwap, which TDMStoreInst takes; Solution rejects a
-  nonzero resolved width."""
+  """StoreRemapVectorWidth=-1 resolves to 0 with SourceSwap and to a remap width without it; TDMStoreInst
+  takes both."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, SourceSwap=True, StoreRemapVectorWidth=-1)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreRemapVectorWidth"] == 0
   assert "tensor_store_from_lds " in asm
-  capsys.readouterr()
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, SourceSwap=False, StoreRemapVectorWidth=-1,
-                       VectorWidthA=1)
-  assert not sol.get("Valid") and asm is None
-  assert "TDMStoreInst does not support StoreRemapVectorWidth" in capsys.readouterr().out
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=2, SourceSwap=False,
+                       StoreRemapVectorWidth=-1, VectorWidthA=1, VectorWidthB=1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreRemapVectorWidth"] > 0 and "tensor_store_from_lds " in asm
+
+
+_REMAP = ("storeRemap lw", "storeRemap lr", "shift storeRemap coord1")
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+@pytest.mark.parametrize("srvw, waveTile", [(4, 4)])
+def test_srvw_tdm_blocks_skip_the_remap(gp_gfx1250, gfx1250_iim, assembler, capsys, srvw, waveTile, level):
+  """With StoreRemapVectorWidth 4 (MT128x128) a TDM block stages D itself: it has no remap local write,
+  read-back or row shift, while the blocks that keep buffer_store still remap through LDS. An explicit remap
+  width needs SourceSwap 0, and one wave's write must cover an M column."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, waveTile, waveTile, 2, 2], TDMStoreInst=level,
+                       StoreRemapVectorWidth=srvw, SourceSwap=False, VectorWidthA=1, VectorWidthB=1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreRemapVectorWidth"] == srvw
+  stores = _stores(asm)
+  for beta in "01":
+    slots = sorted(set(stores[("GSU1", beta)]["tdm"]))
+    assert slots, beta
+    for slot in slots:
+      block = _tdmBlock(asm, beta, slot)
+      assert not any(tag in block for tag in _REMAP), (beta, slot)
+  if level < 3:
+    assert all(tag in asm for tag in _REMAP[:2])
 
 
 def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, capsys):
