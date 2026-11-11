@@ -490,25 +490,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         }
 
         // TDM configs for Q/K/V; LDS padding comes from the policy, no cluster multicast.
+        const auto set_padding = [](TDMConfig& config, auto padding) {
+            config.pad_enable              = padding[I0];
+            config.pad_config.pad_amount   = padding[I1];
+            config.pad_config.pad_interval = padding[number<2>{}];
+        };
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
-        {
-            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
-            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
-            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
-            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
-
-            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
-            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
-            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
-            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
-
-            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
-            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
-            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
-            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
-        }
+        set_padding(tdm_config_q, Policy::template GetLdsPaddingConfigQ<Problem>());
+        set_padding(tdm_config_k, Policy::template GetLdsPaddingConfigK<Problem>());
+        set_padding(tdm_config_v, Policy::template GetLdsPaddingConfigV<Problem>());
 
         // Q tile in LDS: staged in V1, which the iteration-0 V prefetch overwrites first.
         auto q_dram_window = make_tile_window(
@@ -804,6 +796,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                                    decltype(num_bases)::value>{
                     window, &lds_bases[decltype(first)::value]};
             };
+            // V reads: one base, or one per K half in the segmented layout.
             auto pinned_v = [&] {
                 return FmhaTdmSchedFp8PinnedWindow<remove_cvref_t<decltype(v_lds_read_window)>,
                                                    kVBases,
@@ -874,20 +867,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 };
 
                 // Dword next-K stores drop QK byte permutes; MX and blockscale keep bytes for size.
-                if constexpr(kD256 && kLdsSegSplit)
+                if constexpr(kD256)
                     Policy::template RunPvStageWithWmma<decltype(stage)::value,
                                                         Mode,
                                                         !kMx && !kBlockScale>(
                         next_b_block_tensor, b_lds_window, v_tile, pinned_v(), emit_wmma);
-                else if constexpr(kD256)
-                    Policy::template RunPvStageWithWmma<decltype(stage)::value,
-                                                        Mode,
-                                                        !kMx && !kBlockScale>(
-                        next_b_block_tensor,
-                        b_lds_window,
-                        v_tile,
-                        pinned(v_lds_read_window, number<kVBase>{}, number<1>{}),
-                        emit_wmma);
                 else
                 {
                     typename Policy::NoStreamedV no_v;
@@ -1140,12 +1124,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                     else
                     {
-                        if constexpr(kLdsSegSplit)
-                            run_qk_stage(i_su, v_tile, pinned_v());
-                        else
-                            run_qk_stage(i_su,
-                                         v_tile,
-                                         pinned(v_lds_read_window, number<kVBase>{}, number<1>{}));
+                        run_qk_stage(i_su, v_tile, pinned_v());
                     }
                     if constexpr(kKDescaleWithScaleS)
                         tile_elementwise_inout(
@@ -1237,39 +1216,35 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
                     if(__builtin_expect(need_split_check || need_mask_check, false))
                     {
+                        const auto is_edge_out = [&](index_t row, index_t col) {
+                            return (need_split_check && logical_seqlen_k_end <= col) ||
+                                   (need_mask_check && mask.IsOutOfBound(row, col));
+                        };
                         if constexpr(kMergeHeads)
-                            TileIndex::SetTileIfRowPos(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                MergedRows::MergedRowPositions<decltype(m)>(merged,
-                                                                            q_origin.at(I0)),
-                                k_origin.at(I0),
-                                [&](index_t row, index_t col) {
-                                    return (need_split_check && logical_seqlen_k_end <= col) ||
-                                           (need_mask_check && mask.IsOutOfBound(row, col));
-                                });
+                            TileIndex::SetTileIfRowPos(s_acc,
+                                                       -numeric<SMPLComputeDataType>::infinity(),
+                                                       MergedRows::MergedRowPositions<decltype(m)>(
+                                                           merged, q_origin.at(I0)),
+                                                       k_origin.at(I0),
+                                                       is_edge_out);
                         else if constexpr(!kLdsSegSplit)
-                            TileIndex::SetTileIfLaneBase(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    return (need_split_check && logical_seqlen_k_end <= col) ||
-                                           (need_mask_check && mask.IsOutOfBound(row, col));
-                                });
+                            TileIndex::SetTileIfLaneBase(s_acc,
+                                                         -numeric<SMPLComputeDataType>::infinity(),
+                                                         [&](auto tile_idx) {
+                                                             return is_edge_out(
+                                                                 q_origin.at(I0) + tile_idx.at(I0),
+                                                                 k_origin.at(I0) + tile_idx.at(I1));
+                                                         });
                         else
                             TileIndex::SetTileIfLaneBase(
                                 s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx, auto const_idx) {
                                     // The constant column part alone picks the K half.
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col =
+                                    return is_edge_out(
+                                        q_origin.at(I0) + tile_idx.at(I0),
                                         k_origin.at(I0) + tile_idx.at(I1) +
-                                        (const_idx.at(I1) < kN0 / 2 ? seg_col : -seg_col);
-                                    return (need_split_check && logical_seqlen_k_end <= col) ||
-                                           (need_mask_check && mask.IsOutOfBound(row, col));
+                                            (const_idx.at(I1) < kN0 / 2 ? seg_col : -seg_col));
                                 });
                         if constexpr(kProgressiveMax)
                             static_for<0, Geometry::kQkStages - 1, 1>{}([&](auto su) {
