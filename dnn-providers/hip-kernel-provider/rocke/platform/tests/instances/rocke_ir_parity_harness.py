@@ -1476,9 +1476,11 @@ def build_direct_nongrouped(
 
 def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
     """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
-    dw_mfma / grouped_mfma / fold; ``problem`` overrides the DirectConvProblem
-    fields (unused by the fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
-    where the C++ engine is gated byte-identical by check_byte_identity.py."""
+    dw_mfma / grouped_mfma / fold, or the gfx1250 wave32 image (and small-C)
+    ``w32`` and depthwise ``dw_valu`` kernels; ``problem`` overrides the
+    DirectConvProblem fields (unused by the fold). Configs mirror
+    parity/conv_direct_grouped_emit.* (indices 95+ and 201+), where the C++
+    engine is gated byte-identical by check_byte_identity.py."""
 
     def _build():
         from kernels.common import conv_direct_dw_wgrad as dw
@@ -1486,6 +1488,7 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
         from kernels.common import conv_direct_grouped_wgrad_mfma as gwm
         from kernels.common import conv_direct_wgrad_gather as wg
         from kernels.common import conv_direct_wgrad_tiled as wt
+        from kernels.common import conv_direct_grouped as dc
         from kernels.common.conv_direct_grouped import DirectConvProblem
 
         if kind == "fold":
@@ -1517,6 +1520,8 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
                 gwm.GroupedWgradMfmaSpec,
                 gwm.build_grouped_wgrad_mfma,
             ),
+            "w32": (dc.DirectConvWgradSpec, dc.build_direct_conv_wgrad),
+            "dw_valu": (dc.DirectDepthwiseWgradSpec, dc.build_direct_depthwise_wgrad),
         }[kind]
         return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
 
@@ -2873,6 +2878,75 @@ def cases():
             tile_k=32,
             split_k=4,
             epilogue="cshuffle",
+        ),
+    )
+    # The register-prefetch K loop (prefetch_global_regs): the plain synchronous
+    # loop with tile k+1's reads held in VGPRs under tile k's MFMAs, behind
+    # LDS-only barriers. K-outer cshuffle without and with the packed fp16
+    # atomic (the 16x16x32 atom, compv3), and two-stage into bf16 dW.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_spk4_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv3",
+            split_k=4,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_2stage_bf16_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_2stage_bf16_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv4",
+            split_k=4,
+            two_stage=True,
+            dtype_d="bf16",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
         ),
     )
     add(
@@ -6325,6 +6399,75 @@ def cases():
             "gfx950",
             build_direct_wgrad(
                 f"irhash_direct_wgrad_{_case_id}", "gfx950", _kind, _prob, **_over
+            ),
+        )
+    # The gfx1250 (wave32) direct wgrad kernels: the image-per-block kernel
+    # (register blocking, row split, TDM ring, replicated two-stage scratch,
+    # LDS epilogue), the small-C stem form, and the depthwise VALU kernel.
+    # Mirrors library/tests/parity/conv_direct_grouped_emit.* (indices 318+).
+    for _case_id, _kind, _prob, _over in (
+        (
+            "image_rps3_rb2_ws8",
+            "w32",
+            dict(H=12),
+            dict(
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                ws_replicas=8,
+                lds_epilogue=True,
+            ),
+        ),
+        (
+            "image_tdm3_fp16",
+            "w32",
+            dict(dtype="fp16"),
+            dict(
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+                ws_replicas=8,
+            ),
+        ),
+        (
+            "small_c3_3x3_s2",
+            "w32",
+            dict(cpg=3, kpg=32, stride=2, H=32, W=64),
+            dict(
+                waves_k=2,
+                waves_c=1,
+                wave_tiles_k=1,
+                wave_tiles_c=2,
+                small_c=True,
+                vec_x=4,
+                sub_steps=2,
+                ws_replicas=4,
+                row_blocks=8,
+            ),
+        ),
+        (
+            "dw_valu_7x7_c128",
+            "dw_valu",
+            dict(groups=128, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=14, W=14),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=4, r_split=2),
+        ),
+    ):
+        add(
+            "conv_direct_wgrad",
+            f"conv_direct_wgrad/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_wgrad(
+                f"irhash_direct_wgrad_1250_{_case_id}",
+                "gfx1250",
+                _kind,
+                _prob,
+                wave_size=32,
+                **({"mfma_k": 32} if _kind == "w32" else {}),
+                **_over,
             ),
         )
 

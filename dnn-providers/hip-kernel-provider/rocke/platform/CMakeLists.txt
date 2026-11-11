@@ -489,6 +489,7 @@ if(ROCKE_INSTALL_TESTS)
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
+    # the MMA catalog cross-check unit tests (load tools/ from the source tree),
     # and the arch-domain artifact unit tests. The latter remain
     # source-only units, while the full regeneration sweep is installed below as
     # its own CTest with an independent timeout and resource policy.
@@ -516,6 +517,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_arch_table_engine_parity.py" EXCLUDE
               PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
+              PATTERN "test_check_mma_catalog.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
@@ -741,30 +743,58 @@ if(ROCKE_INSTALL_TESTS)
       rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
 
-      # The tensor_transforms tests live inside the package
-      # (rocke/tests/helpers/tiling/tensor_transforms), so the rocke_pytest_*
-      # parts above, which collect the installed tests/ tree, never see them.
-      # Run them from the installed package. Without a usable GPU the GPU tests
-      # skip; the source scans of the dsl_docs and library trees skip here too,
-      # since the installed tree holds neither (rocke.tests.source_tree). Like
-      # the rocke_pytest_* parts, the entry gets the compiler tool locations but
-      # not the compiler requirement policy.
+      # The tiling package's tests live inside the package
+      # (rocke/tests/helpers/tiling), so the rocke_pytest_* parts above, which
+      # collect the installed tests/ tree, never see them. Three entries run
+      # them from the installed package. The gpu marker, which the tree's
+      # conftest.py puts on every test asking for a GPU fixture, splits the
+      # tests that launch kernels, in rocke_tiling_gpu_pytest, from the rest.
+      # The rest are split again by directory: the figure-drawing tests of
+      # visualization/ run in rocke_tiling_visualization_pytest, which the
+      # provider categories tier for scheduled CI only (TESTING.md, section
+      # 5.1.2), and every other directory runs in rocke_tiling_pytest. None of
+      # the three is one of the parts, so none takes their name prefix. Each
+      # budget keeps the entry's time on the slowest runners under half its
+      # CTest limit. The CPU tests build and check many kernels, so
+      # rocke_tiling_pytest has a longer limit than a part; the visualization
+      # and GPU tests are fewer. Four kinds of test skip here and pass: the GPU
+      # tests, without a usable GPU; the C++-engine cases of the IR tests, as
+      # the installed tree has no rocke_engine binding (their Python-engine
+      # cases run); the source scans of the dsl_docs and library trees, which
+      # the installed tree does not hold (rocke.tests.source_tree); and every
+      # test that loads platform/tools/, which it does not hold either. The last
+      # kind runs only from a source checkout: the backend coverage
+      # re-measurement, the compile of every issued MMA instruction and the
+      # gfx950 fp8 x fp4 hardware run (traits/README.md, Backend coverage). Like
+      # the rocke_pytest_* parts, the entries get the compiler tool locations
+      # but not the compiler requirement policy.
       #
       # No directory above the installed package holds a rocke pytest
       # configuration, so without -c pytest would take one from any pytest.ini or
       # pyproject.toml above the install (a CI workspace has one whose
       # python_files collects nothing here). -c names the installed
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
-      set(_ROCKE_TENSOR_TRANSFORMS_TESTS
-          "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
+      set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
+      set(_ROCKE_TILING_VISUALIZATION_TESTS "${_ROCKE_TILING_TESTS}/visualization")
+      set(_rocke_tiling_pytest_launcher "python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
+      set(_rocke_tiling_pytest_options "-v -rs --timeout=60")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set(_rocke_tensor_transforms_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
-             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tensor_transforms_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_tensor_transforms_pytest PROPERTIES\n"
+             "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"\${_rocke_tensor_transforms_pytest_environment}\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 600)\n"
+             "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} -m gpu)\n"
+             "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;gpu\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -781,6 +811,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_mma_operand_roles.py"
         "tests/library/tests/test_wgrad_cached_candidate_filter.py"
         "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -801,6 +832,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
+        "tests/library/tests/test_direct_wgrad_refusals.py"
+        "tests/library/tests/test_direct_depthwise_wgrad_cachepolicy.py"
+        "tests/library/tests/test_conv_tr_lane_map.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_direct_grouped_backend_parity.py"
         "tests/library/tests/test_direct_wgrad_specs.py"
@@ -1075,6 +1109,8 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_sdpa_pytest python -m pytest"
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
            "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
@@ -1232,6 +1268,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
+        "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
+        "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
