@@ -149,7 +149,8 @@ TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)
     const rocsparse_operation ops[]
         = {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose};
     for(rocsparse_operation opA : ops)
-    {
+        for(int64_t cols : {int64_t{0}, int64_t{1}})
+        {
         BellRun r;
         r.opA           = opA;
         r.kb            = 5;
@@ -162,7 +163,7 @@ TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)
             = up_raw<float>(store_dense<float>(Dense(Kc, r.n), rocsparse_order_column, ldb));
         DevBuf<float>   dC  = up_raw<float>(store_dense<float>(C0, rocsparse_order_column, ldc));
         DevBuf<int32_t> ind = up_idx<int32_t>(std::vector<int64_t>(4, 0));
-        DevBuf<float>   val = up_raw<float>(std::vector<float>(4, 0.0f));
+        DevBuf<float>   val = up_raw<float>(std::vector<float>(16, 0.0f));
         ASSERT_TRUE(dB.ptr && dC.ptr && ind.ptr && val.ptr);
 
         SpmatH sp;
@@ -171,7 +172,7 @@ TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)
                                               k,
                                               rocsparse_direction_row,
                                               r.bd,
-                                              0,
+                                              cols,
                                               ind.ptr,
                                               val.ptr,
                                               rocsparse_indextype_i32,
@@ -210,7 +211,7 @@ TEST_F(ExtraBell, no_stored_blocks_transpose_is_not_implemented)
                       rocsparse_status_not_implemented);
         }
         expect_dense_equal<float>(dC.host(), C0, rocsparse_order_column, ldc, "C");
-    }
+        }
 }
 
 namespace
