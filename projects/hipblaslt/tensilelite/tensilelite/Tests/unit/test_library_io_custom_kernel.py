@@ -211,8 +211,11 @@ def test_custom_config_is_read_once_and_shared(assembler, isa_info_map, monkeypa
     assert received[0] is raw
 
 
-def _parse_with_config(assembler, isa_info_map, monkeypatch, declared, configured):
-    """Parse one custom-kernel solution whose logic file declares `declared` (None for no key)."""
+def _parse_with_config(assembler, isa_info_map, monkeypatch, declared, configured, file_default=None):
+    """Parse one custom-kernel solution whose logic file declares `declared` (None for no key).
+
+    `file_default` is an AssertSizeLessThan placed in the file's DefaultSolution.
+    """
     monkeypatch.setattr(
         L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"AssertSizeLessThan": configured}
     )
@@ -221,6 +224,8 @@ def _parse_with_config(assembler, isa_info_map, monkeypatch, declared, configure
     data["Solutions"][0].pop("AssertSizeLessThan", None)
     if declared is not None:
         data["Solutions"][0]["AssertSizeLessThan"] = declared
+    if file_default is not None:
+        data["DefaultSolution"] = {"AssertSizeLessThan": file_default}
     return L.parseLibraryLogicData(
         data, str(_FIXTURE), assembler, False, False, False, isa_info_map, False
     )
@@ -250,3 +255,10 @@ def test_custom_config_does_not_warn_for_a_predicate_the_logic_file_leaves_to_de
 
     assert "replaces" not in capsys.readouterr().out
     assert logic.solutions[0]["AssertSizeLessThan"] == {0: 5}
+
+
+def test_custom_config_does_not_warn_for_a_predicate_only_the_file_default_declares(
+        assembler, isa_info_map, monkeypatch, capsys):
+    _parse_with_config(assembler, isa_info_map, monkeypatch, None, {0: 5}, file_default={0: 8})
+
+    assert "replaces" not in capsys.readouterr().out

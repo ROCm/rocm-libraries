@@ -219,12 +219,11 @@ Tests:
 
 # The kernels compute D = bf16(alpha * A^T B + beta * C) for any alpha and beta, with C and D in
 # distinct buffers. Only ExactLogic shapes use the skinny kernels; the rest run the generic kernels,
-# and a generic MXFP8 kernel with beta != 0 and N % 16 != 0 over-reads C (AIHPBLAS-5511). The shapes
-# that run a generic kernel stay here and are quarantined in known_bugs.yaml until that fix lands
-# (29584x4x8192, 4x16385x2304, 10240x3x9216 and 16384x2x5120). 51200x1x5120, 4096x1x14336, 10240x4x5120
-# and 10240x1x8192 are shard keys that run skinny kernels in this tree (the VALU kernel, which serves only
-# skinny n, for 51200x1x5120 and MFMA kernels for the others), and their mirrors 1x51200x5120, 4x10240x5120
-# and 1x10240x8192 run MFMA kernels; known_bugs.yaml also lists the four shard keys.
+# and a generic MXFP8 kernel with beta != 0 and N % 16 != 0 over-reads C (AIHPBLAS-5511). The four
+# shapes that run a generic kernel (29584x4x8192, 4x16385x2304, 10240x3x9216 and 16384x2x5120) are
+# quarantined in known_bugs.yaml until that fix lands. The other shapes are ExactLogic shard keys or
+# their mirrors and run skinny kernels: the VALU kernel (solution 2) for 51200x1x5120, and MFMA kernels
+# for the rest, covering beta != 0 for solutions 0 (28672x4x4096), 1 (32768x2x14336) and 4 (3x16384x25600).
 - name: matmul_skinny_mxfp8_tn_alpha_beta
   category: pre_checkin
   function:
@@ -243,7 +242,7 @@ Tests:
     - { M: 4096,  N: 1, K: 14336 }
     - { M: 10240, N: 3, K: 9216  }
     # Medium, skinny n.
-    - { M: 10240, N: 4, K: 5120 }
+    - { M: 28672, N: 4, K: 4096 }
     - { M: 16384, N: 2, K: 5120 }
     # Medium, skinny m.
     - { M: 4, N: 10240, K: 5120 }
@@ -251,6 +250,9 @@ Tests:
     # Shard keys with one skinny extent of 1.
     - { M: 10240, N: 1, K: 8192 }
     - { M: 1, N: 10240, K: 8192 }
+    # Shard keys running MFMA kernels with beta != 0.
+    - { M: 32768, N: 2, K: 14336 }
+    - { M: 3, N: 16384, K: 25600 }
   alpha: 1.5
   beta: 0.5
   batch_count: 1

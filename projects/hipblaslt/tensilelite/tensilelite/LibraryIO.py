@@ -764,7 +764,7 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        declared = {**libDefaults, **solutionState}
+        declared = dict(solutionState)
         solutionState = fillSolutionDefaults(solutionState, libDefaults)
 
         if "KernelLanguage" not in solutionState.keys():

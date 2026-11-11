@@ -836,7 +836,9 @@ namespace TensileLite
 
             // Handwritten kernels that address a whole tensor through one buffer resource
             // declare the first byte extent they cannot address (the shipped skinny MXFP8
-            // kernels declare 2^31), leading strides included.
+            // kernels declare 2^31). Each tensor's allocated bytes and its leading stride in
+            // bytes must stay below it; the stride is passed as a 32-bit kernel argument and is
+            // not part of the allocated bytes when a dimension has size 1.
             struct TensorBytesLessThan
                 : public Predicate_CRTP<TensorBytesLessThan, ContractionProblemGemm>
             {
@@ -862,8 +864,16 @@ namespace TensileLite
                 {
                     for(TensorDescriptor const* tensor :
                         {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
-                        if(!tensor->empty() && tensor->totalAllocatedBytes() >= value)
+                    {
+                        if(tensor->empty())
+                            continue;
+                        if(tensor->totalAllocatedBytes() >= value)
                             return false;
+                        if(tensor->dimensions() >= 2
+                           && multiplyElementSize(tensor->strides()[1], tensor->elementBytes())
+                                  >= value)
+                            return false;
+                    }
                     return true;
                 }
 

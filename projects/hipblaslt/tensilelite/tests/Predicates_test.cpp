@@ -697,6 +697,34 @@ TEST(Predicates, TensorBytesLessThanIsExactAtTwoToThe31)
     }
 }
 
+// With n = 1 the leading stride is not part of the allocated bytes, but it is still passed to the
+// kernel as a 32-bit byte stride, so it must be bounded too.
+TEST(Predicates, TensorBytesLessThanBoundsTheLeadingStrideForSingleColumn)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::TensorBytesLessThan pred(bytesLimit);
+
+    // C is bf16: ldc * 2 bytes reaches 2^31 at ldc = 2^30 while its allocated bytes stay at 8.
+    ContractionProblemGemm hugeLdc = tensorBytesProblem(4, 1, 64, 64, 64, size_t(1) << 30, 4);
+    ASSERT_LT(hugeLdc.c().totalAllocatedBytes(), bytesLimit);
+    EXPECT_FALSE(pred(hugeLdc));
+
+    ContractionProblemGemm hugeLdd = tensorBytesProblem(4, 1, 64, 64, 64, 4, size_t(1) << 30);
+    EXPECT_FALSE(pred(hugeLdd));
+
+    // A is fp8: lda = 2^31 bytes with m = 1.
+    ContractionProblemGemm hugeLda = tensorBytesProblem(1, 1, 64, size_t(1) << 31, 64, 1, 1);
+    EXPECT_FALSE(pred(hugeLda));
+
+    ContractionProblemGemm smallLdc = tensorBytesProblem(4, 1, 64, 64, 64, 4096, 4);
+    EXPECT_TRUE(pred(smallLdc));
+    ContractionProblemGemm justBelow = tensorBytesProblem(4, 1, 64, 64, 64, (size_t(1) << 30) - 1, 4);
+    EXPECT_TRUE(pred(justBelow));
+
+    std::ostringstream stream;
+    EXPECT_FALSE(pred.debugEval(hugeLdc, stream));
+}
+
 // A problem without a C tensor has no C extent to bound. The same problem with a C over the
 // limit proves the skip is what lets the empty-C case through.
 TEST(Predicates, TensorBytesLessThanSkipsAnEmptyC)

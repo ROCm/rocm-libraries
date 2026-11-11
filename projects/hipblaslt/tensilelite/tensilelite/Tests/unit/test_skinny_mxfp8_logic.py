@@ -164,18 +164,33 @@ def test_every_key_satisfies_the_predicates_of_its_solution(shard, entries):
         assert not violated, (key, solution_index, [(p.tag, p.index, p.value) for p in violated])
 
 
-def keys_lost_to(shard_data, other_data):
-    """(key, shard efficiency, other efficiency) for each full key in both ExactLogic tables where the other wins.
+def _best_efficiency_by_key(logic_data):
+    """Map (m, n, batch, k) to (full key, best efficiency) over a logic file's ExactLogic table."""
+    best = {}
+    for key, (_, efficiency) in logic_data["ExactLogic"]:
+        short_key = tuple(key[:4])
+        if short_key not in best or efficiency > best[short_key][1]:
+            best[short_key] = (tuple(key), efficiency)
+    return best
 
-    The C++ loader sorts equal keys by descending speed (Serialization/MatchingLibrary.hpp) and the
-    Equality lookup (PropertyMatching.hpp) takes the first, so a tie or a higher value elsewhere wins.
+
+def keys_lost_to(shard_data, other_data):
+    """(full shard key, shard efficiency, other efficiency) for each (m, n, batch, k) in both tables where the other wins.
+
+    Keys compare on their first four columns because MatchingLibrary.FromOriginalState keeps only
+    those, so files that differ in the trailing columns still collide. The C++ loader sorts equal
+    keys by descending speed (Serialization/MatchingLibrary.hpp) and the Equality lookup
+    (PropertyMatching.hpp) takes the first, so a tie or a higher value elsewhere wins; each side
+    therefore counts only its best efficiency per key.
     """
-    other = {tuple(key): efficiency for key, (_, efficiency) in other_data["ExactLogic"]}
+    other = _best_efficiency_by_key(other_data)
     lost = []
-    for key, (_, efficiency) in shard_data["ExactLogic"]:
-        other_efficiency = other.get(tuple(key))
-        if other_efficiency is not None and other_efficiency >= efficiency:
-            lost.append((tuple(key), efficiency, other_efficiency))
+    for short_key, (full_key, efficiency) in _best_efficiency_by_key(shard_data).items():
+        if short_key not in other:
+            continue
+        other_efficiency = other[short_key][1]
+        if other_efficiency >= efficiency:
+            lost.append((full_key, efficiency, other_efficiency))
     return lost
 
 
