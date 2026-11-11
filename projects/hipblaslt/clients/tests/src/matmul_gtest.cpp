@@ -949,7 +949,7 @@ namespace
         }
     };
 
-    TEST(ClientUniformSummationOrder, smoke_GroupedSizesAndStridesAdmitCustomKernel)
+    TEST(ClientUniformSummationOrderGrouped, smoke_GroupedSizesAndStridesAdmitCustomKernel)
     {
         if(hipblaslt_get_arch() != 942)
             GTEST_SKIP() << "The mixed FP8/FP16 custom kernel is specific to gfx942";
