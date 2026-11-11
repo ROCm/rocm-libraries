@@ -179,7 +179,7 @@ def _describe(eng, spec, arch):
 
 def test_engines_agree_on_specs():
     """C++ describe == Python validity, reason, name, LDS bytes and, for a
-    valid spec, grid and fold contract (partitions, workspace, taps,
+    valid spec, grid, block and fold contract (partitions, workspace, taps,
     channels), over the AOT grid and every rejected spec, on gfx1250 and on
     gfx950 and gfx1201 (which refuse all of them: wave64, and no WMMA
     16x16x32)."""
@@ -189,7 +189,7 @@ def test_engines_agree_on_specs():
     rejected = _rejected_specs()
     for arch in ("gfx1250", "gfx950", "gfx1201"):
         for i, spec in enumerate(grid_specs + rejected):
-            ok, why_c, name, grid, lds, parts, ws, taps, chans = _describe(
+            ok, why_c, name, grid, block_c, lds, parts, ws, taps, chans = _describe(
                 eng, spec, arch
             )
             ok_py, why = is_valid_grouped_wgrad_wmma_spec(spec, arch)
@@ -205,13 +205,13 @@ def test_engines_agree_on_specs():
             if ok:
                 g, block = spec.launch_geometry()
                 assert tuple(grid) == g
-                assert block == (spec.threads, 1, 1)
+                assert tuple(block_c) == block == (spec.threads, 1, 1)
                 assert parts == spec.n_partitions()
                 assert ws == spec.workspace_bytes()
                 assert taps == spec.fold_taps()
                 assert chans == spec.fold_channels()
             else:
-                assert tuple(grid) == (0, 0, 0)
+                assert tuple(grid) == tuple(block_c) == (0, 0, 0)
 
 
 def test_binding_rejects_bad_input():

@@ -2050,8 +2050,9 @@ std::vector<std::string> conv_direct_grouped_wgrad_wmma_verify(const py::dict& d
 
 /* is_valid_grouped_wgrad_wmma_spec + kernel_name / grid / lds_bytes and the
  * fold contract in one call: -> (ok, reason, kernel_name, (gx, gy, gz),
- * lds_bytes, n_partitions, workspace_bytes, fold_taps, fold_channels). The
- * grid and the fold contract are zero for a rejected spec. */
+ * (bx, by, bz), lds_bytes, n_partitions, workspace_bytes, fold_taps,
+ * fold_channels). The grid, block and fold contract are zero for a rejected
+ * spec. */
 py::tuple conv_direct_grouped_wgrad_wmma_describe(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
@@ -2078,6 +2079,7 @@ py::tuple conv_direct_grouped_wgrad_wmma_describe(const py::dict& d, const std::
                           std::string(reason),
                           std::string(name),
                           py::make_tuple(grid[0], grid[1], grid[2]),
+                          py::make_tuple(block[0], block[1], block[2]),
                           rocke_grouped_wgrad_wmma_lds_bytes(&s),
                           n_parts,
                           ws_bytes,
