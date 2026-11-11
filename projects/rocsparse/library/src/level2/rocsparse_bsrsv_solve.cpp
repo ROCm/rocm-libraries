@@ -388,8 +388,8 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
 
-        auto                   bsrsv_info = info->get_bsrsv_info();
-        rocsparse::trm_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);
+        auto                          bsrsv_info = info->get_bsrsv_info();
+        rocsparse::triangular_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);
         if(trm_info == nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);

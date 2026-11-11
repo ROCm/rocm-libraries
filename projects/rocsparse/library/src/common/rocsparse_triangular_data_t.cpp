@@ -21,11 +21,12 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
-void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t stream)
+void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that,
+                                        hipStream_t                         stream)
 {
     if(that != nullptr)
     {
@@ -33,7 +34,7 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t 
         {
             if(that->m_data[i] != nullptr)
             {
-                rocsparse::trm_info_t::copy(&this->m_data[i], that->m_data[i]);
+                rocsparse::triangular_info_t::copy(&this->m_data[i], that->m_data[i]);
             }
         }
 
@@ -42,7 +43,7 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t 
     }
 }
 
-void rocsparse::trm_data_t::uncouple(const rocsparse::trm_data_t* that)
+void rocsparse::triangular_data_t::uncouple(const rocsparse::triangular_data_t* that)
 {
     if(that != nullptr && that != this)
     {
@@ -65,7 +66,7 @@ void rocsparse::trm_data_t::uncouple(const rocsparse::trm_data_t* that)
     }
 }
 
-rocsparse::trm_data_t::~trm_data_t()
+rocsparse::triangular_data_t::~triangular_data_t()
 {
     // Clear zero pivot
     for(int i = 0; i < 4; ++i)
@@ -79,29 +80,30 @@ rocsparse::trm_data_t::~trm_data_t()
     }
 }
 
-rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
-                                                  rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* rocsparse::triangular_data_t::get(rocsparse_operation operation,
+                                                                rocsparse_fill_mode fill_mode)
 {
-    const int idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
+    const int idx = rocsparse::triangular_data_t::storage_index(operation, fill_mode);
     return this->m_data[idx];
 }
 
-const rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
-                                                        rocsparse_fill_mode fill_mode) const
+const rocsparse::triangular_info_t*
+    rocsparse::triangular_data_t::get(rocsparse_operation operation,
+                                      rocsparse_fill_mode fill_mode) const
 {
-    const auto idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
+    const auto idx = rocsparse::triangular_data_t::storage_index(operation, fill_mode);
     return this->m_data[idx];
 }
 
-void rocsparse::trm_data_t::set(rocsparse_operation    operation,
-                                rocsparse_fill_mode    fill_mode,
-                                rocsparse::trm_info_t* trm_info)
+void rocsparse::triangular_data_t::set(rocsparse_operation           operation,
+                                       rocsparse_fill_mode           fill_mode,
+                                       rocsparse::triangular_info_t* trm_info)
 {
-    const int idx     = rocsparse::trm_data_t::storage_index(operation, fill_mode);
+    const int idx     = rocsparse::triangular_data_t::storage_index(operation, fill_mode);
     this->m_data[idx] = trm_info;
 }
 
-rocsparse_indextype rocsparse::trm_data_t::get_indextype_J() const
+rocsparse_indextype rocsparse::triangular_data_t::get_indextype_J() const
 {
     for(int i = 0; i < 4; ++i)
     {

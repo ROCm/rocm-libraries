@@ -30,11 +30,11 @@ namespace rocsparse
 {
 
     /********************************************************************************
-   * \brief trm_info_t is a structure holding the rocsparse bsrsv, csrsv,
+   * \brief triangular_info_t is a structure holding the rocsparse bsrsv, csrsv,
    * csrsm, csrilu0 and csric0 data gathered during csrsv_analysis,
    * csrilu0_analysis and csric0_analysis.
    *******************************************************************************/
-    struct trm_info_t
+    struct triangular_info_t
     {
     protected:
         // maximum non-zero entries per row
@@ -59,13 +59,13 @@ namespace rocsparse
         rocsparse_indextype         index_type_J{(rocsparse_indextype)-1};
 
     public:
-        trm_info_t(const trm_info_t&);
-        trm_info_t();
-        ~trm_info_t();
+        triangular_info_t(const triangular_info_t&);
+        triangular_info_t();
+        ~triangular_info_t();
 
-        trm_info_t& operator=(const trm_info_t&);
-        int64_t     get_max_nnz() const;
-        void        set_max_nnz(int64_t);
+        triangular_info_t& operator=(const triangular_info_t&);
+        int64_t            get_max_nnz() const;
+        void               set_max_nnz(int64_t);
 
         int64_t get_m() const;
         void    set_m(int64_t);
@@ -104,8 +104,8 @@ namespace rocsparse
         int64_t get_nnz() const;
         void    set_nnz(int64_t);
 
-        static void destroy(trm_info_t*);
-        static void copy(trm_info_t* __restrict__*, const trm_info_t* __restrict__);
+        static void destroy(triangular_info_t*);
+        static void copy(triangular_info_t* __restrict__*, const triangular_info_t* __restrict__);
     };
 
 }

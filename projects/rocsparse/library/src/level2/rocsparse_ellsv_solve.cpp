@@ -351,7 +351,7 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
 
     rocsparse_ellsv_info ei = ellsv_info;
 
-    rocsparse::trm_info_t* trm_info = ei->get(trans, descr->fill_mode);
+    rocsparse::triangular_info_t* trm_info = ei->get(trans, descr->fill_mode);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_init_zero_pivot(handle, ei, A));
 

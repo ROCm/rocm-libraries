@@ -393,8 +393,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_mat_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_position_t.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_t.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_data_t.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_triangular_data_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_triangular_info_t.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_idnvec_descr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_transposed_sparsity_pattern.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_assign_async.cpp

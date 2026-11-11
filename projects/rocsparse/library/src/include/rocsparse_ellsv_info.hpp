@@ -25,9 +25,9 @@
 #pragma once
 
 #include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 
-struct _rocsparse_ellsv_info : rocsparse::trm_data_t
+struct _rocsparse_ellsv_info : rocsparse::triangular_data_t
 {
 protected:
     rocsparse::singular_info_t m_singularity_numeric_exact{};
@@ -37,7 +37,7 @@ public:
 
     void copy(const _rocsparse_ellsv_info* that, hipStream_t stream)
     {
-        this->rocsparse::trm_data_t::copy(that, stream);
+        this->rocsparse::triangular_data_t::copy(that, stream);
         this->m_singularity_numeric_exact.copy_singular_info_async(
             &that->m_singularity_numeric_exact, stream);
         THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));

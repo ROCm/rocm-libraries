@@ -72,119 +72,119 @@ rocsparse_bsric0_info _rocsparse_mat_info::get_bsric0_info()
     return this->m_trm.create_bsric0_info();
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsm_info(rocsparse_operation operation,
-                                                           rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_csrsm_info(rocsparse_operation operation,
+                                                                  rocsparse_fill_mode fill_mode)
 {
     return this->get_csrsm_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsv_info(rocsparse_operation operation,
-                                                           rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_csrsv_info(rocsparse_operation operation,
+                                                                  rocsparse_fill_mode fill_mode)
 {
     return this->get_csrsv_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_csrilu0_info(rocsparse_operation operation,
-                                                             rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_csrilu0_info(rocsparse_operation operation,
+                                                                    rocsparse_fill_mode fill_mode)
 {
     return this->get_csrilu0_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_csric0_info(rocsparse_operation operation,
-                                                            rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_csric0_info(rocsparse_operation operation,
+                                                                   rocsparse_fill_mode fill_mode)
 {
     return this->get_csric0_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_csrildlt0_info(rocsparse_operation operation,
-                                                               rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_csrildlt0_info(rocsparse_operation operation,
+                                                                      rocsparse_fill_mode fill_mode)
 {
     return this->get_csrildlt0_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsm_info(rocsparse_operation operation,
-                                                           rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_bsrsm_info(rocsparse_operation operation,
+                                                                  rocsparse_fill_mode fill_mode)
 {
     return this->get_bsrsm_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsv_info(rocsparse_operation operation,
-                                                           rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_bsrsv_info(rocsparse_operation operation,
+                                                                  rocsparse_fill_mode fill_mode)
 {
     return this->get_bsrsv_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrilu0_info(rocsparse_operation operation,
-                                                             rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_bsrilu0_info(rocsparse_operation operation,
+                                                                    rocsparse_fill_mode fill_mode)
 {
     return this->get_bsrilu0_info()->get(operation, fill_mode);
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_bsric0_info(rocsparse_operation operation,
-                                                            rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_bsric0_info(rocsparse_operation operation,
+                                                                   rocsparse_fill_mode fill_mode)
 {
     return this->get_bsric0_info()->get(operation, fill_mode);
 }
 
-void _rocsparse_mat_info::set_bsrsm_info(rocsparse_operation    operation,
-                                         rocsparse_fill_mode    fill_mode,
-                                         rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_bsrsm_info(rocsparse_operation           operation,
+                                         rocsparse_fill_mode           fill_mode,
+                                         rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_bsrsm_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_bsrsv_info(rocsparse_operation    operation,
-                                         rocsparse_fill_mode    fill_mode,
-                                         rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_bsrsv_info(rocsparse_operation           operation,
+                                         rocsparse_fill_mode           fill_mode,
+                                         rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_bsrsv_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_bsrilu0_info(rocsparse_operation    operation,
-                                           rocsparse_fill_mode    fill_mode,
-                                           rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_bsrilu0_info(rocsparse_operation           operation,
+                                           rocsparse_fill_mode           fill_mode,
+                                           rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_bsrilu0_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_bsric0_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_bsric0_info(rocsparse_operation           operation,
+                                          rocsparse_fill_mode           fill_mode,
+                                          rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_bsric0_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_csrsm_info(rocsparse_operation    operation,
-                                         rocsparse_fill_mode    fill_mode,
-                                         rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_csrsm_info(rocsparse_operation           operation,
+                                         rocsparse_fill_mode           fill_mode,
+                                         rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_csrsm_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_csrsv_info(rocsparse_operation    operation,
-                                         rocsparse_fill_mode    fill_mode,
-                                         rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_csrsv_info(rocsparse_operation           operation,
+                                         rocsparse_fill_mode           fill_mode,
+                                         rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_csrsv_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_csrilu0_info(rocsparse_operation    operation,
-                                           rocsparse_fill_mode    fill_mode,
-                                           rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_csrilu0_info(rocsparse_operation           operation,
+                                           rocsparse_fill_mode           fill_mode,
+                                           rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_csrilu0_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_csric0_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_csric0_info(rocsparse_operation           operation,
+                                          rocsparse_fill_mode           fill_mode,
+                                          rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_csric0_info()->set(operation, fill_mode, trm);
 }
 
-void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation    operation,
-                                             rocsparse_fill_mode    fill_mode,
-                                             rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation           operation,
+                                             rocsparse_fill_mode           fill_mode,
+                                             rocsparse::triangular_info_t* trm)
 {
     this->m_trm.create_csrildlt0_info()->set(operation, fill_mode, trm);
 }
@@ -194,15 +194,15 @@ rocsparse_ellsv_info _rocsparse_mat_info::get_ellsv_info()
     return this->m_trm.create_ellsv_info();
 }
 
-rocsparse::trm_info_t* _rocsparse_mat_info::get_ellsv_info(rocsparse_operation operation,
-                                                           rocsparse_fill_mode fill_mode)
+rocsparse::triangular_info_t* _rocsparse_mat_info::get_ellsv_info(rocsparse_operation operation,
+                                                                  rocsparse_fill_mode fill_mode)
 {
     return this->get_ellsv_info()->get(operation, fill_mode);
 }
 
-void _rocsparse_mat_info::set_ellsv_info(rocsparse_operation    operation,
-                                         rocsparse_fill_mode    fill_mode,
-                                         rocsparse::trm_info_t* trm)
+void _rocsparse_mat_info::set_ellsv_info(rocsparse_operation           operation,
+                                         rocsparse_fill_mode           fill_mode,
+                                         rocsparse::triangular_info_t* trm)
 {
     this->get_ellsv_info()->set(operation, fill_mode, trm);
 }
@@ -287,7 +287,7 @@ void _rocsparse_mat_info::clear_ellsv_info()
 }
 
 //
-// Duplicate all the trm_info_t.
+// Duplicate all the triangular_info_t.
 //
 void _rocsparse_mat_info::duplicate_trdata(rocsparse_mat_info src, hipStream_t stream)
 {

@@ -86,7 +86,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // Initialize buffers
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
 
-    const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
+    const rocsparse::triangular_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
     if(csrsv == nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);

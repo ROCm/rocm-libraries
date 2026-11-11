@@ -25,9 +25,9 @@
 #pragma once
 
 #include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 
-struct _rocsparse_bsrilu0_info : rocsparse::trm_data_t
+struct _rocsparse_bsrilu0_info : rocsparse::triangular_data_t
 {
 protected:
     rocsparse::singular_info_t m_singularity_numeric_exact;

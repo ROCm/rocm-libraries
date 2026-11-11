@@ -34,7 +34,7 @@
 #include "rocsparse_csrsm_info.hpp"
 #include "rocsparse_csrsv_info.hpp"
 #include "rocsparse_ellsv_info.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 
 #include <memory>
 namespace rocsparse
@@ -64,7 +64,7 @@ namespace rocsparse
         void destroy_bsric0_info();
         void destroy_ellsv_info();
 
-        void uncouple(rocsparse::trm_data_t* p);
+        void uncouple(rocsparse::triangular_data_t* p);
 
     public:
         rocsparse_csrsv_info     create_csrsv_info();

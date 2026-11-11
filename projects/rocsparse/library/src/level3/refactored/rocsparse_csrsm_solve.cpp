@@ -356,10 +356,10 @@ static csrsm_launch_t find_csrsm_launch(rocsparse_handle    handle,
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 
-rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle            handle,
-                                                          rocsparse_spmat_descr       target,
-                                                          rocsparse_const_spmat_descr source,
-                                                          rocsparse::trm_info_t*      trm_info)
+rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle              handle,
+                                                          rocsparse_spmat_descr         target,
+                                                          rocsparse_const_spmat_descr   source,
+                                                          rocsparse::triangular_info_t* trm_info)
 {
 
     // Gather values
@@ -578,7 +578,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         buf += rocsparse::align_size(Bt_nbytes);
     }
 
-    rocsparse::trm_info_t* trm_info = csrsm_info->get(op_A, A->descr->fill_mode);
+    rocsparse::triangular_info_t* trm_info = csrsm_info->get(op_A, A->descr->fill_mode);
 
     _rocsparse_spmat_descr At_st(rocsparse_format_csr,
                                  A_batch_count,

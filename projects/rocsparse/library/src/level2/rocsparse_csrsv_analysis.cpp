@@ -110,16 +110,16 @@ rocsparse_status rocsparse_trm_transpose_buffer_size(int64_t             m,
     return rocsparse_status_success;
 }
 
-static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle,
-                                                int64_t                   m,
-                                                int64_t                   nnz,
-                                                const rocsparse_mat_descr descr,
-                                                rocsparse_indextype       csr_row_ptr_indextype,
-                                                const void*               csr_row_ptr,
-                                                rocsparse_indextype       csr_col_ind_indextype,
-                                                const void*               csr_col_ind,
-                                                rocsparse::trm_info_t*    info,
-                                                void*                     temp_buffer)
+static rocsparse_status rocsparse_trm_transpose(rocsparse_handle              handle,
+                                                int64_t                       m,
+                                                int64_t                       nnz,
+                                                const rocsparse_mat_descr     descr,
+                                                rocsparse_indextype           csr_row_ptr_indextype,
+                                                const void*                   csr_row_ptr,
+                                                rocsparse_indextype           csr_col_ind_indextype,
+                                                const void*                   csr_col_ind,
+                                                rocsparse::triangular_info_t* info,
+                                                void*                         temp_buffer)
 {
     const size_t              sizeof_I = rocsparse::indextype_sizeof(csr_row_ptr_indextype);
     const size_t              sizeof_J = rocsparse::indextype_sizeof(csr_col_ind_indextype);
@@ -278,20 +278,20 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
-                                          rocsparse_operation       trans,
-                                          int64_t                   m,
-                                          int64_t                   nnz,
-                                          const rocsparse_mat_descr descr,
-                                          rocsparse_datatype        csr_val_datatype,
-                                          const void*               csr_val,
-                                          rocsparse_indextype       csr_row_ptr_indextype,
-                                          const void*               csr_row_ptr,
-                                          rocsparse_indextype       csr_col_ind_indextype,
-                                          const void*               csr_col_ind,
-                                          rocsparse::trm_info_t*    info,
-                                          rocsparse::pivot_info_t*  pivot_info,
-                                          void*                     temp_buffer)
+rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle              handle,
+                                          rocsparse_operation           trans,
+                                          int64_t                       m,
+                                          int64_t                       nnz,
+                                          const rocsparse_mat_descr     descr,
+                                          rocsparse_datatype            csr_val_datatype,
+                                          const void*                   csr_val,
+                                          rocsparse_indextype           csr_row_ptr_indextype,
+                                          const void*                   csr_row_ptr,
+                                          rocsparse_indextype           csr_col_ind_indextype,
+                                          const void*                   csr_col_ind,
+                                          rocsparse::triangular_info_t* info,
+                                          rocsparse::pivot_info_t*      pivot_info,
+                                          void*                         temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
     const size_t sizeof_I = rocsparse::indextype_sizeof(csr_row_ptr_indextype);
@@ -481,7 +481,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
     // Differentiate the analysis policies
     if(analysis_policy == rocsparse_analysis_policy_reuse)
     {
-        rocsparse::trm_info_t* p = info->get_csrsv_info(trans, descr->fill_mode);
+        rocsparse::triangular_info_t* p = info->get_csrsv_info(trans, descr->fill_mode);
 
         if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans == rocsparse_operation_none))
         {

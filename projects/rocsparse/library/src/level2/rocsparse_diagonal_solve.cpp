@@ -37,7 +37,7 @@
 #include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv_info.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 namespace rocsparse
 {
@@ -74,7 +74,7 @@ namespace rocsparse
         auto           alpha = reinterpret_cast<const T*>(alpha_);
         const uint32_t gy    = static_cast<uint32_t>(
             (nrhs < static_cast<int64_t>(DIAGONAL_SOLVE_GRID_CAP)) ? nrhs
-                                                                      : DIAGONAL_SOLVE_GRID_CAP);
+                                                                   : DIAGONAL_SOLVE_GRID_CAP);
         dim3 blocks((m - 1) / DIAGONAL_SOLVE_BLOCKSIZE + 1, gy, batch_count);
         dim3 threads(DIAGONAL_SOLVE_BLOCKSIZE);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -304,7 +304,7 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
         (info == nullptr) ? rocsparse_status_invalid_pointer : rocsparse_status_success,
         "the analysis stage must be executed before a diagonal solve");
 
-    const rocsparse::trm_info_t* trm = nullptr;
+    const rocsparse::triangular_info_t* trm = nullptr;
     switch(A->format)
     {
     case rocsparse_format_csr:

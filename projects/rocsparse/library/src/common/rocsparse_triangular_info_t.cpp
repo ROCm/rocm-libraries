@@ -21,11 +21,11 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse::trm_info_t::~trm_info_t()
+rocsparse::triangular_info_t::~triangular_info_t()
 {
     // Due to the changes in the hipFree introduced in HIP 7.0
     // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
@@ -50,154 +50,154 @@ rocsparse::trm_info_t::~trm_info_t()
     this->transposed_col_ind = nullptr;
 }
 
-void rocsparse::trm_info_t::set_max_nnz(const int64_t value)
+void rocsparse::triangular_info_t::set_max_nnz(const int64_t value)
 {
     this->max_nnz = value;
 }
-int64_t rocsparse::trm_info_t::get_max_nnz() const
+int64_t rocsparse::triangular_info_t::get_max_nnz() const
 {
     return this->max_nnz;
 }
 
-const void* rocsparse::trm_info_t::get_row_map() const
+const void* rocsparse::triangular_info_t::get_row_map() const
 {
     return this->row_map;
 }
 
-void* rocsparse::trm_info_t::get_row_map()
+void* rocsparse::triangular_info_t::get_row_map()
 {
     return this->row_map;
 }
 
-void** rocsparse::trm_info_t::get_ref_row_map()
+void** rocsparse::triangular_info_t::get_ref_row_map()
 {
     return &this->row_map;
 }
 
-const void* rocsparse::trm_info_t::get_diag_ind() const
+const void* rocsparse::triangular_info_t::get_diag_ind() const
 {
     return this->diag_ind;
 }
 
-void* rocsparse::trm_info_t::get_diag_ind()
+void* rocsparse::triangular_info_t::get_diag_ind()
 {
     return this->diag_ind;
 }
 
-void** rocsparse::trm_info_t::get_ref_diag_ind()
+void** rocsparse::triangular_info_t::get_ref_diag_ind()
 {
     return &this->diag_ind;
 }
 
-const void* rocsparse::trm_info_t::get_transposed_perm() const
+const void* rocsparse::triangular_info_t::get_transposed_perm() const
 {
     return this->transposed_perm;
 }
 
-void* rocsparse::trm_info_t::get_transposed_perm()
+void* rocsparse::triangular_info_t::get_transposed_perm()
 {
     return this->transposed_perm;
 }
 
-void** rocsparse::trm_info_t::get_ref_transposed_perm()
+void** rocsparse::triangular_info_t::get_ref_transposed_perm()
 {
     return &this->transposed_perm;
 }
 
-const void* rocsparse::trm_info_t::get_transposed_row_ptr() const
+const void* rocsparse::triangular_info_t::get_transposed_row_ptr() const
 {
     return this->transposed_row_ptr;
 }
 
-void* rocsparse::trm_info_t::get_transposed_row_ptr()
+void* rocsparse::triangular_info_t::get_transposed_row_ptr()
 {
     return this->transposed_row_ptr;
 }
 
-void** rocsparse::trm_info_t::get_ref_transposed_row_ptr()
+void** rocsparse::triangular_info_t::get_ref_transposed_row_ptr()
 {
     return &this->transposed_row_ptr;
 }
 
-const void* rocsparse::trm_info_t::get_transposed_col_ind() const
+const void* rocsparse::triangular_info_t::get_transposed_col_ind() const
 {
     return this->transposed_col_ind;
 }
 
-void* rocsparse::trm_info_t::get_transposed_col_ind()
+void* rocsparse::triangular_info_t::get_transposed_col_ind()
 {
     return this->transposed_col_ind;
 }
 
-void** rocsparse::trm_info_t::get_ref_transposed_col_ind()
+void** rocsparse::triangular_info_t::get_ref_transposed_col_ind()
 {
     return &this->transposed_col_ind;
 }
 
-void rocsparse::trm_info_t::set_m(const int64_t value)
+void rocsparse::triangular_info_t::set_m(const int64_t value)
 {
     this->m = value;
 }
-int64_t rocsparse::trm_info_t::get_m() const
+int64_t rocsparse::triangular_info_t::get_m() const
 {
     return this->m;
 }
 
-void rocsparse::trm_info_t::set_nnz(const int64_t value)
+void rocsparse::triangular_info_t::set_nnz(const int64_t value)
 {
     this->nnz = value;
 }
-int64_t rocsparse::trm_info_t::get_nnz() const
+int64_t rocsparse::triangular_info_t::get_nnz() const
 {
     return this->nnz;
 }
 
-void rocsparse::trm_info_t::set_row_ptr(const void* const value)
+void rocsparse::triangular_info_t::set_row_ptr(const void* const value)
 {
     this->row_ptr = value;
 }
-const void* rocsparse::trm_info_t::get_row_ptr()
+const void* rocsparse::triangular_info_t::get_row_ptr()
 {
     return this->row_ptr;
 }
 
-void rocsparse::trm_info_t::set_col_ind(const void* const value)
+void rocsparse::triangular_info_t::set_col_ind(const void* const value)
 {
     this->col_ind = value;
 }
-const void* rocsparse::trm_info_t::get_col_ind()
+const void* rocsparse::triangular_info_t::get_col_ind()
 {
     return this->col_ind;
 }
 
-const _rocsparse_mat_descr* rocsparse::trm_info_t::get_descr() const
+const _rocsparse_mat_descr* rocsparse::triangular_info_t::get_descr() const
 {
     return this->descr;
 }
-void rocsparse::trm_info_t::set_descr(const _rocsparse_mat_descr* const value)
+void rocsparse::triangular_info_t::set_descr(const _rocsparse_mat_descr* const value)
 {
     this->descr = value;
 }
 
-rocsparse_indextype rocsparse::trm_info_t::get_offset_indextype() const
+rocsparse_indextype rocsparse::triangular_info_t::get_offset_indextype() const
 {
     return this->index_type_I;
 }
-rocsparse_indextype rocsparse::trm_info_t::get_index_indextype() const
+rocsparse_indextype rocsparse::triangular_info_t::get_index_indextype() const
 {
     return this->index_type_J;
 }
 
-void rocsparse::trm_info_t::set_offset_indextype(const rocsparse_indextype value)
+void rocsparse::triangular_info_t::set_offset_indextype(const rocsparse_indextype value)
 {
     this->index_type_I = value;
 }
-void rocsparse::trm_info_t::set_index_indextype(const rocsparse_indextype value)
+void rocsparse::triangular_info_t::set_index_indextype(const rocsparse_indextype value)
 {
     this->index_type_J = value;
 }
 
-void rocsparse::trm_info_t::destroy(rocsparse::trm_info_t* const p_that)
+void rocsparse::triangular_info_t::destroy(rocsparse::triangular_info_t* const p_that)
 {
     if(p_that != nullptr)
     {
@@ -205,9 +205,9 @@ void rocsparse::trm_info_t::destroy(rocsparse::trm_info_t* const p_that)
     }
 }
 
-rocsparse::trm_info_t::trm_info_t() {}
+rocsparse::triangular_info_t::triangular_info_t() {}
 
-rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
+rocsparse::triangular_info_t::triangular_info_t(const rocsparse::triangular_info_t& that)
 {
 
     this->max_nnz      = that.max_nnz;
@@ -267,7 +267,8 @@ rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
     }
 }
 
-rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_info_t& that)
+rocsparse::triangular_info_t&
+    rocsparse::triangular_info_t::operator=(const rocsparse::triangular_info_t& that)
 {
     bool invalid = false;
     invalid |= (this->max_nnz != that.max_nnz);
@@ -353,14 +354,14 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
     return *this;
 }
 
-void rocsparse::trm_info_t::copy(rocsparse::trm_info_t* __restrict__* const p_dest,
-                                 const rocsparse::trm_info_t* const __restrict__ that)
+void rocsparse::triangular_info_t::copy(rocsparse::triangular_info_t* __restrict__* const p_dest,
+                                        const rocsparse::triangular_info_t* const __restrict__ that)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
     if(p_dest[0] == nullptr)
     {
-        p_dest[0] = new rocsparse::trm_info_t(that[0]);
+        p_dest[0] = new rocsparse::triangular_info_t(that[0]);
     }
     else
     {

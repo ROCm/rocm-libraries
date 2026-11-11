@@ -31,7 +31,7 @@
 #include "rocsparse_csrmv_info.hpp"
 #include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_sorted_coo2csr_info.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 #include "rocsparse_trm_t.hpp"
 
 /********************************************************************************
@@ -79,75 +79,75 @@ public:
     void                                       clear_bsric0_info();
     void                                       clear_ellsv_info();
 
-    rocsparse_bsric0_info  get_bsric0_info();
-    rocsparse::trm_info_t* get_bsric0_info(rocsparse_operation operation,
-                                           rocsparse_fill_mode fill_mode);
-    void                   set_bsric0_info(rocsparse_operation    operation,
-                                           rocsparse_fill_mode    fill_mode,
-                                           rocsparse::trm_info_t* trm_info);
+    rocsparse_bsric0_info         get_bsric0_info();
+    rocsparse::triangular_info_t* get_bsric0_info(rocsparse_operation operation,
+                                                  rocsparse_fill_mode fill_mode);
+    void                          set_bsric0_info(rocsparse_operation           operation,
+                                                  rocsparse_fill_mode           fill_mode,
+                                                  rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_bsrilu0_info get_bsrilu0_info();
-    rocsparse::trm_info_t* get_bsrilu0_info(rocsparse_operation operation,
-                                            rocsparse_fill_mode fill_mode);
-    void                   set_bsrilu0_info(rocsparse_operation    operation,
-                                            rocsparse_fill_mode    fill_mode,
-                                            rocsparse::trm_info_t* trm_info);
+    rocsparse_bsrilu0_info        get_bsrilu0_info();
+    rocsparse::triangular_info_t* get_bsrilu0_info(rocsparse_operation operation,
+                                                   rocsparse_fill_mode fill_mode);
+    void                          set_bsrilu0_info(rocsparse_operation           operation,
+                                                   rocsparse_fill_mode           fill_mode,
+                                                   rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_csric0_info  get_csric0_info();
-    rocsparse::trm_info_t* get_csric0_info(rocsparse_operation operation,
-                                           rocsparse_fill_mode fill_mode);
-    void                   set_csric0_info(rocsparse_operation    operation,
-                                           rocsparse_fill_mode    fill_mode,
-                                           rocsparse::trm_info_t* trm_info);
+    rocsparse_csric0_info         get_csric0_info();
+    rocsparse::triangular_info_t* get_csric0_info(rocsparse_operation operation,
+                                                  rocsparse_fill_mode fill_mode);
+    void                          set_csric0_info(rocsparse_operation           operation,
+                                                  rocsparse_fill_mode           fill_mode,
+                                                  rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_csrildlt0_info get_csrildlt0_info();
-    rocsparse::trm_info_t*   get_csrildlt0_info(rocsparse_operation operation,
-                                                rocsparse_fill_mode fill_mode);
-    void                     set_csrildlt0_info(rocsparse_operation    operation,
-                                                rocsparse_fill_mode    fill_mode,
-                                                rocsparse::trm_info_t* trm_info);
+    rocsparse_csrildlt0_info      get_csrildlt0_info();
+    rocsparse::triangular_info_t* get_csrildlt0_info(rocsparse_operation operation,
+                                                     rocsparse_fill_mode fill_mode);
+    void                          set_csrildlt0_info(rocsparse_operation           operation,
+                                                     rocsparse_fill_mode           fill_mode,
+                                                     rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_csrilu0_info get_csrilu0_info();
-    rocsparse::trm_info_t* get_csrilu0_info(rocsparse_operation operation,
-                                            rocsparse_fill_mode fill_mode);
-    void                   set_csrilu0_info(rocsparse_operation    operation,
-                                            rocsparse_fill_mode    fill_mode,
-                                            rocsparse::trm_info_t* trm_info);
+    rocsparse_csrilu0_info        get_csrilu0_info();
+    rocsparse::triangular_info_t* get_csrilu0_info(rocsparse_operation operation,
+                                                   rocsparse_fill_mode fill_mode);
+    void                          set_csrilu0_info(rocsparse_operation           operation,
+                                                   rocsparse_fill_mode           fill_mode,
+                                                   rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_csrsv_info   get_csrsv_info();
-    rocsparse::trm_info_t* get_csrsv_info(rocsparse_operation operation,
-                                          rocsparse_fill_mode fill_mode);
-    void                   set_csrsv_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm_info);
+    rocsparse_csrsv_info          get_csrsv_info();
+    rocsparse::triangular_info_t* get_csrsv_info(rocsparse_operation operation,
+                                                 rocsparse_fill_mode fill_mode);
+    void                          set_csrsv_info(rocsparse_operation           operation,
+                                                 rocsparse_fill_mode           fill_mode,
+                                                 rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_csrsm_info   get_csrsm_info();
-    rocsparse::trm_info_t* get_csrsm_info(rocsparse_operation operation,
-                                          rocsparse_fill_mode fill_mode);
-    void                   set_csrsm_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm_info);
+    rocsparse_csrsm_info          get_csrsm_info();
+    rocsparse::triangular_info_t* get_csrsm_info(rocsparse_operation operation,
+                                                 rocsparse_fill_mode fill_mode);
+    void                          set_csrsm_info(rocsparse_operation           operation,
+                                                 rocsparse_fill_mode           fill_mode,
+                                                 rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_bsrsv_info   get_bsrsv_info();
-    rocsparse::trm_info_t* get_bsrsv_info(rocsparse_operation operation,
-                                          rocsparse_fill_mode fill_mode);
-    void                   set_bsrsv_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm_info);
+    rocsparse_bsrsv_info          get_bsrsv_info();
+    rocsparse::triangular_info_t* get_bsrsv_info(rocsparse_operation operation,
+                                                 rocsparse_fill_mode fill_mode);
+    void                          set_bsrsv_info(rocsparse_operation           operation,
+                                                 rocsparse_fill_mode           fill_mode,
+                                                 rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_bsrsm_info   get_bsrsm_info();
-    rocsparse::trm_info_t* get_bsrsm_info(rocsparse_operation operation,
-                                          rocsparse_fill_mode fill_mode);
-    void                   set_bsrsm_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm_info);
+    rocsparse_bsrsm_info          get_bsrsm_info();
+    rocsparse::triangular_info_t* get_bsrsm_info(rocsparse_operation operation,
+                                                 rocsparse_fill_mode fill_mode);
+    void                          set_bsrsm_info(rocsparse_operation           operation,
+                                                 rocsparse_fill_mode           fill_mode,
+                                                 rocsparse::triangular_info_t* trm_info);
 
-    rocsparse_ellsv_info   get_ellsv_info();
-    rocsparse::trm_info_t* get_ellsv_info(rocsparse_operation operation,
-                                          rocsparse_fill_mode fill_mode);
-    void                   set_ellsv_info(rocsparse_operation    operation,
-                                          rocsparse_fill_mode    fill_mode,
-                                          rocsparse::trm_info_t* trm_info);
+    rocsparse_ellsv_info          get_ellsv_info();
+    rocsparse::triangular_info_t* get_ellsv_info(rocsparse_operation operation,
+                                                 rocsparse_fill_mode fill_mode);
+    void                          set_ellsv_info(rocsparse_operation           operation,
+                                                 rocsparse_fill_mode           fill_mode,
+                                                 rocsparse::triangular_info_t* trm_info);
 
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};

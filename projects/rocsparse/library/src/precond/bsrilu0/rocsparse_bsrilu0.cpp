@@ -38,7 +38,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    rocsparse::trm_info_t* trm_info
+    rocsparse::triangular_info_t* trm_info
         = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
     ROCSPARSE_CHECKARG(1,

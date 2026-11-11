@@ -347,7 +347,7 @@ GET_SHARED_INFO(bsrilu0);
 GET_SHARED_INFO(bsric0);
 GET_SHARED_INFO(ellsv);
 
-void rocsparse::trm_t::uncouple(rocsparse::trm_data_t* p)
+void rocsparse::trm_t::uncouple(rocsparse::triangular_data_t* p)
 {
     if(p != nullptr)
     {

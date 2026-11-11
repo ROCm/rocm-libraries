@@ -66,7 +66,7 @@ rocsparse_status rocsparse::csrsm_analysis(rocsparse_handle            handle,
         //
         //
         //
-        rocsparse::trm_info_t* p = nullptr;
+        rocsparse::triangular_info_t* p = nullptr;
 
         p = (p) ? p : info->get_csrsm_info(op_A, descr->fill_mode);
 

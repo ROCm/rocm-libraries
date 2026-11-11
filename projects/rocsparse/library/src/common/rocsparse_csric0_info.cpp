@@ -24,7 +24,7 @@
 #include "rocsparse_csric0_info.hpp"
 void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_t stream)
 {
-    this->rocsparse::trm_data_t::copy(that, stream);
+    this->rocsparse::triangular_data_t::copy(that, stream);
     this->m_singularity_numeric_exact.copy_singular_info_async(&that->m_singularity_numeric_exact,
                                                                stream);
     this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,

@@ -36,7 +36,7 @@
 #include "rocsparse_diagonal_solve.hpp"
 #include "rocsparse_ellsv.hpp"
 #include "rocsparse_sptrsv_descr.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_stage value)
