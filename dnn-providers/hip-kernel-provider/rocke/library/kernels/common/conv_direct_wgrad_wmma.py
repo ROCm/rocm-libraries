@@ -169,9 +169,12 @@ class DirectWgradWmmaSpec:
         return 8 * (p.KH * p.KW * self.tiles_k * self.tiles_c + frags)
 
     def lds_bytes(self) -> int:
+        # The builder's allocations: the dY row and, without TDM, the X row
+        # carry a dummy slot past the buffer; TDM's X row has PAD slack rows.
         x_rows = self.x_cols() + (self.problem.PAD if self.tdm else 0)
+        dummies = _DUMMY if self.tdm else 2 * _DUMMY
         per_stage = x_rows * self.pitch_c() + self.block_q * self.pitch_k()
-        return self.stages * self.rows * (per_stage + 2 * _DUMMY) * 2
+        return self.stages * self.rows * (per_stage + dummies) * 2
 
 
 def wgrad_wmma_arch_reason(arch: str, dtype: str):

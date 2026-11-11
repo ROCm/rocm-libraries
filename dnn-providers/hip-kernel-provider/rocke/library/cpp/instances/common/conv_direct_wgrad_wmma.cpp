@@ -167,7 +167,10 @@ long long rocke_direct_wgrad_wmma_lds_bytes(const rocke_direct_wgrad_wmma_spec_t
     long long per_stage = x_rows * rocke_direct_wgrad_wmma_pitch_c(spec)
                           + (long long)rocke_direct_wgrad_wmma_block_q(spec)
                                 * rocke_direct_wgrad_wmma_pitch_k(spec);
-    return (long long)spec->stages * spec->rows * (per_stage + 2 * WGW_DUMMY) * 2;
+    /* The builder's allocations: the dY row and, without TDM, the X row carry
+     * a dummy slot past the buffer; TDM's X row has PAD slack rows. */
+    long long dummies = spec->tdm ? WGW_DUMMY : 2 * WGW_DUMMY;
+    return (long long)spec->stages * spec->rows * (per_stage + dummies) * 2;
 }
 
 void rocke_direct_wgrad_wmma_launch_geometry(const rocke_direct_wgrad_wmma_spec_t* spec,

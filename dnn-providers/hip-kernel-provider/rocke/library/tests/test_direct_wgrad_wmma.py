@@ -153,7 +153,22 @@ class TestWgradWmmaSpec(unittest.TestCase):
         spec = DirectWgradWmmaSpec(problem=_problem(), **_AOT)
         # X: (32 + 2 + PAD 1) cols x (64 + 16); dY: 32 x (128 + 16); 4 x 2 slots.
         per_stage = 35 * 80 + 32 * 144
-        self.assertEqual(spec.lds_bytes(), 4 * 2 * (per_stage + 16) * 2)
+        # TDM: only the dY row carries the 8-element dummy slot.
+        self.assertEqual(spec.lds_bytes(), 4 * 2 * (per_stage + 8) * 2)
+
+    def test_lds_bytes_match_the_allocations(self):
+        """lds_bytes() is the sum of the builder's LDS allocations, with and
+        without TDM (whose X row has no dummy slot but PAD slack rows)."""
+        for knobs in (_AOT, dict(_AOT, tdm=False), {}):
+            with self.subTest(knobs=knobs):
+                spec = DirectWgradWmmaSpec(problem=_problem(), **knobs)
+                kernel = build_direct_wgrad_wmma(spec, "gfx1250")
+                allocated = 0
+                for op in kernel.body.ops:
+                    if op.name == "tile.smem_alloc":
+                        shape = op.results[0].type.shape
+                        allocated += shape[0] * shape[1] * 2
+                self.assertEqual(spec.lds_bytes(), allocated)
 
     def test_kernel_name(self):
         spec = DirectWgradWmmaSpec(problem=_problem(), **_AOT)
