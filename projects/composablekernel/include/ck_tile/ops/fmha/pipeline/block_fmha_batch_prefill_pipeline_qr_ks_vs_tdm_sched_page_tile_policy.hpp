@@ -245,7 +245,8 @@ using FmhaBatchPrefillPageTileGeometryFor =
 // Code-generation options per problem, as measured on gfx1250 (BF16, vectorized-KV batch-prefill
 // page tile, dense and causal):
 //  - the WMMA operand guard for every vectorized-KV problem, which requires it; the linear page
-//    tile keeps its unguarded refills (see the hazard note of the scheduled-TDM policy);
+//    tile keeps its unguarded refills (see the hazard note of the scheduled-TDM policy) and takes
+//    the LDS drain before every K/V TDM issue instead (kDrainLdsBeforeTdmIssue);
 //  - M128 tiles (P64/P128 x D64/D128): the other four (scalar row clamp 1);
 //  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
 //    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
@@ -255,7 +256,7 @@ using FmhaBatchPrefillPageTileGeometryFor =
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
 using FmhaBatchPrefillPageTileOptionsFor = std::conditional_t<
     !detail::fmha_tdm_is_vectorized_kv<Problem>::value,
-    FmhaTdmSchedTuningOptions<>,
+    FmhaTdmSchedTuningOptions<false, false, false, 0, false, true>,
     std::conditional_t<
         !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
         FmhaTdmSchedTuningOptions<true, true, true, 1, true>,

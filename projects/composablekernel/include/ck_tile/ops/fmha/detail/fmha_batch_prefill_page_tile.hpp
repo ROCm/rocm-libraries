@@ -268,8 +268,10 @@ struct FmhaBatchPrefillLinearPageTileWriter
             // V rows are multiplied by P, so a non-zero (e.g. NaN) row would propagate -
             // so correctness of the V tail depends on that zero fill.
             const index_t present_rows = kPerWavePage ? wave_rows : tile_rows;
-            const index_t physical_page =
-                present_rows > 0 ? ids.owned[kFragment].physical_page : index_t{0};
+            // In an SGPR (the row count comes from a clamp, which selects v_med3_i32): the page
+            // address arithmetic below stays on the scalar unit.
+            const index_t physical_page = amd_wave_read_first_lane(
+                present_rows > 0 ? ids.owned[kFragment].physical_page : index_t{0});
 
             // Full 64-bit pointer rebase; never a 32-bit pool-relative offset. The
             // P>=128 distribution's (4,32) warp factor already contributes the

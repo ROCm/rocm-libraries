@@ -300,19 +300,23 @@ struct FmhaTdmSchedLayout
 //   WmmaOperandGuard: waits before the K/V operand refills of WMMAs that may still read them
 //                   (the WAR hazard described in
 //                   block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp).
-template <bool QkKOuter          = false,
-          bool KReadKMajor       = false,
-          bool RowMaxMaximum     = false,
-          index_t ScalarRowClamp = 0,
-          bool WmmaOperandGuard  = false>
+//   DrainLdsBeforeTdmIssue: the wave's own LDS reads complete before every K/V TDM issue (the
+//                   stale-fragment workaround, kDrainLdsBeforeTdmIssue of the same file).
+template <bool QkKOuter               = false,
+          bool KReadKMajor            = false,
+          bool RowMaxMaximum          = false,
+          index_t ScalarRowClamp      = 0,
+          bool WmmaOperandGuard       = false,
+          bool DrainLdsBeforeTdmIssue = false>
 struct FmhaTdmSchedTuningOptions
 {
     static_assert(ScalarRowClamp >= 0 && ScalarRowClamp <= 2);
-    static constexpr bool kQkKOuter          = QkKOuter;
-    static constexpr bool kKReadKMajor       = KReadKMajor;
-    static constexpr bool kRowMaxMaximum     = RowMaxMaximum;
-    static constexpr index_t kScalarRowClamp = ScalarRowClamp;
-    static constexpr bool kWmmaOperandGuard  = WmmaOperandGuard;
+    static constexpr bool kQkKOuter               = QkKOuter;
+    static constexpr bool kKReadKMajor            = KReadKMajor;
+    static constexpr bool kRowMaxMaximum          = RowMaxMaximum;
+    static constexpr index_t kScalarRowClamp      = ScalarRowClamp;
+    static constexpr bool kWmmaOperandGuard       = WmmaOperandGuard;
+    static constexpr bool kDrainLdsBeforeTdmIssue = DrainLdsBeforeTdmIssue;
 };
 
 // Code-generation options of a tuning: its Options when it names them (a tuning derived for one
