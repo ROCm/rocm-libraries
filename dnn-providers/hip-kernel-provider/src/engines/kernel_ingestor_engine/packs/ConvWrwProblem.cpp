@@ -330,9 +330,21 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
         }
         return std::max(divUp(aGroups, waves), divUp(bGroups, waves));
     }
+    const int64_t threads = waves * wave;
+    if(config.loop == LOOP_ROWS_SMALLC && config.layout == LAYOUT_CHANNELS_LAST)
+    {
+        // K3SmallClTiles: dy units KV positions by a vector of output channels; x units one
+        // element of the channels-first tiles' window (fr rows, sw phases of ph positions, bc
+        // channels).
+        const int64_t kv = 4 / elementBytes;
+        const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
+        const int64_t ph = divUp(win, vec) * vec / config.sw;
+        const int64_t aUnits = (config.bq / kv) * (config.bk / vec);
+        const int64_t bUnits = config.fr * config.sw * ph * config.bc;
+        return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+    }
     // K3Tiles: channels-first units are a vector of positions of one channel row; channels-last
     // ones KV positions (1 for layout 2) by a vector of channels.
-    const int64_t threads = waves * wave;
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const int64_t kv = config.layout == LAYOUT_CHANNELS_LAST ? 4 / elementBytes : 1;
     const int64_t rows
@@ -565,13 +577,16 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
     }
-    else if((kg % config.vec != 0 && config.align != 2) || cg % config.vec != 0)
+    else if((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc))
     {
         return std::nullopt;
     }
-    // Small-C rows: channels-first, for at most 16 input channels per group (stems); a tile of
-    // at most 16 of them.
-    if(smallc && (!cf || cg > 16 || config.bc > 16))
+    // Small-C rows: at most 16 input channels per group (stems), a tile of at most 16 of them.
+    // Channels-last operands are staged into the channels-first tiles (x one element at a time,
+    // so any channel count): their geometry's whole-vector chunk and phases hold too.
+    if(smallc
+       && (tr || cg > 16 || config.bc > 16
+           || (!cf && (config.bq % config.vec != 0 || config.vec % config.sw != 0))))
     {
         return std::nullopt;
     }

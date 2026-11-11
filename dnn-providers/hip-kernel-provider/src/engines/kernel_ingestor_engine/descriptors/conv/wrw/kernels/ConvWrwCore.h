@@ -1247,14 +1247,188 @@ __device__ inline typename Atom::frag k3FragAtRt(const T* p, int off)
     }
 }
 
+/// The small-C rows' tiles from channels-last x and dy (stems stored N H W C): the LDS tiles of
+/// K3Tiles<K3_NCHW> (so the small-C loop reads them unchanged and the LDS arithmetic is the
+/// channels-first one), loaded from channels-last operands.
+///
+/// A (dy): a unit is KV positions by VEC output channels (16 bytes each, the output channels per
+/// group whole vectors), transposed into As[k][q] by words, as K3Tiles<K3_NHWC> does. B (x): a
+/// unit is one element (filter row, window position, channel), the channel fastest, so a wave
+/// reads the window's run of C-channel pixels in order however few channels there are; it is
+/// stored into its phase row Bs[(f SW + p % SW) BC + c][p / SW]. Elements outside the image,
+/// the row or the group read zeros. The B unit's indices are recomputed from the thread and pass
+/// (constant divisors), not kept in registers: there can be ~30 passes.
+template <class T, int BK, int BC, int BQ, int FR, int S, int SW, int DW, int VEC, int THREADS>
+struct K3SmallClTiles
+{
+    typedef K3Tiles<T, K3_NCHW, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS> Geo;
+    typedef typename K1Raw<16>::type Raw;
+    typedef typename K1Raw<sizeof(T)>::type RawE;
+    static constexpr int KV = 4 / static_cast<int>(sizeof(T));
+    static constexpr int LDA = Geo::LDA, LDB = Geo::LDB;
+    static constexpr int A_ELEMS = Geo::A_ELEMS, B_ELEMS = Geo::B_ELEMS;
+    /// Window positions staged per filter row: every phase row's PH positions.
+    static constexpr int SPAN = SW * Geo::PH;
+    static constexpr int A_UNITS = (BQ / KV) * (BK / VEC);
+    static constexpr int B_UNITS = FR * SPAN * BC;
+    static constexpr int A_PASSES = (A_UNITS + THREADS - 1) / THREADS;
+    static constexpr int B_PASSES = (B_UNITS + THREADS - 1) / THREADS;
+    static_assert(VEC * sizeof(T) == 16 && BK % VEC == 0 && BQ % KV == 0,
+                  "K3 small-C channels-last dy units");
+    static_assert(A_PASSES <= 32 && B_PASSES <= 32, "K3 pass masks");
+
+    Raw ra[A_PASSES * KV];
+    RawE rb[B_PASSES];
+    int aOff[A_PASSES], aLds[A_PASSES], aPos[A_PASSES];
+    unsigned aOk;
+    int gc0; ///< the block's first input channel, all groups
+
+    __device__ void init(const K3Args& a, int tid, int g, int k0, int c0, int kg, int cg)
+    {
+        aOk = 0;
+        gc0 = g * cg + c0;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            const int qp = u % (BQ / KV), kv = u / (BQ / KV);
+            const int k = k0 + kv * VEC;
+            aPos[p] = qp * KV;
+            aOff[p] = aPos[p] * static_cast<int>(a.ys[4]) + g * kg + k;
+            aLds[p] = (kv * VEC) * LDA + qp * KV;
+            if(u < A_UNITS && k < kg)
+                aOk |= 1u << p;
+        }
+    }
+
+    /// B unit u: filter row f, window position pos, channel c of the tile.
+    __device__ static void unitOf(int u, int& f, int& pos, int& c)
+    {
+        c = u % BC;
+        const int rest = u / BC;
+        pos = rest % SPAN;
+        f = rest / SPAN;
+    }
+
+    /// The global loads of one step: the dy row (yOk, element offset yRow) from position q0,
+    /// and per filter row f the x row (xOk[f], xRow[f]) window from position q0 SW - pw.
+    template <int P = 0>
+    __device__ void load(const K3Args& a,
+                         int n,
+                         int q0,
+                         bool yOk,
+                         int yRow,
+                         const bool (&xOk)[FR],
+                         const int (&xRow)[FR])
+    {
+        static_assert(P == 0, "K3 small-C channels-last tiles hold one step");
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage, a.yImage * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage, a.xImage * sizeof(T));
+        const int ys4 = static_cast<int>(a.ys[4]), xs4 = static_cast<int>(a.xs[4]);
+        const int cg = a.c / a.groups;
+        const int c0 = gc0 % cg;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const bool ok = yOk && ((aOk >> p) & 1u);
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+            {
+                const bool okq = ok && q0 + aPos[p] + j < a.wo;
+                const int off = aOff[p] + yRow + (q0 + j) * ys4;
+                k3Load(ra[p * KV + j],
+                       yr,
+                       okq ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+            }
+        }
+        const int iw0 = q0 * SW - a.pw;
+        const int tid = threadIdx.x;
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            int f, pos, c;
+            unitOf(u, f, pos, c);
+            bool rowOk = false;
+            int row = 0;
+#pragma unroll
+            for(int ff = 0; ff < FR; ++ff)
+                if(ff == f)
+                {
+                    rowOk = xOk[ff];
+                    row = xRow[ff];
+                }
+            const int iw = iw0 + pos;
+            const bool ok = u < B_UNITS && rowOk && c0 + c < cg && iw >= 0 && iw < a.wi;
+            const int off = row + iw * xs4 + gc0 + c;
+            k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+        }
+    }
+
+    template <int P, int N>
+    __device__ void wait()
+    {
+        k3WaitLoads<N>();
+#pragma unroll
+        for(int i = 0; i < A_PASSES * KV; ++i)
+            k3Pin(ra[i]);
+#pragma unroll
+        for(int i = 0; i < B_PASSES; ++i)
+            k3Pin(rb[i]);
+    }
+
+    template <int P = 0>
+    __device__ void store(const K3Args& /*a*/, T* As, T* Bs, int tid) const
+    {
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            if(A_UNITS % THREADS != 0 && u >= A_UNITS)
+                continue;
+            T* dst = As + aLds[p];
+            // KV loaded vectors (one per position) of VEC channels become VEC words of KV
+            // positions, one per channel row (by value: see K3Tiles::storeWords).
+#pragma unroll
+            for(int i = 0; i < VEC; ++i)
+            {
+                if constexpr(KV == 1)
+                {
+                    *reinterpret_cast<unsigned*>(dst + i * LDA) = ra[p][i];
+                }
+                else
+                {
+                    const int sh = 16 * (i % 2);
+                    const unsigned lo = (ra[p * KV][i / 2] >> sh) & 0xffffu;
+                    const unsigned hi = (ra[p * KV + 1][i / 2] >> sh) & 0xffffu;
+                    *reinterpret_cast<unsigned*>(dst + i * LDA) = lo | (hi << 16);
+                }
+            }
+        }
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            if(B_UNITS % THREADS != 0 && u >= B_UNITS)
+                continue;
+            int f, pos, c;
+            unitOf(u, f, pos, c);
+            Bs[((f * SW + pos % SW) * BC + c) * LDB + pos / SW] = __builtin_bit_cast(T, rb[p]);
+        }
+    }
+};
+
 // ---------------------------------------------------------------------------------------------
-// Small-C output rows (stems: few input channels, channels-first). The output-rows kernel with
-// the GEMM's N axis the (input channel, filter-width tap) pairs instead of the input channels:
-// lane column n of a fragment is channel n / S, tap n % S, read from the channel's window at
-// the tap's stride phase and offset, so BC S columns fill whole fragments where BC channels
-// alone would leave most of them idle. Waves split the output channels only (WC = 1).
+// Small-C output rows (stems: few input channels). The output-rows kernel with the GEMM's N
+// axis the (input channel, filter-width tap) pairs instead of the input channels: lane column n
+// of a fragment is channel n / S, tap n % S, read from the channel's window at the tap's stride
+// phase and offset, so BC S columns fill whole fragments where BC channels alone would leave
+// most of them idle. Waves split the output channels only (WC = 1). Channels-first operands
+// load through K3Tiles; channels-last ones (LAYOUT K3_NHWC) through K3SmallClTiles, into the
+// same LDS tiles.
 template <class T,
           class Atom,
+          int LAYOUT,
           int BK,
           int BC,
           int BQ,
@@ -1275,7 +1449,10 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
     constexpr int FN = (BC * S + DIM - 1) / DIM; // (channel, tap) fragments
     constexpr int KK = BQ / KA;
     static_assert(FK * DIM * WK == BK && BQ % KA == 0, "K3 small-C tile");
-    typedef K3Tiles<T, K3_NCHW, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS> Tiles;
+    static_assert(LAYOUT == K3_NCHW || LAYOUT == K3_NHWC, "K3 small-C layouts");
+    typedef typename K1If<LAYOUT == K3_NCHW,
+                          K3Tiles<T, K3_NCHW, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS>,
+                          K3SmallClTiles<T, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS>>::type Tiles;
     static_assert(
         k3LdsBytes(6, K3_NCHW, sizeof(T), BK, BC, BQ, FR, S, SW, DW, WK, 1, 0, 0, VEC, 0, 0)
             == 2 * (Tiles::A_ELEMS + Tiles::B_ELEMS) * sizeof(T),

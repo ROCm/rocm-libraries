@@ -280,8 +280,10 @@ DirectPlan directPlanFor(int64_t tiles,
  * loop takes wq 0.
  *
  * Loop 6 (small-C rows): loop 0 on a matrix atom with the N axis the (input channel, filter-width
- * tap) pairs: channels-first, at most 16 input channels per group, bc at most 16, wc 1, bk whole
- * fragments per wave, bq whole atom steps.
+ * tap) pairs: at most 16 input channels per group, bc at most 16, wc 1, bk whole fragments per
+ * wave, bq whole atom steps; channels-first, or channels-last (layout 1: any input channel count,
+ * output channels per group whole vectors, bq whole vectors and vec whole width-stride phases,
+ * as the channels-first tiles it stages into).
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,

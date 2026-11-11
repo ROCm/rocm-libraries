@@ -1096,7 +1096,7 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
 
 TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
 {
-    // Three input channels, channels-first: served; 24 (past 16) and channels-last are not.
+    // Three input channels, channels-first: served; 24 (past 16) is not.
     EXPECT_TRUE(admits(smallcFields(), "gfx942", stemShape()));
     EXPECT_FALSE(admits(smallcFields(), "gfx942", baseShape()));
     auto many = stemShape();
@@ -1104,12 +1104,56 @@ TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
     EXPECT_FALSE(admits(smallcFields(), "gfx942", many));
     many.c = 16;
     EXPECT_TRUE(admits(smallcFields(), "gfx942", many));
+    // Channels-last: any input channel count up to 16 (x staged an element at a time), the
+    // output channels whole vectors (dy units of 16 bytes).
     auto cl = stemShape();
-    cl.c = 8;
     cl.channelsLast = true;
     auto f = smallcFields();
     f.layout = 1;
+    EXPECT_TRUE(admits(f, "gfx942", cl));
+    cl.c = 8;
+    EXPECT_TRUE(admits(f, "gfx942", cl));
+    cl.c = 17;
     EXPECT_FALSE(admits(f, "gfx942", cl));
+    cl.c = 3;
+    cl.k = 36;
+    EXPECT_FALSE(admits(f, "gfx942", cl));
+    EXPECT_FALSE(admits(f, "gfx942", stemShape())); // channels-last config, channels-first graph
+    // Not kept channels-last for transpose reads (gfx950's layout 2).
+    auto clStem = stemShape();
+    clStem.channelsLast = true;
+    auto tr = smallcFields();
+    tr.atom = "mfma16x32_f16";
+    tr.atomId = 8;
+    tr.layout = 1;
+    EXPECT_TRUE(admits(tr, "gfx950", clStem));
+    tr.layout = 2;
+    EXPECT_FALSE(admits(tr, "gfx950", clStem));
+    // The channels-first tiles' geometry: bq whole vectors (mfma32_f32 steps 2 positions) and
+    // vec whole width-stride phases.
+    auto f32 = clStem;
+    f32.dataType = DataType::FLOAT;
+    auto steps = smallcFields();
+    steps.atom = "mfma32_f32";
+    steps.atomId = 7;
+    steps.layout = 1;
+    steps.wk = 2;
+    steps.vec = 4;
+    steps.bq = 64;
+    EXPECT_TRUE(admits(steps, "gfx942", f32));
+    steps.bq = 66;
+    EXPECT_FALSE(admits(steps, "gfx942", f32));
+    auto s3 = clStem;
+    s3.input = {10, 31};
+    s3.stride = {1, 3};
+    auto phases = smallcFields();
+    phases.layout = 1;
+    phases.sw = 3;
+    EXPECT_FALSE(admits(phases, "gfx942", s3));
+    s3.stride = {1, 2};
+    phases.sw = 2;
+    EXPECT_TRUE(admits(phases, "gfx942", s3));
+    f = smallcFields();
     // Any stride: the rows loop's grid, filter rows per block.
     auto s2 = stemShape();
     s2.stride = {2, 2};
@@ -2006,6 +2050,18 @@ TEST(TestConvWrwLaunch, SplitsCoverEveryStepOnce)
 // ---------------------------------------------------------------------------
 // LDS: the kernel's arithmetic
 // ---------------------------------------------------------------------------
+
+TEST(TestConvWrwLoadPasses, SmallCChannelsLastStagesXAnElementAUnit)
+{
+    // Small-C rows, 64 x 4 tile, 64 positions, 3 filter rows of 3 taps, fp16, 256 threads.
+    // Channels-first: dy 64 rows x 8 vectors (2 passes), x 3 rows x 4 channels x 9 vectors.
+    auto f = smallcFields();
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 2, 64), 2);
+    // Channels-last: dy 32 position pairs x 8 vectors (1 pass); x one element a unit: 3 rows x
+    // 72 window positions (66 rounded to vectors) x 4 channels = 864 (4 passes).
+    f.layout = 1;
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 2, 64), 4);
+}
 
 TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 {

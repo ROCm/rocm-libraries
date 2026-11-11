@@ -164,6 +164,8 @@ constexpr long long k3LdsBytes(int loop,
         return static_cast<long long>(ns) * (aPasses + bPasses) * waves * 64 * v * eb;
     }
     const int rows = loop == 0 || loop == 6 ? fr : 1; // 6: small-C rows, loop 0's tiles
+    // Small-C rows stage channels-last operands into the channels-first tiles.
+    layout = loop == 6 ? 0 : layout;
     const bool tr = layout == 2;
     const int kv = layout == 1 ? 4 / eb : 1;
     const int win = (bq - 1) * sw + (s - 1) * dw + 1;

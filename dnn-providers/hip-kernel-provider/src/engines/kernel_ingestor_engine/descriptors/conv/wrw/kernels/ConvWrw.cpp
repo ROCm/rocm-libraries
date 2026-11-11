@@ -11,7 +11,7 @@
 //                    rows that are not a whole number of vectors); 5 direct (ConvWrwDirect.h:
 //                    gfx950, 16-bit, unit stride and height dilation, persistent grid); 6
 //                    small-C output rows (stems: (channel, tap) pairs on the N axis,
-//                    channels-first, WC 1)
+//                    layout 0 or 1 staged into the same tiles, WC 1)
 //   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2
 //   CONV_K3_LAYOUT   0 channels-first (N C D H W); 1 channels-last (N D H W C) transposed into
 //                    LDS; 2 channels-last kept channels-last, LDS transpose reads (gfx950, 16-bit)
@@ -70,6 +70,7 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 #elif CONV_K3_LOOP == 6
     k3WrwRowsSmallC<CONV_K3_T,
                     CONV_K3_ATOM,
+                    CONV_K3_LAYOUT,
                     CONV_K3_BK,
                     CONV_K3_BC,
                     CONV_K3_BQ,

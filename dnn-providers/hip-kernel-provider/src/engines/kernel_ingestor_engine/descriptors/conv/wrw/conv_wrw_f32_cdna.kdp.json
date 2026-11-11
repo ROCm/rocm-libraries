@@ -455,6 +455,154 @@
     },
     {
       "version": "1.0",
+      "id": "42a52d89-1bc0-56aa-9b66-1b34a6b834c9",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 988
+    },
+    {
+      "version": "1.0",
+      "id": "7af6a1ad-8ad5-56f5-ac9c-55dddb028bbf",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 987
+    },
+    {
+      "version": "1.0",
+      "id": "3301e6c5-f8d0-59a5-b7e7-8541f30c403f",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 986
+    },
+    {
+      "version": "1.0",
+      "id": "acefd40b-3fc2-5282-80af-24af5dc38b7c",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 985
+    },
+    {
+      "version": "1.0",
       "id": "dbce5d9a-a18a-5305-a0da-780699bf7359",
       "name": "conv_wrw.f32.mfma16_f32.l6.nchw.64x4x64.w4x1.fr1s7sw2dw1.v4.x0a0n0b2",
       "kernel_source": {
@@ -488,7 +636,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 988
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -525,7 +673,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 987
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -562,7 +710,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 986
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -599,7 +747,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 985
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -636,7 +784,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 984
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -673,7 +821,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 983
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -710,7 +858,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 982
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -747,7 +895,377 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 981
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "4569a0ce-60fd-5c32-92d7-68122068db6f",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "2e947ec9-7a0a-5a95-838c-c56e037bcd10",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 975
+    },
+    {
+      "version": "1.0",
+      "id": "d050ddae-373c-5e31-8b61-373e1bf4c315",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 974
+    },
+    {
+      "version": "1.0",
+      "id": "3d9b26dc-ef9e-585a-8d9c-344da8e4436e",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 973
+    },
+    {
+      "version": "1.0",
+      "id": "57c4de20-f937-59f9-a10e-4ef99ccb0420",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 972
+    },
+    {
+      "version": "1.0",
+      "id": "dc297fee-8ec8-5e65-842b-79ec5e36864d",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 971
+    },
+    {
+      "version": "1.0",
+      "id": "1789365f-38e0-5742-801f-0a8c406d3be9",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 970
+    },
+    {
+      "version": "1.0",
+      "id": "25c2c82e-42a5-56d7-a8e3-5b3c344d08a0",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 969
+    },
+    {
+      "version": "1.0",
+      "id": "9e7f2521-c080-575e-a529-6a1ed9a493aa",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 968
+    },
+    {
+      "version": "1.0",
+      "id": "509fa682-6cdf-5f72-855e-56b4dc15fd9a",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -784,7 +1302,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 980
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -821,7 +1339,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 979
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -858,7 +1376,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 978
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -895,7 +1413,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 977
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -932,7 +1450,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 976
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -969,7 +1487,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 975
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -1006,7 +1524,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 974
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -1043,7 +1561,377 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 973
+      "priority": 959
+    },
+    {
+      "version": "1.0",
+      "id": "d9208ab8-ffa9-5130-827e-e4d45cac0579",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 958
+    },
+    {
+      "version": "1.0",
+      "id": "b51693c0-81ed-5aba-88f1-f42f24fda42b",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 957
+    },
+    {
+      "version": "1.0",
+      "id": "58b5476d-28ed-53f1-86a1-aecce10ab6f8",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 956
+    },
+    {
+      "version": "1.0",
+      "id": "6302f470-ddac-5e51-9112-b573bdbc1b66",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 955
+    },
+    {
+      "version": "1.0",
+      "id": "223d0eb6-3f62-56bc-bc43-c6eb1a8d89c7",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 954
+    },
+    {
+      "version": "1.0",
+      "id": "5268ac2b-20f0-5879-b550-0fee15d10eec",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 953
+    },
+    {
+      "version": "1.0",
+      "id": "6abfcc9e-628b-505a-96e1-0165705f5f27",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 952
+    },
+    {
+      "version": "1.0",
+      "id": "32990a9d-1bad-5374-b9fa-7110fe24dfe0",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 951
+    },
+    {
+      "version": "1.0",
+      "id": "795a3bd0-69e4-5e36-ac4f-69c9493ca26e",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 950
+    },
+    {
+      "version": "1.0",
+      "id": "69aa7eec-51db-570b-be33-ac1a259427d8",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -1080,7 +1968,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 972
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -1117,7 +2005,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 971
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -1154,7 +2042,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 970
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -1191,7 +2079,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 969
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -1228,7 +2116,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 968
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -1265,7 +2153,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 967
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -1302,7 +2190,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 966
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -1339,7 +2227,377 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 965
+      "priority": 941
+    },
+    {
+      "version": "1.0",
+      "id": "44606d52-a4f7-5481-8d66-2d8d2b3bd035",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 940
+    },
+    {
+      "version": "1.0",
+      "id": "feea5e55-84b6-58d3-a939-e1e1423fcac6",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 939
+    },
+    {
+      "version": "1.0",
+      "id": "ba5e41d3-ce6e-50dd-9763-96ec8e05a014",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 938
+    },
+    {
+      "version": "1.0",
+      "id": "8f17e484-dd91-5d71-9c83-f9ea15cb2700",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 937
+    },
+    {
+      "version": "1.0",
+      "id": "d81db86b-8f0a-5af7-8666-e57e21849adf",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 936
+    },
+    {
+      "version": "1.0",
+      "id": "b58b2394-920c-5362-844a-9b615269ce19",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 935
+    },
+    {
+      "version": "1.0",
+      "id": "54500cc2-b1df-56dd-b78b-dee71bc5f4ed",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 934
+    },
+    {
+      "version": "1.0",
+      "id": "658238d6-6860-5c59-b429-0cbeff6dfac9",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 933
+    },
+    {
+      "version": "1.0",
+      "id": "7fb06459-66cc-5f6e-9dc8-2a20a310e2f3",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v4.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 932
+    },
+    {
+      "version": "1.0",
+      "id": "eef5ddd0-ff67-5f45-8cc5-581156c669b4",
+      "name": "conv_wrw.f32.mfma16_f32.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v4.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "atom_id": 3,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 4,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -1376,7 +2634,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 964
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -1413,7 +2671,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 963
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -1450,7 +2708,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 962
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -1487,7 +2745,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 961
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -1524,7 +2782,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 960
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -1561,7 +2819,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 959
+      "priority": 925
     },
     {
       "version": "1.0",
@@ -1598,7 +2856,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 958
+      "priority": 924
     },
     {
       "version": "1.0",
@@ -1635,7 +2893,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 957
+      "priority": 923
     },
     {
       "version": "1.0",
@@ -1672,7 +2930,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 956
+      "priority": 922
     },
     {
       "version": "1.0",
@@ -1709,7 +2967,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 955
+      "priority": 921
     },
     {
       "version": "1.0",
@@ -1746,7 +3004,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 954
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -1783,7 +3041,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 953
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -1820,7 +3078,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 952
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -1857,7 +3115,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 951
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -1894,7 +3152,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 950
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -1931,7 +3189,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 949
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -1968,7 +3226,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 948
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -2005,7 +3263,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 947
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -2042,7 +3300,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 946
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -2079,7 +3337,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 945
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -2116,7 +3374,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 944
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -2153,7 +3411,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 943
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -2190,7 +3448,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 942
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -2227,7 +3485,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 941
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -2264,7 +3522,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 940
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -2301,7 +3559,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 939
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -2338,7 +3596,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 938
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -2375,7 +3633,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 937
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -2412,7 +3670,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 936
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -2449,7 +3707,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 935
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -2486,7 +3744,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 934
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -2523,7 +3781,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 933
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -2560,7 +3818,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 932
+      "priority": 898
     },
     {
       "version": "1.0",
@@ -2597,7 +3855,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 931
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -2634,7 +3892,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 930
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -2671,7 +3929,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 929
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -2708,7 +3966,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 928
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -2745,7 +4003,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 927
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -2782,7 +4040,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 926
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -2819,7 +4077,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 925
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -2856,7 +4114,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 924
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -2893,7 +4151,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 923
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -2930,7 +4188,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 922
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -2967,7 +4225,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 921
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -3004,7 +4262,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 920
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -3041,7 +4299,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 919
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -3078,7 +4336,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 918
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -3115,7 +4373,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 917
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -3152,7 +4410,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 916
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -3189,7 +4447,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 915
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -3226,7 +4484,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 914
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -3263,7 +4521,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 913
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -3300,7 +4558,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 912
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -3337,7 +4595,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 911
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -3374,7 +4632,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 910
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -3411,7 +4669,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 909
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -3448,7 +4706,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 908
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -3485,7 +4743,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 907
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -3522,7 +4780,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 906
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -3559,7 +4817,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 905
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -3596,7 +4854,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 904
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -3633,7 +4891,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 903
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -3670,7 +4928,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 902
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -3707,7 +4965,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 901
+      "priority": 867
     },
     {
       "version": "1.0",
@@ -3744,7 +5002,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 900
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -3781,7 +5039,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 899
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -3818,7 +5076,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 898
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -3855,7 +5113,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 897
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -3892,7 +5150,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 896
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -3929,7 +5187,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 895
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -3966,7 +5224,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 894
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -4003,7 +5261,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 893
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -4040,7 +5298,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 892
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -4077,7 +5335,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 891
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -4114,7 +5372,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 890
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -4151,7 +5409,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 889
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -4188,7 +5446,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 888
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -4225,7 +5483,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 887
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -4262,7 +5520,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 886
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -4299,7 +5557,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 885
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -4336,7 +5594,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 884
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -4373,7 +5631,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 883
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -4410,7 +5668,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 882
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -4447,7 +5705,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 881
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -4484,7 +5742,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 880
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -4521,7 +5779,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 879
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -4558,7 +5816,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 878
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -4595,7 +5853,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 877
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -4632,7 +5890,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 876
+      "priority": 842
     },
     {
       "version": "1.0",
@@ -4669,7 +5927,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 875
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -4706,7 +5964,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 874
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -4743,7 +6001,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 873
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -4780,7 +6038,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 872
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -4817,7 +6075,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 871
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -4854,7 +6112,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 870
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -4891,7 +6149,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 869
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -4928,7 +6186,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 868
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -4965,7 +6223,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 867
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -5002,7 +6260,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 866
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -5039,7 +6297,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 865
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -5076,7 +6334,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 864
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -5113,7 +6371,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 863
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -5150,7 +6408,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 862
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -5187,7 +6445,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 861
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -5224,7 +6482,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 860
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -5261,7 +6519,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 859
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -5298,7 +6556,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 858
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -5335,7 +6593,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 857
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -5372,7 +6630,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 856
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -5409,7 +6667,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 855
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -5446,7 +6704,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 854
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -5483,7 +6741,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 853
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -5520,7 +6778,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 852
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -5557,7 +6815,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 851
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -5594,7 +6852,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 850
+      "priority": 816
     },
     {
       "version": "1.0",
@@ -5631,7 +6889,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 849
+      "priority": 815
     },
     {
       "version": "1.0",
@@ -5668,7 +6926,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 848
+      "priority": 814
     },
     {
       "version": "1.0",
@@ -5705,7 +6963,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 847
+      "priority": 813
     },
     {
       "version": "1.0",
@@ -5742,7 +7000,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 846
+      "priority": 812
     },
     {
       "version": "1.0",
@@ -5779,7 +7037,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 845
+      "priority": 811
     },
     {
       "version": "1.0",
@@ -5816,7 +7074,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 844
+      "priority": 810
     },
     {
       "version": "1.0",
@@ -5853,7 +7111,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 843
+      "priority": 809
     },
     {
       "version": "1.0",
@@ -5890,7 +7148,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 842
+      "priority": 808
     },
     {
       "version": "1.0",
@@ -5927,7 +7185,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 841
+      "priority": 807
     },
     {
       "version": "1.0",
@@ -5964,7 +7222,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 840
+      "priority": 806
     },
     {
       "version": "1.0",
@@ -6001,7 +7259,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 839
+      "priority": 805
     },
     {
       "version": "1.0",
@@ -6038,7 +7296,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 838
+      "priority": 804
     },
     {
       "version": "1.0",
@@ -6075,7 +7333,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 837
+      "priority": 803
     },
     {
       "version": "1.0",
@@ -6112,7 +7370,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 836
+      "priority": 802
     },
     {
       "version": "1.0",
@@ -6149,7 +7407,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 835
+      "priority": 801
     },
     {
       "version": "1.0",
@@ -6186,7 +7444,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 834
+      "priority": 800
     },
     {
       "version": "1.0",
@@ -6223,7 +7481,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 833
+      "priority": 799
     },
     {
       "version": "1.0",
@@ -6260,7 +7518,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 832
+      "priority": 798
     },
     {
       "version": "1.0",
@@ -6297,7 +7555,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 831
+      "priority": 797
     },
     {
       "version": "1.0",
@@ -6334,7 +7592,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 830
+      "priority": 796
     },
     {
       "version": "1.0",
@@ -6371,7 +7629,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 829
+      "priority": 795
     },
     {
       "version": "1.0",
@@ -6408,7 +7666,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 828
+      "priority": 794
     },
     {
       "version": "1.0",
@@ -6445,7 +7703,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 827
+      "priority": 793
     },
     {
       "version": "1.0",
@@ -6482,7 +7740,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 826
+      "priority": 792
     },
     {
       "version": "1.0",
@@ -6519,7 +7777,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 825
+      "priority": 791
     },
     {
       "version": "1.0",
@@ -6556,7 +7814,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 824
+      "priority": 790
     },
     {
       "version": "1.0",
@@ -6593,7 +7851,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 823
+      "priority": 789
     },
     {
       "version": "1.0",
@@ -6630,7 +7888,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 822
+      "priority": 788
     },
     {
       "version": "1.0",
@@ -6667,7 +7925,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 821
+      "priority": 787
     },
     {
       "version": "1.0",
@@ -6704,7 +7962,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 820
+      "priority": 786
     },
     {
       "version": "1.0",
@@ -6741,7 +7999,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 819
+      "priority": 785
     },
     {
       "version": "1.0",
@@ -6778,7 +8036,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 818
+      "priority": 784
     },
     {
       "version": "1.0",
@@ -6815,7 +8073,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 817
+      "priority": 783
     },
     {
       "version": "1.0",
@@ -6852,7 +8110,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 816
+      "priority": 782
     },
     {
       "version": "1.0",
@@ -6889,7 +8147,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 815
+      "priority": 781
     },
     {
       "version": "1.0",
@@ -6926,7 +8184,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 814
+      "priority": 780
     },
     {
       "version": "1.0",
@@ -6963,7 +8221,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 813
+      "priority": 779
     },
     {
       "version": "1.0",
@@ -7000,7 +8258,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 812
+      "priority": 778
     },
     {
       "version": "1.0",
@@ -7037,7 +8295,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 811
+      "priority": 777
     },
     {
       "version": "1.0",
@@ -7074,7 +8332,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 810
+      "priority": 776
     },
     {
       "version": "1.0",
@@ -7111,7 +8369,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 809
+      "priority": 775
     },
     {
       "version": "1.0",
@@ -7148,7 +8406,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 808
+      "priority": 774
     },
     {
       "version": "1.0",
@@ -7185,7 +8443,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 807
+      "priority": 773
     },
     {
       "version": "1.0",
@@ -7222,7 +8480,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 806
+      "priority": 772
     },
     {
       "version": "1.0",
@@ -7259,7 +8517,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 805
+      "priority": 771
     },
     {
       "version": "1.0",
@@ -7296,7 +8554,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 804
+      "priority": 770
     },
     {
       "version": "1.0",
@@ -7333,7 +8591,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 803
+      "priority": 769
     },
     {
       "version": "1.0",
@@ -7370,7 +8628,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 802
+      "priority": 768
     },
     {
       "version": "1.0",
@@ -7407,7 +8665,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 801
+      "priority": 767
     },
     {
       "version": "1.0",
@@ -7444,7 +8702,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 800
+      "priority": 766
     },
     {
       "version": "1.0",
@@ -7481,7 +8739,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 799
+      "priority": 765
     },
     {
       "version": "1.0",
@@ -7518,7 +8776,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 798
+      "priority": 764
     },
     {
       "version": "1.0",
@@ -7555,7 +8813,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 797
+      "priority": 763
     },
     {
       "version": "1.0",
@@ -7592,7 +8850,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 796
+      "priority": 762
     },
     {
       "version": "1.0",
@@ -7629,7 +8887,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 795
+      "priority": 761
     },
     {
       "version": "1.0",
@@ -7666,7 +8924,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 794
+      "priority": 760
     },
     {
       "version": "1.0",
@@ -7703,7 +8961,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 793
+      "priority": 759
     },
     {
       "version": "1.0",
@@ -7740,7 +8998,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 792
+      "priority": 758
     },
     {
       "version": "1.0",
@@ -7777,7 +9035,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 791
+      "priority": 757
     },
     {
       "version": "1.0",
@@ -7814,7 +9072,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 790
+      "priority": 756
     },
     {
       "version": "1.0",
@@ -7851,7 +9109,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 789
+      "priority": 755
     },
     {
       "version": "1.0",
@@ -7888,7 +9146,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 788
+      "priority": 754
     },
     {
       "version": "1.0",
@@ -7925,7 +9183,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 787
+      "priority": 753
     },
     {
       "version": "1.0",
@@ -7962,7 +9220,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 786
+      "priority": 752
     },
     {
       "version": "1.0",
@@ -7999,7 +9257,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 785
+      "priority": 751
     },
     {
       "version": "1.0",
@@ -8036,7 +9294,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 784
+      "priority": 750
     },
     {
       "version": "1.0",
@@ -8073,7 +9331,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 783
+      "priority": 749
     },
     {
       "version": "1.0",
@@ -8110,7 +9368,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 782
+      "priority": 748
     },
     {
       "version": "1.0",
@@ -8147,7 +9405,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 781
+      "priority": 747
     },
     {
       "version": "1.0",
@@ -8184,7 +9442,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 780
+      "priority": 746
     },
     {
       "version": "1.0",
@@ -8221,7 +9479,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 779
+      "priority": 745
     },
     {
       "version": "1.0",
@@ -8258,7 +9516,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 778
+      "priority": 744
     },
     {
       "version": "1.0",
@@ -8295,7 +9553,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 777
+      "priority": 743
     },
     {
       "version": "1.0",
@@ -8332,7 +9590,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 776
+      "priority": 742
     },
     {
       "version": "1.0",
@@ -8369,7 +9627,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 775
+      "priority": 741
     },
     {
       "version": "1.0",
@@ -8406,7 +9664,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 774
+      "priority": 740
     },
     {
       "version": "1.0",
@@ -8443,7 +9701,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 773
+      "priority": 739
     },
     {
       "version": "1.0",
@@ -8480,7 +9738,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 772
+      "priority": 738
     },
     {
       "version": "1.0",
@@ -8517,7 +9775,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 771
+      "priority": 737
     },
     {
       "version": "1.0",
@@ -8554,7 +9812,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 770
+      "priority": 736
     },
     {
       "version": "1.0",
@@ -8591,7 +9849,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 769
+      "priority": 735
     },
     {
       "version": "1.0",
@@ -8628,7 +9886,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 768
+      "priority": 734
     },
     {
       "version": "1.0",
@@ -8665,7 +9923,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 767
+      "priority": 733
     },
     {
       "version": "1.0",
@@ -8702,7 +9960,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 766
+      "priority": 732
     },
     {
       "version": "1.0",
@@ -8739,7 +9997,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 765
+      "priority": 731
     },
     {
       "version": "1.0",
@@ -8776,7 +10034,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 764
+      "priority": 730
     },
     {
       "version": "1.0",
@@ -8813,7 +10071,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 763
+      "priority": 729
     },
     {
       "version": "1.0",
@@ -8850,7 +10108,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 762
+      "priority": 728
     },
     {
       "version": "1.0",
@@ -8887,7 +10145,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 761
+      "priority": 727
     },
     {
       "version": "1.0",
@@ -8924,7 +10182,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 760
+      "priority": 726
     },
     {
       "version": "1.0",
@@ -8961,7 +10219,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 759
+      "priority": 725
     },
     {
       "version": "1.0",
@@ -8998,7 +10256,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 758
+      "priority": 724
     },
     {
       "version": "1.0",
@@ -9035,7 +10293,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 757
+      "priority": 723
     },
     {
       "version": "1.0",
@@ -9072,7 +10330,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 756
+      "priority": 722
     },
     {
       "version": "1.0",
@@ -9109,7 +10367,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 755
+      "priority": 721
     },
     {
       "version": "1.0",
@@ -9146,7 +10404,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 754
+      "priority": 720
     },
     {
       "version": "1.0",
@@ -9183,7 +10441,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 753
+      "priority": 719
     },
     {
       "version": "1.0",
@@ -9220,7 +10478,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 752
+      "priority": 718
     },
     {
       "version": "1.0",
@@ -9257,7 +10515,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 751
+      "priority": 717
     },
     {
       "version": "1.0",
@@ -9294,7 +10552,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 750
+      "priority": 716
     },
     {
       "version": "1.0",
@@ -9331,7 +10589,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 749
+      "priority": 715
     },
     {
       "version": "1.0",
@@ -9368,7 +10626,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 748
+      "priority": 714
     },
     {
       "version": "1.0",
@@ -9405,7 +10663,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 747
+      "priority": 713
     },
     {
       "version": "1.0",
@@ -9442,7 +10700,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 746
+      "priority": 712
     },
     {
       "version": "1.0",
@@ -9479,7 +10737,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 745
+      "priority": 711
     },
     {
       "version": "1.0",
@@ -9516,7 +10774,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 744
+      "priority": 710
     },
     {
       "version": "1.0",
@@ -9553,7 +10811,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 743
+      "priority": 709
     },
     {
       "version": "1.0",
@@ -9590,7 +10848,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 742
+      "priority": 708
     },
     {
       "version": "1.0",
@@ -9627,7 +10885,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 741
+      "priority": 707
     },
     {
       "version": "1.0",
@@ -9664,7 +10922,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 740
+      "priority": 706
     },
     {
       "version": "1.0",
@@ -9701,7 +10959,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 739
+      "priority": 705
     },
     {
       "version": "1.0",
@@ -9738,7 +10996,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 738
+      "priority": 704
     },
     {
       "version": "1.0",
@@ -9775,7 +11033,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 737
+      "priority": 703
     },
     {
       "version": "1.0",
@@ -9812,7 +11070,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 736
+      "priority": 702
     },
     {
       "version": "1.0",
@@ -9849,7 +11107,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 735
+      "priority": 701
     },
     {
       "version": "1.0",
@@ -9886,7 +11144,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 734
+      "priority": 700
     },
     {
       "version": "1.0",
@@ -9923,7 +11181,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 733
+      "priority": 699
     },
     {
       "version": "1.0",
@@ -9960,7 +11218,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 732
+      "priority": 698
     },
     {
       "version": "1.0",
@@ -9997,7 +11255,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 731
+      "priority": 697
     },
     {
       "version": "1.0",
@@ -10034,7 +11292,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 730
+      "priority": 696
     },
     {
       "version": "1.0",
@@ -10071,7 +11329,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 729
+      "priority": 695
     },
     {
       "version": "1.0",
@@ -10108,7 +11366,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 728
+      "priority": 694
     },
     {
       "version": "1.0",
@@ -10145,7 +11403,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 727
+      "priority": 693
     },
     {
       "version": "1.0",
@@ -10182,7 +11440,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 726
+      "priority": 692
     },
     {
       "version": "1.0",
@@ -10219,7 +11477,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 725
+      "priority": 691
     },
     {
       "version": "1.0",
@@ -10256,7 +11514,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 724
+      "priority": 690
     },
     {
       "version": "1.0",
@@ -10293,7 +11551,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 723
+      "priority": 689
     },
     {
       "version": "1.0",
@@ -10330,7 +11588,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 722
+      "priority": 688
     },
     {
       "version": "1.0",
@@ -10367,7 +11625,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 721
+      "priority": 687
     },
     {
       "version": "1.0",
@@ -10404,7 +11662,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 720
+      "priority": 686
     },
     {
       "version": "1.0",
@@ -10441,7 +11699,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 719
+      "priority": 685
     },
     {
       "version": "1.0",
@@ -10478,7 +11736,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 718
+      "priority": 684
     },
     {
       "version": "1.0",
@@ -10515,7 +11773,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 717
+      "priority": 683
     },
     {
       "version": "1.0",
@@ -10552,7 +11810,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 716
+      "priority": 682
     },
     {
       "version": "1.0",
@@ -10589,7 +11847,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 715
+      "priority": 681
     },
     {
       "version": "1.0",
@@ -10626,7 +11884,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 714
+      "priority": 680
     },
     {
       "version": "1.0",
@@ -10663,7 +11921,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 713
+      "priority": 679
     },
     {
       "version": "1.0",
@@ -10700,7 +11958,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 712
+      "priority": 678
     },
     {
       "version": "1.0",
@@ -10737,7 +11995,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 711
+      "priority": 677
     },
     {
       "version": "1.0",
@@ -10774,7 +12032,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 710
+      "priority": 676
     },
     {
       "version": "1.0",
@@ -10811,7 +12069,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 709
+      "priority": 675
     },
     {
       "version": "1.0",
@@ -10848,7 +12106,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 708
+      "priority": 674
     },
     {
       "version": "1.0",
@@ -10885,7 +12143,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 707
+      "priority": 673
     },
     {
       "version": "1.0",
@@ -10922,7 +12180,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 706
+      "priority": 672
     },
     {
       "version": "1.0",
@@ -10959,7 +12217,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 705
+      "priority": 671
     },
     {
       "version": "1.0",
@@ -10996,7 +12254,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 704
+      "priority": 670
     },
     {
       "version": "1.0",
@@ -11033,7 +12291,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 703
+      "priority": 669
     },
     {
       "version": "1.0",
@@ -11070,7 +12328,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 702
+      "priority": 668
     },
     {
       "version": "1.0",
@@ -11107,7 +12365,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 701
+      "priority": 667
     },
     {
       "version": "1.0",
@@ -11144,7 +12402,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 700
+      "priority": 666
     },
     {
       "version": "1.0",
@@ -11181,7 +12439,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 699
+      "priority": 665
     }
   ]
 }

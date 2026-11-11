@@ -340,7 +340,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 904
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -377,7 +377,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 903
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -414,7 +414,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 902
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -451,7 +451,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 901
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -488,7 +488,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 900
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -525,7 +525,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 899
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -562,7 +562,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 898
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -599,7 +599,303 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 897
+      "priority": 845
+    },
+    {
+      "version": "1.0",
+      "id": "8837de01-f369-5b4d-9621-1cecdd7b458c",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr7s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 844
+    },
+    {
+      "version": "1.0",
+      "id": "4cbd3c11-e10f-57d2-b766-feeff4fc7cbf",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr7s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 843
+    },
+    {
+      "version": "1.0",
+      "id": "42cdc644-714b-59cc-b5ba-cbe11094cfc6",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 842
+    },
+    {
+      "version": "1.0",
+      "id": "aef4d024-cec2-534c-ad2c-85f8097dd454",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 841
+    },
+    {
+      "version": "1.0",
+      "id": "035f5569-20bb-5fe6-87a6-886a54068cfe",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 840
+    },
+    {
+      "version": "1.0",
+      "id": "a84193cc-f161-5173-b2ab-a329970539c7",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 839
+    },
+    {
+      "version": "1.0",
+      "id": "59675f82-cdcc-5d50-9e0d-f6d9389af915",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr7s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 838
+    },
+    {
+      "version": "1.0",
+      "id": "510372d8-0d9d-5fb6-96ea-dfcf69fa7339",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr7s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -636,7 +932,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 896
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -673,7 +969,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 895
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -710,7 +1006,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 894
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -747,7 +1043,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 893
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -784,7 +1080,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 892
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -821,7 +1117,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 891
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -858,7 +1154,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 890
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -895,7 +1191,451 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 889
+      "priority": 829
+    },
+    {
+      "version": "1.0",
+      "id": "aa4f301b-3494-573d-b2b3-b1e613160328",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 828
+    },
+    {
+      "version": "1.0",
+      "id": "f6d6f021-c5da-5299-a235-52f1668eee11",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 827
+    },
+    {
+      "version": "1.0",
+      "id": "71c73086-5b07-5777-99c1-36622bb504e6",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 826
+    },
+    {
+      "version": "1.0",
+      "id": "04bb92ee-b988-5d74-8152-a6fdbb65c4c2",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 825
+    },
+    {
+      "version": "1.0",
+      "id": "a01e0150-34eb-5dc4-bf98-678200c20d14",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 824
+    },
+    {
+      "version": "1.0",
+      "id": "178d4f3f-b4bf-5fc3-b991-0361d1f0d0f4",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 823
+    },
+    {
+      "version": "1.0",
+      "id": "e02291a3-3751-5c75-a2ba-6bbd2b4f53e2",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 822
+    },
+    {
+      "version": "1.0",
+      "id": "0b7106e9-2ac0-566a-95e9-d5b6fc3eceb6",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 821
+    },
+    {
+      "version": "1.0",
+      "id": "b8af6452-93ad-59f4-9288-7b504cbae0c4",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 820
+    },
+    {
+      "version": "1.0",
+      "id": "411ca48c-423d-570c-a453-2294c5f8d0d0",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 819
+    },
+    {
+      "version": "1.0",
+      "id": "3185fb26-c7c6-595b-be99-05ce6ab472f1",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr1s7sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 818
+    },
+    {
+      "version": "1.0",
+      "id": "8fe45287-c066-50a6-8be3-47f6c1bf85e7",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr1s7sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -932,7 +1672,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 888
+      "priority": 816
     },
     {
       "version": "1.0",
@@ -969,7 +1709,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 887
+      "priority": 815
     },
     {
       "version": "1.0",
@@ -1006,7 +1746,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 886
+      "priority": 814
     },
     {
       "version": "1.0",
@@ -1043,7 +1783,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 885
+      "priority": 813
     },
     {
       "version": "1.0",
@@ -1080,7 +1820,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 884
+      "priority": 812
     },
     {
       "version": "1.0",
@@ -1117,7 +1857,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 883
+      "priority": 811
     },
     {
       "version": "1.0",
@@ -1154,7 +1894,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 882
+      "priority": 810
     },
     {
       "version": "1.0",
@@ -1191,7 +1931,451 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 881
+      "priority": 809
+    },
+    {
+      "version": "1.0",
+      "id": "31ffd445-67e7-5f48-aae4-0a59724a5c3b",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 808
+    },
+    {
+      "version": "1.0",
+      "id": "491373cd-d137-58c7-bf93-76ecd2ed8a09",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 807
+    },
+    {
+      "version": "1.0",
+      "id": "7ae1a0c0-b8c6-581b-9c6a-5ae08f3165df",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 806
+    },
+    {
+      "version": "1.0",
+      "id": "c367228b-edd3-5ebe-9874-32749c1b2df1",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 805
+    },
+    {
+      "version": "1.0",
+      "id": "11e5ce6f-0fe1-5659-9536-634796d0c3e4",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 804
+    },
+    {
+      "version": "1.0",
+      "id": "069ab455-aa08-5876-b254-439c701d7c71",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 803
+    },
+    {
+      "version": "1.0",
+      "id": "c222452c-7b9c-5002-b53a-5df913e0f344",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 802
+    },
+    {
+      "version": "1.0",
+      "id": "120da534-970e-5bd4-a49b-076778889a43",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 801
+    },
+    {
+      "version": "1.0",
+      "id": "9e9bd042-0111-52a5-96e3-cdf7a9b3f442",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 800
+    },
+    {
+      "version": "1.0",
+      "id": "5229f03b-6f84-5dfa-bd92-8520a4da2aaa",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 799
+    },
+    {
+      "version": "1.0",
+      "id": "b397d775-b760-5516-ab12-71766ddd12ce",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr3s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 798
+    },
+    {
+      "version": "1.0",
+      "id": "be249690-99f6-56af-8cce-5084cb26907e",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr3s3sw2dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 797
     },
     {
       "version": "1.0",
@@ -1228,7 +2412,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 880
+      "priority": 796
     },
     {
       "version": "1.0",
@@ -1265,7 +2449,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 879
+      "priority": 795
     },
     {
       "version": "1.0",
@@ -1302,7 +2486,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 878
+      "priority": 794
     },
     {
       "version": "1.0",
@@ -1339,7 +2523,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 877
+      "priority": 793
     },
     {
       "version": "1.0",
@@ -1376,7 +2560,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 876
+      "priority": 792
     },
     {
       "version": "1.0",
@@ -1413,7 +2597,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 875
+      "priority": 791
     },
     {
       "version": "1.0",
@@ -1450,7 +2634,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 874
+      "priority": 790
     },
     {
       "version": "1.0",
@@ -1487,7 +2671,451 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 873
+      "priority": 789
+    },
+    {
+      "version": "1.0",
+      "id": "f80414b2-4e0d-5fbe-81df-5d06f05dec01",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 788
+    },
+    {
+      "version": "1.0",
+      "id": "452d7fef-37df-53ab-86ab-cfd6bc3f6cd0",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 787
+    },
+    {
+      "version": "1.0",
+      "id": "90cb7796-ced9-5615-83a2-21fadd0652b4",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 786
+    },
+    {
+      "version": "1.0",
+      "id": "6b6786eb-e1b7-574a-80b7-b5fce7a125b8",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 785
+    },
+    {
+      "version": "1.0",
+      "id": "bb0bac2d-8a9a-514f-ba57-03a8d4cb3307",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 784
+    },
+    {
+      "version": "1.0",
+      "id": "4ff180fd-97cc-5757-bfc4-b769ddb2c212",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 783
+    },
+    {
+      "version": "1.0",
+      "id": "7f9b1919-8a06-5a43-900e-37d173f76a64",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 782
+    },
+    {
+      "version": "1.0",
+      "id": "136b83eb-609d-564b-b887-72f059a02471",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 781
+    },
+    {
+      "version": "1.0",
+      "id": "d5b73fce-3b46-5df4-8f81-fd4ad57131c4",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 780
+    },
+    {
+      "version": "1.0",
+      "id": "9b83cc39-4af0-5a11-bdbb-386c17985415",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 779
+    },
+    {
+      "version": "1.0",
+      "id": "b5c09835-49c1-567f-99bf-e7fc2040ba99",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr3s3sw1dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 778
+    },
+    {
+      "version": "1.0",
+      "id": "cb33ec42-fead-5409-9ff5-ca29039e4f30",
+      "name": "conv_wrw.f16.mfma16_f16.l6.nhwc.64x4x128.w4x1.fr3s3sw1dw1.v8.x0a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "atom_id": 0,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 777
     },
     {
       "version": "1.0",
@@ -1524,7 +3152,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 493
+      "priority": 321
     },
     {
       "version": "1.0",
@@ -1561,7 +3189,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 492
+      "priority": 320
     },
     {
       "version": "1.0",
@@ -1598,7 +3226,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 491
+      "priority": 319
     },
     {
       "version": "1.0",
@@ -1635,7 +3263,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 490
+      "priority": 318
     },
     {
       "version": "1.0",
@@ -1672,7 +3300,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 489
+      "priority": 317
     },
     {
       "version": "1.0",
@@ -1709,7 +3337,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 488
+      "priority": 316
     },
     {
       "version": "1.0",
@@ -1746,7 +3374,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 487
+      "priority": 315
     },
     {
       "version": "1.0",
@@ -1783,7 +3411,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 486
+      "priority": 314
     },
     {
       "version": "1.0",
@@ -1820,7 +3448,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 485
+      "priority": 313
     },
     {
       "version": "1.0",
@@ -1857,7 +3485,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 484
+      "priority": 312
     },
     {
       "version": "1.0",
@@ -1894,7 +3522,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 483
+      "priority": 311
     },
     {
       "version": "1.0",
@@ -1931,7 +3559,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 482
+      "priority": 310
     },
     {
       "version": "1.0",
@@ -1968,7 +3596,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 481
+      "priority": 309
     },
     {
       "version": "1.0",
@@ -2005,7 +3633,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 480
+      "priority": 308
     },
     {
       "version": "1.0",
@@ -2042,7 +3670,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 479
+      "priority": 307
     },
     {
       "version": "1.0",
@@ -2079,7 +3707,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 478
+      "priority": 306
     },
     {
       "version": "1.0",
@@ -2116,7 +3744,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 477
+      "priority": 305
     },
     {
       "version": "1.0",
@@ -2153,7 +3781,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 476
+      "priority": 304
     },
     {
       "version": "1.0",
@@ -2190,7 +3818,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 475
+      "priority": 303
     },
     {
       "version": "1.0",
@@ -2227,7 +3855,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 474
+      "priority": 302
     },
     {
       "version": "1.0",
@@ -2264,7 +3892,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 473
+      "priority": 301
     },
     {
       "version": "1.0",
@@ -2301,7 +3929,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 472
+      "priority": 300
     },
     {
       "version": "1.0",
@@ -2338,7 +3966,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 471
+      "priority": 299
     },
     {
       "version": "1.0",
@@ -2375,7 +4003,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 470
+      "priority": 298
     },
     {
       "version": "1.0",
@@ -2412,7 +4040,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 469
+      "priority": 297
     },
     {
       "version": "1.0",
@@ -2449,7 +4077,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 468
+      "priority": 296
     },
     {
       "version": "1.0",
@@ -2486,7 +4114,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 467
+      "priority": 295
     },
     {
       "version": "1.0",
@@ -2523,7 +4151,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 466
+      "priority": 294
     },
     {
       "version": "1.0",
@@ -2560,7 +4188,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 465
+      "priority": 293
     },
     {
       "version": "1.0",
@@ -2597,7 +4225,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 464
+      "priority": 292
     },
     {
       "version": "1.0",
@@ -2634,7 +4262,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 463
+      "priority": 291
     },
     {
       "version": "1.0",
@@ -2671,7 +4299,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 462
+      "priority": 290
     },
     {
       "version": "1.0",
@@ -2708,7 +4336,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 461
+      "priority": 289
     },
     {
       "version": "1.0",
@@ -2745,7 +4373,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 460
+      "priority": 288
     },
     {
       "version": "1.0",
@@ -2782,7 +4410,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 459
+      "priority": 287
     },
     {
       "version": "1.0",
@@ -2819,7 +4447,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 458
+      "priority": 286
     },
     {
       "version": "1.0",
@@ -2856,7 +4484,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 457
+      "priority": 285
     },
     {
       "version": "1.0",
@@ -2893,7 +4521,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 456
+      "priority": 284
     },
     {
       "version": "1.0",
@@ -2930,7 +4558,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 455
+      "priority": 283
     },
     {
       "version": "1.0",
@@ -2967,7 +4595,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 454
+      "priority": 282
     },
     {
       "version": "1.0",
@@ -3004,7 +4632,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 453
+      "priority": 281
     },
     {
       "version": "1.0",
@@ -3041,7 +4669,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 452
+      "priority": 280
     },
     {
       "version": "1.0",
@@ -3078,7 +4706,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 451
+      "priority": 279
     },
     {
       "version": "1.0",
@@ -3115,7 +4743,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 450
+      "priority": 278
     },
     {
       "version": "1.0",
@@ -3152,7 +4780,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 449
+      "priority": 277
     },
     {
       "version": "1.0",
@@ -3189,7 +4817,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 448
+      "priority": 276
     },
     {
       "version": "1.0",
@@ -3226,7 +4854,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 447
+      "priority": 275
     },
     {
       "version": "1.0",
@@ -3263,7 +4891,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 446
+      "priority": 274
     },
     {
       "version": "1.0",
@@ -3300,7 +4928,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 445
+      "priority": 273
     },
     {
       "version": "1.0",
@@ -3337,7 +4965,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 444
+      "priority": 272
     },
     {
       "version": "1.0",
@@ -3374,7 +5002,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 443
+      "priority": 271
     },
     {
       "version": "1.0",
@@ -3411,7 +5039,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 442
+      "priority": 270
     },
     {
       "version": "1.0",
@@ -3448,7 +5076,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 441
+      "priority": 269
     },
     {
       "version": "1.0",
@@ -3485,7 +5113,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 440
+      "priority": 268
     },
     {
       "version": "1.0",
@@ -3522,7 +5150,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 439
+      "priority": 267
     },
     {
       "version": "1.0",
@@ -3559,7 +5187,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 438
+      "priority": 266
     },
     {
       "version": "1.0",
@@ -3596,7 +5224,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 437
+      "priority": 265
     },
     {
       "version": "1.0",
@@ -3633,7 +5261,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 436
+      "priority": 264
     },
     {
       "version": "1.0",
@@ -3670,7 +5298,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 435
+      "priority": 263
     },
     {
       "version": "1.0",
@@ -3707,7 +5335,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 434
+      "priority": 262
     },
     {
       "version": "1.0",
@@ -3744,7 +5372,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 433
+      "priority": 261
     },
     {
       "version": "1.0",
@@ -3781,7 +5409,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 432
+      "priority": 260
     },
     {
       "version": "1.0",
@@ -3818,7 +5446,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 431
+      "priority": 259
     },
     {
       "version": "1.0",
@@ -3855,7 +5483,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 430
+      "priority": 258
     },
     {
       "version": "1.0",
@@ -3892,7 +5520,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 429
+      "priority": 257
     },
     {
       "version": "1.0",
@@ -3929,7 +5557,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 428
+      "priority": 256
     },
     {
       "version": "1.0",
@@ -3966,7 +5594,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 427
+      "priority": 255
     },
     {
       "version": "1.0",
@@ -4003,7 +5631,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 426
+      "priority": 254
     },
     {
       "version": "1.0",
@@ -4040,7 +5668,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 425
+      "priority": 253
     },
     {
       "version": "1.0",
@@ -4077,7 +5705,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 424
+      "priority": 252
     },
     {
       "version": "1.0",
@@ -4114,7 +5742,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 423
+      "priority": 251
     },
     {
       "version": "1.0",
@@ -4151,7 +5779,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 422
+      "priority": 250
     },
     {
       "version": "1.0",
@@ -4188,7 +5816,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 421
+      "priority": 249
     },
     {
       "version": "1.0",
@@ -4225,7 +5853,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 420
+      "priority": 248
     },
     {
       "version": "1.0",
@@ -4262,7 +5890,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 419
+      "priority": 247
     },
     {
       "version": "1.0",
@@ -4299,7 +5927,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 418
+      "priority": 246
     },
     {
       "version": "1.0",
@@ -4336,7 +5964,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 417
+      "priority": 245
     },
     {
       "version": "1.0",
@@ -4373,7 +6001,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 416
+      "priority": 244
     },
     {
       "version": "1.0",
@@ -4410,7 +6038,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 415
+      "priority": 243
     },
     {
       "version": "1.0",
@@ -4447,7 +6075,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 414
+      "priority": 242
     },
     {
       "version": "1.0",
@@ -4484,7 +6112,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 413
+      "priority": 241
     },
     {
       "version": "1.0",
@@ -4521,7 +6149,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 412
+      "priority": 240
     },
     {
       "version": "1.0",
@@ -4558,7 +6186,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 411
+      "priority": 239
     },
     {
       "version": "1.0",
@@ -4595,7 +6223,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 410
+      "priority": 238
     },
     {
       "version": "1.0",
@@ -4632,7 +6260,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 409
+      "priority": 237
     },
     {
       "version": "1.0",
@@ -4669,7 +6297,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 408
+      "priority": 236
     },
     {
       "version": "1.0",
@@ -4706,7 +6334,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 407
+      "priority": 235
     },
     {
       "version": "1.0",
@@ -4743,7 +6371,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 406
+      "priority": 234
     },
     {
       "version": "1.0",
@@ -4780,7 +6408,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 405
+      "priority": 233
     },
     {
       "version": "1.0",
@@ -4817,7 +6445,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 404
+      "priority": 232
     },
     {
       "version": "1.0",
@@ -4854,7 +6482,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 403
+      "priority": 231
     },
     {
       "version": "1.0",
@@ -4891,7 +6519,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 402
+      "priority": 230
     },
     {
       "version": "1.0",
@@ -4928,7 +6556,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 401
+      "priority": 229
     },
     {
       "version": "1.0",
@@ -4965,7 +6593,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 400
+      "priority": 228
     },
     {
       "version": "1.0",
@@ -5002,7 +6630,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 399
+      "priority": 227
     },
     {
       "version": "1.0",
@@ -5039,7 +6667,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 398
+      "priority": 226
     },
     {
       "version": "1.0",
@@ -5076,7 +6704,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 397
+      "priority": 225
     },
     {
       "version": "1.0",
@@ -5113,7 +6741,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 396
+      "priority": 224
     },
     {
       "version": "1.0",
@@ -5150,7 +6778,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 395
+      "priority": 223
     },
     {
       "version": "1.0",
@@ -5187,7 +6815,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 394
+      "priority": 222
     },
     {
       "version": "1.0",
@@ -5224,7 +6852,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 393
+      "priority": 221
     },
     {
       "version": "1.0",
@@ -5261,7 +6889,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 392
+      "priority": 220
     },
     {
       "version": "1.0",
@@ -5298,7 +6926,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 391
+      "priority": 219
     },
     {
       "version": "1.0",
@@ -5335,7 +6963,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 390
+      "priority": 218
     },
     {
       "version": "1.0",
@@ -5372,7 +7000,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 389
+      "priority": 217
     },
     {
       "version": "1.0",
@@ -5409,7 +7037,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 388
+      "priority": 216
     },
     {
       "version": "1.0",
@@ -5446,7 +7074,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 387
+      "priority": 215
     },
     {
       "version": "1.0",
@@ -5483,7 +7111,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 386
+      "priority": 214
     },
     {
       "version": "1.0",
@@ -5520,7 +7148,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 385
+      "priority": 213
     },
     {
       "version": "1.0",
@@ -5557,7 +7185,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 384
+      "priority": 212
     },
     {
       "version": "1.0",
@@ -5594,7 +7222,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 383
+      "priority": 211
     },
     {
       "version": "1.0",
@@ -5631,7 +7259,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 382
+      "priority": 210
     },
     {
       "version": "1.0",
@@ -5668,7 +7296,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 381
+      "priority": 209
     },
     {
       "version": "1.0",
@@ -5705,7 +7333,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 380
+      "priority": 208
     },
     {
       "version": "1.0",
@@ -5742,7 +7370,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 379
+      "priority": 207
     },
     {
       "version": "1.0",
@@ -5779,7 +7407,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 378
+      "priority": 206
     },
     {
       "version": "1.0",
@@ -5816,7 +7444,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 377
+      "priority": 205
     },
     {
       "version": "1.0",
@@ -5853,7 +7481,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 376
+      "priority": 204
     },
     {
       "version": "1.0",
@@ -5890,7 +7518,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 375
+      "priority": 203
     },
     {
       "version": "1.0",
@@ -5927,7 +7555,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 374
+      "priority": 202
     },
     {
       "version": "1.0",
@@ -5964,7 +7592,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 373
+      "priority": 201
     },
     {
       "version": "1.0",
@@ -6001,7 +7629,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 372
+      "priority": 200
     },
     {
       "version": "1.0",
@@ -6038,7 +7666,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 371
+      "priority": 199
     },
     {
       "version": "1.0",
@@ -6075,7 +7703,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 370
+      "priority": 198
     },
     {
       "version": "1.0",
@@ -6112,7 +7740,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 369
+      "priority": 197
     },
     {
       "version": "1.0",
@@ -6149,7 +7777,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 368
+      "priority": 196
     },
     {
       "version": "1.0",
@@ -6186,7 +7814,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 367
+      "priority": 195
     },
     {
       "version": "1.0",
@@ -6223,7 +7851,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 366
+      "priority": 194
     },
     {
       "version": "1.0",
@@ -6260,7 +7888,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 365
+      "priority": 193
     },
     {
       "version": "1.0",
@@ -6297,7 +7925,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 364
+      "priority": 192
     },
     {
       "version": "1.0",
@@ -6334,7 +7962,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 363
+      "priority": 191
     },
     {
       "version": "1.0",
@@ -6371,7 +7999,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 362
+      "priority": 190
     },
     {
       "version": "1.0",
@@ -6408,7 +8036,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 361
+      "priority": 189
     },
     {
       "version": "1.0",
@@ -6445,7 +8073,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 360
+      "priority": 188
     },
     {
       "version": "1.0",
@@ -6482,7 +8110,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 359
+      "priority": 187
     },
     {
       "version": "1.0",
@@ -6519,7 +8147,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 358
+      "priority": 186
     },
     {
       "version": "1.0",
@@ -6556,7 +8184,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 357
+      "priority": 185
     },
     {
       "version": "1.0",
@@ -6593,7 +8221,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 356
+      "priority": 184
     },
     {
       "version": "1.0",
@@ -6630,7 +8258,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 355
+      "priority": 183
     },
     {
       "version": "1.0",
@@ -6667,7 +8295,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 354
+      "priority": 182
     },
     {
       "version": "1.0",
@@ -6704,7 +8332,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 353
+      "priority": 181
     },
     {
       "version": "1.0",
@@ -6741,7 +8369,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 352
+      "priority": 180
     },
     {
       "version": "1.0",
@@ -6778,7 +8406,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 351
+      "priority": 179
     },
     {
       "version": "1.0",
@@ -6815,7 +8443,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 350
+      "priority": 178
     },
     {
       "version": "1.0",
@@ -6852,7 +8480,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 349
+      "priority": 177
     }
   ]
 }
