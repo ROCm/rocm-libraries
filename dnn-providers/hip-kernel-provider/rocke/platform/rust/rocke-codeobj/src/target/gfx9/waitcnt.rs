@@ -34,10 +34,13 @@ const DMA_KEYS: usize = 16;
 /// The first LDS DMA key.
 const DMA_BASE: usize = 256 + 128 + 256;
 
+/// The key every vector memory store (and LDS DMA load) stamps: the age of
+/// the youngest one in flight (lever `storewait`).
+const STORE_KEY: usize = DMA_BASE + DMA_KEYS;
 /// VGPRs 0..255, then SGPRs 0..127 (VCC 106-107, M0 124, EXEC 126-127),
-/// then AGPRs 0..255, then the LDS DMA keys.
-const NREGS: usize = DMA_BASE + DMA_KEYS;
-const NONE: u8 = u8::MAX;
+/// then AGPRs 0..255, then the LDS DMA keys, then the store key.
+const NREGS: usize = STORE_KEY + 1;
+pub(crate) const NONE: u8 = u8::MAX;
 const VM_MAX: u8 = 62;
 const LGKM_MAX: u8 = 14;
 
@@ -198,7 +201,8 @@ impl DmaKeys {
 }
 
 /// The wait `inst` needs, applied to `state`, then `inst` issued.
-fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
+/// `store_wait`: lever `storewait` (`rir::lever`).
+fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys, store_wait: bool) -> Option<(u8, u8)> {
     let flags = inst.op.flags();
     let vmem_load = flags & F_VMEM_LOAD != 0;
     let lds_merge = lds_merge(inst);
@@ -224,13 +228,15 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
     // loads land in issue order, so one does not wait for another.
     if dma.waited_by(inst) {
         for (k, &tag) in dma.tags.iter().enumerate() {
-            if lds_dma::overlaps(tag, inst.mem) {
+            if lds_dma::overlaps(tag, inst.mem) && !(inst.mods & M_DMA_MANUAL != 0 && tag == inst.mem) {
                 need_vm = need_vm.min(state.vm.get(DMA_BASE + k));
             }
         }
     }
     if inst.op == Opc::SBarrier {
-        if state.vm_any {
+        if store_wait {
+            need_vm = need_vm.min(state.vm.get(STORE_KEY));
+        } else if state.vm_any {
             need_vm = 0;
         }
         if state.lgkm_any {
@@ -239,6 +245,13 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
     }
     if inst.op == Opc::SBarrierLds && state.lgkm_any {
         need_lgkm = 0;
+    }
+    // A workgroup release (lever `wgfence`): LDS, LDS DMA loads and stores; not plain loads.
+    if inst.op == Opc::Gfx9(super::gen_isa::Gfx9Op::WaitRelease) {
+        need_vm = need_vm.min(state.vm.get(STORE_KEY));
+        if state.lgkm_any {
+            need_lgkm = 0;
+        }
     }
     if need_lgkm != NONE && state.smem {
         need_lgkm = 0;
@@ -267,6 +280,9 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
         state.vm_any = true;
         if lds_dma::is_dma(inst.op) {
             state.vm.stamp[dma.key(inst.mem)] = state.vm.now;
+        }
+        if lds_dma::is_dma(inst.op) || flags & F_VMEM_STORE != 0 {
+            state.vm.stamp[STORE_KEY] = state.vm.now;
         }
     }
     if counters & t::CNT_LGKM != 0 {
@@ -318,6 +334,18 @@ pub fn explicit_imm(vm: i64, exp: i64, lgkm: i64) -> i64 {
 /// Inserts `s_waitcnt` before every instruction that reads or overwrites an
 /// outstanding result, and before barriers.
 pub fn insert(f: &mut MFunc) {
+    insert_with(f, crate::rir::lever("storewait"));
+}
+
+/// `insert`, with lever `storewait` (`crate::rir::lever`) given.
+pub fn insert_with(f: &mut MFunc, store_wait: bool) {
+    f.fill_scopes();
+    // An instruction with a lever scope reads `storewait` from it.
+    let scopes = f.scopes.clone();
+    let store_wait = |inst: &MInst| match inst.scope {
+        0 => store_wait,
+        _ => crate::rir::lever_at(&scopes, inst.scope, "storewait"),
+    };
     let n = f.blocks.len();
     let succs: Vec<Vec<usize>> = (0..n).map(|b| f.successors(b)).collect();
     let dma = DmaKeys::of(f);
@@ -344,7 +372,7 @@ pub fn insert(f: &mut MFunc) {
             found[b].clear();
             let mut running = Running::new(&start);
             for (k, inst) in f.blocks[b].insts.iter().enumerate() {
-                if let Some((vm, lgkm)) = step(&mut running, inst, &dma) {
+                if let Some((vm, lgkm)) = step(&mut running, inst, &dma, store_wait(inst)) {
                     found[b].push((k, vm, lgkm));
                 }
             }
@@ -384,7 +412,7 @@ pub fn insert(f: &mut MFunc) {
             // Never reached: stepped from an empty state.
             let mut state = Running::new(&State::new());
             for inst in insts {
-                if let Some((vm, lgkm)) = step(&mut state, &inst, &dma) {
+                if let Some((vm, lgkm)) = step(&mut state, &inst, &dma, store_wait(&inst)) {
                     out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
                 }
                 out.push(inst);
@@ -568,7 +596,7 @@ mod tests {
         }
         if dma.waited_by(inst) {
             for (k, &tag) in dma.tags.iter().enumerate() {
-                if lds_dma::overlaps(tag, inst.mem) {
+                if lds_dma::overlaps(tag, inst.mem) && !(inst.mods & M_DMA_MANUAL != 0 && tag == inst.mem) {
                     need_vm = need_vm.min(state.vm[DMA_BASE + k]);
                 }
             }

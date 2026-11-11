@@ -86,7 +86,7 @@ impl<'a> Block<'a> {
     fn run(mut self) -> Vec<MInst> {
         for i in 0..self.code.len() {
             let Some(inst) = self.code[i].clone() else { continue };
-            if let Some(new) = self.rewrite(&inst, i) {
+            if let Some(new) = self.rewrite(&inst, i).map(|new| MInst { loc: inst.loc, ..new }) {
                 self.counts.add(&inst, -1);
                 self.counts.add(&new, 1);
                 self.code[i] = Some(new);

@@ -6,7 +6,8 @@
 //! (`sched_barrier` after each MFMA) gets each DMA's M0 write right before
 //! the DMA, and the hazard pass puts an `s_nop 0` between them.
 //!
-//! With the kernel's `m0_fill = b:true` (`MFunc::passes`), after `s_waitcnt`
+//! With the kernel's `m0_fill = b:true` (`MFunc::passes`) or rustgemm lever
+//! `m0fill` ([`enabled`]), after `s_waitcnt`
 //! and before the hazard `s_nop`s, a `s_mov_b32 m0, x` directly before a DMA
 //! swaps with the instruction before it when that one is an MFMA, a VALU, a
 //! SALU or an LDS access other than a DMA that reads and writes neither M0
@@ -42,10 +43,16 @@ fn may_cross(p: &MInst, mov: &MInst) -> bool {
     !touches_m0 && !writes_source
 }
 
+/// Whether the pass runs: the kernel's `m0_fill` (also through
+/// `ROCKE_DIRECT_FORCE_ATTRS`) or lever `m0fill`.
+pub fn enabled(f: &MFunc) -> bool {
+    f.passes.m0_fill || f.lever_anywhere("m0fill")
+}
+
 /// Swaps the M0 writes as the module documentation says; returns how many
 /// moved.
 pub fn run(f: &mut MFunc) -> usize {
-    if !f.passes.m0_fill {
+    if !enabled(f) {
         return 0;
     }
     let mut moved = 0;
@@ -107,10 +114,27 @@ mod tests {
         assert_eq!(run(&mut off), 0);
         insert_nops(&mut off);
         assert_eq!(nops(&off), 1);
+        // Lever `m0fill` is the same switch as the attribute.
+        let mut lever = func(insts.clone(), false);
+        assert_eq!(crate::rir::with_levers(&["m0fill"], || run(&mut lever)), 1);
         let mut on = func(insts, true);
         assert_eq!(run(&mut on), 1);
         let ops: Vec<Opc> = on.blocks[0].insts.iter().map(|i| i.op).collect();
         assert_eq!(ops[1..4], [Opc::SMovB32, Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4), Opc::Gfx9(Gfx9Op::BufLoadLdsB128)]);
+        insert_nops(&mut on);
+        assert_eq!(nops(&on), 0);
+    }
+
+    #[test]
+    fn the_write_swaps_with_the_16x16x128_scaled_mfma_too() {
+        let mfma16 = |acc: u16| {
+            MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), [v(256 + acc, 4)], [v(20, 6), v(30, 6), v(256 + acc, 4), v(40, 1), v(41, 1)])
+                .with_imm(2 | 2 << 7)
+        };
+        let mut on = func(vec![dma(1), mfma16(0), m0(15), dma(2), mfma16(4)], true);
+        assert_eq!(run(&mut on), 1);
+        let ops: Vec<Opc> = on.blocks[0].insts.iter().map(|i| i.op).collect();
+        assert_eq!(ops[1..4], [Opc::SMovB32, Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::BufLoadLdsB128)]);
         insert_nops(&mut on);
         assert_eq!(nops(&on), 0);
     }

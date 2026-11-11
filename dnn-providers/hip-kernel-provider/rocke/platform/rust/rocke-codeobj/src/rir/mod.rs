@@ -12,6 +12,7 @@ mod fma_chains;
 mod fma_mix;
 #[rustfmt::skip]
 pub mod gen_isa;
+mod idioms;  // W15 climb r0 fix: SWAR popcount -> v_bcnt (`nopopcount` debug flag: off)
 pub mod isa;
 mod hashcons;
 pub mod isel;
@@ -25,6 +26,7 @@ mod parse_par;
 pub mod peephole;
 pub mod post;
 pub mod print;
+pub mod reassoc;
 pub mod regalloc;
 mod reload;
 pub mod unroll;
@@ -43,6 +45,39 @@ use crate::error::CompileError;
 use crate::hsaco_writer::{write_kernel_object, KernelArgMeta, KernelObjectSpec};
 pub use crate::target::Target;
 use ast::{Scalar, Type};
+
+thread_local! {
+    /// rustgemm: AGPRs the kernel's `agpr_alloc = [lo, hi]` asks for (`lo`; 0: no request). Set by the
+    /// parser for the kernel being compiled.
+    static AGPR_ACC_REQUEST: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// rustgemm: records the kernel's AGPR request (see `AGPR_ACC_REQUEST`).
+pub(crate) fn set_agpr_acc_request(lo: u32) {
+    AGPR_ACC_REQUEST.with(|c| c.set(lo));
+}
+
+/// rustgemm: the AGPRs the kernel being compiled asks for (0: none).
+#[allow(dead_code)]
+pub(crate) fn agpr_acc_request() -> u32 {
+    AGPR_ACC_REQUEST.with(|c| c.get())
+}
+
+thread_local! {
+    /// rust-compiler-v2: the most AGPRs the kernel's `agpr_alloc = [lo, hi]` allows (`hi`; 256: the whole file).
+    /// Set by the parser for the kernel being compiled.
+    static AGPR_CAP: std::cell::Cell<u32> = const { std::cell::Cell::new(256) };
+}
+
+/// rust-compiler-v2: records the kernel's AGPR cap (see `AGPR_CAP`).
+pub(crate) fn set_agpr_cap(hi: u32) {
+    AGPR_CAP.with(|c| c.set(hi.min(256)));
+}
+
+/// rust-compiler-v2: the most AGPRs the kernel being compiled may use (256 unless `agpr_alloc` caps it).
+pub(crate) fn agpr_cap() -> u32 {
+    AGPR_CAP.with(|c| c.get())
+}
 
 /// Conservative-mode switches for bisecting miscompiles, e.g.
 /// `ROCKE_DIRECT_DEBUG=waitall,nocoalesce,nolicm,noldsreuse,noldscse,nosimplify,nofuse,nosched,nodelay,novopd,noclause,nowiden,noshrink`
@@ -63,6 +98,206 @@ use ast::{Scalar, Type};
 /// adds of a pair and a zero-extended VGPR (`gfx9::wide_add`).
 pub(crate) fn debug_flag(name: &str) -> bool {
     std::env::var("ROCKE_DIRECT_DEBUG").is_ok_and(|v| v.split(',').any(|f| f.trim() == name))
+}
+
+/// A direct-only code-generation lever named in `ROCKE_DIRECT_LEVERS`
+/// (comma-separated), default off: every lever changes what the compiler
+/// emits for the same IR, and none is on unless named. The levers:
+///
+/// - `storewait`: a `tile.sync` barrier waits on vmcnt only for the vector
+///   memory stores (and LDS DMA loads) still in flight, not for loads: the
+///   count of VMEM ops issued after the youngest outstanding store
+///   (`target::gfx9::waitcnt`). Loads write only the issuing wave's
+///   registers, so no other wave can observe them across the barrier.
+/// - `nopause`: a `tile.tagged_poll` retry runs without its pause (the
+///   direct poll is a leaf no pass can hoist, so the pause keeps nothing in
+///   the loop).
+/// - `nofence`: `tile.sched_barrier` (mask 0) is no scheduling boundary.
+/// - `dppmirror`: `tile.dpp_xor` masks 7, 8 and 15 as register DPP
+///   (row_half_mirror, row_ror:8, row_mirror; `target::gfx9::isel_hooks`)
+///   instead of `ds_swizzle_b32`, as the LLVM lowering.
+/// - `dppcombine`: a `v_mov_b32_dpp` folds into the `v_add_u32` reading it
+///   (`target::gfx9::dpp`), as LLVM's `GCNDPPCombine`.
+/// - `vmemfirst`: the list scheduler issues vector memory loads first among
+///   the ready instructions (`rir::post`).
+/// - `loadorder`: `vmemfirst`, and of those loads the one read first issues
+///   first (deeper in-order `vmcnt` waits; `rir::post`).
+/// - `ldsquads`: four aligned dword LDS loads of one address merge into one
+///   `ds_read_b128` on gfx950 too (as on gfx1151).
+/// - `dppcombinef`: with `dppcombine`, the f32 add / mul / max and the u32
+///   max fold their DPP move too (`target::gfx9::dpp::dpp_form`).
+/// - `ldspairs`: two dword LDS loads (stores) of one base within 1 KiB merge
+///   into `ds_read2_b32` (`ds_write2_b32`; `target::gfx9::lds_pairs`).
+/// - `minmax`: a compare whose every select picks the larger (smaller) of its
+///   operands becomes `v_max` / `v_min` (`target::gfx9::minmax`).
+/// - `xorcmp`: a signed compare of two values xor'ed with the sign bit is an
+///   unsigned compare of the values (`rir::opt`).
+/// - `wgfence`: a workgroup-scope fence waits only for stores, LDS DMA and
+///   LDS (release) or nothing (acquire), as LLVM without tgsplit
+///   (`target::gfx9::isel_hooks`, `WaitRelease` in `target::gfx9::waitcnt`).
+/// - `litreuse`: straight-line blocks reuse a literal's register (and an
+///   SGPR's VGPR copy) as loop blocks do (`target::gfx9::legalize`).
+/// - `bufoffany`: a buffer access's constant voffset part (0..4095) goes
+///   to the offset field even when the rest's sign is unknown (`rir::opt`).
+/// - `dsrebase`, `scalesep`, `loadorder`, `bitop3`, `selxor`, `subadd`: see
+///   their passes (`rir::isel`, `target::gfx9::mfma`, `rir::post`,
+///   `target::gfx9::bitop3`, `rir::opt`).
+/// - `acqfence`: an acquire-only `memref.fence` waits and invalidates without
+///   the release's `buffer_wbl2` (LLVM's gfx940 lowering; `rir::isel`).
+/// - `wpecap`: a kernel's `waves_per_eu` maximum caps its occupancy through
+///   the descriptor's VGPR granules, as COMGR's objects do (`rir::compile`).
+/// - `loadfirst`: the list scheduler issues each vector memory load, and
+///   the instructions its address waits on, as soon as they are ready, ahead
+///   of instructions that could start sooner (`rir::post`): the loads keep
+///   the most in flight.
+/// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
+///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
+/// - `litshare`: one register per literal and block before scheduling
+///   (`target::gfx9::lits`; the debug flag `litshare` too).
+///
+/// A lever can also be scoped to a part of the kernel: an op's `dlevers`
+/// string attribute (`"nofence,-loadorder"`: names to turn on, `-name` to
+/// turn off) overrides the kernel's levers for that op, every op nested in
+/// its regions that has no `dlevers` of its own, the ops the optimizer
+/// rewrites it into, and the machine instructions selected for them
+/// (`MInst::scope`, resolved by [`lever_at`]). `+` joins names too.
+pub(crate) fn lever(name: &str) -> bool {
+    if let Some(on) = SCOPE.with(|s| s.borrow().as_ref().and_then(|d| d.get(name))) {
+        return on;
+    }
+    kernel_lever(name)
+}
+
+/// The kernel's lever `name` (`ROCKE_DIRECT_LEVERS`), whatever the scope.
+pub(crate) fn kernel_lever(name: &str) -> bool {
+    #[cfg(test)]
+    if TEST_LEVERS.with(|l| l.borrow().iter().any(|f| f == name)) {
+        return true;
+    }
+    std::env::var("ROCKE_DIRECT_LEVERS").is_ok_and(|v| v.split([',', '+']).any(|f| f.trim() == name))
+}
+
+/// Every lever name the compiler reads (`ROCKE_DIRECT_LEVERS` and `dlevers`
+/// scopes), sorted; `lever_registry_tests` checks it against the sources.
+/// Drivers reject any other name ([`unknown_levers`]): an unknown name would
+/// otherwise be ignored silently and build the lever-off code.
+pub const LEVERS: &[&str] = &[
+    "acqfence", "addrfold", "bitop3", "bufoffany", "devfn", "dmafree", "dmamanual", "dmamanualring",
+    "dmamanualringw", "dppcombine", "dppcombinef", "dppcombinei", "dppmirror", "ds128", "dsb96",
+    "dsfold", "dshoist", "dsrebase", "fmac", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
+    "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
+    "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
+    "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
+    "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "wpecap", "xorcmp",
+];
+
+/// The names of lever list `text` (`,` / `+` separated; `-name` turns a
+/// lever off in a `dlevers` scope) that are no lever of [`LEVERS`].
+pub fn unknown_levers(text: &str) -> Vec<String> {
+    let d = LeverDelta::parse(text);
+    d.on.into_iter().chain(d.off).filter(|n| !LEVERS.contains(&n.as_str())).collect()
+}
+
+/// One `dlevers` scope: the levers it turns on and off.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeverDelta {
+    pub on: Vec<String>,
+    pub off: Vec<String>,
+}
+
+impl LeverDelta {
+    pub fn parse(text: &str) -> Self {
+        let mut d = Self::default();
+        for name in text.split([',', '+', ' ']).map(str::trim).filter(|n| !n.is_empty()) {
+            match name.strip_prefix('-') {
+                Some(off) => d.off.push(off.to_string()),
+                None => d.on.push(name.to_string()),
+            }
+        }
+        d
+    }
+
+    /// `Some(on)` when this scope decides lever `name`.
+    pub fn get(&self, name: &str) -> Option<bool> {
+        if self.off.iter().any(|n| n == name) {
+            Some(false)
+        } else if self.on.iter().any(|n| n == name) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+}
+
+/// Lever `name` for a machine instruction of scope `scope` (an index into
+/// `scopes`, 0: the kernel's levers).
+pub(crate) fn lever_at(scopes: &[std::sync::Arc<LeverDelta>], scope: u16, name: &str) -> bool {
+    match scope {
+        0 => kernel_lever(name),
+        s => scopes.get(s as usize).and_then(|d| d.get(name)).unwrap_or_else(|| kernel_lever(name)),
+    }
+}
+
+/// Whether lever `name` is on anywhere: in the kernel's levers or in a scope.
+pub(crate) fn lever_anywhere(scopes: &[std::sync::Arc<LeverDelta>], name: &str) -> bool {
+    kernel_lever(name) || scopes.iter().any(|d| d.get(name) == Some(true))
+}
+
+/// Lever `name` for IR op `op`: its `dlevers` scope, else the kernel's.
+pub(crate) fn op_lever(op: &ast::Op, name: &str) -> bool {
+    op.str_attr("dlevers").and_then(|s| LeverDelta::parse(s).get(name)).unwrap_or_else(|| kernel_lever(name))
+}
+
+/// Whether some op of `kernel` turns lever `name` on in its scope.
+pub(crate) fn scoped_anywhere(kernel: &ast::Kernel, name: &str) -> bool {
+    let mut stack = vec![&kernel.body];
+    while let Some(region) = stack.pop() {
+        for op in &region.ops {
+            if op.str_attr("dlevers").is_some_and(|s| LeverDelta::parse(s).get(name) == Some(true)) {
+                return true;
+            }
+            stack.extend(op.regions.iter());
+        }
+    }
+    false
+}
+
+/// Whether some op of `kernel` has a lever scope.
+pub(crate) fn scoped_kernel(kernel: &ast::Kernel) -> bool {
+    let mut stack = vec![&kernel.body];
+    while let Some(region) = stack.pop() {
+        for op in &region.ops {
+            if op.attr("dlevers").is_some() {
+                return true;
+            }
+            stack.extend(op.regions.iter());
+        }
+    }
+    false
+}
+
+thread_local! {
+    /// The scope of the op being optimized or selected on this thread.
+    static SCOPE: std::cell::RefCell<Option<std::sync::Arc<LeverDelta>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Sets the scope [`lever`] reads on this thread; returns the previous one.
+pub(crate) fn set_scope(scope: Option<std::sync::Arc<LeverDelta>>) -> Option<std::sync::Arc<LeverDelta>> {
+    SCOPE.with(|s| std::mem::replace(&mut *s.borrow_mut(), scope))
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LEVERS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `f` with `names` as levers on this thread (tests: the environment is shared by every test thread).
+#[cfg(test)]
+pub(crate) fn with_levers<T>(names: &[&str], f: impl FnOnce() -> T) -> T {
+    TEST_LEVERS.with(|l| *l.borrow_mut() = names.iter().map(|n| n.to_string()).collect());
+    let out = f();
+    TEST_LEVERS.with(|l| l.borrow_mut().clear());
+    out
 }
 
 /// Measurement override: `ROCKE_DIRECT_FORCE_ATTRS=dead_lanes,m0_fill,peep_waits,peep_shifts,ds_rebase`
@@ -118,6 +353,99 @@ mod attr_tests {
             assert!(one.set(name, true) && one != ast::Passes::default(), "{name}");
             assert_eq!(parsed(&format!(", {name} = b:true")).passes, one);
         }
+    }
+}
+
+#[cfg(test)]
+mod preload_tests {
+    use super::*;
+    use crate::rir::mir::{Opc, Opnd, Phys};
+
+    /// `pointers` pointer parameters and an i32 `%n`: each lane stores,
+    /// through the last pointer at its global index, `%n`'s bits plus what
+    /// the others hold there.
+    fn kernel(pointers: usize, attrs: &str) -> String {
+        let mut t = format!("ckdsl.ir v1\nkernel @pre {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n");
+        for p in 0..pointers {
+            t += &format!("    %P{p} : ptr<f32,global>\n");
+        }
+        t += "    %n : i32\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n";
+        t += "    %bid : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n";
+        t += "    %row : i32 = arith.mul ( %bid, %c64 )\n    %i : i32 = arith.add ( %row, %tid )\n";
+        t += "    %nf : f32 = arith.bitcast ( %n ) { target = s:\"f32\" }\n";
+        let mut sum = "%nf".to_string();
+        for p in 0..pointers - 1 {
+            t += &format!("    %x{p} : f32 = memref.global_load_typed ( %P{p}, %i ) {{ align = i:4, elem_type = s:\"f32\" }}\n");
+            t += &format!("    %s{p} : f32 = arith.fadd ( {sum}, %x{p} )\n");
+            sum = format!("%s{p}");
+        }
+        t + &format!(
+            "    memref.global_store_typed ( %P{}, %i, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n",
+            pointers - 1
+        )
+    }
+
+    fn compiled(text: &str) -> CompiledKernel {
+        compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}"))
+    }
+
+    /// The kernel descriptor in a code object: the 64 bytes with the
+    /// kernel's kernarg size, reserved bytes 12-15 zero and gfx950's kernel
+    /// code properties.
+    fn descriptor(hsaco: &[u8], kernarg_size: u32) -> [u8; 64] {
+        let at = (0..hsaco.len() - 64)
+            .step_by(4)
+            .find(|&i| hsaco[i + 8..i + 12] == kernarg_size.to_le_bytes() && hsaco[i + 12..i + 16] == [0; 4] && hsaco[i + 56..i + 58] == [8, 0])
+            .expect("a kernel descriptor");
+        hsaco[at..at + 64].try_into().unwrap()
+    }
+
+    fn smem_loads(f: &mir::MFunc) -> Vec<i64> {
+        let loads = |op: Opc| matches!(op, Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512);
+        f.blocks.iter().flat_map(|b| &b.insts).filter(|i| loads(i.op)).map(|i| i.imm).collect()
+    }
+
+    /// `text` with every parameter `inreg`.
+    fn inreg(text: &str) -> String {
+        let param = |l: &str| l.starts_with("    %") && l.contains(" : ") && !l.contains(" = ");
+        text.lines().map(|l| if param(l) { format!("{l} {{ inreg = b:true }}\n") } else { format!("{l}\n") }).collect()
+    }
+
+    #[test]
+    fn the_attribute_preloads_as_every_parameter_inreg_would() {
+        // Five pointers and an i32: 44 bytes, 11 dwords preloaded into s2..s12.
+        let (on, off) = (compiled(&kernel(5, ", kernarg_preload = b:true")), compiled(&kernel(5, "")));
+        assert_eq!(on.hsaco, compiled(&inreg(&kernel(5, ""))).hsaco);
+        // The kernel proper loads no argument, and reads the workgroup id
+        // after the preloaded SGPRs (s13, against s2 without them).
+        assert!(smem_loads(&on.func).is_empty(), "{}", on.listing());
+        assert!(!smem_loads(&off.func).is_empty());
+        let reads = |f: &mir::MFunc, s: u16| f.blocks.iter().flat_map(|b| &b.insts).any(|i| i.uses.contains(&Opnd::P(Phys::S(s), 1)));
+        assert!(reads(&on.func, 13) && reads(&off.func, 2), "{}", on.listing());
+        // USER_SGPR_COUNT 13 against 2, the rest of RSRC2 alike; the preload
+        // length 11 from offset 0 against none; the 256-byte entry first.
+        let (d_on, d_off) = (descriptor(&on.hsaco, 44), descriptor(&off.hsaco, 44));
+        let rsrc2 = |d: &[u8; 64]| u32::from_le_bytes(d[52..56].try_into().unwrap());
+        assert_eq!((rsrc2(&d_on) >> 1 & 0x1f, rsrc2(&d_off) >> 1 & 0x1f), (13, 2));
+        assert_eq!(rsrc2(&d_on) & !(0x1f << 1), rsrc2(&d_off) & !(0x1f << 1));
+        assert_eq!((u16::from_le_bytes([d_on[58], d_on[59]]), u16::from_le_bytes([d_off[58], d_off[59]])), (11, 0));
+        let body = crate::target::gfx9::asm::assemble(&on.func).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(on.stats.code_bytes, 256 + body.len());
+    }
+
+    #[test]
+    fn arguments_past_the_user_sgprs_still_load_and_off_is_unchanged() {
+        // Eight pointers and an i32: 68 bytes; the first seven pointers fill
+        // the 14 dwords, the last pointer and %n still load.
+        let on = compiled(&kernel(8, ", kernarg_preload = b:true"));
+        let body = smem_loads(&on.func);
+        assert!(!body.is_empty() && body.iter().all(|&at| at >= 56), "{body:?}");
+        assert_eq!(u16::from_le_bytes(descriptor(&on.hsaco, 68)[58..60].try_into().unwrap()), 14);
+        // The attribute off is the code without it, byte for byte.
+        assert_eq!(compiled(&kernel(8, ", kernarg_preload = b:false")).hsaco, compiled(&kernel(8, "")).hsaco);
+        // gfx1151 has no kernarg preload.
+        let err = compile_any_target(&kernel(2, ", kernarg_preload = b:true"), Target::Gfx1151).err().expect("refused");
+        assert!(err.to_string().contains("kernarg preload"), "{err}");
     }
 }
 
@@ -456,7 +784,7 @@ fn spill_best(
         lds_slots: t.lds_spill_slots(lds_size, wg, hw.vgprs),
         agpr_slots: match f.target {
             Target::Gfx950 if !agprs => 0,
-            Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg),
+            Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg).min(agpr_cap()),
             Target::Gfx1151 => 0,
         },
     };
@@ -808,6 +1136,10 @@ pub struct CompiledKernel {
     func: mir::MFunc,
     /// Plain first-fit did not fit the hardware (see `compile`).
     tight: bool,
+    /// When the IR's ops carry `@loc`s (and then the code object carries
+    /// DWARF): the source map as JSON (`srcloc::SourceMap::json`), and as built.
+    pub srcmap: Option<String>,
+    pub source_map: Option<crate::srcloc::SourceMap>,
 }
 
 impl CompiledKernel {
@@ -1059,6 +1391,7 @@ fn compile_with(
     };
     force_attrs(&mut kernel)?;
     kernel.wave = target.info().wave;
+    opt::inherit_scopes(&mut kernel);
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
@@ -1192,15 +1525,17 @@ fn same_function(a: &mir::MFunc, b: &mir::MFunc) -> bool {
         class == y.class && size == y.size && align == y.align && fixed == y.fixed
     };
     let inst = |x: &mir::MInst, y: &mir::MInst| {
-        let mir::MInst { op, defs, uses, imm, mods, mem } = x;
-        *op == y.op && *defs == y.defs && *uses == y.uses && *imm == y.imm && *mods == y.mods && *mem == y.mem
+        // Where an instruction came from does not change the code.
+        let mir::MInst { op, defs, uses, imm, mods, mem, scope, loc: _ } = x;
+        *op == y.op && *defs == y.defs && *uses == y.uses && *imm == y.imm && *mods == y.mods && *mem == y.mem && *scope == y.scope
     };
     let block = |x: &mir::MBlock, y: &mir::MBlock| {
         let mir::MBlock { insts, loop_depth } = x;
         *loop_depth == y.loop_depth && insts.len() == y.insts.len() && insts.iter().zip(&y.insts).all(|(p, q)| inst(p, q))
     };
-    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit, lds_dma_explicit, m0_early, passes } = a;
-    *target == b.target
+    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit, scopes, lds_dma_explicit, m0_early, passes, locs: _ } = a;
+    *scopes == b.scopes
+        && *target == b.target
         && *vgpr_limit == b.vgpr_limit
         && *agpr_limit == b.agpr_limit
         && *lds_dma_explicit == b.lds_dma_explicit
@@ -1235,6 +1570,13 @@ fn complete(
     };
     let code = match target {
         Target::Gfx1151 => asm::assemble(&sel.func)?,
+        // Kernarg preload: the 256-byte entry that loads the preloaded
+        // arguments for firmware that does not preload (which skips it).
+        Target::Gfx950 if sel.preload > 0 => {
+            let mut code = crate::target::gfx9::preload_entry(sel.preload)?;
+            code.extend(crate::target::gfx9::asm::assemble(&sel.func)?);
+            code
+        }
         Target::Gfx950 => crate::target::gfx9::asm::assemble(&sel.func)?,
     };
     laps.lap("encode");
@@ -1253,7 +1595,27 @@ fn complete(
         Target::Gfx950 => {
             let scratch = alloc.spill.scratch_bytes > 0;
             let agprs = alloc.spill.agpr_dwords;
+            // rust-compiler-v2: `agpr_alloc = [lo, hi]` with hi < 256 caps the AGPRs (placement and spill slots
+            // stay within it; this is the backstop).
+            if agprs > agpr_cap() {
+                return Err(CompileError::new(
+                    "ROCKE_DIRECT_REGISTERS",
+                    format!("the allocation uses {agprs} AGPRs, past the kernel's agpr_alloc cap of {}", agpr_cap()),
+                ));
+            }
             let r = crate::target::gfx9::program_resources_with_agprs(vgprs, agprs, alloc.num_sgprs, sel.wg_ids, scratch);
+            let mut r = crate::target::gfx9::with_preload(r, sel.preload, sel.wg_ids);
+            // Lever `wpecap`: `waves_per_eu = [_, max]` caps the occupancy as LLVM's amdgpu-waves-per-eu
+            // does: the descriptor's register granules cover more than 512 / (max + 1) registers, so at
+            // most `max` waves fit a SIMD (the metadata's counts stay the allocation's).
+            let max = kernel.waves_per_eu.1;
+            if lever("wpecap") && (1..8).contains(&max) {
+                let floor = (512 / (max + 1) + 8).next_multiple_of(8);
+                let granules = (r.rsrc1 & 0x3f) + 1;
+                if granules * 8 < floor {
+                    r.rsrc1 = r.rsrc1 & !0x3f | (floor / 8 - 1);
+                }
+            }
             (r.rsrc1, r.rsrc2, r.rsrc3, r.sgpr_count)
         }
     };
@@ -1293,8 +1655,23 @@ fn complete(
         rsrc3,
         private_segment_size: alloc.spill.scratch_bytes,
         vgpr_spill_count: alloc.spill.lds_dwords + alloc.spill.scratch_dwords,
+        kernarg_preload: sel.preload as u16,
     };
     let hsaco = write_kernel_object(&spec).map_err(|e| CompileError::new("ROCKE_DIRECT_ELF", e))?;
+    // `sel.func`'s code starts after the kernarg preload entry.
+    let entry = if target == Target::Gfx950 && sel.preload > 0 { 256 } else { 0 };
+    let source_map = crate::srcloc::SourceMap::of(&sel.func, &kernel.name, entry)?;
+    let (hsaco, srcmap) = match &source_map {
+        None => (hsaco, None),
+        Some(map) => {
+            let debug = || {
+                let (text_vaddr, _) = crate::hsaco_writer::text_section(&hsaco)?;
+                Some((crate::hsaco_writer::with_sections(&hsaco, &map.dwarf(text_vaddr))?, map.json(text_vaddr)))
+            };
+            let (hsaco, json) = debug().ok_or_else(|| CompileError::new("ROCKE_DIRECT_ELF", "could not add the debug sections"))?;
+            (hsaco, Some(json))
+        }
+    };
     laps.lap("elf");
     let instructions = sel.func.blocks.iter().map(|b| b.insts.len()).sum();
     Ok(CompiledKernel {
@@ -1320,5 +1697,86 @@ fn complete(
         target: sel.func.target,
         func: sel.func,
         tight: alloc.tight && window <= 1,
+        srcmap,
+        source_map,
     })
+}
+
+#[cfg(test)]
+mod lever_registry_tests {
+    use super::*;
+
+    /// The string literal names passed to the lever lookups in `src` (`lever`,
+    /// `kernel_lever`, `op_lever`, `lever_at`, `lever_anywhere`, `scoped_anywhere`).
+    fn names_in(text: &str, out: &mut std::collections::BTreeSet<String>) {
+        const CALLS: [&str; 6] = ["lever", "kernel_lever", "op_lever", "lever_at", "lever_anywhere", "scoped_anywhere"];
+        let b = text.as_bytes();
+        let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        let mut i = 0;
+        while i < b.len() {
+            if !ident(b[i]) || (i > 0 && ident(b[i - 1])) {
+                i += 1;
+                continue;
+            }
+            let mut j = i;
+            while j < b.len() && ident(b[j]) {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'(' && CALLS.contains(&&text[i..j]) && !text[..i].ends_with("fn ") {
+                let mut depth = 0;
+                let mut k = j;
+                while k < b.len() {
+                    match b[k] {
+                        b'(' => depth += 1,
+                        b')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        b'"' if depth == 1 => {
+                            let end = k + 1 + text[k + 1..].find('"').expect("closing quote");
+                            out.insert(text[k + 1..end].to_string());
+                            break;
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+            }
+            i = j;
+        }
+    }
+
+    fn scan(dir: &std::path::Path, out: &mut std::collections::BTreeSet<String>) {
+        for e in std::fs::read_dir(dir).expect("read src") {
+            let p = e.expect("dir entry").path();
+            if p.is_dir() {
+                scan(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                names_in(&std::fs::read_to_string(&p).expect("read source"), out);
+            }
+        }
+    }
+
+    #[test]
+    fn levers_is_every_lever_the_sources_read() {
+        let mut used = std::collections::BTreeSet::new();
+        scan(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut used);
+        let listed: std::collections::BTreeSet<String> = LEVERS.iter().map(|n| n.to_string()).collect();
+        assert_eq!(listed.len(), LEVERS.len(), "LEVERS has a duplicate");
+        let mut sorted = LEVERS.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(sorted, LEVERS, "LEVERS is sorted");
+        assert_eq!(used.difference(&listed).collect::<Vec<_>>(), Vec::<&String>::new(), "levers read but not listed");
+        assert_eq!(listed.difference(&used).collect::<Vec<_>>(), Vec::<&String>::new(), "levers listed but never read");
+    }
+
+    #[test]
+    fn unknown_levers_names_every_unknown_name() {
+        assert!(unknown_levers("").is_empty());
+        assert!(unknown_levers("scalesep, dsrebase+dmamanualringw").is_empty());
+        assert!(unknown_levers("nofence,-loadorder").is_empty());
+        assert_eq!(unknown_levers("scalesep,srm,-nosuch"), ["srm", "nosuch"]);
+    }
 }

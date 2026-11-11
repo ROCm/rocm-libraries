@@ -4,12 +4,15 @@
 //! Developer driver: `cargo run --release --example target_compile -- <gfx> <out-dir> [--max-vgprs N] <in.ir>...`.
 //! Compiles each input for `<gfx>` (`gfx1151`, or `gfx950`, which compiles
 //! through `rir::compile_any_target` until it is supported) to
-//! `<out-dir>/<stem>.hsaco` with its listing in `<stem>.s`, and prints one
+//! `<out-dir>/<stem>.hsaco` with its listing in `<stem>.s` (and, when the IR
+//! has `@loc`s, its source map in `<stem>.srcmap.json`), and prints one
 //! tab-separated line per input: `<stem> ok <instructions> <code bytes>
 //! <vgprs> <sgprs> <lds bytes>`, or `<stem> error <message>`.
 //! `--max-vgprs N` allocates within N VGPRs (`rir::compile_any_target_limited`),
 //! which makes kernels that need more spill; each line then adds the VGPR
 //! dwords spilled to LDS and to scratch, and the SGPR dwords kept in VGPR lanes.
+//! `target_compile --list-levers` prints the lever names (`rir::LEVERS`), one
+//! per line; a `ROCKE_DIRECT_LEVERS` name that is no lever fails (exit 2).
 
 use std::path::Path;
 
@@ -18,6 +21,19 @@ use rocke_codeobj_ffi::target::Target;
 
 fn main() {
     let mut args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a == "--list-levers") {
+        println!("{}", rir::LEVERS.join("
+"));
+        return;
+    }
+    // an unknown lever name would build the lever-off code silently
+    if let Ok(levers) = std::env::var("ROCKE_DIRECT_LEVERS") {
+        let unknown = rir::unknown_levers(&levers);
+        if !unknown.is_empty() {
+            eprintln!("target_compile: unknown lever(s) {} in ROCKE_DIRECT_LEVERS (--list-levers lists the levers)", unknown.join(","));
+            std::process::exit(2);
+        }
+    }
     let mut limit = None;
     if let Some(at) = args.iter().position(|a| a == "--max-vgprs") {
         limit = args.get(at + 1).and_then(|n| n.parse::<u32>().ok());
@@ -51,6 +67,9 @@ fn main() {
             Ok(compiled) => {
                 std::fs::write(out_dir.join(format!("{stem}.hsaco")), &compiled.hsaco).expect("write the code object");
                 std::fs::write(out_dir.join(format!("{stem}.s")), compiled.listing()).expect("write the listing");
+                if let Some(srcmap) = &compiled.srcmap {
+                    std::fs::write(out_dir.join(format!("{stem}.srcmap.json")), srcmap).expect("write the source map");
+                }
                 let s = &compiled.stats;
                 let mut line = format!("{stem}\tok\t{}\t{}\t{}\t{}\t{}", s.instructions, s.code_bytes, s.vgprs, s.sgprs, s.lds_bytes);
                 if limit.is_some() {

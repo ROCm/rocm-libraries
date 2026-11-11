@@ -265,7 +265,9 @@ mod tests {
         assert_eq!(both(Opc::VDual), (true, false));
         assert_eq!(both(Opc::Copy), (false, false));
         for op in Gfx9Op::ALL {
-            assert_eq!(both(Opc::Gfx9(op)), (false, true), "{op:?}");
+            // `KEEP_ALIVE` and `WAIT_RELEASE` are the gfx9 back end's own pseudos (dropped before encoding).
+            let gfx950 = op != Gfx9Op::KeepAlive && op != Gfx9Op::WaitRelease;
+            assert_eq!(both(Opc::Gfx9(op)), (false, gfx950), "{op:?}");
         }
     }
 

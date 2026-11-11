@@ -173,17 +173,20 @@ pub struct Dma {
     pub aux: i64,
     /// The LDS tag of the bytes it may write.
     pub tag: u16,
-    /// The instruction offset (the IR's `offset`, 0..4095 bytes; buffer
-    /// loads only), which the hardware adds to both the global and the LDS
-    /// address.
+    /// rustgemm: the instruction offset (0..4095 bytes; buffer loads only), added by the hardware to the global and
+    /// the LDS address (`tile.async_buffer_load_lds_imm`).
     pub offset: i64,
 }
 
+#[cold]
+#[inline(never)]
+fn offset_error(offset: i64) -> CompileError {
+    CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("an LDS DMA instruction offset of {offset}"))
+}
+
 /// Appends `dma` to `block` of `f`: M0 from the address, then the load.
+#[inline(never)]
 pub fn select(f: &mut MFunc, block: usize, dma: Dma) -> Result<(), CompileError> {
-    if !(0..4096).contains(&dma.offset) || (dma.offset != 0 && matches!(dma.source, Source::Global { .. })) {
-        return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("an LDS DMA instruction offset of {}", dma.offset)));
-    }
     let (op, uses): (Gfx9Op, Uses) = match (&dma.source, dma.dwords) {
         (Source::Buffer { rsrc, voffset, soffset }, 1 | 4) => {
             let op = if dma.dwords == 1 { Gfx9Op::BufLoadLdsB32 } else { Gfx9Op::BufLoadLdsB128 };
@@ -215,6 +218,10 @@ pub fn select(f: &mut MFunc, block: usize, dma: Dma) -> Result<(), CompileError>
     let insts = &mut f.blocks[block].insts;
     insts.push(MInst::new(Opc::SMovB32, [Opnd::P(Phys::M0, 1)], [m0_source]));
     let cpol = (dma.aux & 1) | (dma.aux >> 1 & 1) << 1 | (dma.aux >> 4 & 1) << 2;
+    if !(0..4096).contains(&dma.offset) || (dma.offset != 0 && matches!(dma.source, Source::Global { .. })) {
+        return Err(offset_error(dma.offset));
+    }
+    let insts = &mut f.blocks[block].insts;
     insts.push(MInst::new(Opc::Gfx9(op), [], uses).with_imm(cpol << 12 | dma.offset).with_mem(dma.tag));
     Ok(())
 }
@@ -224,22 +231,34 @@ pub fn select(f: &mut MFunc, block: usize, dma: Dma) -> Result<(), CompileError>
 /// for one GEMM; as an instruction of ours it is an LDS load like any other
 /// (waited for, and waiting for the DMA loads into LDS).
 pub fn asm_lds_read(op: &crate::rir::ast::Op) -> Option<(u8, i64)> {
+    asm_lds_read_op(op).map(|(_, dwords, offset)| (dwords, offset))
+}
+
+/// `asm_lds_read` with the instruction: also, under rust-compiler-v2 lever `dsb96`, `ds_read_b96` (3 dwords) and
+/// gfx950's transposing reads `ds_read_b96_tr_b6` (3), `ds_read_b64_tr_b4` / `_b8` / `_b16` (2).
+pub fn asm_lds_read_op(op: &crate::rir::ast::Op) -> Option<(Opc, u8, i64)> {
     if op.kind != OpKind::InlineAsmIdentity || op.str_attr("constraints") != Some("=v,v") {
         return None;
     }
     let rest = op.str_attr("template")?.strip_prefix("ds_read_b")?;
     let (bits, rest) = rest.split_once(' ')?;
-    let dwords = match bits {
-        "32" => 1,
-        "64" => 2,
-        "128" => 4,
+    let wide = || crate::rir::lever("dsb96");
+    let (opc, dwords) = match bits {
+        "32" => (Opc::DsLoadB32, 1),
+        "64" => (Opc::DsLoadB64, 2),
+        "128" => (Opc::DsLoadB128, 4),
+        "96" if wide() => (Opc::Gfx9(Gfx9Op::DsReadB96), 3),
+        "96_tr_b6" if wide() => (Opc::Gfx9(Gfx9Op::DsReadB96TrB6), 3),
+        "64_tr_b4" if wide() => (Opc::Gfx9(Gfx9Op::DsReadB64TrB4), 2),
+        "64_tr_b8" if wide() => (Opc::Gfx9(Gfx9Op::DsReadB64TrB8), 2),
+        "64_tr_b16" if wide() => (Opc::Gfx9(Gfx9Op::DsReadB64TrB16), 2),
         _ => return None,
     };
     let offset = match rest.strip_prefix("$0, $1")? {
         "" => 0,
         tail => tail.strip_prefix(" offset:")?.parse::<i64>().ok().filter(|o| (0..65536).contains(o))?,
     };
-    Some((dwords, offset))
+    Some((opc, dwords, offset))
 }
 
 /// Gives the LDS instructions of `block` from position `from` on (those
@@ -381,6 +400,89 @@ mod tests {
     }
 
     #[test]
+    fn manual_dma_sync_allocations_leave_their_reads_to_the_kernels_waits() {
+        // rust-compiler-v2 (requests R1): %A marked `dma_sync = "manual"`: its read issues with no wait for the DMA
+        // into %A; %B unmarked still waits for its own DMA; an explicit wait still orders everything.
+        // Without the lever `dmamanual` the attribute changes nothing.
+        let marked = dma_kernel("", false, 0).replacen("%A_smem : smem<f32, [1024]> = tile.smem_alloc (  )", "%A_smem : smem<f32, [1024]> = tile.smem_alloc (  ) { dma_sync = s:\"manual\" }", 1);
+        assert_eq!(wait_before(&listing(&marked), "ds_read_b32"), Some((1, 15)));
+        let listing = |text: &str| rir::with_levers(&["dmamanual"], || listing(text));
+        let manual = |text: String| text.replacen("%A_smem : smem<f32, [1024]> = tile.smem_alloc (  )", "%A_smem : smem<f32, [1024]> = tile.smem_alloc (  ) { dma_sync = s:\"manual\" }", 1);
+        assert_eq!(wait_before(&listing(&dma_kernel("", false, 0)), "ds_read_b32"), Some((1, 15)));
+        assert_eq!(wait_before(&listing(&manual(dma_kernel("", false, 0))), "ds_read_b32"), None);
+        assert_eq!(wait_before(&listing(&manual(dma_kernel("", true, 0))), "ds_read_b32"), Some((0, 15)));
+        let explicit = "    tile.s_waitcnt (  ) { expcnt = i:-1, lgkmcnt = i:-1, vmcnt = i:1 }\n";
+        let l = listing(&manual(dma_kernel(explicit, false, 0)));
+        assert!(line_index(&l, "s_waitcnt") < line_index(&l, "ds_read_b32"), "{l}");
+        // A write into the marked allocation still waits for the DMA into it (write after write).
+        let write = "    %w : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n    \
+                     tile.smem_store ( %A_smem, %tid, %w ) { elem_type = s:\"f32\", rank = i:1 }\n";
+        let l = listing(&manual(dma_kernel(write, false, 0)));
+        assert!(wait_before(&l, "ds_write_b32").is_some_and(|w| w.0 <= 1), "{l}");
+        // Without the attribute nothing changes.
+        assert!(rir::compile_any_target(&dma_kernel("", false, 0), Target::Gfx950).is_ok());
+    }
+
+    #[test]
+    fn dsb96_reads_encode_as_llvm_mc_does() {
+        // Inline-asm `ds_read_b96` / `ds_read_b96_tr_b6` (and a 3-dword load, which stays b32 reads).
+        let text = "ckdsl.ir v1\nkernel @b96 {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<i32,global>\n    \
+                    %Y : ptr<i32,global>\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+                    %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+                    %c16 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:16 }\n    \
+                    %t : smem<i32, [1024]> = tile.smem_alloc (  )\n    \
+                    %x : i32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"i32\" }\n    \
+                    tile.smem_store ( %t, %tid, %x ) { elem_type = s:\"i32\", rank = i:1 }\n    \
+                    tile.sync (  )\n    \
+                    %i : i32 = arith.mul ( %tid, %c4 )\n    \
+                    %a : vec<i32x3> = tile.smem_load_vN ( %t, %i ) { elem_type = s:\"i32\", rank = i:1, vec = i:3 }\n    \
+                    %b : i32 = arith.mul ( %tid, %c16 )\n    \
+                    %r : vec<i32x3> = tile.inline_asm ( %b ) { constraints = s:\"=v,v\", template = s:\"ds_read_b96 $0, $1 offset:48\" }\n    \
+                    %s : vec<i32x3> = tile.inline_asm ( %b ) { constraints = s:\"=v,v\", template = s:\"ds_read_b96_tr_b6 $0, $1 offset:16\" }\n    \
+                    %a0 : i32 = vector.extract ( %a ) { index = i:2 }\n    %r0 : i32 = vector.extract ( %r ) { index = i:2 }\n    \
+                    %s0 : i32 = vector.extract ( %s ) { index = i:1 }\n    \
+                    %u : i32 = arith.add ( %a0, %r0 )\n    %w : i32 = arith.add ( %u, %s0 )\n    \
+                    memref.global_store_typed ( %Y, %tid, %w ) { align = i:4, elem_type = s:\"i32\" }\n    cf.return (  )\n  }\n}\n";
+        let l = rir::with_levers(&["dsb96"], || listing(text));
+        // llvm-mc -mcpu=gfx950: ds_read_b96 v[8:10], v0 offset:48 = D9FC0030 08000000; ds_read_b96_tr_b6 v[12:14], v0
+        // offset:16 = D9C20010 0C000000.
+        assert_eq!(words(&l, "ds_read_b96 ")[0], 0xD9FC_0030, "{l}");
+        assert_eq!(words(&l, "ds_read_b96_tr_b6")[0], 0xD9C2_0010, "{l}");
+        // Without the lever the templates are not LDS reads of ours (the general inline-asm path refuses them).
+        assert!(rir::compile_any_target(text, Target::Gfx950).map_or(true, |c| !c.listing().contains("ds_read_b96")));
+    }
+
+    #[test]
+    fn dmamanualring_marks_the_allocations_named_ring() {
+        let ring = dma_kernel("", false, 0).replace("%A_smem", "%ringA");
+        assert_eq!(wait_before(&listing(&ring), "ds_read_b32"), Some((1, 15)));
+        assert_eq!(wait_before(&rir::with_levers(&["dmamanualring"], || listing(&ring)), "ds_read_b32"), None);
+        // Other names keep their waits under the lever; the attribute needs `dmamanual`.
+        assert_eq!(wait_before(&rir::with_levers(&["dmamanualring"], || listing(&dma_kernel("", false, 0))), "ds_read_b32"), Some((1, 15)));
+    }
+
+    #[test]
+    fn dmamanualringw_lets_ring_writes_skip_the_dma_waits() {
+        // DMA into %ringA, then an LDS write into %ringA (of a value read from %B_smem).
+        // (no DMA into %B_smem: the read of it needs no wait, the write into %ringA does)
+        let k = dma_kernel("", true, 0).replace("%A_smem", "%ringA").replace(
+            "tile.async_buffer_load_lds ( %rsrc, %b1, %voff1, %c0 ) { aux = i:0, dwords = i:1 }
+",
+            "",
+        ).replace(
+            "    memref.global_store_typed ( %Y, %tid, %v )",
+            "    tile.smem_store ( %ringA, %tid, %v ) { elem_type = s:\"f32\", rank = i:1 }
+                 memref.global_store_typed ( %Y, %tid, %v )",
+        );
+        let waits = |lv: &[&str]| wait_before(&rir::with_levers(lv, || listing(&k)), "ds_write_b32");
+        assert!(waits(&[]).is_some_and(|(vm, _)| vm < 2), "{:?}", waits(&[]));
+        // dmamanualring: reads only -- the write still waits for the DMA into %ringA
+        assert!(waits(&["dmamanualring"]).is_some_and(|(vm, _)| vm < 2), "{:?}", waits(&["dmamanualring"]));
+        // dmamanualringw: the write skips it (no vmcnt wait right before it)
+        assert!(waits(&["dmamanualringw"]).map_or(true, |(vm, _)| vm >= 2), "{:?}", waits(&["dmamanualringw"]));
+    }
+
+    #[test]
     fn lds_dma_explicit_leaves_the_dma_waits_to_the_kernel() {
         let text = dma_kernel("", false, 0)
             .replace("max_workgroup_size = i:256 }", "max_workgroup_size = i:256, lds_dma_explicit = b:true }");
@@ -437,6 +539,7 @@ mod tests {
                 attrs: Vec::new(),
                 regions: Vec::new(),
                 block_args: Vec::new(),
+                loc: None,
             };
             op.set_attr("template", crate::rir::ast::Attr::Str(template.to_string().into()));
             op.set_attr("constraints", crate::rir::ast::Attr::Str(constraints.to_string().into()));
@@ -448,6 +551,11 @@ mod tests {
         for (t, c) in [("ds_read_b128 $0, $1 offset:65536", "=v,v"), ("ds_read_b128 $0, $1", "=v,0"), ("ds_read_b96 $0, $1", "=v,v"), ("", "=v,0"), ("ds_write_b32 $0, $1", "=v,v")] {
             assert_eq!(op(t, c), None, "{t} {c}");
         }
+        // rust-compiler-v2 lever `dsb96`: the 96-bit and transposing reads too.
+        let b96 = rir::with_levers(&["dsb96"], || {
+            ["ds_read_b96 $0, $1 offset:48", "ds_read_b96_tr_b6 $0, $1", "ds_read_b64_tr_b4 $0, $1 offset:8", "ds_read_b96_tr_b4 $0, $1"].map(|t| op(t, "=v,v"))
+        });
+        assert_eq!(b96, [Some((3, 48)), Some((3, 0)), Some((2, 8)), None]);
     }
 
     /// `dma_kernel` whose waves each load three 1 KiB parts of `%A` through

@@ -417,18 +417,26 @@ fn result_latency(inst: &MInst) -> u32 {
 /// to the end of the block. An instruction moves at most `window` places,
 /// which bounds the change in register pressure.
 pub fn schedule_window(f: &mut MFunc, window: usize) {
+    f.fill_scopes();
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
     let (target, pin_vmem) = (f.target, f.passes.pin_vmem);
     for block in f.blocks.iter_mut() {
         let insts = std::mem::take(&mut block.insts);
-        block.insts = schedule_block(insts, window, &units, target, pin_vmem);
+        block.insts = schedule_block(insts, window, &units, target, pin_vmem, &f.scopes);
     }
 }
 
 const NO_INST: u32 = u32::MAX;
 
-fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target, pin_vmem: bool) -> Vec<MInst> {
-    let order = block_dag(&insts, units, target, pin_vmem, &mut DagScratch::default()).order(window);
+fn schedule_block(
+    insts: Vec<MInst>,
+    window: usize,
+    units: &UnitIndex,
+    target: crate::target::Target,
+    pin_vmem: bool,
+    scopes: &[std::sync::Arc<super::LeverDelta>],
+) -> Vec<MInst> {
+    let order = block_dag(&insts, units, target, pin_vmem, &mut DagScratch::default(), scopes).order(window);
     order.iter().map(|&i| insts[i as usize].clone()).collect()
 }
 
@@ -457,6 +465,19 @@ pub(super) struct BlockDag {
     /// Per instruction, the slots it holds gfx950's matrix pipe for; empty
     /// when the block has no MFMA.
     pipe: Vec<u8>,
+    /// Lever `loadfirst`: the vector memory loads (and the instructions
+    /// their addresses wait on, through `height`) that issue as soon as they
+    /// are ready, ahead of instructions that could start sooner; empty when
+    /// no instruction of the block has the lever.
+    urgent: Vec<bool>,
+}
+
+/// rust-compiler-v2 (`target::gfx9::sched_groups`): each instruction's successors in block `block`'s dependence graph.
+pub(crate) fn block_successors(f: &MFunc, block: usize) -> Vec<Vec<u32>> {
+    let insts = &f.blocks[block].insts;
+    let units = UnitIndex::new(insts.iter());
+    let dag = block_dag(insts, &units, f.target, f.passes.pin_vmem, &mut DagScratch::default(), &f.scopes);
+    (0..insts.len()).map(|i| dag.succs[dag.succ_start[i] as usize..dag.succ_start[i + 1] as usize].iter().map(|&(j, _)| j).collect()).collect()
 }
 
 /// With `pin_vmem` (the kernel's `pin_vmem`), VMEM accesses, LDS DMA loads
@@ -464,10 +485,32 @@ pub(super) struct BlockDag {
 /// gives each DMA its MFMA slot (the MFMA, then the DMA, then
 /// `sched_barrier`) keeps it there, where otherwise a DMA that is no fence
 /// (`m0_order`) may issue above the MFMA of its window.
-fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, pin_vmem: bool, scratch: &mut DagScratch) -> BlockDag {
+fn block_dag(
+    insts: &[MInst],
+    units: &UnitIndex,
+    target: crate::target::Target,
+    pin_vmem: bool,
+    scratch: &mut DagScratch,
+    scopes: &[std::sync::Arc<super::LeverDelta>],
+) -> BlockDag {
+    // Levers `vmlat60` / `vmlat100` (PLAN decision 18): a vector memory load's result is taken to arrive after 60
+    // (100) slots instead of the model's 180, as for a stream whose loads were issued several steps ahead: the list
+    // scheduler then keeps a run of MFMAs that read prefetched operands together instead of slotting each MFMA
+    // result's LDS store (and its hazard wait) between them (LLVM's model latency of a VMEM load is in this range).
     let result_latency = |inst: &MInst| match target {
         crate::target::Target::Gfx1151 => result_latency(inst),
-        crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
+        crate::target::Target::Gfx950 => {
+            let l = crate::target::gfx9::model::result_latency(inst);
+            if inst.op.flags() & F_VMEM_LOAD != 0 {
+                if super::lever_at(scopes, inst.scope, "vmlat60") {
+                    return l.min(60);
+                }
+                if super::lever_at(scopes, inst.scope, "vmlat100") {
+                    return l.min(100);
+                }
+            }
+            l
+        }
     };
     let mut mfma = match target {
         crate::target::Target::Gfx1151 => None,
@@ -500,7 +543,16 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
     // `alias` tag). SMEM reads only kernel arguments and memory the kernel
     // does not write.
     let mut lds = (None, Vec::new());
+    // Lever `ldsalias` (PLAN decision 18): LDS accesses of different allocations (their `mem` tags, gfx950's
+    // `lds_dma::tag`) do not order each other, as LLVM's alias analysis of distinct LDS objects lets an MFMA result's
+    // store to a staging buffer sink past the next tile's operand reads. The accesses since the last fence with their
+    // tags, and whether each writes.
+    let alias_on = |inst: &MInst| target == crate::target::Target::Gfx950 && super::lever_at(scopes, inst.scope, "ldsalias");
+    let mut lds_tagged: Vec<(u32, u16, bool)> = Vec::new();
     let mut vmem = super::alias::GlobalOrder::default();
+    // rustgemm: VMEM-only fences (`tile.sched_barrier` masks that keep VMEM from crossing, `rir::isel`): the last one
+    // and the VMEM accesses since it.
+    let (mut vm_fence, mut vm_since): (Option<usize>, Vec<usize>) = (None, Vec::new());
     // `pin_vmem`: the last MFMA, and the VMEM accesses since it.
     let pin = pin_vmem && target == crate::target::Target::Gfx950;
     let (mut last_mfma, mut vmem_since) = (None, Vec::new());
@@ -518,11 +570,37 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
                 vmem_since.push(i);
             }
         }
-        let unfenced = m0.is_some() && crate::target::gfx9::m0_order::unfenced(inst);
+        let vm_only = inst.op == Opc::SchedBarrier && inst.imm != 0 && inst.imm & crate::target::gfx9::sched_groups::SGB == 0;
+        if vm_only {
+            for j in std::mem::take(&mut vm_since) {
+                edge(j, i, 0);
+            }
+            if let Some(f) = vm_fence {
+                edge(f, i, 0);
+            }
+            vm_fence = Some(i);
+        } else if inst.op.flags() & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
+            if let Some(f) = vm_fence {
+                edge(f, i, 0);
+            }
+            vm_since.push(i);
+        }
+        let unfenced = (m0.is_some() && crate::target::gfx9::m0_order::unfenced(inst)) || vm_only;
         let flags = inst.op.flags() & if unfenced { !F_FENCE } else { !0 };
-        if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
-            || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
-            || has_phys(inst) && !unfenced
+        // Lever `smemfree` (PLAN decision 18): a scalar load (not a fence, a value result, physical registers only read,
+        // e.g. the kernarg pointer) is no scheduling fence: it reads kernel arguments or memory the kernel does not
+        // write, so only its operands order it, and the independent ones issue together (LLVM issues the kernarg and
+        // table loads of a framework kernel's prologue in parallel; a fence per load made one round trip each).
+        let smem_free = target == crate::target::Target::Gfx950
+            && flags & F_SMEM != 0
+            && flags & (F_FENCE | F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC) == 0
+            && !inst.defs.is_empty()
+            && inst.defs.iter().all(|d| !matches!(d, Opnd::P(..)))
+            && super::lever_at(scopes, inst.scope, "smemfree");
+        if !smem_free
+            && (flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
+                || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
+                || has_phys(inst) && !unfenced)
         {
             // Fences stay in order even with nothing between them, as the
             // `s_cbranch_execz` right after its `s_and_saveexec`.
@@ -599,7 +677,30 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
         if let Some(m) = m0.as_mut() {
             m.order(insts, i, &result_latency, &mut edge);
         }
-        let memory = if flags & F_LDS != 0 {
+        let tagged = flags & F_LDS != 0
+            && crate::target::gfx9::lds_dma::accesses_lds_memory(inst.op)
+            && flags & F_FENCE == 0
+            && alias_on(inst);
+        if tagged {
+            // Ordered after the untagged LDS ops (`lds`) as one of them would be, and after every tagged access
+            // that may touch the same bytes where either writes.
+            let is_write = inst.defs.is_empty();
+            if let Some(w) = lds.0 {
+                edge(w, i, 0);
+            }
+            if is_write {
+                for &r in &lds.1 {
+                    edge(r, i, 0);
+                }
+            }
+            for &(p, tag, w) in &lds_tagged {
+                if (w || is_write) && crate::target::gfx9::lds_dma::overlaps(tag, inst.mem) {
+                    edge(p as usize, i, 0);
+                }
+            }
+            lds_tagged.push((i as u32, inst.mem, is_write));
+        }
+        let memory = if flags & F_LDS != 0 && !tagged {
             Some((&mut lds, !inst.defs.is_empty()))
         } else if flags & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
             vmem.access(i as u32, inst.mem, flags & F_VMEM_STORE == 0, |from| edge(from as usize, i, 0));
@@ -608,6 +709,15 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
             None
         };
         if let Some(((write, reads), is_read)) = memory {
+            // An untagged LDS op orders after every tagged one before it (a write after all, a read after writes).
+            for &(p, _, w) in &lds_tagged {
+                if w || !is_read {
+                    edge(p as usize, i, 0);
+                }
+            }
+            if !is_read {
+                lds_tagged.clear();
+            }
             if let Some(w) = *write {
                 edge(w, i, 0);
             }
@@ -651,9 +761,109 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
             .map(|&(j, latency)| latency + height[j as usize])
             .fold(own, u32::max);
     }
+    // Lever `vmemfirst` (`rir::lever`): of the instructions ready at a cycle,
+    // vector memory loads issue first, as LLVM keeps a load group ahead of the
+    // MFMAs it feeds; a load chain's predecessors inherit it through `height`.
+    // Lever `loadorder` (implies `vmemfirst`): among those loads, the one whose
+    // result is read first in the block issues first, so the in-order `vmcnt`
+    // wait before that reader leaves the most loads in flight (COMGR's head GEMV
+    // keeps 13); loads read only past the block keep program order (the fused
+    // MoE's guarded weight loads, read after their 0/1-trip loop in order). The
+    // rank is scaled past any latency path so an address chain feeding later
+    // loads cannot pull them ahead. Both levers are read per load (its scope).
+    if super::lever_anywhere(scopes, "vmemfirst") || super::lever_anywhere(scopes, "loadorder") {
+        // Scope 0 (an instruction a pass made): the one before it in the block, else after (`MFunc::fill_scopes`).
+        let mut scope: Vec<u16> = insts.iter().map(|x| x.scope).collect();
+        if !scopes.is_empty() {
+            for i in 1..n {
+                if scope[i] == 0 {
+                    scope[i] = scope[i - 1];
+                }
+            }
+            for i in (0..n.saturating_sub(1)).rev() {
+                if scope[i] == 0 {
+                    scope[i] = scope[i + 1];
+                }
+            }
+        }
+        for i in (0..n).rev() {
+            let f = insts[i].op.flags();
+            let order = super::lever_at(scopes, scope[i], "loadorder");
+            if f & F_VMEM_LOAD != 0 && f & F_LDS == 0 && (order || super::lever_at(scopes, scope[i], "vmemfirst")) {
+                // Its first reader in the block (a successor reading one of its registers; a copy
+                // only passes the value on, as a loop's yield copies, emitted in any order, do).
+                let reads = |j: usize| {
+                    insts[j].op != Opc::Copy
+                        && insts[j].uses.iter().any(|u| matches!(u, Opnd::R(r) if insts[i].defs.iter().any(|d| matches!(d, Opnd::R(v) if v.reg == r.reg))))
+                };
+                let first = succs[succ_start[i] as usize..succ_start[i + 1] as usize].iter().map(|&(j, _)| j as usize).filter(|&j| reads(j)).min();
+                let rank = match (order, first) {
+                    (false, _) => 0,
+                    (true, Some(j)) => (2 * n - j) as u32,
+                    (true, None) => (n - i) as u32,
+                };
+                height[i] = height[i].max((u32::MAX >> 2).saturating_add(rank.saturating_mul(1024)));
+            } else {
+                let up = succs[succ_start[i] as usize..succ_start[i + 1] as usize].iter().map(|&(j, l)| height[j as usize].saturating_add(l)).max();
+                if let Some(h) = up.filter(|&h| h >= u32::MAX >> 2) {
+                    height[i] = height[i].max(h);
+                }
+            }
+        }
+    }
     let issues = insts.iter().map(|inst| inst.op.fmt() != Fmt::Pseudo || inst.op.flags() & F_USE_EXEC != 0).collect();
     let pipe = mfma.map_or_else(Vec::new, |_| insts.iter().map(crate::target::gfx9::sched::pipe_slots).collect());
-    BlockDag { succ_start, succs, preds, height, issues, pipe }
+    // Lever `loadfirst` (implies `vmemfirst`'s heights): a load, or an instruction a load's address waits on, is
+    // ranked as if it could start now: it issues once ready, so the loads keep the most in flight (the head
+    // GEMV's next-tile loads, which LLVM issues before the tile's MFMAs).
+    let urgent = if super::lever_anywhere(scopes, "loadfirst") {
+        let mut scope: Vec<u16> = insts.iter().map(|x| x.scope).collect();
+        for i in 1..n {
+            if scope[i] == 0 {
+                scope[i] = scope[i - 1];
+            }
+        }
+        for i in (0..n.saturating_sub(1)).rev() {
+            if scope[i] == 0 {
+                scope[i] = scope[i + 1];
+            }
+        }
+        // The data predecessors of each instruction: the last writer in the block of each virtual register it
+        // reads (the address chain; ordering edges such as scheduling barriers do not make a writer urgent).
+        let mut last: FxHashMap<u32, usize> = FxHashMap::default();
+        let mut data: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (i, inst) in insts.iter().enumerate() {
+            for u in inst.uses.iter() {
+                if let Opnd::R(v) = u {
+                    if let Some(&d) = last.get(&v.reg) {
+                        data[i].push(d);
+                    }
+                }
+            }
+            for d in inst.defs.iter() {
+                if let Opnd::R(v) = d {
+                    last.insert(v.reg, i);
+                }
+            }
+        }
+        let mut urgent = vec![false; n];
+        for i in (0..n).rev() {
+            let f = insts[i].op.flags();
+            if f & F_VMEM_LOAD != 0 && f & F_LDS == 0 && super::lever_at(scopes, scope[i], "loadfirst") {
+                urgent[i] = true;
+            }
+            if urgent[i] {
+                height[i] = height[i].max(u32::MAX >> 2);
+                for &d in &data[i] {
+                    urgent[d] = true;
+                }
+            }
+        }
+        urgent
+    } else {
+        Vec::new()
+    };
+    BlockDag { succ_start, succs, preds, height, issues, pipe, urgent }
 }
 
 impl BlockDag {
@@ -708,7 +918,14 @@ impl BlockDag {
             }
             let now = u64::from(cycle) << 32;
             let at = |k: u64| k.max(now | (k & 0xffff_ffff));
-            let rank = |i: usize| if PIPE { self.piped(i, at(key[i]), free, cycle) } else { at(key[i]) };
+            let rank = |i: usize| {
+                if self.urgent.get(i).copied().unwrap_or(false) {
+                    // Lever `loadfirst`: ranked as starting now, ahead of an MFMA the free matrix pipe would
+                    // take now too (`piped` clears bit 31 of its path rank); its true start is taken below.
+                    return now | (key[i] & 0xffff_ffff) >> 2;
+                }
+                if PIPE { self.piped(i, at(key[i]), free, cycle) } else { at(key[i]) }
+            };
             // The first unscheduled instruction's predecessors all precede
             // it, so it is always a candidate.
             let (mut pick, mut best) = (first, rank(first));
@@ -730,7 +947,8 @@ impl BlockDag {
                     }
                 }
             }
-            let (i, start) = (pick, (best >> 32) as u32);
+            let start = if self.urgent.get(pick).copied().unwrap_or(false) { (at(key[pick]) >> 32) as u32 } else { (best >> 32) as u32 };
+            let i = pick;
             done[i] = true;
             ready[i / 64] &= !(1 << (i % 64));
             order.push(i as u32);
@@ -759,7 +977,7 @@ impl Dags {
     pub(super) fn new(f: &MFunc) -> Dags {
         let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
         let mut scratch = DagScratch::default();
-        Dags(f.blocks.iter().map(|block| block_dag(&block.insts, &units, f.target, f.passes.pin_vmem, &mut scratch)).collect())
+        Dags(f.blocks.iter().map(|block| block_dag(&block.insts, &units, f.target, f.passes.pin_vmem, &mut scratch, &f.scopes)).collect())
     }
 
     /// The order of each block's instructions in `schedule_window` with
@@ -794,9 +1012,11 @@ pub(super) fn reordered(f: &MFunc, orders: &[Vec<u32>]) -> MFunc {
         target: f.target,
         vgpr_limit: f.vgpr_limit,
         agpr_limit: f.agpr_limit,
+        scopes: f.scopes.clone(),
         lds_dma_explicit: f.lds_dma_explicit,
         m0_early: f.m0_early,
         passes: f.passes,
+        locs: f.locs.clone(),
     }
 }
 
@@ -1288,6 +1508,7 @@ pub(super) fn expand_pseudos_with(f: &mut MFunc, spare: &mut Vec<MInst>) -> Resu
     for block in f.blocks.iter_mut() {
         let mut out = reuse(spare, block.insts.len());
         for inst in block.insts.drain(..) {
+            let (start, loc) = (out.len(), inst.loc);
             match inst.op {
                 Opc::Copy => {
                     let dst = inst.defs[0];
@@ -1317,6 +1538,9 @@ pub(super) fn expand_pseudos_with(f: &mut MFunc, spare: &mut Vec<MInst>) -> Resu
                 }
                 Opc::ImplicitDef | Opc::SchedBarrier => {}
                 _ => out.push(inst),
+            }
+            for expanded in &mut out[start..] {
+                expanded.loc = loc;
             }
         }
         *spare = std::mem::replace(&mut block.insts, out);
@@ -1850,7 +2074,22 @@ pub(super) mod tests {
 
     fn schedule_block(insts: Vec<MInst>, window: usize) -> Vec<MInst> {
         let units = UnitIndex::new(insts.iter());
-        super::schedule_block(insts, window, &units, crate::target::Target::Gfx1151, false)
+        super::schedule_block(insts, window, &units, crate::target::Target::Gfx1151, false, &[])
+    }
+
+    /// Lever `loadfirst`: a load ready at the same cycle as an MFMA the free matrix pipe would take issues first.
+    #[test]
+    fn loadfirst_ranks_a_ready_load_ahead_of_a_ready_mfma() {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let vr = |reg: u32, n: u8| Opnd::R(VRef { reg, off: 0, n });
+        let mfma = MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x16F16), [vr(10, 4)], [vr(1, 2), vr(2, 2), vr(3, 4)]);
+        let load = MInst::new(Opc::GLoadB32, [r(20)], [vr(5, 2)]);
+        let order = |insts: Vec<MInst>| {
+            let units = UnitIndex::new(insts.iter());
+            super::schedule_block(insts, 16, &units, crate::target::Target::Gfx950, false, &[])
+        };
+        assert_eq!(order(vec![mfma.clone(), load.clone()])[0].op, mfma.op);
+        assert_eq!(crate::rir::with_levers(&["loadfirst"], || order(vec![mfma.clone(), load.clone()]))[0].op, load.op);
     }
 
     #[test]

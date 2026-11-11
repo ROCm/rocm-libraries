@@ -6,7 +6,8 @@
 //! only in their instruction offset (`offset`) each get a move of the same
 //! value; allocation may give each its own SGPR copy of it.
 //!
-//! With the kernel's `m0_cse = b:true` (`MFunc::passes`), after allocation
+//! With the kernel's `m0_cse = b:true` (`MFunc::passes`) or rustgemm lever
+//! `m0cse` ([`enabled`]), after allocation
 //! and `s_waitcnt` and before the hazard `s_nop`s: within a block, a
 //! `s_mov_b32 m0, x` goes when M0 already holds `x`'s value. Values are
 //! numbered per block: an immediate is its own value, `s_mov_b32 y, x` gives
@@ -51,9 +52,15 @@ impl Numbering {
     }
 }
 
+/// Whether the pass runs: the kernel's `m0_cse` (also through
+/// `ROCKE_DIRECT_FORCE_ATTRS`) or lever `m0cse`.
+pub fn enabled(f: &MFunc) -> bool {
+    f.passes.m0_cse || f.lever_anywhere("m0cse")
+}
+
 /// Removes the moves the module documentation says; returns how many went.
 pub fn run(f: &mut MFunc) -> usize {
-    if !f.passes.m0_cse {
+    if !enabled(f) {
         return 0;
     }
     let mut removed = 0;
@@ -137,6 +144,9 @@ mod tests {
         ];
         let mut off = func(insts.clone(), false);
         assert_eq!(run(&mut off), 0);
+        // Lever `m0cse` is the same switch as the attribute.
+        let mut lever = func(insts.clone(), false);
+        assert_eq!(crate::rir::with_levers(&["m0cse"], || run(&mut lever)), 1);
         let mut on = func(insts, true);
         assert_eq!(run(&mut on), 1);
         assert_eq!(on.blocks[0].insts.len(), 9);

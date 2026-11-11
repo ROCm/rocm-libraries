@@ -441,6 +441,7 @@ pub(super) fn scan_chunk<'s>(
             attrs: scanned.attrs,
             regions: Vec::new(),
             block_args: Vec::new(),
+            loc: scanned.loc,
         };
         let regions = expected_regions(op.kind);
         if structured != (regions > 0) {
@@ -1025,7 +1026,7 @@ pub(super) fn header(text: &str) -> Option<(Header, Info, usize)> {
         names: String::new(),
     };
     let mut params = Info::default();
-    for (pname, ty, noalias, readonly) in prologue.params {
+    for (pname, ty, noalias, readonly, inreg) in prologue.params {
         let at = offset(text, pname) as usize;
         if at == 0 || text.as_bytes()[at - 1] != b'%' {
             return None;
@@ -1036,7 +1037,7 @@ pub(super) fn header(text: &str) -> Option<(Header, Info, usize)> {
         params.defs.push(Def { name: Name::of(text, name), pos: 0, region: 0, kind: Kind::Line(params.line_defs) });
         params.line_defs += 1;
         params.line_bytes += name.len();
-        header.params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
+        header.params.push(Param { value, name: pname.to_string(), ty, noalias, readonly, inreg });
     }
     Some((header, params, body_start))
 }

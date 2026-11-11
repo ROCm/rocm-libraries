@@ -19,6 +19,8 @@ pub mod asm;
 pub mod atomics;
 pub mod bank_wide;
 pub mod clauses;
+pub mod dpp;
+pub mod ds_merge;
 pub mod attn_ops;
 pub mod conv_ops;
 pub mod cpol;
@@ -33,8 +35,11 @@ pub mod fp8;
 pub mod lanes;
 pub mod latency;
 pub mod lds_dma;
+pub mod lds_pairs;
 pub mod lds_tr;
+pub mod licm_const;
 pub mod lits;
+pub mod loop_align;
 pub mod m0_order;
 pub mod mask_splat;
 pub mod masks;
@@ -44,13 +49,18 @@ pub mod m0_early;
 pub mod m0_fill;
 pub mod m0_hoist;
 pub mod mfma;
+pub mod bitop3;
+pub mod minmax;
+pub mod minmax3;
 pub mod model;
 pub mod pack;
 pub mod peep;
+pub mod q38;
 pub mod relief;
 pub mod ro_loads;
 pub mod rules;
 pub mod sched;
+pub mod sched_groups;
 pub mod select;
 pub mod spill;
 pub mod trade;
@@ -71,6 +81,25 @@ pub mod widen;
 /// (`pack`) over what the fusion leaves. `ROCKE_DIRECT_DEBUG=nofuse` and
 /// `nopack` skip those two.
 pub fn prepare(f: &mut MFunc) {
+    f.fill_scopes();
+    if f.lever_anywhere("dppcombine") {
+        dpp::combine(f);
+    }
+    if f.lever_anywhere("ldspairs") {
+        lds_pairs::merge(f);
+    }
+    if f.lever_anywhere("ldspairsfar") {
+        lds_pairs::merge_far(f);
+    }
+    if f.lever_anywhere("ds128") {
+        ds_merge::run(f);
+    }
+    if f.lever_anywhere("minmax") {
+        minmax::run(f);
+    }
+    if f.lever_anywhere("minmax3") {
+        minmax3::run(f);
+    }
     zero_acc::run(f);
     m0_hoist::run(f);
     rules::peephole(f);
@@ -79,10 +108,18 @@ pub fn prepare(f: &mut MFunc) {
     if !crate::rir::debug_flag("nofuse") {
         crate::rir::post::fuse_valu(f);
     }
+    if f.lever_anywhere("bitop3") {
+        f.fill_scopes();
+        bitop3::run(f);
+    }
     if !crate::rir::debug_flag("nopack") {
         pack::run(f);
     }
     masks::reuse(f);
+    // rust-compiler-v2 lever `sgb`: `tile.sched_group_barrier` pipelines order the blocks that have them.
+    if f.lever_anywhere("sgb") {
+        sched_groups::run(f);
+    }
 }
 
 /// The passes after register allocation on gfx950: pseudos become moves
@@ -101,19 +138,136 @@ pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
 /// (`expand`, `waitcnt`, `hazards`), for the compile's phase times.
 pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'static str)) -> Result<(), CompileError> {
     crate::rir::post::expand_pseudos(func)?;
+    drop_holds(func);
     zero_acc::after_allocation(func);
     zero_wide::after_allocation(func);
     hazards::fix_shift64(func, num_vgprs)?;
+    if func.lever_anywhere("fmac") {
+        func.fill_scopes();
+        shrink_fmac(func);
+    }
+    if func.lever_anywhere("licm") {
+        func.fill_scopes();
+        licm_const::run(func);
+    }
     lap("expand");
     waitcnt::insert(func);
+    drop_releases(func);
+    // rust-compiler-v2: `M_DMA_MANUAL` only steers `waitcnt`; it is not encoded.
+    for inst in func.blocks.iter_mut().flat_map(|b| b.insts.iter_mut()) {
+        inst.mods &= !crate::rir::mir::M_DMA_MANUAL;
+    }
     lap("waitcnt");
     peep::run(func);
     m0_cse::run(func);
     m0_early::run(func);
     m0_fill::run(func);
     hazards::insert_nops(func);
+    // rust-compiler-v2 lever `loopalign`: loop headers on 64 bytes.
+    if func.lever_anywhere("loopalign") {
+        loop_align::run(func)?;
+    }
     lap("hazards");
     Ok(())
+}
+
+/// Lever `fmac`: each allocated `v_fma_f32 d, a, b, d` without modifiers
+/// whose second factor (either factor: it commutes) is a VGPR becomes the
+/// four-byte VOP2 `v_fmac_f32 d, a, b`, as LLVM's `SIShrinkInstructions`
+/// (gfx1151 does it unconditionally, `rir::vopd::shrink_fmac`). The same
+/// operation and the same rounding; half the code bytes of an FMA-bound
+/// straight-line body (instruction fetch and cache).
+pub fn shrink_fmac(func: &mut crate::rir::mir::MFunc) -> usize {
+    use crate::rir::mir::{Opc, Opnd, Phys};
+    let mut n = 0;
+    let scopes = func.scopes.clone();
+    for inst in func.blocks.iter_mut().flat_map(|b| b.insts.iter_mut()) {
+        if inst.op != Opc::VFmaF32 || !crate::rir::lever_at(&scopes, inst.scope, "fmac") {
+            continue;
+        }
+        let [Opnd::P(Phys::V(dst), 1)] = inst.defs[..] else { continue };
+        let &[a, b, c] = &inst.uses[..] else { continue };
+        if inst.mods != 0 || c != Opnd::P(Phys::V(dst), 1) {
+            continue;
+        }
+        let (src0, vsrc1) = match (a, b) {
+            (_, Opnd::P(Phys::V(r), 1)) => (a, r),
+            (Opnd::P(Phys::V(r), 1), _) => (b, r),
+            _ => continue,
+        };
+        if !matches!(src0, Opnd::P(Phys::V(_) | Phys::S(_), 1) | Opnd::Imm(_)) {
+            continue;
+        }
+        inst.op = Opc::VFmacF32;
+        inst.uses = [src0, Opnd::P(Phys::V(vsrc1), 1)].into();
+        n += 1;
+    }
+    n
+}
+
+/// Drops the `WAIT_RELEASE` markers (lever `wgfence`) once `waitcnt` has
+/// placed their waits.
+fn drop_releases(func: &mut MFunc) {
+    let marker = crate::rir::mir::Opc::Gfx9(gen_isa::Gfx9Op::WaitRelease);
+    for block in &mut func.blocks {
+        block.insts.retain(|inst| inst.op != marker);
+    }
+}
+
+/// Drops the `KEEP_ALIVE` holds (`tile.l2_touch_drain`): they kept registers
+/// allocated up to them and emit nothing.
+fn drop_holds(func: &mut MFunc) {
+    let hold = crate::rir::mir::Opc::Gfx9(gen_isa::Gfx9Op::KeepAlive);
+    for block in &mut func.blocks {
+        block.insts.retain(|inst| inst.op != hold);
+    }
+}
+
+/// `r` for a kernel that preloads `preload` kernarg dwords into s[2..]:
+/// USER_SGPR_COUNT counts them, the workgroup ids follow them, and the SGPR
+/// count covers every SGPR the hardware writes.
+pub fn with_preload(mut r: ProgramResources, preload: u32, wg_ids: [bool; 3]) -> ProgramResources {
+    if preload == 0 {
+        return r;
+    }
+    let inputs = 2 + preload + wg_ids.iter().filter(|&&on| on).count() as u32;
+    r.sgpr_count = r.sgpr_count.max(inputs + EXTRA_SGPRS);
+    r.rsrc1 = r.rsrc1 & !(0xf << 6) | (r.sgpr_count.div_ceil(8) - 1) << 6;
+    // USER_SGPR_COUNT is 5 bits: a `devfn` build (more than 14 preloaded dwords, never launched) saturates it
+    r.rsrc2 = r.rsrc2 & !(0x1f << 1) | (2 + preload).min(31) << 1;
+    r
+}
+
+/// The first 256 bytes of a kernel that preloads `preload` kernarg dwords:
+/// what firmware without kernarg preload runs instead (firmware with it
+/// starts 256 bytes in): scalar loads of the dwords into s[2..2 + preload]
+/// from the kernarg pointer s[0:1], their wait, a branch to byte 256, and
+/// `s_nop 0` padding.
+pub fn preload_entry(preload: u32) -> Result<Vec<u8>, CompileError> {
+    use crate::rir::mir::{MInst, Opc, Opnd, Phys};
+    let mut words = Vec::new();
+    let mut k = 0u32;
+    while k < preload {
+        let reg = 2 + k;
+        let n = [8u32, 4, 2, 1].into_iter().find(|&n| n <= preload - k && reg % n.min(4) == 0).unwrap_or(1);
+        let opc = match n {
+            8 => Opc::SLoadB256,
+            4 => Opc::SLoadB128,
+            2 => Opc::SLoadB64,
+            _ => Opc::SLoadB32,
+        };
+        let inst = MInst::new(opc, [Opnd::P(Phys::S(reg as u16), n as u8)], [Opnd::P(Phys::S(0), 2)]).with_imm(4 * k as i64);
+        words.extend(asm::encode_words(&inst)?);
+        k += n;
+    }
+    words.extend(asm::encode_words(&MInst::new(Opc::SWaitcntExplicit, [], []).with_imm(waitcnt::explicit_imm(-1, -1, 0)))?);
+    let branch_at = words.len() as i64;
+    words.extend(asm::encode_words(&MInst::new(Opc::SBranch, [], []).with_imm((64 - branch_at - 1) & 0xffff))?);
+    if words.len() > 64 {
+        return Err(CompileError::new("ROCKE_DIRECT_ENCODE", "the kernarg preload entry passes 256 bytes"));
+    }
+    words.resize(64, 0xbf80_0000);
+    Ok(words.iter().flat_map(|w| w.to_le_bytes()).collect())
 }
 
 /// SGPRs a gfx950 code object counts besides those the kernel uses: VCC,
@@ -380,6 +534,33 @@ mod tests {
     }
 
     #[test]
+    fn agpr_alloc_caps_the_agprs() {
+        use crate::rir;
+        use crate::target::Target;
+        let with = |range: &str, text: String| text.replacen("attrs { ", &format!("attrs {{ agpr_alloc = {range}, "), 1);
+        let limited = |text: String| rir::compile_any_target_limited(&text, Target::Gfx950, 64).unwrap_or_else(|e| panic!("{e}"));
+        // Accumulators short of VGPRs bank in AGPRs; a cap at or above what they take changes nothing.
+        let free = limited(accumulators(6));
+        let used = free.stats.spill.agpr_dwords;
+        assert!(used > 8 && used <= 128, "{:?}", free.stats.spill);
+        for range in ["l:[ i:128, i:128 ]", "l:[ i:0, i:128 ]", "l:[ i:1, i:255 ]"] {
+            assert!(limited(with(range, accumulators(6))).hsaco == free.hsaco, "{range}");
+        }
+        // Spill slots stay below the cap too: values short of VGPRs take at most 8 AGPR slots, the rest LDS.
+        let spills = rir::compile_any_target_limited(&many_live(64), Target::Gfx950, 16).unwrap_or_else(|e| panic!("{e}")).stats;
+        assert!(spills.spill.agpr_dwords > 8, "{:?}", spills.spill);
+        let capped = rir::compile_any_target_limited(&with("l:[ i:0, i:8 ]", many_live(64)), Target::Gfx950, 16).unwrap_or_else(|e| panic!("{e}")).stats;
+        assert!(capped.spill.agpr_dwords <= 8 && capped.spill.lds_dwords + capped.spill.scratch_dwords > 0, "{:?}", capped.spill);
+        // A cap below it: at most that many AGPRs, the rest in VGPRs / spilled elsewhere, and the same results path.
+        for cap in [8u32, 16] {
+            let small = limited(with(&format!("l:[ i:0, i:{cap} ]"), accumulators(6)));
+            let s = &small.stats.spill;
+            assert!(s.agpr_dwords <= cap, "cap {cap}: {s:?}");
+            assert!(small.hsaco != free.hsaco);
+        }
+    }
+
+    #[test]
     fn kernels_with_agpr_alloc_0_use_no_agprs() {
         use crate::rir;
         use crate::target::Target;
@@ -397,8 +578,8 @@ mod tests {
         // Without spills the attribute changes nothing.
         let plain = rir::compile_any_target(&accumulators(2), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
         assert!(rir::compile_any_target(&none(accumulators(2)), Target::Gfx950).is_ok_and(|c| c.hsaco == plain.hsaco));
-        // Only [0, 0] is supported.
-        for range in ["l:[ i:0, i:8 ]", "l:[ i:4, i:4 ]", "i:0"] {
+        // rust-compiler-v2: [lo, hi] caps the AGPRs at hi (`agpr_alloc_caps_the_agprs`); a malformed range is refused.
+        for range in ["l:[ i:8, i:4 ]", "l:[ i:0, i:300 ]", "l:[ i:-1, i:8 ]", "i:0"] {
             let text = many_live(4).replacen("attrs { ", &format!("attrs {{ agpr_alloc = {range}, "), 1);
             let e = rir::compile_any_target(&text, Target::Gfx950).err().map(|e| e.to_string()).unwrap_or_default();
             assert!(e.contains("agpr_alloc"), "{range}: {e}");

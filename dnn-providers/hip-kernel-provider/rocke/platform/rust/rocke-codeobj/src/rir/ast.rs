@@ -355,6 +355,7 @@ pub enum OpKind {
     DsBpermute,
     WaveAny,
     WaveAll,
+    WaveBallot,
     LaneId,
     // atomics, fences, buffer stores, barriers
     GlobalAtomicAdd,
@@ -455,6 +456,95 @@ pub enum OpKind {
     /// `memref.global_flag_store (flags, index, value) {ordering, scope}`: an
     /// atomic i32 store.
     FlagStore,
+    // The Qwen3.8 monokernel's persistent-kernel and MX ops (gfx950; the
+    // Python engine lowers them, `rocke.core.ir.PYTHON_ONLY_OPCODES`).
+    /// `tile.int_to_ptr (addr: i64) -> ptr<T,global>`: a global pointer from
+    /// a runtime address; it is based on no argument (alias tag `ANY`).
+    IntToPtr,
+    /// `tile.buffer_load_cp (rsrc, voffset, soffset) {dwords, aux}`: a raw
+    /// buffer load of 1, 2 or 4 dwords with the cache-policy bits `aux`
+    /// (sc0 1, nt 2, sc1 16); `i32` or `vec<i32xN>`.
+    BufferLoadCp,
+    /// `tile.buffer_store_cp (data, rsrc, voffset, soffset) {dwords, aux}`.
+    BufferStoreCp,
+    /// `tile.tagged_poll (tag, rsrc0, voffset0, ...) {dwords: list, aux, pause}`:
+    /// each lane reloads its `(payload, tag)` pairs (buffer loads with `aux`)
+    /// until every pair's tag word equals `tag`, executing `pause` between
+    /// tries; one `vec<i32xN>` per spec. A leaf: the loop is expanded by
+    /// selection, so no pass sees or hoists it.
+    TaggedPoll,
+    /// `arith.cvt_scalef32_pk_bf16_fp4 (src: i32, scale: f32) {byte}`:
+    /// `v_cvt_scalef32_pk_bf16_fp4`, byte `byte` of `src` (two E2M1 codes)
+    /// as `vec<bf16x2>`, scaled by the exponent field of `scale`.
+    CvtScalePkBf16Fp4,
+    /// `tile.permlane16_swap (lo: i32, hi: i32) -> (i32, i32)`:
+    /// `v_permlane16_swap_b32` (gfx950).
+    Permlane16Swap,
+    /// `tile.s_getreg {hwreg}` -> i32: `s_getreg_b32` of `XCC_ID` or `HW_ID`.
+    SGetreg,
+    /// `tile.s_sleep {units}`: `s_sleep` in steps of at most 127.
+    SSleep,
+    /// `tile.memrealtime` -> i64: `s_memrealtime`.
+    MemRealtime,
+    /// `tile.global_atomic_add_scoped (voff: i32, value: i32|i64, base: i64)
+    /// {scope, returns}`: `global_atomic_add[_x2]` at `base + voff`, `sc1` at
+    /// system scope, `sc0` and the old value when `returns`.
+    AtomicAddScoped,
+    /// `tile.l2_touch_load (voff: i32, base: i64) -> vec<i32x4>`: a
+    /// `global_load_dwordx4` whose value is never read.
+    L2TouchLoad,
+    /// `tile.l2_touch_drain (values...)`: `s_waitcnt vmcnt(0)`, holding the
+    /// `l2_touch_load` destinations allocated until then.
+    L2TouchDrain,
+    // The rust track's ops (gfx950; `target::gfx9::q38`).
+    /// `math.exp (x: f32) -> f32`: LLVM's `llvm.exp.f32` expansion.
+    Exp,
+    /// `arith.cvt_scalef32_pk_fp8_f32 (old: i32, src0: f32, src1: f32, scale:
+    /// f32) {hi} -> i32`: two scaled fp8 bytes into one half of `old`.
+    CvtScalePkFp8F32,
+    /// `arith.cvt_scalef32_pk_bf8_f32`: as `CvtScalePkFp8F32`, bf8 bytes.
+    CvtScalePkBf8F32,
+    /// `tile.mfma_scale_mx (a, b, c, a_scale: i32, b_scale: i32) {shape,
+    /// fmt_a, fmt_b, opsel_a, opsel_b}`: the block-scaled f8f6f4 MFMA.
+    MfmaScaleMx,
+    /// `arith.maximum3_f32 (a, b, c) {abs}`: IEEE maximum of three, `abs`
+    /// a mask of the sources taken as magnitudes (bit k: source k).
+    Maximum3,
+    /// `tile.dpp_op (old: i32, src0: i32[, src1: i32]) {op, ctrl, row_mask,
+    /// bank_mask, bound_ctrl} -> i32`: `v_mov_b32_dpp` (op `mov`) or
+    /// `v_max_u32_dpp` (`max_u32`) of `src0` through the DPP control; lanes
+    /// the masks leave unwritten keep `old`.
+    DppOp,
+    /// `tile.mov_dpp (src: i32) {row_shl | row_shr, bound_ctrl}`: a row shift
+    /// (`llvm.amdgcn.update.dpp` with `src` as old).
+    MovDpp,
+    /// `arith.cvt_f32_to_f64` / `arith.cvt_f64_to_f32`.
+    CvtF32ToF64,
+    CvtF64ToF32,
+    /// `math.sqrt (x: f64) -> f64`: LLVM's expansion (rsq, Goldschmidt steps).
+    Sqrt,
+    /// `tile.global_store_cp (data, voff: i32, base: i64) | (data, addr: i64)
+    /// {aux, offset}`: a global store of 1, 2 or 4 dwords with the cache bits
+    /// `aux` (sc0 1, nt 2, sc1 16), through saddr or a per-lane address.
+    GlobalStoreCp,
+    /// `tile.global_load_cp (voff: i32, base: i64) | (addr: i64) {aux, offset,
+    /// dwords}`: a global load (i32, i64 or `vec<i32xN>`) with cache bits.
+    GlobalLoadCp,
+    /// `tile.bcnt (x: i32) -> i32`: `v_bcnt_u32_b32 x, 0`.
+    Bcnt,
+    /// `tile.s_ff1 (x: i32|i64) -> i32`: `s_ff1_i32_b32` / `_b64` (uniform).
+    SFf1,
+    /// `tile.memtime` -> i64: `s_memtime`.
+    MemTime,
+    /// `tile.s_nop {n}`: `s_nop n`.
+    SNop,
+    /// `tile.compiler_fence`: no instruction; no memory access moves across it.
+    CompilerFence,
+    /// `tile.ds_or_b32 (addr: i32, value: i32)`, `tile.ds_write_b32 (addr,
+    /// value)`, `tile.ds_read_b32 (addr) -> i32`: LDS at a raw byte address.
+    DsOrRaw,
+    DsWriteRaw,
+    DsReadRaw,
 }
 
 impl OpKind {
@@ -518,6 +608,8 @@ impl OpKind {
             "tile.buffer_rsrc" => OpKind::BufferRsrc,
             "tile.buffer_load_vN" => OpKind::BufferLoadVec,
             "tile.buffer_store_vN_f16" => OpKind::BufferStoreVecF16,
+            // rustgemm: the dtype-generic store (value of 1, 2 or 4 dwords, e.g. `vec<i32x2>`).
+            "tile.buffer_store_vN" => OpKind::BufferStoreVecF16,
             "tile.ds_swizzle_xor" => OpKind::DsSwizzleXor,
             "tile.mma" => OpKind::Mma,
             "tile.sync" => OpKind::Sync,
@@ -584,6 +676,7 @@ impl OpKind {
             "tile.ds_bpermute" => OpKind::DsBpermute,
             "tile.wave_any" => OpKind::WaveAny,
             "tile.wave_all" => OpKind::WaveAll,
+            "tile.wave_ballot" => OpKind::WaveBallot,
             "tile.lane_id" => OpKind::LaneId,
             "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
             // `(ptr<f16>, index, vec<f16x2>)`: an atomic add of both halves at an f16 element index.
@@ -592,7 +685,8 @@ impl OpKind {
             "tile.sync_lds_only" => OpKind::SyncLdsOnly,
             "tile.smem_addr_of" => OpKind::SmemAddrOf,
             "tile.smem_ptr_add" => OpKind::SmemPtrAdd,
-            "tile.async_buffer_load_lds_addr" | "tile.async_buffer_load_lds" => OpKind::BufferLoadLds,
+            // rustgemm: `_imm` adds an instruction offset (0..4095 bytes) to the global and the LDS address.
+            "tile.async_buffer_load_lds_addr" | "tile.async_buffer_load_lds" | "tile.async_buffer_load_lds_imm" => OpKind::BufferLoadLds,
             "tile.global_load_lds" => OpKind::GlobalLoadLds,
             "tile.ds_read_tr16_b64" => OpKind::DsReadTr16,
             "tile.ds_read_tr_b8" => OpKind::DsReadTr8,
@@ -610,6 +704,38 @@ impl OpKind {
             "tile.s_wait_asynccnt" => OpKind::WaitAsyncCnt,
             "memref.global_flag_wait_eq" => OpKind::FlagWaitEq,
             "memref.global_flag_store" => OpKind::FlagStore,
+            "tile.int_to_ptr" => OpKind::IntToPtr,
+            "tile.buffer_load_cp" => OpKind::BufferLoadCp,
+            "tile.buffer_store_cp" => OpKind::BufferStoreCp,
+            "tile.tagged_poll" => OpKind::TaggedPoll,
+            "arith.cvt_scalef32_pk_bf16_fp4" => OpKind::CvtScalePkBf16Fp4,
+            "tile.permlane16_swap" => OpKind::Permlane16Swap,
+            "tile.s_getreg" => OpKind::SGetreg,
+            "tile.s_sleep" => OpKind::SSleep,
+            "tile.memrealtime" => OpKind::MemRealtime,
+            "tile.global_atomic_add_scoped" => OpKind::AtomicAddScoped,
+            "tile.l2_touch_load" => OpKind::L2TouchLoad,
+            "tile.l2_touch_drain" => OpKind::L2TouchDrain,
+            "math.exp" => OpKind::Exp,
+            "arith.cvt_scalef32_pk_fp8_f32" => OpKind::CvtScalePkFp8F32,
+            "arith.cvt_scalef32_pk_bf8_f32" => OpKind::CvtScalePkBf8F32,
+            "tile.mfma_scale_mx" => OpKind::MfmaScaleMx,
+            "arith.maximum3_f32" => OpKind::Maximum3,
+            "tile.dpp_op" => OpKind::DppOp,
+            "tile.mov_dpp" => OpKind::MovDpp,
+            "arith.cvt_f32_to_f64" => OpKind::CvtF32ToF64,
+            "arith.cvt_f64_to_f32" => OpKind::CvtF64ToF32,
+            "math.sqrt" => OpKind::Sqrt,
+            "tile.global_store_cp" => OpKind::GlobalStoreCp,
+            "tile.global_load_cp" => OpKind::GlobalLoadCp,
+            "tile.bcnt" => OpKind::Bcnt,
+            "tile.s_ff1" => OpKind::SFf1,
+            "tile.memtime" => OpKind::MemTime,
+            "tile.s_nop" => OpKind::SNop,
+            "tile.compiler_fence" => OpKind::CompilerFence,
+            "tile.ds_or_b32" => OpKind::DsOrRaw,
+            "tile.ds_write_b32" => OpKind::DsWriteRaw,
+            "tile.ds_read_b32" => OpKind::DsReadRaw,
             _ => return None,
         })
     }
@@ -663,6 +789,7 @@ impl OpKind {
                 | OpKind::DsBpermute
                 | OpKind::WaveAny
                 | OpKind::WaveAll
+                | OpKind::WaveBallot
                 | OpKind::GlobalAtomicAdd
                 | OpKind::GAtomicAdd
                 | OpKind::Fence
@@ -678,6 +805,27 @@ impl OpKind {
                 | OpKind::WaitAsyncCnt
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
+                | OpKind::BufferLoadCp
+                | OpKind::BufferStoreCp
+                | OpKind::TaggedPoll
+                | OpKind::Permlane16Swap
+                | OpKind::SGetreg
+                | OpKind::SSleep
+                | OpKind::MemRealtime
+                | OpKind::AtomicAddScoped
+                | OpKind::L2TouchLoad
+                | OpKind::L2TouchDrain
+                // A lane's result depends on the other lanes.
+                | OpKind::DppOp
+                | OpKind::MovDpp
+                | OpKind::GlobalStoreCp
+                | OpKind::GlobalLoadCp
+                | OpKind::MemTime
+                | OpKind::SNop
+                | OpKind::CompilerFence
+                | OpKind::DsOrRaw
+                | OpKind::DsWriteRaw
+                | OpKind::DsReadRaw
         )
     }
 
@@ -704,11 +852,18 @@ impl OpKind {
                     | OpKind::DsBpermute
                     | OpKind::WaveAny
                     | OpKind::WaveAll
+                    | OpKind::WaveBallot
                     | OpKind::DsReadTr16
                     | OpKind::DsReadTr8
                     | OpKind::LdsReadTr
                     | OpKind::Permlane32Swap
                     | OpKind::ReadLane
+                    | OpKind::BufferLoadCp
+                    | OpKind::Permlane16Swap
+                    | OpKind::DppOp
+                    | OpKind::MovDpp
+                    | OpKind::GlobalLoadCp
+                    | OpKind::DsReadRaw
             )
     }
 
@@ -728,6 +883,12 @@ impl OpKind {
                 | OpKind::Fence
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
+                | OpKind::BufferStoreCp
+                | OpKind::TaggedPoll
+                | OpKind::AtomicAddScoped
+                | OpKind::GlobalStoreCp
+                // Orders memory like a write: nothing is reused across it.
+                | OpKind::CompilerFence
         )
     }
 }
@@ -742,7 +903,14 @@ pub struct Op {
     /// Values a region defines on entry: the induction variable and iteration
     /// arguments of `scf.for`.
     pub block_args: Vec<ValueId>,
+    /// The `@loc "..."` the op was printed with (`file:line:col:func` frames,
+    /// `;`-separated, innermost first; `crate::srcloc`), unescaped. Never
+    /// compared: it does not change what the op computes.
+    pub loc: Option<Loc>,
 }
+
+/// An op's source location chain, shared by the ops cloned from it.
+pub type Loc = std::sync::Arc<str>;
 
 impl Op {
     pub fn attr(&self, key: &str) -> Option<&Attr> {
@@ -776,6 +944,41 @@ impl Op {
             Some(Attr::Bool(value)) => Some(*value),
             _ => None,
         }
+    }
+
+    /// The register file of an identity pin, `'v'` or `'s'`: a
+    /// `tile.inline_asm` of one operand tied to its result (`"=v,0"` or
+    /// `"=s,0"`) whose template emits nothing, being empty or `;` comments
+    /// only (`rocke.helpers.device_ops.fresh`'s `"; fresh $0"`).
+    pub fn asm_pin(&self) -> Option<char> {
+        if self.kind != OpKind::InlineAsmIdentity || self.operands.len() != 1 || self.results.len() != 1 {
+            return None;
+        }
+        let silent = self.str_attr("template").is_some_and(|t| t.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with(';')));
+        match self.str_attr("constraints") {
+            Some("=v,0") if silent => Some('v'),
+            Some("=s,0") if silent => Some('s'),
+            // rustgemm: rocKE's AGPR accumulator pin (`acc_agpr`): an identity whose register file the
+            // allocator picks (AGPR accumulators come from the AGPR request / pressure).
+            Some("=a,0") if silent => Some('a'),
+            _ => None,
+        }
+    }
+
+    /// The register files (`'v'` / `'s'`) of a general `tile.inline_asm`'s
+    /// outputs, from its constraint string (`None` for another op).
+    pub fn asm_output_classes(&self) -> Option<Vec<char>> {
+        if self.kind != OpKind::InlineAsmIdentity {
+            return None;
+        }
+        let text = self.str_attr("constraints")?;
+        Some(
+            text.split(',')
+                .map(str::trim)
+                .filter_map(|p| p.strip_prefix('='))
+                .map(|p| if p.trim_start_matches('&').starts_with('s') { 's' } else { 'v' })
+                .collect(),
+        )
     }
 
     pub fn set_attr(&mut self, key: &'static str, value: Attr) {
@@ -819,6 +1022,9 @@ pub struct Param {
     pub noalias: bool,
     /// `readonly = b:true`: the kernel does not write through this argument.
     pub readonly: bool,
+    /// `inreg = b:true`: preload the argument into user SGPRs at dispatch
+    /// (gfx950 kernarg preload, `opt::kernarg_preload`).
+    pub inreg: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -895,11 +1101,16 @@ pub struct Passes {
     /// `u16_zext`: the zero extension of a `ds_read_u16` result is the
     /// register itself, whose high half the load already zeroed (`rir::isel`).
     pub u16_zext: bool,
+    /// `kernarg_preload`: every parameter is `inreg`, so the dispatch writes
+    /// the leading arguments that fit into the user SGPRs after the kernarg
+    /// pointer, where the kernel reads them instead of loading them
+    /// (`opt::kernarg_preload`).
+    pub kernarg_preload: bool,
 }
 
 impl Passes {
     /// The attribute names, as `set` takes them.
-    pub const NAMES: [&'static str; 10] = [
+    pub const NAMES: [&'static str; 11] = [
         "dead_lanes",
         "m0_fill",
         "peep_waits",
@@ -910,6 +1121,7 @@ impl Passes {
         "acc_init_keep",
         "lds_waw",
         "u16_zext",
+        "kernarg_preload",
     ];
 
     /// Turns pass `name` on or off; false when no pass has that name.
@@ -925,6 +1137,7 @@ impl Passes {
             "acc_init_keep" => &mut self.acc_init_keep,
             "lds_waw" => &mut self.lds_waw,
             "u16_zext" => &mut self.u16_zext,
+            "kernarg_preload" => &mut self.kernarg_preload,
             _ => return false,
         };
         *flag = on;

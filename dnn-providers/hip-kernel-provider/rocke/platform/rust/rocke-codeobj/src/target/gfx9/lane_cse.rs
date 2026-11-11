@@ -30,9 +30,11 @@ fn exchanges(kind: OpKind) -> bool {
             | OpKind::Permlane16
             | OpKind::Permlane64
             | OpKind::Permlane32Swap
+            | OpKind::Permlane16Swap
             | OpKind::ReadLane
             | OpKind::WaveAny
             | OpKind::WaveAll
+            | OpKind::WaveBallot
     )
 }
 

@@ -155,6 +155,32 @@ pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError>
             OpKind::BufferLoadLds if !(op.operands.first().is_some_and(uni) && op.operands.get(3).is_some_and(uni)) => {
                 return Err(unsupported(format!("{:?} with a divergent resource or soffset", op.kind)));
             }
+            OpKind::BufferLoadCp if !(op.operands.first().is_some_and(uni) && op.operands.get(2).is_some_and(uni)) => {
+                return Err(unsupported(format!("{:?} with a divergent resource or soffset", op.kind)));
+            }
+            OpKind::BufferStoreCp if !(op.operands.get(1).is_some_and(uni) && op.operands.get(3).is_some_and(uni)) => {
+                return Err(unsupported(format!("{:?} with a divergent resource or soffset", op.kind)));
+            }
+            // Resources at operands 1, 3, ..; the tag and the L2-touch / atomic bases are SGPR operands.
+            OpKind::TaggedPoll if !op.operands.iter().skip(1).step_by(2).all(uni) => {
+                return Err(unsupported("tile.tagged_poll with a divergent resource"));
+            }
+            OpKind::L2TouchLoad | OpKind::AtomicAddScoped if !op.operands.last().is_some_and(uni) => {
+                return Err(unsupported(format!("{:?} with a divergent base address", op.kind)));
+            }
+            // The saddr base of a global access with cache bits, and s_ff1's source, are SGPR operands.
+            OpKind::GlobalStoreCp if op.operands.len() == 3 && !op.operands.last().is_some_and(uni) => {
+                return Err(unsupported("tile.global_store_cp with a divergent base address"));
+            }
+            OpKind::GlobalLoadCp if op.operands.len() == 2 && !op.operands.last().is_some_and(uni) => {
+                return Err(unsupported("tile.global_load_cp with a divergent base address"));
+            }
+            OpKind::SFf1 if !op.operands.first().is_some_and(uni) => {
+                return Err(unsupported("tile.s_ff1 of a divergent value"));
+            }
+            OpKind::InlineAsmIdentity if op.asm_pin() == Some('s') && !op.operands.first().is_some_and(uni) => {
+                return Err(unsupported("an \"=s,0\" pin of a divergent value"));
+            }
             OpKind::If | OpKind::IfElse => {
                 let cond = op.operands.first().is_some_and(uni);
                 stack.extend(op.regions.iter().map(|r| (r.ops.iter(), divergent || !cond)));
@@ -207,6 +233,22 @@ fn int_value(key: &str, attr: Option<&Attr>) -> Result<Option<i64>, CompileError
     }
 }
 
+/// rustgemm: an LDS DMA's instruction offset is 0..4095 bytes.
+#[inline(never)]
+#[cold]
+fn dma_offset_error(o: i64) -> CompileError {
+    malformed(format!("an LDS DMA instruction offset of {o}"))
+}
+
+#[inline(never)]
+fn dma_offset(op: &Op) -> Result<(), CompileError> {
+    match op.attr("offset") {
+        None | Some(Attr::Int(0..=4095)) => Ok(()),
+        Some(Attr::Int(o)) => Err(dma_offset_error(*o)),
+        Some(_) => Err(malformed("an LDS DMA instruction offset that is no integer")),
+    }
+}
+
 impl Checker<'_> {
     fn ty(&self, v: ValueId) -> Result<&Type, CompileError> {
         self.kernel.values.get(v.0 as usize).map(|d| &d.ty).ok_or_else(|| malformed("an undefined value"))
@@ -217,17 +259,6 @@ impl Checker<'_> {
             None => Ok(None),
             Some(Attr::Int(v)) => Ok(Some(*v)),
             Some(other) => Err(malformed(format!("attribute {key} is {other:?}, not an integer"))),
-        }
-    }
-
-    /// An LDS DMA load's instruction offset (`offset`), added to the global
-    /// and the LDS address: 0..4095 bytes. Out of line: the checker's frame
-    /// bounds the nesting depth a small stack takes.
-    #[inline(never)]
-    fn dma_offset(&self, op: &Op) -> Result<(), CompileError> {
-        match self.int(op, "offset")? {
-            None | Some(0..=4095) => Ok(()),
-            Some(o) => Err(unsupported(format!("an LDS DMA instruction offset of {o}"))),
         }
     }
 
@@ -427,7 +458,7 @@ impl Checker<'_> {
                 }
             }
             // Selection reads the operand as an f32 word.
-            Exp2 | Log2 | Rcp | Exp2Fast | RcpFast | Rsqrt | Tanh | Rint => only_f32(same(1)?)?,
+            Exp2 | Log2 | Rcp | Exp2Fast | RcpFast | Rsqrt | Tanh | Rint | Exp => only_f32(same(1)?)?,
             CastToF32 => {
                 arity(1, 1)?;
                 if !matches!(types[0], Type::Scalar(Scalar::F16 | Scalar::BF16)) || *res.expect("one result") != f32t {
@@ -551,6 +582,8 @@ impl Checker<'_> {
                 // `tile.buffer_store_vN_f32` stores its dwords as the 16-bit forms do.
                 let dwords = match data {
                     Type::Vec(Scalar::F16 | Scalar::BF16 | Scalar::F32, _) => data.dwords(),
+                    // rustgemm: `tile.buffer_store_vN` stores i32 vectors as they are.
+                    Type::Vec(Scalar::I32, _) => data.dwords(),
                     Type::Vec(_, _) if loads => data.dwords(),
                     _ => return Err(mismatch()),
                 };
@@ -589,7 +622,9 @@ impl Checker<'_> {
                     Some(aux) if aux & !(1 | 2 | 16) == 0 => {}
                     Some(aux) => return Err(unsupported(format!("LDS DMA cache policy {aux:#x}"))),
                 }
-                self.dma_offset(op)?;
+                // rustgemm: `tile.async_buffer_load_lds_imm`'s instruction offset (out of line: this function's frame
+                // bounds the nesting depth a small stack takes).
+                dma_offset(op)?;
             }
             // `global.load.lds` from `ptr + byte_offset` (an i8 GEP).
             GlobalLoadLds => {
@@ -658,10 +693,33 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            // A general template (gfx950 assembles it, `rir::isel_asm`; gfx1151
+            // lowers only identity pins): one result per output constraint and
+            // one operand per input constraint; what the template says is
+            // isel's to accept or refuse.
+            InlineAsmIdentity if op.asm_pin().is_none() => {
+                let text = op.str_attr("constraints").unwrap_or("");
+                let parts: Vec<&str> = text.split(',').map(str::trim).filter(|p| !p.is_empty() && !p.starts_with("~{")).collect();
+                let outputs = parts.iter().filter(|p| p.starts_with('=')).count();
+                if outputs != op.results.len() || parts.len() - outputs != op.operands.len() {
+                    return Err(mismatch());
+                }
+            }
+            // rustgemm: an AGPR pin passes any value through unchanged.
+            InlineAsmIdentity if op.asm_pin() == Some('a') => {
+                arity(1, 1)?;
+                if res != Some(types[0]) {
+                    return Err(mismatch());
+                }
+            }
             InlineAsmIdentity => {
                 arity(1, 1)?;
                 if res != Some(types[0]) || !matches!(types[0], Type::Scalar(s) if *s != Scalar::I1) && !matches!(types[0], Type::Ptr(_)) {
                     return Err(mismatch());
+                }
+                // An SGPR pin holds one dword (`device_ops.fresh_s`).
+                if op.asm_pin() == Some('s') && !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) {
+                    return Err(unsupported(format!("an \"=s,0\" pin of {:?}", types[0])));
                 }
             }
             KernArg | GLoad | GStore | GAtomicAddF32 | GAtomicAdd | LLoad | LStore | LAtomicAdd | LdsReadTr => {
@@ -765,6 +823,13 @@ impl Checker<'_> {
                 let Type::Vec(_, n) = *t else { return Err(mismatch()) };
                 let mask = *types[0] == Type::Scalar(Scalar::I1) || *types[0] == Type::Vec(Scalar::I1, n);
                 if !mask || types[1] != t || types[2] != t {
+                    return Err(mismatch());
+                }
+            }
+            // i32 predicate in, the i64 lane mask out (llvm.amdgcn.ballot.i64 of p != 0).
+            WaveBallot => {
+                arity(1, 1)?;
+                if *types[0] != i32t || *res.expect("one result") != Type::Scalar(Scalar::I64) {
                     return Err(mismatch());
                 }
             }
@@ -965,6 +1030,280 @@ impl Checker<'_> {
             }
             // DPP moves of i32 words (`mov_dpp8` also f32), with the control
             // words the lowering accepts.
+            IntToPtr => {
+                arity(1, 1)?;
+                if *types[0] != Type::Scalar(Scalar::I64) || !matches!(res.expect("one result"), Type::Ptr(_)) {
+                    return Err(mismatch());
+                }
+            }
+            // `aux`: sc0 1, nt 2, sc1 16 (`rocke.core.ir.CPOL_*`); 1, 2 or 4 dwords of i32.
+            BufferLoadCp | BufferStoreCp => {
+                let loads = op.kind == BufferLoadCp;
+                arity(loads as usize, if loads { 3 } else { 4 })?;
+                let at = if loads { 0 } else { 1 };
+                if *types[at] != rsrc || *types[at + 1] != i32t || *types[at + 2] != i32t {
+                    return Err(mismatch());
+                }
+                let data = if loads { res.expect("one result") } else { types[0] };
+                let dwords = match data {
+                    Type::Scalar(Scalar::I32) => 1,
+                    Type::Vec(Scalar::I32, n @ (2 | 4)) => *n,
+                    _ => return Err(mismatch()),
+                };
+                if self.int(op, "dwords")? != Some(dwords as i64) {
+                    return Err(malformed(format!("a {dwords}-dword cache-policy buffer access declared {:?}", op.attr("dwords"))));
+                }
+                cache_policy(self.int(op, "aux")?)?;
+            }
+            TaggedPoll => {
+                let Some(Attr::List(widths)) = op.attr("dwords") else {
+                    return Err(malformed("tile.tagged_poll without a dwords list"));
+                };
+                let n = widths.len();
+                if n == 0 || r != n || o != 1 + 2 * n || *types[0] != i32t {
+                    return Err(malformed("tile.tagged_poll needs a tag and a (resource, offset) and result per spec"));
+                }
+                for (k, w) in widths.iter().enumerate() {
+                    let Attr::Int(w @ (2 | 4)) = *w else {
+                        return Err(malformed(format!("tile.tagged_poll spec {k} of {w:?} dwords")));
+                    };
+                    if *types[1 + 2 * k] != rsrc || *types[2 + 2 * k] != i32t || *self.ty(op.results[k])? != Type::Vec(Scalar::I32, w as u32) {
+                        return Err(mismatch());
+                    }
+                }
+                cache_policy(self.int(op, "aux")?)?;
+                if !matches!(self.str(op, "pause")?, Some("" | "s_nop 0" | "s_sleep 1")) {
+                    return Err(unsupported(format!("tile.tagged_poll pause {:?}", op.attr("pause"))));
+                }
+            }
+            CvtScalePkBf16Fp4 => {
+                arity(1, 2)?;
+                if *types[0] != i32t || *types[1] != f32t || *res.expect("one result") != Type::Vec(Scalar::BF16, 2) {
+                    return Err(mismatch());
+                }
+                if !matches!(self.int(op, "byte")?, Some(0..=3)) {
+                    return Err(malformed(format!("byte {:?} is not 0..3", op.attr("byte"))));
+                }
+            }
+            Permlane16Swap => {
+                arity(2, 2)?;
+                let results = op.results.iter().map(|&v| self.ty(v)).collect::<Result<Vec<_>, _>>()?;
+                if *types[0] != i32t || *types[1] != i32t || results.iter().any(|t| **t != i32t) {
+                    return Err(mismatch());
+                }
+            }
+            SGetreg => {
+                arity(1, 0)?;
+                if *res.expect("one result") != i32t || !matches!(self.str(op, "hwreg")?, Some("XCC_ID" | "HW_ID")) {
+                    return Err(malformed(format!("tile.s_getreg of {:?}", op.attr("hwreg"))));
+                }
+            }
+            SSleep => {
+                arity(0, 0)?;
+                if !matches!(self.int(op, "units")?, Some(1..=0xffff)) {
+                    return Err(malformed(format!("tile.s_sleep units {:?}", op.attr("units"))));
+                }
+            }
+            MemRealtime => {
+                arity(1, 0)?;
+                if *res.expect("one result") != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
+            AtomicAddScoped => {
+                let returns = match op.attr("returns") {
+                    Some(Attr::Bool(b)) => *b,
+                    _ => return Err(malformed("tile.global_atomic_add_scoped without returns")),
+                };
+                arity(returns as usize, 3)?;
+                let value = types[1];
+                if *types[0] != i32t || !matches!(value, Type::Scalar(Scalar::I32 | Scalar::I64)) || *types[2] != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+                if returns && res != Some(value) {
+                    return Err(mismatch());
+                }
+                if !matches!(self.str(op, "scope")?, Some("workgroup" | "agent" | "system")) {
+                    return Err(invalid(format!("atomic scope {:?}", op.attr("scope"))));
+                }
+            }
+            L2TouchLoad => {
+                arity(1, 2)?;
+                if *types[0] != i32t || *types[1] != Type::Scalar(Scalar::I64) || *res.expect("one result") != Type::Vec(Scalar::I32, 4) {
+                    return Err(mismatch());
+                }
+            }
+            L2TouchDrain => {
+                if r != 0 || o == 0 || types.iter().any(|t| **t != Type::Vec(Scalar::I32, 4)) {
+                    return Err(mismatch());
+                }
+            }
+            CvtScalePkFp8F32 | CvtScalePkBf8F32 => {
+                arity(1, 4)?;
+                if *types[0] != i32t || types[1..].iter().any(|t| **t != f32t) || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+            }
+            MfmaScaleMx => {
+                arity(1, 5)?;
+                let wide = match self.str(op, "shape")? {
+                    Some("16x16x128") => false,
+                    Some("32x32x64") => true,
+                    other => return Err(invalid(format!("tile.mfma_scale_mx shape {other:?}"))),
+                };
+                let dwords = |f: Option<i64>| match f {
+                    Some(0 | 1) => Some(8),
+                    Some(2 | 3) => Some(6),
+                    Some(4) => Some(4),
+                    _ => None,
+                };
+                let (na, nb) = match (dwords(self.int(op, "fmt_a")?), dwords(self.int(op, "fmt_b")?)) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => return Err(invalid(format!("tile.mfma_scale_mx formats {:?}, {:?}", op.attr("fmt_a"), op.attr("fmt_b")))),
+                };
+                for key in ["opsel_a", "opsel_b"] {
+                    if !matches!(self.int(op, key)?, None | Some(0..=3)) {
+                        return Err(invalid(format!("tile.mfma_scale_mx {key} {:?}", op.attr(key))));
+                    }
+                }
+                let cd = Type::Vec(Scalar::F32, if wide { 16 } else { 4 });
+                if *types[0] != Type::Vec(Scalar::I32, na)
+                    || *types[1] != Type::Vec(Scalar::I32, nb)
+                    || *types[2] != cd
+                    || *types[3] != i32t
+                    || *types[4] != i32t
+                    || res != Some(&cd)
+                {
+                    return Err(mismatch());
+                }
+            }
+            Maximum3 => {
+                only_f32(same(3)?)?;
+                if !matches!(self.int(op, "abs")?, None | Some(0..=7)) {
+                    return Err(invalid(format!("arith.maximum3_f32 abs {:?}", op.attr("abs"))));
+                }
+            }
+            MovDpp => {
+                arity(1, 1)?;
+                if *types[0] != i32t || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+                let shift = match (self.int(op, "row_shl")?, self.int(op, "row_shr")?) {
+                    (Some(k), None) | (None, Some(k)) => k,
+                    _ => return Err(invalid("tile.mov_dpp needs one of row_shl, row_shr")),
+                };
+                if !(1..=15).contains(&shift) {
+                    return Err(invalid(format!("tile.mov_dpp shift {shift}")));
+                }
+            }
+            CvtF32ToF64 => {
+                arity(1, 1)?;
+                if *types[0] != f32t || *res.expect("one result") != Type::Scalar(Scalar::F64) {
+                    return Err(mismatch());
+                }
+            }
+            CvtF64ToF32 => {
+                arity(1, 1)?;
+                if *types[0] != Type::Scalar(Scalar::F64) || *res.expect("one result") != f32t {
+                    return Err(mismatch());
+                }
+            }
+            Sqrt => {
+                let t = same(1)?;
+                // f32 selects on gfx950 only (isel refuses it elsewhere)
+                if !matches!(*t, Type::Scalar(Scalar::F64 | Scalar::F32)) {
+                    return Err(if float(t) { unsupported(format!("math.sqrt of {t:?}")) } else { mismatch() });
+                }
+            }
+            GlobalStoreCp => {
+                if r != 0 || !(2..=3).contains(&o) {
+                    return Err(mismatch());
+                }
+                let data_ok = matches!(types[0], Type::Scalar(Scalar::I32)) || matches!(types[0], Type::Vec(Scalar::I32, 2 | 4));
+                let addr_ok = if o == 3 { *types[1] == i32t && *types[2] == Type::Scalar(Scalar::I64) } else { *types[1] == Type::Scalar(Scalar::I64) };
+                if !data_ok || !addr_ok {
+                    return Err(mismatch());
+                }
+                if !matches!(self.int(op, "aux")?, None | Some(0..=19)) || !matches!(self.int(op, "offset")?, None | Some(-4096..=4095)) {
+                    return Err(invalid(format!("tile.global_store_cp aux {:?} offset {:?}", op.attr("aux"), op.attr("offset"))));
+                }
+            }
+            GlobalLoadCp => {
+                if r != 1 || !(1..=2).contains(&o) {
+                    return Err(mismatch());
+                }
+                let addr_ok = if o == 2 { *types[0] == i32t && *types[1] == Type::Scalar(Scalar::I64) } else { *types[0] == Type::Scalar(Scalar::I64) };
+                let t = res.expect("one result");
+                let words = match t {
+                    Type::Scalar(Scalar::I32 | Scalar::F32) => 1,
+                    Type::Scalar(Scalar::I64) | Type::Vec(Scalar::I32, 2) => 2,
+                    Type::Vec(Scalar::I32, 4) => 4,
+                    _ => 0,
+                };
+                if !addr_ok || words == 0 || self.int(op, "dwords")?.is_some_and(|d| d != words) {
+                    return Err(mismatch());
+                }
+                if !matches!(self.int(op, "aux")?, None | Some(0..=19)) || !matches!(self.int(op, "offset")?, None | Some(-4096..=4095)) {
+                    return Err(invalid(format!("tile.global_load_cp aux {:?} offset {:?}", op.attr("aux"), op.attr("offset"))));
+                }
+            }
+            Bcnt => {
+                arity(1, 1)?;
+                if *types[0] != i32t || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+            }
+            SFf1 => {
+                arity(1, 1)?;
+                if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::I64)) || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+            }
+            MemTime => {
+                arity(1, 0)?;
+                if *res.expect("one result") != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
+            SNop => {
+                arity(0, 0)?;
+                if !matches!(self.int(op, "n")?, Some(0..=15)) {
+                    return Err(invalid(format!("tile.s_nop n {:?}", op.attr("n"))));
+                }
+            }
+            CompilerFence => arity(0, 0)?,
+            DsOrRaw | DsWriteRaw => {
+                arity(0, 2)?;
+                if *types[0] != i32t || *types[1] != i32t {
+                    return Err(mismatch());
+                }
+            }
+            DsReadRaw => {
+                arity(1, 1)?;
+                if *types[0] != i32t || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+            }
+            DppOp => {
+                let max = match self.str(op, "op")? {
+                    Some("mov") => false,
+                    Some("max_u32") => true,
+                    other => return Err(invalid(format!("tile.dpp_op op {other:?}"))),
+                };
+                arity(1, if max { 3 } else { 2 })?;
+                if types.iter().any(|t| **t != i32t) || *res.expect("one result") != i32t {
+                    return Err(mismatch());
+                }
+                match self.int(op, "ctrl")? {
+                    Some(c) if crate::target::gfx9::q38::dpp_ctrl_ok(c) => {}
+                    other => return Err(invalid(format!("tile.dpp_op ctrl {other:?}"))),
+                }
+                for key in ["row_mask", "bank_mask"] {
+                    if !matches!(self.int(op, key)?, None | Some(0..=15)) {
+                        return Err(invalid(format!("tile.dpp_op {key} {:?}", op.attr(key))));
+                    }
+                }
+            }
             DppXor | QuadPerm | MovDpp8 => {
                 arity(1, 1)?;
                 let t = types[0];
@@ -985,6 +1324,14 @@ impl Checker<'_> {
         Ok(())
     }
 
+}
+
+/// A cache policy of sc0 (1), nt (2) and sc1 (16), as `rocke.core.ir` checks it.
+fn cache_policy(aux: Option<i64>) -> Result<(), CompileError> {
+    match aux {
+        Some(a) if a & !(1 | 2 | 16) == 0 => Ok(()),
+        other => Err(malformed(format!("cache policy {other:?} beyond sc0, nt and sc1"))),
+    }
 }
 
 /// Bits of `s` as the LLVM lowering's integer type (fp8 and bf8 are `i8`),
@@ -1260,5 +1607,150 @@ mod tests {
             }
         };
         std::thread::Builder::new().stack_size(1 << 20).spawn(run).expect("spawns").join().expect("no overflow");
+    }
+
+    /// Well-formed rocKE IR this compiler does not lower is refused as
+    /// `ROCKE_DIRECT_UNSUPPORTED` (`compile_kernel` then compiles with COMGR),
+    /// on gfx950 and gfx1151 alike: the ops, types, parameter and kernel
+    /// attributes and inline asm the Qwen3.8 builds use. Text that is not
+    /// rocKE IR stays a parse error.
+    #[test]
+    fn rocke_ir_the_direct_backend_does_not_lower_is_unsupported() {
+        use crate::target::Target;
+        let store = "    %e : f32 = arith.bitcast ( %tid )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n";
+        let body = |ops: &str| kernel(&format!("{ops}{store}"));
+        let cases: Vec<(String, &str)> = vec![
+            // Ops rocKE defines that the direct backend has no lowering for.
+            (body("    %x : f32 = math.sinh ( %n )\n"), "UNSUPPORTED"),
+            (body("    %v : vec<f32x4> = tile.mfma_unknown_mx ( %n, %n, %n ) { m = i:16 }\n"), "UNSUPPORTED"),
+            (body("    %x : vec<i32x2> = arith.cvt_scalef32_pk_fp6_f32 ( %n, %n )\n"), "UNSUPPORTED"),
+            // Not a rocKE IR dialect, or not an identifier: not rocKE IR.
+            (body("    %x : f32 = foo.exp ( %n )\n"), "PARSE"),
+            (body("    %x : f32 = math.e-xp ( %n )\n"), "PARSE"),
+            // An SGPR pin of a lane's value.
+            (kernel("    %a : i32 = tile.inline_asm ( %tid ) { constraints = s:\"=s,0\", template = s:\"; fresh $0\" }\n    \
+                     %e : f32 = arith.bitcast ( %a )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n"), "UNSUPPORTED"),
+            // A pointer other than a global one, and an element type the backend has not.
+            (body("    %w : i64 = arith.zext ( %tid )\n    %q : ptr<i32,constant> = tile.global_ptr_add ( %Y, %w )\n"), "UNSUPPORTED"),
+            (kernel_with("max_workgroup_size = i:64", "    %s : ptr<fp4e2m1,global>\n", store), "UNSUPPORTED"),
+            (kernel_with("max_workgroup_size = i:64", "    %s : ptr<vec<i32x8>,global>\n", store), "UNSUPPORTED"),
+            (kernel_with("max_workgroup_size = i:64", "    %s : ptr<vec<i32x>,global>\n", store), "PARSE"),
+            (kernel_with("max_workgroup_size = i:64", "    %s : ptr<i3-2,global>\n", store), "PARSE"),
+            // An unknown kernel attribute, an AGPR range, an argument type.
+            (kernel_with("max_workgroup_size = i:64, lds_budget = i:4096", "    %n : i32\n", store), "UNSUPPORTED"),
+            (kernel_with("max_workgroup_size = i:64, agpr_alloc = l:[ i:64, i:32 ]", "    %n : i32\n", store), "UNSUPPORTED"),
+            (kernel_with("max_workgroup_size = i:64", "    %n : f16\n", store), "UNSUPPORTED"),
+            // A kernel symbol the ELF writer does not emit (a `-1` knob value in the name).
+            (kernel(store).replace("kernel @probe {", "kernel @probe_base+1 {"), "UNSUPPORTED"),
+            (kernel(store).replace("kernel @probe {", &format!("kernel @{} {{", "k".repeat(1025))), "UNSUPPORTED"),
+            (kernel(store).replace("kernel @probe {", "kernel @ {"), "PARSE"),
+        ];
+        for (text, kind) in &cases {
+            for target in [Target::Gfx950, Target::Gfx1151] {
+                let error = super::super::compile_any_target(text, target).err().unwrap_or_else(|| panic!("accepted:\n{text}"));
+                assert_eq!(error.kind, format!("ROCKE_DIRECT_{kind}"), "{target:?}: {}\n{text}", error.message);
+            }
+        }
+        // General inline asm (no result, one, two; a tied pin with an instruction): gfx950 assembles the
+        // template (`rir::isel_asm`), gfx1151 lowers only the identity pins.
+        let used = |ops: &str| {
+            kernel(&format!(
+                "{ops}    %e : f32 = arith.bitcast ( %a )
+    memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4, elem_type = s:\"f32\" }}
+"
+            ))
+        };
+        let asm: Vec<String> = vec![
+            body("    tile.inline_asm ( %n ) { constraints = s:\"v\", sideeffect = b:true, template = s:\"s_sleep 1\" }
+"),
+            used("    %a : i32 = tile.inline_asm ( %n ) { constraints = s:\"=s,s\", template = s:\"s_mov_b32 $0, $1\" }
+"),
+            used("    %a : i32, %b : i32 = tile.inline_asm ( %n ) { constraints = s:\"=v,=v,v\", template = s:\"v_mov_b32 $0, $2\" }
+"),
+            used("    %a : i32 = tile.inline_asm ( %n ) { constraints = s:\"=v,0\", template = s:\"v_mov_b32 $0, $0 ; fresh\" }
+"),
+        ];
+        for text in &asm {
+            let error = super::super::compile_any_target(text, Target::Gfx1151).err().unwrap_or_else(|| panic!("gfx1151 accepted:
+{text}"));
+            assert_eq!(error.kind, "ROCKE_DIRECT_UNSUPPORTED", "{}
+{text}", error.message);
+            super::super::compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("gfx950: {e}
+{text}"));
+        }
+        // `inreg = b:false` states nothing and the empty pin still lowers.
+        let pin = "    %a : i32 = tile.inline_asm ( %tid ) { constraints = s:\"=v,0\", convergent = b:false, sideeffect = b:false, template = s:\"\" }\n    \
+                   %e : f32 = arith.bitcast ( %a )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n";
+        assert!(compile(&kernel_with("max_workgroup_size = i:64", "    %n : i32 { inreg = b:false }\n", pin)).is_ok());
+        // COMGR's fresh-process policy carries nothing for this compiler.
+        assert!(compile(&kernel_with("comgr_fresh_process = b:true, max_workgroup_size = i:64", "    %n : i32\n", pin)).is_ok());
+    }
+
+    /// The Qwen3.8 monokernel's persistent-kernel and MX ops lower on gfx950
+    /// and are refused (UNSUPPORTED, COMGR then compiles) on gfx1151; so is
+    /// kernarg preload. Malformed forms of them are MALFORMED on both. The
+    /// comment-only `fresh` pins (`device_ops.fresh`, `"=v,0"` / `"=s,0"`)
+    /// lower on both.
+    #[test]
+    fn qwen38_device_ops_lower_on_gfx950_only() {
+        use crate::target::Target;
+        let store = "    %e : f32 = arith.bitcast ( %r )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n";
+        let body = |ops: &str| kernel(&format!("{ops}{store}"));
+        let rsrc = "    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n    \
+                    %rs : vec<i32x4> = tile.buffer_rsrc ( %Y, %c64 )\n    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n";
+        let lowered: Vec<String> = vec![
+            body(&format!("{rsrc}    %v : vec<i32x4> = tile.buffer_load_cp ( %rs, %tid, %c0 ) {{ aux = i:17, dwords = i:4 }}\n    \
+                           %r : i32 = vector.extract ( %v ) {{ index = i:2 }}\n")),
+            body(&format!("{rsrc}    tile.buffer_store_cp ( %tid, %rs, %tid, %c0 ) {{ aux = i:18, dwords = i:1 }}\n    %r : i32 = arith.add ( %tid, %n )\n")),
+            body(&format!("{rsrc}    %p0 : vec<i32x2>, %p1 : vec<i32x4> = tile.tagged_poll ( %n, %rs, %tid, %rs, %c0 ) \
+                           {{ aux = i:16, dwords = l:[ i:2, i:4 ], pause = s:\"s_sleep 1\" }}\n    %r : i32 = vector.extract ( %p1 ) {{ index = i:2 }}\n")),
+            body("    %w : i64 = arith.zext ( %n )\n    %q : ptr<i32,global> = tile.int_to_ptr ( %w )\n    \
+                  %r : i32 = memref.global_load_typed ( %q, %tid ) { align = i:4, elem_type = s:\"i32\" }\n"),
+            body("    %h : f32 = arith.bitcast ( %n )\n    %d : vec<bf16x2> = arith.cvt_scalef32_pk_bf16_fp4 ( %tid, %h ) { byte = i:3 }\n    \
+                  %r : i32 = vector.bitcast ( %d )\n"),
+            body("    %r : i32, %r2 : i32 = tile.permlane16_swap ( %tid, %n )\n"),
+            body("    %r : i32 = tile.s_getreg (  ) { hwreg = s:\"XCC_ID\" }\n    tile.s_sleep (  ) { units = i:200 }\n"),
+            body("    %t : i64 = tile.memrealtime (  )\n    %r : i32 = arith.trunc ( %t )\n"),
+            body("    %w : i64 = arith.zext ( %n )\n    %o : i64 = tile.global_atomic_add_scoped ( %tid, %w, %w ) { returns = b:true, scope = s:\"system\" }\n    \
+                  %r : i32 = arith.trunc ( %o )\n"),
+            body("    %w : i64 = arith.zext ( %n )\n    %v : vec<i32x4> = tile.l2_touch_load ( %tid, %w )\n    tile.l2_touch_drain ( %v )\n    \
+                  %r : i32 = arith.add ( %tid, %n )\n"),
+            kernel_with("max_workgroup_size = i:64", "    %n : i32 { inreg = b:true }\n", "    %r : i32 = arith.add ( %tid, %n )\n    \
+                        %e : f32 = arith.bitcast ( %r )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n"),
+        ];
+        for text in &lowered {
+            if let Err(e) = super::super::compile_any_target(text, Target::Gfx950) {
+                panic!("gfx950: {} {}\n{text}", e.kind, e.message);
+            }
+            let error = super::super::compile_any_target(text, Target::Gfx1151).err().unwrap_or_else(|| panic!("gfx1151 accepted:\n{text}"));
+            assert_eq!(error.kind, "ROCKE_DIRECT_UNSUPPORTED", "gfx1151: {}\n{text}", error.message);
+        }
+        let malformed = [
+            body(&format!("{rsrc}    %p : vec<i32x2> = tile.tagged_poll ( %n, %rs, %tid ) {{ aux = i:16, dwords = l:[ i:3 ], pause = s:\"s_nop 0\" }}\n    %r : i32 = arith.add ( %tid, %n )\n")),
+            body(&format!("{rsrc}    %v : vec<i32x4> = tile.buffer_load_cp ( %rs, %tid, %c0 ) {{ aux = i:4, dwords = i:4 }}\n    %r : i32 = vector.extract ( %v ) {{ index = i:2 }}\n")),
+            body("    %w : i64 = arith.zext ( %tid )\n    %r : i32 = tile.int_to_ptr ( %w )\n"),
+            body("    %r : i32 = tile.s_getreg (  ) { hwreg = s:\"MODE\" }\n"),
+        ];
+        for text in &malformed {
+            for target in [Target::Gfx950, Target::Gfx1151] {
+                let error = super::super::compile_any_target(text, target).err().unwrap_or_else(|| panic!("accepted:\n{text}"));
+                assert_eq!(error.kind, "ROCKE_DIRECT_MALFORMED", "{target:?}: {}\n{text}", error.message);
+            }
+        }
+        // An SGPR pin of a lane's value is refused by the uniformity check (before selection).
+        let divergent = kernel("    %r : i32 = tile.inline_asm ( %tid ) { constraints = s:\"=s,0\", template = s:\"; fresh $0\" }
+                                    %e : f32 = arith.bitcast ( %r )
+    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }
+");
+        let error = super::super::compile_any_target(&divergent, Target::Gfx950).err().expect("refused");
+        assert!(error.message.contains("pin of a divergent value"), "{}", error.message);
+        for (pin, arg) in [("=v,0", "%tid"), ("=s,0", "%n")] {
+            let text = body(&format!("    %r : i32 = tile.inline_asm ( {arg} ) {{ constraints = s:\"{pin}\", convergent = b:false, sideeffect = b:true, template = s:\"; fresh $0\" }}\n"));
+            for target in [Target::Gfx950, Target::Gfx1151] {
+                if let Err(e) = super::super::compile_any_target(&text, target) {
+                    panic!("{target:?} {pin}: {} {}", e.kind, e.message);
+                }
+            }
+        }
     }
 }

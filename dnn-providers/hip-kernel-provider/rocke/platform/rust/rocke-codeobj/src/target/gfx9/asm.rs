@@ -343,7 +343,8 @@ fn vop3(
         Some(sdst) => t::EncVop3b { op, vdst: dst, sdst, src0, src1, src2, neg, ..Default::default() }.pack(),
         None => {
             let op_sel = (mods / M_OPSEL_SRC0) & 0xf;
-            t::EncVop3 { op, vdst: dst, op_sel, src0, src1, src2, neg, ..Default::default() }.pack()
+            let abs = (mods / super::q38::M_ABS0) & 0x7;
+            t::EncVop3 { op, vdst: dst, abs, op_sel, src0, src1, src2, neg, ..Default::default() }.pack()
         }
     });
     Ok(())
@@ -426,20 +427,50 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             out.push(t::EncSopk { op: code, sdst, simm16: inst.imm as u32 & 0xffff }.pack());
         }
         Fmt::Sopp => out.push(t::EncSopp { op: code, simm16: inst.imm as u32 & 0xffff }.pack()),
+        Fmt::Smem if form == Form::Nobase && defs.is_empty() => {
+            // s_dcache_inv: no operands, the imm bit clear (as llvm-mc writes it).
+            if !uses.is_empty() || inst.imm != 0 {
+                return Err(bad(format!("{}: no operands", name())));
+            }
+            let word = t::EncSmem { op: code, ..Default::default() }.pack()[0] & !(1 << 17);
+            push2(out, [word, 0]);
+        }
+        Fmt::Smem if form == Form::Nobase => {
+            // s_memrealtime: only sdata, the imm bit clear (as llvm-mc writes it).
+            if !uses.is_empty() || inst.imm != 0 {
+                return Err(bad(format!("{}: no address and no offset", name())));
+            }
+            let Opnd::P(Phys::S(r), 2) = *nth(defs, 0)? else {
+                return Err(bad(format!("{}: the destination is an SGPR pair", name())));
+            };
+            if r % 2 != 0 {
+                return Err(bad(format!("{}: an SGPR pair at an even register", name())));
+            }
+            let sdata = sgpr(r, 2)?;
+            let word = t::EncSmem { op: code, sdata, ..Default::default() }.pack()[0] & !(1 << 17);
+            push2(out, [word, 0]);
+        }
         Fmt::Smem => {
             if matches!(nth(defs, 0)?, Opnd::P(Phys::M0 | Phys::ExecLo, _)) {
                 return Err(bad(format!("{}: M0 and EXEC are not SMEM destinations", name())));
             }
             let sdata = sdst(nth(defs, 0)?)?;
-            let Opnd::P(Phys::S(base), 2) = *nth(uses, 0)? else {
-                return Err(bad("SMEM base is not an SGPR pair"));
+            // An SGPR pair (s_load) or a buffer descriptor quad (s_buffer_load), at an even register.
+            let (base, n) = match *nth(uses, 0)? {
+                Opnd::P(Phys::S(base), n @ (2 | 4)) => (base, n),
+                _ => return Err(bad("SMEM base is not an SGPR pair or quad")),
             };
             let offset = inst.imm;
             if !(-(1 << 20)..1 << 20).contains(&offset) {
                 return Err(bad(format!("SMEM offset {offset} out of range")));
             }
-            let sbase = sgpr(base, 2)? >> 1;
-            push2(out, t::EncSmem { op: code, sdata, sbase, offset: offset as u32 & 0x1f_ffff, ..Default::default() }.pack());
+            // s_buffer_load takes an unsigned 20-bit offset (llvm-mc refuses a negative one).
+            if n == 4 && offset < 0 {
+                return Err(bad(format!("{}: a negative offset {offset}", name())));
+            }
+            let sbase = sgpr(base, n)? >> 1;
+            let glc = u32::from(inst.mods & M_GLC != 0);
+            push2(out, t::EncSmem { op: code, sdata, sbase, glc, offset: offset as u32 & 0x1f_ffff, ..Default::default() }.pack());
         }
         Fmt::Vop1 if defs.is_empty() => out.push(t::EncVop1 { op: code, ..Default::default() }.pack()),
         Fmt::Vop1 if form == Form::Swap => {
@@ -493,6 +524,16 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
                 vop3(out, vop3_code, dst, None, &uses[..1], mods, reads, name())?;
             }
         }
+        Fmt::Vop2 if form == Form::Dpp16 => {
+            let vdst = vgpr(nth(defs, 0)?)?;
+            let (src0, vsrc1) = (vgpr(nth(uses, 0)?)?, vgpr(nth(uses, 1)?)?);
+            let control = inst.imm as u32 & 0xff_ffff;
+            if !dpp_control_on_gfx9(control & 0x1ff) || control & 1 << 10 != 0 || mods != 0 {
+                return Err(bad(format!("{}: DPP control {control:#x} or modifiers {mods:#x}", name())));
+            }
+            out.push(t::EncVop2 { op: code, vdst, vsrc1, src0: t::SRC_DPP }.pack());
+            out.push(t::EncDpp { src0, ctrl: control }.pack());
+        }
         Fmt::Vop2 => {
             let vdst = vgpr(nth(defs, 0)?)?;
             let (s0, s1) = (nth(uses, 0)?, nth(uses, 1)?);
@@ -514,7 +555,18 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         Fmt::Vop3 => {
             // The destination's old value (a fourth use, or the third of v_cvt_pk_fp8_f32) is not encoded.
             let vdst = vgpr(nth(defs, 0)?)?;
+            // v_bitop3_b32: its truth table in the neg (bits 2:0), abs (5:3) and omod (7:6) fields.
+            let (mods, omod) = if inst.op == Opc::Gfx9(t::Gfx9Op::VBitop3B32) {
+                let k = inst.imm as u32 & 0xff;
+                ((k & 7) | ((k >> 3) & 7) * super::q38::M_ABS0, (k >> 6) & 3)
+            } else {
+                (mods, 0)
+            };
             vop3(out, vop3_code, vdst, None, &uses[..super::fp8::encoded_sources(sig, uses)], mods, valu_lits(form, flags), name())?;
+            if omod != 0 {
+                let n = out.len();
+                out[n - 1] |= omod << 27;
+            }
         }
         Fmt::Vop3b => {
             let vdst = vgpr(nth(defs, 0)?)?;
@@ -556,29 +608,17 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             // each it reads (controls 11:10 and 13:12) is op_sel (bit 0) and
             // op_sel_hi (bit 1) of its source. Its MFMA half sets bit 11.
             let scaled = form == Form::MaiScale;
-            let sel = if scaled { inst.imm >> super::mfma::SCALE_SEL_SHIFT } else { 0 };
             if scaled {
+                // The A and B scales: two VGPRs (any two, not a pair).
                 let (sa, sb) = (nth(uses, 3)?, nth(uses, 4)?);
                 if sa.dwords() != 1 || sb.dwords() != 1 {
-                    return Err(bad(format!("{}: the A and B scales are one VGPR each, not {sa:?} and {sb:?}", name())));
+                    return Err(bad(format!("{}: the A and B scales are one VGPR each, not {sa:?}, {sb:?}", name())));
                 }
-                if !(0..16).contains(&sel) {
-                    return Err(bad(format!("{}: scale bytes {sel:#x} past the A and B selects", name())));
-                }
-                let (byte_a, byte_b) = (sel as u32 & 3, sel as u32 >> 2);
-                let (sa, sb) = (vgpr(sa)?, vgpr(sb)?);
-                push2(
-                    out,
-                    t::EncVop3p {
-                        op: LD_SCALE,
-                        op_sel: (byte_a & 1) | (byte_b & 1) << 1,
-                        op_sel_hi: byte_a >> 1 | (byte_b >> 1) << 1,
-                        src0: t::SRC_VGPR + sa,
-                        src1: t::SRC_VGPR + sb,
-                        ..Default::default()
-                    }
-                    .pack(),
-                );
+                let (s, s1) = (vgpr(sa)?, vgpr(sb)?);
+                // The scale byte selects (imm bits 13:10, A's low): op_sel holds bit 0 of each, op_sel_hi bit 1.
+                let sel = (inst.imm >> 10) as u32 & 15;
+                let (op_sel, op_sel_hi) = (sel & 1 | (sel >> 2 & 1) << 1, (sel >> 1 & 1) | (sel >> 3 & 1) << 1);
+                push2(out, t::EncVop3p { op: LD_SCALE, src0: t::SRC_VGPR + s, src1: t::SRC_VGPR + s1, op_sel, op_sel_hi, ..Default::default() }.pack());
             }
             // D and C share one bank (acc_cd); A and B each name theirs (acc).
             let (vdst, acc_cd) = vgpr_or_agpr(nth(defs, 0)?)?;
@@ -600,7 +640,8 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
                     t::SRC_VGPR + k
                 }
             };
-            let ctl = inst.imm - (sel << super::mfma::SCALE_SEL_SHIFT);
+            // The scaled form's scale byte selects (imm bits 13:10) went to the ld_scale word.
+            let ctl = if scaled { inst.imm & !(15 << 10) } else { inst.imm };
             if !(0..1 << 10).contains(&ctl) {
                 return Err(bad(format!("{}: controls {:#x} past cbsz, abid and blgp", name(), inst.imm)));
             }
@@ -786,7 +827,10 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             if offset >= 4096 {
                 return Err(bad(format!("buffer offset {offset} out of range")));
             }
-            push2(out, t::EncMubuf { op: code, offset, offen: 1, soffset, srsrc, vdata, vaddr, ..Default::default() }.pack());
+            // Cache policy (rows with `m=glc,sc1,nt`): sc0 is the GLC bit.
+            let sc0 = u32::from(mods & M_GLC != 0);
+            let (sc1, nt) = (u32::from(mods & super::cpol::M_SC1 != 0), u32::from(mods & super::cpol::M_NT != 0));
+            push2(out, t::EncMubuf { op: code, offset, offen: 1, sc0, sc1, nt, soffset, srsrc, vdata, vaddr, ..Default::default() }.pack());
         }
         Fmt::Vopd | Fmt::Pseudo => return Err(bad(format!("{} has no gfx950 encoding", op.name()))),
     }
@@ -817,6 +861,18 @@ fn encode_blocks(f: &MFunc) -> Result<(Vec<u32>, Vec<u32>, Vec<(usize, usize)>),
     }
     block_word.push(words.len() as u32);
     Ok((words, block_word, branches))
+}
+
+/// The word offset of each instruction, in block order, and of the end.
+pub fn inst_starts(f: &MFunc) -> Result<Vec<u32>, CompileError> {
+    let mut words = Vec::new();
+    let mut starts = Vec::with_capacity(f.blocks.iter().map(|b| b.insts.len()).sum::<usize>() + 1);
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        starts.push(words.len() as u32);
+        encode(inst, &mut words)?;
+    }
+    starts.push(words.len() as u32);
+    Ok(starts)
 }
 
 fn branch_delta(block_word: &[u32], at: usize, target: usize) -> Result<i64, CompileError> {
@@ -1012,6 +1068,15 @@ mod tests {
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(24, 6), v(0, 16), v(32, 1), v(33, 1)])
                 .with_imm(2 | 2 << 7 | (a | b << 2) << super::super::mfma::SCALE_SEL_SHIFT)
         };
+        // The block-scaled 16x16x128 MFMA as hipcc wrote it in a probe kernel: D a[d:d+3], A v[a:a+5] and
+        // B v[b:b+5] (fp6 or bf6), C the same AGPRs as D (None: the constant 0), the A scale in v98 and the
+        // B scale in v`sb`; cbsz and blgp `fmt`, and the A and B scale bytes.
+        let probe16 = |d: u16, a: u16, b: u16, c: Option<u16>, sb: u16, fmt: i64, (sa, sbyte): (i64, i64)| {
+            let c = c.map_or(Opnd::Imm(0), |c| v(AGPR0 + c, 4));
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0 + d, 4)], [v(a, 6), v(b, 6), c, v(98, 1), v(sb, 1)])
+                .with_imm(fmt | fmt << 7 | (sa | sbyte << 2) << super::super::mfma::SCALE_SEL_SHIFT)
+        };
+        let sel = |a: i64, b: i64| (a | b << 2) << super::super::mfma::SCALE_SEL_SHIFT;
         let cases: Vec<(MInst, Vec<u32>)> = vec![
             // v_pk_mul_f32 v[0:1], v[2:3], v[4:5]; op_sel_hi:[0,1] and [1,0];
             // an SGPR pair broadcast; neg_lo:[1,0] neg_hi:[1,0]
@@ -1020,6 +1085,10 @@ mod tests {
             (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x20), vec![0xd3b1_4000, 0x0802_0902]),
             (MInst::new(g(VPkMulF32), [v(0, 2)], [s(2, 2), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4000, 0x1002_0802]),
             (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_mods(M_NEG0), vec![0xd3b1_4100, 0x3802_0902]),
+            // llvm-mc -mcpu=gfx950: v_bitop3_b32 v3, v9, v11, v3 bitop3:0xde / 0x1 / 0x80 (the table in neg, abs, omod)
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0xde), vec![0xd234_0303, 0xdc0e_1709]),
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0x1), vec![0xd234_0003, 0x240e_1709]),
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0x80), vec![0xd234_0003, 0x140e_1709]),
             // A one-dword broadcast source: the low half of its pair at an even
             // register; at an odd one the high half of the pair below it, read
             // by both lanes (op_sel:[1,0] / [0,1,0] with op_sel_hi set).
@@ -1087,13 +1156,11 @@ mod tests {
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0800, 0x0402_3110],
             ),
             (
-                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(AGPR0, 16)], [v(16, 4), v(24, 4), Opnd::Imm(0), v(32, 1), v(33, 1)])
-                    .with_imm(4 | 4 << 7),
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(AGPR0, 16)], [v(16, 4), v(24, 4), Opnd::Imm(0), v(32, 1), v(33, 1)]).with_imm(4 | 4 << 7),
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_8c00, 0x8202_3110],
             ),
             (
-                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 1), v(255, 1)])
-                    .with_imm(3),
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 1), v(255, 1)]).with_imm(3),
                 vec![0xd3ac_0000, 0x0003_fffe, 0xd3ae_0b00, 0x1402_3110],
             ),
             (
@@ -1110,6 +1177,64 @@ mod tests {
             (scaled_fp6(2, 0), vec![0xd3ac_0000, 0x0802_4320, 0xd3ae_0a00, 0x4402_3110]),
             (scaled_fp6(0, 1), vec![0xd3ac_1000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
             (scaled_fp6(0, 0), vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            // Block-scaled 16x16x128, as hipcc encodes v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[2:7],
+            // v[44:49], a[0:3], v98, v99 op_sel_hi:[0,0,0] cbsz:2 blgp:2, the other fifteen pairs of scale
+            // bytes (op_sel holds bit 0 of the A and B bytes, op_sel_hi bit 1), four of them with cbsz:3
+            // blgp:3, and two with C the constant 0.
+            (probe16(0, 2, 44, Some(0), 99, 2, (0, 0)), vec![0xd3ac_0000, 0x0002_c762, 0xd3ad_8a00, 0x4402_5902]),
+            (probe16(4, 2, 50, Some(4), 99, 2, (0, 1)), vec![0xd3ac_1000, 0x0002_c762, 0xd3ad_8a04, 0x4412_6502]),
+            (probe16(8, 2, 62, Some(8), 99, 2, (0, 2)), vec![0xd3ac_0000, 0x1002_c762, 0xd3ad_8a08, 0x4422_7d02]),
+            (probe16(12, 2, 68, Some(12), 99, 2, (0, 3)), vec![0xd3ac_1000, 0x1002_c762, 0xd3ad_8a0c, 0x4432_8902]),
+            (probe16(48, 8, 74, Some(48), 101, 2, (1, 0)), vec![0xd3ac_0800, 0x0002_cb62, 0xd3ad_8a30, 0x44c2_9508]),
+            (probe16(44, 8, 80, Some(44), 101, 2, (1, 1)), vec![0xd3ac_1800, 0x0002_cb62, 0xd3ad_8a2c, 0x44b2_a108]),
+            (probe16(40, 8, 86, Some(40), 101, 2, (1, 2)), vec![0xd3ac_0800, 0x1002_cb62, 0xd3ad_8a28, 0x44a2_ad08]),
+            (probe16(36, 8, 92, Some(36), 101, 2, (1, 3)), vec![0xd3ac_1800, 0x1002_cb62, 0xd3ad_8a24, 0x4492_b908]),
+            (probe16(128, 14, 44, Some(128), 99, 2, (2, 0)), vec![0xd3ac_0000, 0x0802_c762, 0xd3ad_8a80, 0x4602_590e]),
+            (probe16(124, 14, 50, Some(124), 99, 2, (2, 1)), vec![0xd3ac_1000, 0x0802_c762, 0xd3ad_8a7c, 0x45f2_650e]),
+            (probe16(120, 14, 62, Some(120), 99, 2, (2, 2)), vec![0xd3ac_0000, 0x1802_c762, 0xd3ad_8a78, 0x45e2_7d0e]),
+            (probe16(116, 14, 68, Some(116), 99, 2, (2, 3)), vec![0xd3ac_1000, 0x1802_c762, 0xd3ad_8a74, 0x45d2_890e]),
+            (probe16(80, 20, 74, Some(80), 101, 2, (3, 0)), vec![0xd3ac_0800, 0x0802_cb62, 0xd3ad_8a50, 0x4542_9514]),
+            (probe16(76, 20, 80, Some(76), 101, 2, (3, 1)), vec![0xd3ac_1800, 0x0802_cb62, 0xd3ad_8a4c, 0x4532_a114]),
+            (probe16(72, 20, 86, Some(72), 101, 2, (3, 2)), vec![0xd3ac_0800, 0x1802_cb62, 0xd3ad_8a48, 0x4522_ad14]),
+            (probe16(68, 20, 92, Some(68), 101, 2, (3, 3)), vec![0xd3ac_1800, 0x1802_cb62, 0xd3ad_8a44, 0x4512_b914]),
+            (probe16(0, 2, 44, Some(0), 99, 3, (0, 0)), vec![0xd3ac_0000, 0x0002_c762, 0xd3ad_8b00, 0x6402_5902]),
+            (probe16(36, 8, 92, Some(36), 101, 3, (1, 3)), vec![0xd3ac_1800, 0x1002_cb62, 0xd3ad_8b24, 0x6492_b908]),
+            (probe16(120, 14, 62, Some(120), 99, 3, (2, 2)), vec![0xd3ac_0000, 0x1802_c762, 0xd3ad_8b78, 0x65e2_7d0e]),
+            (probe16(76, 20, 80, Some(76), 101, 3, (3, 1)), vec![0xd3ac_1800, 0x0802_cb62, 0xd3ad_8b4c, 0x6532_a114]),
+            (probe16(4, 2, 50, None, 99, 2, (0, 1)), vec![0xd3ac_1000, 0x0002_c762, 0xd3ad_8a04, 0x4202_6502]),
+            (probe16(68, 20, 92, None, 101, 2, (3, 3)), vec![0xd3ac_1800, 0x1802_cb62, 0xd3ad_8a44, 0x4202_b914]),
+            // And as llvm-mc encodes v[0:3], v[4:11], v[12:19], v[0:3], v20, v21 (fp8) / a[0:3], v[4:7], a[8:11],
+            // 0, v20, v21 op_sel:[1,0,0] op_sel_hi:[0,1,0] cbsz:4 blgp:4 / v[0:3], v[4:9], v[12:19], v[0:3],
+            // v254, v255 cbsz:2 / v[8:11], v[16:23], v[24:29], 1.0, v40, v33 op_sel:[0,1,0] op_sel_hi:[1,1,0]
+            // cbsz:1 blgp:3 / a[252:255], v[0:5], v[6:11], a[252:255], v12, v13 op_sel:[1,1,0] op_sel_hi:[1,1,0]
+            // cbsz:3 blgp:2.
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4), v(20, 1), v(21, 1)]),
+                vec![0xd3ac_0000, 0x0002_2b14, 0xd3ad_0800, 0x0402_1904],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0, 4)], [v(4, 4), v(AGPR0 + 8, 4), Opnd::Imm(0), v(20, 1), v(21, 1)])
+                    .with_imm(4 | 4 << 7 | sel(1, 2)),
+                vec![0xd3ac_0800, 0x1002_2b14, 0xd3ad_8c00, 0x9202_1104],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 8), v(0, 4), v(254, 1), v(255, 1)]).with_imm(2),
+                vec![0xd3ac_0000, 0x0003_fffe, 0xd3ad_0a00, 0x0402_1904],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(8, 4)], [v(16, 8), v(24, 6), Opnd::Imm(0x3f80_0000), v(40, 1), v(33, 1)])
+                    .with_imm(1 | 3 << 7 | sel(2, 3)),
+                vec![0xd3ac_1000, 0x1802_4328, 0xd3ad_0908, 0x63ca_3110],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0 + 252, 4)], [v(0, 6), v(6, 6), v(AGPR0 + 252, 4), v(12, 1), v(13, 1)])
+                    .with_imm(3 | 2 << 7 | sel(3, 3)),
+                vec![0xd3ac_1800, 0x1802_1b0c, 0xd3ad_8bfc, 0x47f2_0d00],
+            ),
+            // The unscaled 16x16x128 with fp6 and bf6 operands (what literal zero scales select), as llvm-mc
+            // encodes v[0:3], v[4:9], v[12:17], v[0:3] cbsz:2 blgp:2 / a[0:3], v[4:9], v[12:17], a[0:3] cbsz:3 blgp:3.
+            (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 6), v(0, 4)]).with_imm(2 | 2 << 7), vec![0xd3ad_0200, 0x4402_1904]),
+            (MInst::new(g(VMfma16x16x128F8f6f4), [v(AGPR0, 4)], [v(4, 6), v(12, 6), v(AGPR0, 4)]).with_imm(3 | 3 << 7), vec![0xd3ad_8300, 0x6402_1904]),
         ];
         for (inst, want) in cases {
             assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
@@ -1154,9 +1279,11 @@ mod tests {
             MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), Opnd::Imm(0x3e22_f983)]),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(2 << 3),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(3 << 7),
-            // Block-scaled: scales not one VGPR each (a pair as one operand,
-            // SGPRs; llvm-mc refuses SGPR scales), abid, an A format whose
-            // size is not A's.
+            // Block-scaled: scales not one VGPR each (one register, a pair as
+            // one operand, SGPRs; llvm-mc refuses SGPR scales), abid, an A
+            // format whose size is not A's.
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 2)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2), v(34, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 1), s(5, 1)]),
@@ -1165,6 +1292,13 @@ mod tests {
             // Controls past the B scale byte; scale bytes on an MFMA without scales.
             scaled_fp6(0, 0).with_imm(2 | 2 << 7 | 1 << 14),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7 | 3 << 10),
+            // Block-scaled 16x16x128: abid, controls past the B scale byte, fp8 A of six dwords, the scales
+            // as one pair, D and C in different banks.
+            probe16(0, 2, 44, Some(0), 99, 2, (0, 0)).with_imm(2 | 2 << 7 | 1 << 3),
+            probe16(0, 2, 44, Some(0), 99, 2, (0, 0)).with_imm(2 | 2 << 7 | 1 << 14),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 8), v(0, 4), v(20, 1), v(21, 1)]),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4), v(20, 2)]),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(AGPR0, 4), v(20, 1), v(21, 1)]),
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");

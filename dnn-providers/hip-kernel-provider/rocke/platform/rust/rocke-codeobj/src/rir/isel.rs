@@ -20,6 +20,8 @@ mod burs;
 mod gen_burs;
 #[path = "div_bypass.rs"]
 mod div_bypass;
+#[path = "isel_asm.rs"]
+mod asm;
 
 fn unsupported(message: impl Into<String>) -> CompileError {
     CompileError::new("ROCKE_DIRECT_UNSUPPORTED", message)
@@ -121,16 +123,24 @@ pub struct IselResult {
     pub kernarg_size: u32,
     pub lds_size: u32,
     pub wg_ids: [bool; 3],
+    /// Kernarg dwords preloaded into s[2..2 + preload] (gfx950,
+    /// `opt::kernarg_preload`); the workgroup ids follow them.
+    pub preload: u32,
 }
 
 struct Isel<'a> {
     /// The BURS prototype's plan (`ROCKE_DIRECT_DEBUG=burs`), else `None`.
     burs: Option<burs::Plan>,
+    /// The lever scope of the op being selected (`MInst::scope`).
+    scope: u16,
     k: &'a Kernel,
     facts: &'a Facts,
     uniform: Vec<bool>,
     f: MFunc,
     cur: usize,
+    /// The `MInst::loc` of the op being selected, and the ids of the locations seen.
+    cur_loc: u32,
+    loc_ids: FxHashMap<super::ast::Loc, u32>,
     vals: Vec<Option<Val>>,
     lds: &'a FxHashMap<ValueId, u32>,
     depth: u32,
@@ -138,6 +148,8 @@ struct Isel<'a> {
     /// The facts of the target selected for: wave size, lane-mask width.
     t: &'static TargetInfo,
     kernarg_ptr: VRef,
+    /// The precolored user SGPRs of each preloaded parameter, by index.
+    preload: FxHashMap<usize, VRef>,
     tid: VRef,
     bid: [Option<VRef>; 3],
     zero_v: Option<VRef>,
@@ -169,16 +181,36 @@ struct Isel<'a> {
     /// What gfx950's LDS DMA selection reads of the kernel's LDS addresses
     /// (empty on gfx1151).
     lds_dma: crate::target::gfx9::lds_dma::Facts,
-    /// The kernel's `ds_rebase`: per (block, address register, 64 KiB
-    /// part of an offset past the 16-bit field), their sum and where in the
-    /// block it was written (`lds_addr`).
+    /// Lever `dsrebase` (the kernel's `ds_rebase`): per block, an LDS address register plus a 64 KiB-aligned
+    /// constant, and where in the block it was written (`lds_addr`).
     ds_bases: FxHashMap<(usize, Opnd, i64), (Opnd, usize)>,
+    /// rustgemm lever `dshoist` (with `dsrebase`): the uniform loops being selected, innermost last, and the rebased
+    /// LDS addresses put in their preheaders, by (preheader block, address register, 64 KiB part).
+    loop_frames: Vec<LoopFrame>,
+    ds_hoisted: FxHashMap<(usize, Opnd, i64), Opnd>,
+    /// Lever `u16zext` (PLAN decision 18; the kernel's `u16_zext`, `ds_read_u16` only): VGPRs a zero-extending
+    /// 16-bit load wrote (`buffer_load_ushort`, `ds_read_u16`): their high half is already zero, so a zero extension
+    /// of their low half is the register itself (LLVM folds the `and 0xffff`), and no `v_and` waits for the load
+    /// right after it issues.
+    zero_hi16: crate::rir::fx::FxHashSet<u32>,
+    /// rust-compiler-v2: allocations marked `dma_sync = "manual"` (their reads skip the waits for DMA into them).
+    dma_manual: FxHashSet<ValueId>,
+    /// kernel-agent lever `dmamanualringw`: the LDS writes of those allocations skip the DMA waits too.
+    dma_manual_writes: bool,
     /// The kernel's `acc_init_keep`: per register of an `arith.constant_vec`,
     /// the block and the place in it right after the moves that set it.
     const_vecs: FxHashMap<u32, (usize, usize)>,
-    /// The kernel's `u16_zext`: registers a `ds_read_u16` wrote, whose high
-    /// half is zero, so their zero extension is the register itself.
-    zero_hi16: FxHashSet<u32>,
+}
+
+/// rustgemm: a uniform `scf.for` being selected (lever `dshoist`): its preheader block, where in it hoisted
+/// instructions go (before the trip test), how many went there, the first virtual register of the body and the
+/// registers the loop carries (defined again in it).
+struct LoopFrame {
+    block: usize,
+    at: usize,
+    n: usize,
+    first_vreg: u32,
+    carried: Vec<u32>,
 }
 
 /// One half of an f16 pair packed into an i32: an f16 (or i16) value, the
@@ -282,8 +314,60 @@ impl<'a> Isel<'a> {
         self.vreg(Class::V, size, 1)
     }
 
-    fn emit(&mut self, inst: MInst) {
+    fn emit(&mut self, mut inst: MInst) {
+        inst.scope = self.scope;
+        if inst.loc == NO_LOC {
+            inst.loc = self.cur_loc;
+        }
         self.f.blocks[self.cur].insts.push(inst);
+    }
+
+    /// The index of lever scope `text` in `f.scopes` (added on first sight).
+    fn intern_scope(&mut self, text: &str) -> u16 {
+        let delta = super::LeverDelta::parse(text);
+        if self.f.scopes.is_empty() {
+            self.f.scopes.push(std::sync::Arc::default());
+        }
+        if let Some(i) = self.f.scopes.iter().skip(1).position(|d| **d == delta) {
+            return i as u16 + 1;
+        }
+        self.f.scopes.push(std::sync::Arc::new(delta));
+        (self.f.scopes.len() - 1) as u16
+    }
+
+    /// Makes `op`'s location the one the instructions emitted for it get; an
+    /// op the optimizer made without one gets none, so `srcloc` attributes
+    /// them as compiler-made. Returns the enclosing op's.
+    fn enter_loc(&mut self, op: &Op) -> u32 {
+        let old = self.cur_loc;
+        self.cur_loc = match &op.loc {
+            Some(loc) => {
+                let next = self.f.locs.len() as u32 + 1;
+                let id = *self.loc_ids.entry(loc.clone()).or_insert(next);
+                if id == next {
+                    self.f.locs.push(loc.clone());
+                }
+                id
+            }
+            None => NO_LOC,
+        };
+        old
+    }
+
+    /// Gives the current location to the instructions without one emitted
+    /// since `(block, length, blocks)`, including those target helpers push
+    /// straight into the blocks.
+    fn stamp_since(&mut self, (block, len, blocks): (usize, usize, usize)) {
+        if self.cur_loc == NO_LOC {
+            return;
+        }
+        let loc = self.cur_loc;
+        let (before, new) = self.f.blocks.split_at_mut(blocks);
+        let first = before[block].insts.iter_mut().skip(len);
+        let rest = new.iter_mut().flat_map(|b| b.insts.iter_mut());
+        for inst in first.chain(rest).filter(|i| i.loc == NO_LOC) {
+            inst.loc = loc;
+        }
     }
 
     fn new_block(&mut self) -> usize {
@@ -474,9 +558,9 @@ impl<'a> Isel<'a> {
                 if (wide && !shift_amount) || literal.is_some_and(|l| l != v) {
                     let n = if wide && !shift_amount { 2 } else { 1 };
                     let dst = self.sreg(n);
-                    self.f.blocks[self.cur].insts.push(MInst::new(Opc::Copy, [r(sub(dst, 0, 1))], [Opnd::Imm(v)]));
+                    self.emit(MInst::new(Opc::Copy, [r(sub(dst, 0, 1))], [Opnd::Imm(v)]));
                     if n == 2 {
-                        self.f.blocks[self.cur].insts.push(MInst::new(Opc::Copy, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]));
+                        self.emit(MInst::new(Opc::Copy, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]));
                     }
                     *s = r(dst);
                 } else {
@@ -902,13 +986,21 @@ impl<'a> Isel<'a> {
         let mut i = 0;
         while i < region.ops.len() {
             let run = region.ops[i..].iter().take_while(|op| op.kind == OpKind::KernArg).count();
+            let outer = self.enter_loc(&region.ops[i]);
+            let mark = (self.cur, self.f.blocks[self.cur].insts.len(), self.f.blocks.len());
             if run > 1 {
                 self.kernargs(&region.ops[i..i + run]);
                 i += run;
             } else {
-                self.op(&region.ops[i])?;
+                let op = &region.ops[i];
+                match op.str_attr("dlevers") {
+                    None => self.op(op)?,
+                    Some(text) => self.scoped_op(op, text)?,
+                }
                 i += 1;
             }
+            self.stamp_since(mark);
+            self.cur_loc = outer;
         }
         Ok(())
     }
@@ -918,8 +1010,14 @@ impl<'a> Isel<'a> {
     /// arguments stay aligned pairs, and at least half of what it reads is
     /// used. Loads never read past the kernarg segment.
     fn kernargs(&mut self, ops: &[Op]) {
+        for op in ops {
+            if let Some(val) = self.preloaded(op) {
+                self.set(op.results[0], val);
+            }
+        }
         let mut args: Vec<(u32, u32, ValueId)> = ops
             .iter()
+            .filter(|op| !self.is_preloaded(op))
             .map(|op| {
                 let v = op.results[0];
                 (op.int_attr("offset").unwrap_or(0) as u32, self.k.ty(v).dwords(), v)
@@ -965,6 +1063,33 @@ impl<'a> Isel<'a> {
         }
     }
 
+    fn is_preloaded(&self, op: &Op) -> bool {
+        op.int_attr("param").is_some_and(|p| p >= 0 && self.preload.contains_key(&(p as usize)))
+    }
+
+    /// A preloaded argument (`KernArg` of a parameter in `preload`): copies
+    /// of its precolored user SGPRs, so that their fixed registers end there.
+    fn preloaded(&mut self, op: &Op) -> Option<Val> {
+        let index = op.int_attr("param").filter(|&p| p >= 0)? as usize;
+        let fixed = *self.preload.get(&index)?;
+        let copy = self.sreg(fixed.n);
+        self.copy(copy, r(fixed));
+        Some(if fixed.n == 1 { Val::W(r(copy)) } else { Val::D(r(sub(copy, 0, 1)), r(sub(copy, 1, 1))) })
+    }
+
+    /// Selects `op` under its lever scope `text` (`dlevers`). Only scoped ops
+    /// take this extra frame: `region` recurses through `op` per nesting level.
+    #[inline(never)]
+    fn scoped_op(&mut self, op: &Op, text: &str) -> Result<(), CompileError> {
+        let id = self.intern_scope(text);
+        let prev = super::set_scope(Some(self.f.scopes[id as usize].clone()));
+        let prev_id = std::mem::replace(&mut self.scope, id);
+        let out = self.op(op);
+        self.scope = prev_id;
+        super::set_scope(prev);
+        out
+    }
+
     fn op(&mut self, op: &Op) -> Result<(), CompileError> {
         use OpKind::*;
         let res = op.results.first().copied();
@@ -974,9 +1099,12 @@ impl<'a> Isel<'a> {
         if self.burs.is_some() && burs::select(self, op)? {
             return Ok(());
         }
-        // i16 is implemented only as the 16-bit view of a scalar f16.
+        // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
+        // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
+        // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
-        if op.kind != VecBitcast && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
+        let i16_ok = matches!(op.kind, Extract | Insert) && super::lever("i16vec");
+        if op.kind != VecBitcast && !i16_ok && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
             return Err(unsupported(format!("{:?} of i16 vectors", op.kind)));
         }
         match op.kind {
@@ -994,6 +1122,11 @@ impl<'a> Isel<'a> {
                     (_, Some(super::opt::Konst::F32(bits))) => Val::W(Opnd::Imm(bits)),
                     _ => return Err(unsupported("constant without a folded value")),
                 };
+                self.set(v, val);
+            }
+            KernArg if self.is_preloaded(op) => {
+                let v = res.expect("kernarg result");
+                let val = self.preloaded(op).expect("a preloaded argument");
                 self.set(v, val);
             }
             KernArg => {
@@ -1044,6 +1177,16 @@ impl<'a> Isel<'a> {
                     "oge" => 0x16,
                     "one" => 0x15,
                     "une" => 0x1d,
+                    // W15 PORT K2-moe: the unordered / ordered predicates (VOPC f32 codes 0x17-0x1e; a NaN test
+                    // `fcmp uno x, x` is v_cmp_u_f32, as LLVM selects it). A refusal here was a direct-compiler
+                    // defect: ATOM's NaN-propagating max / min (stage_moe nan=prop) uses `uno`.
+                    "ord" => 0x17,
+                    "uno" => 0x18,
+                    "ult" => 0x19,
+                    "ueq" => 0x1a,
+                    "ule" => 0x1b,
+                    "ugt" => 0x1c,
+                    "uge" => 0x1e,
                     other => return Err(unsupported(format!("fcmp predicate {other}"))),
                 };
                 let a = self.w(op.operands[0])?;
@@ -1460,6 +1603,7 @@ impl<'a> Isel<'a> {
                 }
                 let tag = self.lds_tag(op.operands[0]);
                 crate::target::gfx9::lds_dma::tag_from(&mut self.f, block, from, tag);
+                self.mark_manual(op.operands[0], block, from);
             }
             SmemAddrOf | SmemPtrAdd | BufferLoadLds | GlobalLoadLds if self.t.target == Target::Gfx1151 => {
                 let name = match op.kind {
@@ -1478,6 +1622,7 @@ impl<'a> Isel<'a> {
                 self.lds_read_tr(op)?;
                 let tag = self.lds_tag(op.operands[0]);
                 crate::target::gfx9::lds_dma::tag_from(&mut self.f, block, from, tag);
+                self.mark_manual(op.operands[0], block, from);
             }
             LdsReadTr => return Err(unsupported("a transposing LDS read on gfx1151")),
             DsReadTr16 | DsReadTr8 => return Err(unsupported("a transposing LDS read before address legalization")),
@@ -1557,6 +1702,18 @@ impl<'a> Isel<'a> {
                 self.set(v, Val::T(dst));
             }
             BufferStoreVecF16 => {
+                // a vector of 2 bytes in all (one bf16 / f16 / i16) is a 16-bit store, not a dword one (the tuple
+                // of such a value is one register: storing it whole would write 2 bytes past the element)
+                let bytes = match self.k.ty(op.operands[3]) {
+                    Type::Vec(e, n) => e.bytes() * n,
+                    other => other.elem().bytes(),
+                };
+                if bytes < 4 {
+                    if bytes != 2 {
+                        return Err(unsupported(format!("buffer store of {bytes} bytes")));
+                    }
+                    return self.buffer_store(op);
+                }
                 let rsrc = self.tuple(op.operands[0])?;
                 let voff = self.w(op.operands[1])?;
                 let voff = self.to_v(voff);
@@ -1570,7 +1727,9 @@ impl<'a> Isel<'a> {
                 };
                 let offset = op.int_attr("offset").unwrap_or(0);
                 let mem = super::alias::op_tag(&self.mem_tags, op);
-                self.emit(MInst::new(opc, [], [r(data), voff, r(rsrc), soff]).with_imm(offset).with_mem(mem));
+                // the IR's cache policy (rocKE aux: sc0 1, nt 2, sc1 16), as the LLVM lowering passes it
+                let mods = cache_policy_mods(op.int_attr("cachepolicy").unwrap_or(0));
+                self.emit(MInst::new(opc, [], [r(data), voff, r(rsrc), soff]).with_imm(offset).with_mem(mem).with_mods(mods));
             }
             DsSwizzleXor => {
                 let mask = op.int_attr("xor_mask").unwrap_or(0);
@@ -1597,8 +1756,27 @@ impl<'a> Isel<'a> {
                     },
                     Some(other) => return Err(unsupported(format!("tile.mma scale_sel {other:?}: two byte indices"))),
                 };
+                use crate::target::gfx9::mfma;
                 let op_id = op.str_attr("op_id").unwrap_or("");
-                let d = crate::target::gfx9::mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
+                // The MX op names its A and B formats in attributes.
+                let atom = match op_id {
+                    mfma::MX_16X16X128 => {
+                        let format = |key: &str| match op.attr(key) {
+                            None => Some(None),
+                            Some(super::ast::Attr::Str(f)) => Some(Some(&**f)),
+                            Some(_) => None,
+                        };
+                        let atom = match (format("a_format"), format("b_format")) {
+                            (Some(fa), Some(fb)) => mfma::mx_atom(fa, fb),
+                            _ => None,
+                        };
+                        let (fa, fb) = (op.attr("a_format"), op.attr("b_format"));
+                        Some(atom.ok_or_else(|| unsupported(format!("tile.mma {op_id}: formats {fa:?} and {fb:?}")))?)
+                    }
+                    _ => None,
+                };
+                let op_id = atom.as_deref().unwrap_or(op_id);
+                let d = mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
                 self.set(op.results[0], Val::T(d));
             }
             Mma if op.str_attr("op_id") == Some("wmma_f32_16x16x16_bf16") => {
@@ -1681,23 +1859,30 @@ impl<'a> Isel<'a> {
                 self.set(v, Val::W(out));
             }
             InlineAsmIdentity if self.t.target == Target::Gfx950 && crate::target::gfx9::lds_dma::asm_lds_read(op).is_some() => {
-                let (dwords, offset) = crate::target::gfx9::lds_dma::asm_lds_read(op).expect("an LDS read");
+                let (opc, dwords, offset) = crate::target::gfx9::lds_dma::asm_lds_read_op(op).expect("an LDS read");
                 let a = self.w(op.operands[0])?;
                 let addr = self.to_v(a);
                 let dst = self.vgpr(dwords);
-                let opc = match dwords {
-                    1 => Opc::DsLoadB32,
-                    2 => Opc::DsLoadB64,
-                    _ => Opc::DsLoadB128,
-                };
                 self.emit(MInst::new(opc, [r(dst)], [addr]).with_imm(offset));
                 self.set(res.unwrap(), if dwords == 1 { Val::W(r(dst)) } else { Val::T(dst) });
             }
-            InlineAsmIdentity => {
-                if op.str_attr("template") != Some("") || op.str_attr("constraints") != Some("=v,0") {
-                    return Err(unsupported("tile.inline_asm other than the empty \"=v,0\" barrier"));
+            // rustgemm: the AGPR pin is an identity here (the allocator picks the file).
+            InlineAsmIdentity if op.asm_pin() == Some('a') => self.agpr_pin(op)?,
+            InlineAsmIdentity if op.asm_pin() == Some('s') => {
+                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged.
+                let x = self.w(op.operands[0])?;
+                if self.is_v(x) {
+                    return Err(unsupported("an \"=s,0\" pin of a value in VGPRs"));
                 }
-                // The empty barrier: the value in VGPRs, unchanged.
+                let s = self.to_s(x);
+                self.set(res.unwrap(), Val::W(s));
+            }
+            InlineAsmIdentity if self.t.target == Target::Gfx950 && op.asm_pin().is_none() => self.inline_asm(op)?,
+            InlineAsmIdentity => {
+                if !matches!(op.asm_pin(), Some('v' | 'a')) {
+                    return Err(unsupported("tile.inline_asm other than an empty or comment-only \"=v,0\" / \"=s,0\" pin"));
+                }
+                // The barrier: the value in VGPRs, unchanged.
                 let val = match self.get(op.operands[0])? {
                     Val::D(lo, hi) => {
                         let p = self.pair_v(lo, hi);
@@ -1755,12 +1940,8 @@ impl<'a> Isel<'a> {
             // LLVM schedules nothing across a sched_barrier of mask 0 and lets
             // the IGroupLP mutation interpret the other masks and the group
             // barriers, which this scheduler does not model.
-            SchedBarrier => {
-                if op.int_attr("mask").unwrap_or(0) == 0 {
-                    self.emit(MInst::new(Opc::SchedBarrier, [], []));
-                }
-            }
-            SchedGroupBarrier => {}
+            SchedBarrier => self.sched_barrier(op),
+            SchedGroupBarrier => self.sched_group_barrier(op),
             // It only orders instructions, so emitting nothing is correct.
             IglpOpt => {}
             LAtomicAdd => self.lds_atomic_add(op)?,
@@ -1860,6 +2041,7 @@ impl<'a> Isel<'a> {
                 self.set(res.unwrap(), Val::W(r(dst)));
             }
             WaveAny | WaveAll => self.vote_op(op)?,
+            WaveBallot => self.ballot_op(op)?,
             LaneId => {
                 let dst = self.vgpr(1);
                 self.valu(Opc::VMbcntLoU32B32, [r(dst)], [Opnd::Imm(u32::MAX), Opnd::Imm(0)], 0);
@@ -1881,15 +2063,387 @@ impl<'a> Isel<'a> {
                     "acquire" | "acq_rel" | "seq_cst" => true,
                     other => return Err(unsupported(format!("memref.fence ordering {other}"))),
                 };
-                self.memory_fence(scope, acquire)?;
+                // Lever `acqfence`: an acquire-only fence as LLVM's gfx940 cache control writes it (wait, then
+                // invalidate), without the write-back a release adds.
+                if ordering == "acquire" && self.t.target == Target::Gfx950 && super::lever("acqfence") {
+                    for inst in isel_hooks::acquire_fence(scope)? {
+                        self.emit(inst);
+                    }
+                } else {
+                    self.memory_fence(scope, acquire)?;
+                }
             }
             FlagWaitEq if self.t.target == Target::Gfx950 => self.flag_wait_eq(op)?,
             FlagStore if self.t.target == Target::Gfx950 => self.flag_store(op)?,
+            // The device / memory ops below select in their own frame: `region`
+            // recurses through `op` once per nesting level, so the arms stay out of it.
+            IntToPtr | BufferLoadCp | BufferStoreCp | TaggedPoll | CvtScalePkBf16Fp4 | Permlane16Swap | SGetreg | SSleep | MemRealtime
+            | AtomicAddScoped | L2TouchLoad | L2TouchDrain | Exp | CvtScalePkFp8F32 | CvtScalePkBf8F32 | MfmaScaleMx | Maximum3
+            | DppOp | MovDpp | CvtF32ToF64 | CvtF64ToF32 | Sqrt | GlobalStoreCp | GlobalLoadCp | Bcnt | SFf1 | MemTime | SNop
+            | CompilerFence | DsOrRaw | DsWriteRaw | DsReadRaw
+                => self.device_op(op, res)?,
             GlobalAtomicAdd => return Err(unsupported("memref.global_atomic_add survived legalization")),
             For => self.for_op(op)?,
             If | IfElse => self.if_op(op)?,
             Yield => {}
             Return => self.emit(MInst::new(Opc::SEndpgm, [], [])),
+            other => return Err(unsupported(format!("op {other:?} has no direct lowering"))),
+        }
+        Ok(())
+    }
+
+    /// The selection of the device and memory ops (cache-policy loads and
+    /// stores, scoped atomics, DPP, scaled conversions, MX MFMA, raw LDS
+    /// access, timers, ...): `op`'s arms for them, out of line so `op`'s
+    /// frame, taken once per region nesting level, stays small.
+    #[inline(never)]
+    fn device_op(&mut self, op: &Op, res: Option<ValueId>) -> Result<(), CompileError> {
+        use OpKind::*;
+        match op.kind {
+            IntToPtr | BufferLoadCp | BufferStoreCp | TaggedPoll | CvtScalePkBf16Fp4 | Permlane16Swap | SGetreg | SSleep | MemRealtime
+            | AtomicAddScoped | L2TouchLoad | L2TouchDrain | Exp | CvtScalePkFp8F32 | CvtScalePkBf8F32 | MfmaScaleMx | Maximum3
+            | DppOp | MovDpp | CvtF32ToF64 | CvtF64ToF32 | Sqrt | GlobalStoreCp | GlobalLoadCp | Bcnt | SFf1 | MemTime | SNop
+            | CompilerFence | DsOrRaw | DsWriteRaw | DsReadRaw
+                if self.t.target == Target::Gfx1151 =>
+            {
+                return Err(unsupported(format!("{:?} on gfx1151", op.kind)));
+            }
+            IntToPtr => {
+                let (lo, hi) = self.d(op.operands[0])?;
+                self.set(res.unwrap(), Val::D(lo, hi));
+            }
+            BufferLoadCp => {
+                let v = res.unwrap();
+                let rsrc = self.tuple(op.operands[0])?;
+                let voff = self.w(op.operands[1])?;
+                let voff = self.to_v(voff);
+                let soff = self.soffset(op.operands[2])?;
+                let dwords = op.int_attr("dwords").unwrap_or(4) as u8;
+                let opc = match dwords {
+                    1 => Opc::BufLoadB32,
+                    2 => Opc::BufLoadB64,
+                    _ => Opc::BufLoadB128,
+                };
+                let dst = self.vgpr(dwords);
+                let offset = op.int_attr("offset").unwrap_or(0);
+                let mem = super::alias::op_tag(&self.mem_tags, op);
+                let mods = cache_policy_mods(op.int_attr("aux").unwrap_or(0));
+                self.emit(MInst::new(opc, [r(dst)], [voff, r(rsrc), soff]).with_imm(offset).with_mods(mods).with_mem(mem));
+                self.set(v, if dwords == 1 { Val::W(r(dst)) } else { Val::T(dst) });
+            }
+            BufferStoreCp => {
+                let data = match self.get(op.operands[0])? {
+                    Val::T(t) => t,
+                    _ => {
+                        let x = self.w(op.operands[0])?;
+                        let d = self.vgpr(1);
+                        self.copy(d, x);
+                        d
+                    }
+                };
+                let rsrc = self.tuple(op.operands[1])?;
+                let voff = self.w(op.operands[2])?;
+                let voff = self.to_v(voff);
+                let soff = self.soffset(op.operands[3])?;
+                let opc = match data.n {
+                    1 => Opc::BufStoreB32,
+                    2 => Opc::BufStoreB64,
+                    4 => Opc::BufStoreB128,
+                    other => return Err(unsupported(format!("buffer store of {other} dwords"))),
+                };
+                let offset = op.int_attr("offset").unwrap_or(0);
+                let mem = super::alias::op_tag(&self.mem_tags, op);
+                let mods = cache_policy_mods(op.int_attr("aux").unwrap_or(0));
+                self.emit(MInst::new(opc, [], [r(data), voff, r(rsrc), soff]).with_imm(offset).with_mods(mods).with_mem(mem));
+            }
+            TaggedPoll => self.tagged_poll(op)?,
+            CvtScalePkBf16Fp4 => {
+                let src = self.w(op.operands[0])?;
+                let scale = self.w(op.operands[1])?;
+                let byte = op.int_attr("byte").unwrap_or(0) as u32;
+                let mods = if byte & 1 != 0 { M_OPSEL_SRC0 } else { 0 } | if byte & 2 != 0 { M_OPSEL_SRC1 } else { 0 };
+                let dst = self.vgpr(1);
+                let opc = Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VCvtScalef32PkBf16Fp4);
+                self.valu(opc, [r(dst)], [src, scale], mods);
+                self.set(res.unwrap(), Val::T(dst));
+            }
+            Permlane16Swap => {
+                let (a, b) = (self.w(op.operands[0])?, self.w(op.operands[1])?);
+                let (x, y) = (self.vgpr(1), self.vgpr(1));
+                self.copy(x, a);
+                self.copy(y, b);
+                self.emit(MInst::new(crate::target::gfx9::lanes::permlane16_swap(), [r(x), r(y)], [r(x), r(y)]));
+                self.set(op.results[0], Val::W(r(x)));
+                self.set(op.results[1], Val::W(r(y)));
+            }
+            SGetreg => {
+                // hwreg(id, offset 0, size 32): id | 31 << 11 (gfx9 XCC_ID 20, HW_ID 4).
+                let id = match op.str_attr("hwreg") {
+                    Some("XCC_ID") => 20,
+                    Some("HW_ID") => 4,
+                    other => return Err(unsupported(format!("tile.s_getreg of {other:?}"))),
+                };
+                let dst = self.sreg(1);
+                let opc = Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::SGetregB32);
+                self.emit(MInst::new(opc, [r(dst)], []).with_imm(id | 31 << 11));
+                self.set(res.unwrap(), Val::W(r(dst)));
+            }
+            SSleep => {
+                let mut units = op.int_attr("units").unwrap_or(0);
+                while units > 0 {
+                    let step = units.min(127);
+                    self.emit(MInst::new(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::SSleep), [], []).with_imm(step));
+                    units -= step;
+                }
+            }
+            MemRealtime => {
+                let dst = self.sreg(2);
+                self.emit(MInst::new(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::SMemrealtime), [r(dst)], []));
+                self.set(res.unwrap(), Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))));
+            }
+            AtomicAddScoped => self.atomic_add_scoped(op)?,
+            L2TouchLoad => {
+                let voff = self.w(op.operands[0])?;
+                let voff = self.to_v(voff);
+                let (lo, hi) = self.d(op.operands[1])?;
+                let base = self.pair_s(lo, hi);
+                let dst = self.vgpr(4);
+                self.emit(MInst::new(Opc::GLoadB128, [r(dst)], [voff, r(base)]).with_mods(M_SADDR));
+                self.set(res.unwrap(), Val::T(dst));
+            }
+            L2TouchDrain => {
+                // Hold the destinations to here (`KEEP_ALIVE`, a fence, dropped
+                // after allocation), then wait for every load: the asm form's
+                // `s_waitcnt vmcnt(0)`.
+                let mut held = Vec::new();
+                for &v in op.operands.iter() {
+                    held.push(r(self.tuple(v)?));
+                }
+                for chunk in held.chunks(4) {
+                    self.emit(MInst::new(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::KeepAlive), [], Uses::from(chunk)));
+                }
+                let vmcnt0 = crate::target::gfx9::waitcnt::explicit_imm(0, -1, -1);
+                self.emit(MInst::new(Opc::SWaitcntExplicit, [], []).with_imm(vmcnt0));
+            }
+            Exp => {
+                // LLVM's llvm.exp.f32 with fast FMA: x log2e = ph + pl exactly to
+                // 49 bits, 2^ph = 2^round(ph) * 2^(ph - round(ph) + pl).
+                use crate::target::gfx9::q38::exp_consts as k;
+                let x = self.w(op.operands[0])?;
+                let x = self.to_v(x);
+                let ph = self.v_bin(Opc::VMulF32, x, Opnd::Imm(k::LOG2E));
+                let fma0 = self.v3(Opc::VFmaF32, x, Opnd::Imm(k::LOG2E), ph, M_NEG2);
+                let pl = self.v3(Opc::VFmaF32, x, Opnd::Imm(k::LOG2E_LO), fma0, 0);
+                let e = self.vgpr(1);
+                self.valu(Opc::VRndneF32, [r(e)], [ph], 0);
+                let frac = self.v_bin(Opc::VSubF32, ph, r(e));
+                let a = self.v_bin(Opc::VAddF32, frac, pl);
+                let ie = self.vgpr(1);
+                self.valu(Opc::VCvtI32F32, [r(ie)], [r(e)], 0);
+                let ex = self.vgpr(1);
+                self.valu(Opc::VExpF32, [r(ex)], [a], 0);
+                let scaled = self.v_bin(Opc::VLdexpF32, r(ex), r(ie));
+                // 0 below ln(the least denormal), +inf above ln(FLT_MAX).
+                let under = self.mreg();
+                self.valu(Opc::VCmp(0x14), [r(under)], [Opnd::Imm(k::UNDERFLOW), x], 0);
+                let low = self.v3(Opc::VCndmaskB32, scaled, Opnd::Imm(0), r(under), 0);
+                let over = self.mreg();
+                self.valu(Opc::VCmp(0x11), [r(over)], [Opnd::Imm(k::OVERFLOW), x], 0);
+                let out = self.v3(Opc::VCndmaskB32, low, Opnd::Imm(0x7f80_0000), r(over), 0);
+                self.set(res.unwrap(), Val::W(out));
+            }
+            CvtScalePkFp8F32 | CvtScalePkBf8F32 => {
+                use crate::target::gfx9::gen_isa::Gfx9Op;
+                let old = self.w(op.operands[0])?;
+                let (s0, s1, scale) = (self.w(op.operands[1])?, self.w(op.operands[2])?, self.w(op.operands[3])?);
+                let d = self.vgpr(1);
+                self.copy(d, old);
+                let opc = Opc::Gfx9(if op.kind == CvtScalePkFp8F32 { Gfx9Op::VCvtScalef32PkFp8F32 } else { Gfx9Op::VCvtScalef32PkBf8F32 });
+                let mods = if op.bool_attr("hi") == Some(true) { M_OPSEL_DST } else { 0 };
+                self.valu(opc, [r(d)], [s0, s1, scale, r(d)], mods);
+                self.set(res.unwrap(), Val::W(r(d)));
+            }
+            MfmaScaleMx => {
+                let (a, b, c) = (self.tuple(op.operands[0])?, self.tuple(op.operands[1])?, self.tuple(op.operands[2])?);
+                let scales = (self.w(op.operands[3])?, self.w(op.operands[4])?);
+                let wide = op.str_attr("shape") == Some("32x32x64");
+                let int = |key: &str| op.int_attr(key).unwrap_or(0) as u8;
+                let d = crate::target::gfx9::mfma::select_mx(
+                    &mut self.f,
+                    self.cur,
+                    wide,
+                    (int("fmt_a"), int("fmt_b")),
+                    (int("opsel_a"), int("opsel_b")),
+                    a,
+                    b,
+                    c,
+                    scales,
+                )?;
+                self.set(op.results[0], Val::T(d));
+            }
+            Maximum3 => {
+                let (a, b, c) = (self.w(op.operands[0])?, self.w(op.operands[1])?, self.w(op.operands[2])?);
+                let abs = (op.int_attr("abs").unwrap_or(0) as u32 & 7) * crate::target::gfx9::q38::M_ABS0;
+                let opc = Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VMaximum3F32);
+                let out = self.v3(opc, a, b, c, abs);
+                self.set(res.unwrap(), Val::W(out));
+            }
+            DppOp => {
+                use crate::target::gfx9::gen_isa::Gfx9Op;
+                let max = op.str_attr("op") == Some("max_u32");
+                let (row_mask, bank_mask) = (op.int_attr("row_mask").unwrap_or(15), op.int_attr("bank_mask").unwrap_or(15));
+                let bound = op.bool_attr("bound_ctrl").unwrap_or(false);
+                let imm = crate::target::gfx9::q38::dpp_imm(op.int_attr("ctrl").unwrap_or(0), row_mask, bank_mask, bound);
+                let src0 = self.w(op.operands[1])?;
+                let src0 = self.to_v(src0);
+                if !max && row_mask == 15 && bank_mask == 15 && bound {
+                    // Every lane is written (an out-of-row source reads 0).
+                    let dst = self.vgpr(1);
+                    self.emit(MInst::new(Opc::VMovB32Dpp, [r(dst)], [src0]).with_imm(imm));
+                    self.set(res.unwrap(), Val::W(r(dst)));
+                } else {
+                    let old = self.w(op.operands[0])?;
+                    let d = self.vgpr(1);
+                    self.copy(d, old);
+                    // A source that is `old` reads the copy: then `old` can end at the copy and the
+                    // copy coalesce away (an in-place step, as the asm scans write it).
+                    let src0 = if op.operands[1] == op.operands[0] { r(d) } else { src0 };
+                    if max {
+                        let src1 = if op.operands[2] == op.operands[0] { r(d) } else { self.w(op.operands[2])? };
+                        let src1 = self.to_v(src1);
+                        self.emit(MInst::new(Opc::Gfx9(Gfx9Op::VMaxU32DppOld), [r(d)], [src0, src1, r(d)]).with_imm(imm));
+                    } else {
+                        self.emit(MInst::new(Opc::Gfx9(Gfx9Op::VMovB32DppOld), [r(d)], [src0, r(d)]).with_imm(imm));
+                    }
+                    self.set(res.unwrap(), Val::W(r(d)));
+                }
+            }
+            MovDpp => {
+                use crate::target::gfx9::gen_isa::Gfx9Op;
+                // update.dpp(old = src, src): row_shl:k is 0x100 + k, row_shr:k 0x110 + k.
+                let ctrl = match (op.int_attr("row_shl"), op.int_attr("row_shr")) {
+                    (Some(k), None) => 0x100 + k,
+                    (None, Some(k)) => 0x110 + k,
+                    _ => return Err(unsupported("tile.mov_dpp without one row shift")),
+                };
+                let bound = op.bool_attr("bound_ctrl").unwrap_or(false);
+                let imm = crate::target::gfx9::q38::dpp_imm(ctrl, 15, 15, bound);
+                let x = self.w(op.operands[0])?;
+                let x = self.to_v(x);
+                if bound {
+                    let dst = self.vgpr(1);
+                    self.emit(MInst::new(Opc::VMovB32Dpp, [r(dst)], [x]).with_imm(imm));
+                    self.set(res.unwrap(), Val::W(r(dst)));
+                } else {
+                    let d = self.vgpr(1);
+                    self.copy(d, x);
+                    self.emit(MInst::new(Opc::Gfx9(Gfx9Op::VMovB32DppOld), [r(d)], [r(d), r(d)]).with_imm(imm));
+                    self.set(res.unwrap(), Val::W(r(d)));
+                }
+            }
+            CvtF32ToF64 => {
+                let x = self.w(op.operands[0])?;
+                let out = self.v64(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VCvtF64F32), [x], 0);
+                let v = res.unwrap();
+                self.canon64.insert(v);
+                self.set(v, Val::D(r(sub(out, 0, 1)), r(sub(out, 1, 1))));
+            }
+            CvtF64ToF32 => {
+                let (lo, hi) = self.d(op.operands[0])?;
+                let x = self.f64_operand(lo, hi);
+                let dst = self.vgpr(1);
+                self.valu(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VCvtF32F64), [r(dst)], [x], 0);
+                self.set(res.unwrap(), Val::W(r(dst)));
+            }
+            Sqrt if *self.k.ty(op.results[0]) == Type::Scalar(Scalar::F32) => self.sqrt32_op(op)?,
+            Sqrt => self.sqrt64_op(op)?,
+            GlobalStoreCp => {
+                let data = match self.get(op.operands[0])? {
+                    Val::T(t) => t,
+                    _ => {
+                        let x = self.w(op.operands[0])?;
+                        let d = self.vgpr(1);
+                        self.copy(d, x);
+                        d
+                    }
+                };
+                let opc = match data.n {
+                    1 => Opc::GStoreB32,
+                    2 => Opc::GStoreB64,
+                    4 => Opc::GStoreB128,
+                    other => return Err(unsupported(format!("tile.global_store_cp of {other} dwords"))),
+                };
+                let (addr, saddr) = self.cp_address(&op.operands[1..])?;
+                let mods = cache_policy_mods(op.int_attr("aux").unwrap_or(0)) | saddr;
+                let mut uses = addr;
+                uses.push(r(data));
+                self.emit(MInst::new(opc, [], uses).with_imm(op.int_attr("offset").unwrap_or(0)).with_mods(mods));
+            }
+            GlobalLoadCp => {
+                let v = res.unwrap();
+                let words = self.k.ty(v).dwords() as u8;
+                let opc = match words {
+                    1 => Opc::GLoadB32,
+                    2 => Opc::GLoadB64,
+                    _ => Opc::GLoadB128,
+                };
+                let (addr, saddr) = self.cp_address(&op.operands)?;
+                let mods = cache_policy_mods(op.int_attr("aux").unwrap_or(0)) | saddr;
+                let dst = self.vgpr(words);
+                self.emit(MInst::new(opc, [r(dst)], addr).with_imm(op.int_attr("offset").unwrap_or(0)).with_mods(mods));
+                let val = match self.k.ty(v) {
+                    Type::Scalar(Scalar::I64) => Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))),
+                    Type::Scalar(_) => Val::W(r(dst)),
+                    _ => Val::T(dst),
+                };
+                self.set(v, val);
+            }
+            Bcnt => {
+                let x = self.w(op.operands[0])?;
+                let dst = self.vgpr(1);
+                self.valu(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VBcntU32B32), [r(dst)], [x, Opnd::Imm(0)], 0);
+                self.set(res.unwrap(), Val::W(r(dst)));
+            }
+            SFf1 => {
+                use crate::target::gfx9::gen_isa::Gfx9Op;
+                let dst = self.sreg(1);
+                if *self.k.ty(op.operands[0]) == Type::Scalar(Scalar::I64) {
+                    let (lo, hi) = self.d(op.operands[0])?;
+                    let pair = self.pair_s(lo, hi);
+                    self.salu(Opc::Gfx9(Gfx9Op::SFf1I32B64), [r(dst)], [r(pair)]);
+                } else {
+                    let x = self.w(op.operands[0])?;
+                    self.salu(Opc::Gfx9(Gfx9Op::SFf1I32B32), [r(dst)], [x]);
+                }
+                self.set(res.unwrap(), Val::W(r(dst)));
+            }
+            MemTime => {
+                let dst = self.sreg(2);
+                self.emit(MInst::new(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::SMemtime), [r(dst)], []));
+                self.set(res.unwrap(), Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))));
+            }
+            SNop => {
+                self.emit(MInst::new(Opc::SNop, [], []).with_imm(op.int_attr("n").unwrap_or(0)));
+            }
+            // No instruction: the IR passes keep memory accesses on their side
+            // (`writes_global`, not pure), the scheduler moves nothing across.
+            CompilerFence => self.emit(MInst::new(Opc::SchedBarrier, [], [])),
+            DsOrRaw | DsWriteRaw => {
+                use crate::target::gfx9::gen_isa::Gfx9Op;
+                let a = self.w(op.operands[0])?;
+                let a = self.to_v(a);
+                let x = self.w(op.operands[1])?;
+                let x = self.to_v(x);
+                let opc = Opc::Gfx9(if op.kind == DsOrRaw { Gfx9Op::DsOrB32Raw } else { Gfx9Op::DsWriteB32Raw });
+                self.emit(MInst::new(opc, [], [a, x]));
+            }
+            DsReadRaw => {
+                let a = self.w(op.operands[0])?;
+                let a = self.to_v(a);
+                let dst = self.vgpr(1);
+                self.emit(MInst::new(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::DsReadB32Raw), [r(dst)], [a]));
+                self.set(res.unwrap(), Val::W(r(dst)));
+            }
             other => return Err(unsupported(format!("op {other:?} has no direct lowering"))),
         }
         Ok(())
@@ -2013,6 +2567,109 @@ impl<'a> Isel<'a> {
     /// simplifies: `a`, `-a` and `a + a` for `r` = 1, -1 and 2, `v_mul_f64` for
     /// the other inline constants, `v_ldexp_f64 ±a, k` otherwise. Any other
     /// divisor takes div_scale, rcp, two Newton steps, div_fmas and div_fixup.
+    /// The address operands of `tile.global_store_cp` / `global_load_cp`:
+    /// `[voff, base]` (saddr) or `[addr]` (a per-lane 64-bit address).
+    fn cp_address(&mut self, operands: &[ValueId]) -> Result<(Uses, u32), CompileError> {
+        if let [voff, base] = *operands {
+            let off = self.w(voff)?;
+            let off = self.to_v(off);
+            let (lo, hi) = self.d(base)?;
+            let base = self.pair_s(lo, hi);
+            return Ok(([off, r(base)].into(), M_SADDR));
+        }
+        let (lo, hi) = self.d(operands[0])?;
+        let pair = self.pair_v(lo, hi);
+        Ok(([r(pair)].into(), 0))
+    }
+
+    /// `math.sqrt` of an f32 on gfx950, as LLVM expands it with IEEE denormals (`lowerFSQRTF32`, the
+    /// correctly rounded form): an input below 2^-96 scaled up by 2^32, s = v_sqrt_f32, s's two neighbours
+    /// tested by fma(-s', s, x) (s - 1 ulp if that is <= 0, s + 1 ulp if it is > 0), scaled back by 2^-16,
+    /// and the (scaled) input itself for +-0 and +inf. W15 PORT K2-moe: V4.1 route's sqrtsoftplus.
+    fn sqrt32_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        if self.t.target != crate::target::Target::Gfx950 {
+            return Err(unsupported("math.sqrt of an f32 off gfx950"));
+        }
+        let x = self.w(op.operands[0])?;
+        let x = self.to_v(x);
+        let small = self.mreg();
+        self.valu(Opc::VCmp(0x14), [r(small)], [Opnd::Imm(0x0f80_0000), x], 0); // 2^-96 > x (olt)
+        let scaled = self.v_bin(Opc::VMulF32, Opnd::Imm(0x4f80_0000), x);
+        let sx = self.v3(Opc::VCndmaskB32, x, scaled, r(small), 0);
+        let s = self.v1(Opc::Gfx9(Gfx9Op::VSqrtF32), sx);
+        let down = self.v_bin(Opc::VAddNcU32, Opnd::Imm(u32::MAX), s);
+        let vp = self.v3(Opc::VFmaF32, down, s, sx, M_NEG0);
+        let le0 = self.mreg();
+        self.valu(Opc::VCmp(0x16), [r(le0)], [Opnd::Imm(0), vp], 0); // 0 >= vp (ole)
+        let s1 = self.v3(Opc::VCndmaskB32, s, down, r(le0), 0);
+        let up = self.v_bin(Opc::VAddNcU32, Opnd::Imm(1), s);
+        let vs = self.v3(Opc::VFmaF32, up, s, sx, M_NEG0);
+        let gt0 = self.mreg();
+        self.valu(Opc::VCmp(0x11), [r(gt0)], [Opnd::Imm(0), vs], 0); // 0 < vs (ogt)
+        let s2 = self.v3(Opc::VCndmaskB32, s1, up, r(gt0), 0);
+        let sd = self.v_bin(Opc::VMulF32, Opnd::Imm(0x3780_0000), s2);
+        let s3 = self.v3(Opc::VCndmaskB32, s2, sd, r(small), 0);
+        let keep = self.mreg();
+        self.valu(Opc::VCmp(VCMP_CLASS_F32), [r(keep)], [sx, Opnd::Imm(0x260)], 0); // +-0, +inf
+        let out = self.v3(Opc::VCndmaskB32, s3, sx, r(keep), 0);
+        self.set(op.results[0], Val::W(out));
+        Ok(())
+    }
+
+    /// `math.sqrt` of an f64, as LLVM expands it (`lowerFSQRTF64`): scale an
+    /// input below 2^-767 up by 2^256, y = rsq(x), Goldschmidt refinement,
+    /// scale back by 2^-128, and x itself for +-0 and +inf.
+    fn sqrt64_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let v = op.results[0];
+        if *self.k.ty(v) != Type::Scalar(Scalar::F64) {
+            return Err(unsupported(format!("math.sqrt of {:?}", self.k.ty(v))));
+        }
+        let (lo, hi) = self.d(op.operands[0])?;
+        let x = self.f64_operand(lo, hi);
+        // x < 2^-767 (olt) is, for every x but a negative NaN (a NaN result
+        // either way), the signed 64-bit compare of its bits with
+        // 0x1000_0000_0000_0000, i.e. its high word below 0x1000_0000.
+        let hi_v = self.to_v(hi);
+        let small = self.mreg();
+        self.valu(Opc::VCmp(0x44), [r(small)], [Opnd::Imm(0x1000_0000), hi_v], 0);
+        let up = self.v3(Opc::VCndmaskB32, Opnd::Imm(0), Opnd::Imm(256), r(small), 0);
+        let sx = self.v64(Opc::VLdexpF64, [x, up], 0);
+        let y = self.v64(Opc::Gfx9(Gfx9Op::VRsqF64), [r(sx)], 0);
+        let half = Opnd::Imm(0x3fe0_0000);
+        let s0 = self.v64(Opc::VMulF64, [r(sx), r(y)], 0);
+        let h0 = self.v64(Opc::VMulF64, [r(y), half], 0);
+        let r0 = self.v64(Opc::VFmaF64, [r(h0), r(s0), half], M_NEG0);
+        let h1 = self.v64(Opc::VFmaF64, [r(h0), r(r0), r(h0)], 0);
+        let s1 = self.v64(Opc::VFmaF64, [r(s0), r(r0), r(s0)], 0);
+        let d0 = self.v64(Opc::VFmaF64, [r(s1), r(s1), r(sx)], M_NEG0);
+        let s2 = self.v64(Opc::VFmaF64, [r(d0), r(h1), r(s1)], 0);
+        let d1 = self.v64(Opc::VFmaF64, [r(s2), r(s2), r(sx)], M_NEG0);
+        let ret = self.v64(Opc::VFmaF64, [r(d1), r(h1), r(s2)], 0);
+        let down = self.v3(Opc::VCndmaskB32, Opnd::Imm(0), Opnd::Imm(-128i32 as u32), r(small), 0);
+        let ret = self.v64(Opc::VLdexpF64, [r(ret), down], 0);
+        // class(sx, zero | +inf): low word 0 and (|high| 0 or high 0x7ff00000).
+        let (sl, sh) = (r(sub(sx, 0, 1)), r(sub(sx, 1, 1)));
+        let mag = self.v_bin(Opc::VAndB32, Opnd::Imm(0x7fff_ffff), sh);
+        let zero_hi = self.mreg();
+        self.valu(Opc::VCmp(0x4a), [r(zero_hi)], [Opnd::Imm(0), mag], 0);
+        let inf_hi = self.mreg();
+        self.valu(Opc::VCmp(0x4a), [r(inf_hi)], [Opnd::Imm(0x7ff0_0000), sh], 0);
+        let lo0 = self.mreg();
+        self.valu(Opc::VCmp(0x4a), [r(lo0)], [Opnd::Imm(0), sl], 0);
+        let either = self.mreg();
+        let (or, and) = (self.lm(Opc::SOrB32), self.lm(Opc::SAndB32));
+        self.salu(or, [r(either)], [r(zero_hi), r(inf_hi)]);
+        let keep = self.mreg();
+        self.salu(and, [r(keep)], [r(either), r(lo0)]);
+        let out_lo = self.v3(Opc::VCndmaskB32, r(sub(ret, 0, 1)), sl, r(keep), 0);
+        let out_hi = self.v3(Opc::VCndmaskB32, r(sub(ret, 1, 1)), sh, r(keep), 0);
+        self.canon64.insert(v);
+        self.set(v, Val::D(out_lo, out_hi));
+        Ok(())
+    }
+
     fn fdiv64_op(&mut self, op: &Op) -> Result<(), CompileError> {
         let v = op.results[0];
         let (alo, ahi) = self.d(op.operands[0])?;
@@ -2434,7 +3091,36 @@ impl<'a> Isel<'a> {
     /// the wave has `p != 0`; all of them must be active for `wave_all`, as
     /// in the LLVM lowering (ballot == full wave mask).
     fn vote_op(&mut self, op: &Op) -> Result<(), CompileError> {
-        let p = op.operands[0];
+        let lanes = self.vote_lanes(op.operands[0])?;
+        let (test, against) = if op.kind == OpKind::WaveAny {
+            (Opc::SCmpLgU32, Opnd::Imm(0))
+        } else {
+            (Opc::SCmpEqU32, Opnd::Imm(u32::MAX))
+        };
+        self.salu(self.lm(test), [], [lanes, against]);
+        let dst = self.sreg(1);
+        self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
+        self.set(op.results[0], Val::W(r(dst)));
+        Ok(())
+    }
+
+    /// `tile.wave_ballot(p)`: the lanes with `p != 0` as an i64 mask (inactive lanes 0), as
+    /// `llvm.amdgcn.ballot.i64` selects it; a wave32 target's high half is 0.
+    fn ballot_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        let lanes = self.vote_lanes(op.operands[0])?;
+        let dst = self.sreg(2);
+        if self.t.lane_mask_dwords == 2 {
+            self.salu(self.lm(Opc::SMovB32), [r(dst)], [lanes]);
+        } else {
+            self.salu(Opc::SMovB32, [r(sub(dst, 0, 1))], [lanes]);
+            self.salu(Opc::SMovB32, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]);
+        }
+        self.set(op.results[0], Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))));
+        Ok(())
+    }
+
+    /// The lane mask of `p != 0` over the active lanes (a vote's or a ballot's operand).
+    fn vote_lanes(&mut self, p: ValueId) -> Result<Opnd, CompileError> {
         let lanes = if let Some(&(c, t, f)) = self.vote_sel.get(&p) {
             // p = select(c, t, f): the lanes where p != 0 are c's or its complement's.
             match (t, f) {
@@ -2458,16 +3144,7 @@ impl<'a> Isel<'a> {
             self.valu(Opc::VCmp(0x4d), [r(m)], [Opnd::Imm(0), x], 0);
             r(m)
         };
-        let (test, against) = if op.kind == OpKind::WaveAny {
-            (Opc::SCmpLgU32, Opnd::Imm(0))
-        } else {
-            (Opc::SCmpEqU32, Opnd::Imm(u32::MAX))
-        };
-        self.salu(self.lm(test), [], [lanes, against]);
-        let dst = self.sreg(1);
-        self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
-        self.set(op.results[0], Val::W(r(dst)));
-        Ok(())
+        Ok(lanes)
     }
 
     /// Legalized `memref.global_atomic_add` of an i32 or f32: the returning
@@ -2551,6 +3228,7 @@ impl<'a> Isel<'a> {
                 if inst.op.flags() & F_BRANCH != 0 {
                     inst.imm = at[inst.imm as usize] as i64;
                 }
+                inst.loc = self.cur_loc;
                 self.f.blocks[at[block]].insts.push(inst);
             }
         }
@@ -2901,6 +3579,9 @@ impl<'a> Isel<'a> {
         };
         let dst = self.vgpr(1);
         self.emit(MInst::new(opc, [r(dst)], uses).with_imm(offset).with_mem(mem));
+        if opc == Opc::BufLoadU16 && super::lever("u16zext") {
+            self.zero_hi16.insert(dst.reg);
+        }
         self.set(v, val(dst));
         Ok(())
     }
@@ -3022,6 +3703,26 @@ impl<'a> Isel<'a> {
                         let lo = self.int_bin(op.kind, a.0, b.0, uniform, false)?;
                         let hi = self.int_bin(op.kind, a.1, b.1, uniform, false)?;
                         (lo, hi)
+                    }
+                    // A logical right shift by a constant, on the halves (the CCL tag words: `x >> 32`).
+                    OpKind::Lshr => {
+                        let k = self
+                            .facts
+                            .int(op.operands[1])
+                            .ok_or_else(|| unsupported("64-bit shift by a runtime amount"))?
+                            & 63;
+                        match k {
+                            0 => a,
+                            32 => (a.1, Opnd::Imm(0)),
+                            k if k > 32 => (self.int_bin(OpKind::Lshr, a.1, Opnd::Imm((k - 32) as u32), uniform, false)?, Opnd::Imm(0)),
+                            k => {
+                                let low = self.int_bin(OpKind::Lshr, a.0, Opnd::Imm(k as u32), uniform, false)?;
+                                let carry = self.int_bin(OpKind::Shl, a.1, Opnd::Imm(32 - k as u32), uniform, false)?;
+                                let lo = self.int_bin(OpKind::Or, low, carry, uniform, false)?;
+                                let hi = self.int_bin(OpKind::Lshr, a.1, Opnd::Imm(k as u32), uniform, false)?;
+                                (lo, hi)
+                            }
+                        }
                     }
                     other => return Err(unsupported(format!("i64 {other:?}"))),
                 };
@@ -3524,6 +4225,115 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
+    /// `tile.tagged_poll` on gfx950: each lane reloads its `(payload, tag)`
+    /// pairs until every tag word equals `tag`, then keeps them. The lanes
+    /// still waiting stay in EXEC: a try issues the buffer loads (cache bits
+    /// `aux`), compares each odd word with the tag, and narrows EXEC to the
+    /// lanes with a mismatch; none left ends the poll, otherwise the pause
+    /// (`s_nop 0` / `s_sleep 1` / nothing) and the next try. A lane that left
+    /// keeps the values of its last try in the result registers, which only
+    /// instructions under the narrowed EXEC write until EXEC is restored.
+    /// The LLVM lowering's loop, with the asm pause in its retry block.
+    fn tagged_poll(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let Some(super::ast::Attr::List(widths)) = op.attr("dwords") else {
+            return Err(unsupported("tile.tagged_poll without dwords"));
+        };
+        let widths: Vec<u8> = widths.iter().map(|w| if let super::ast::Attr::Int(w) = w { *w as u8 } else { 0 }).collect();
+        let mods = cache_policy_mods(op.int_attr("aux").unwrap_or(16));
+        let tag = self.w(op.operands[0])?;
+        let mut specs = Vec::with_capacity(widths.len());
+        for (k, &w) in widths.iter().enumerate() {
+            let rsrc = self.tuple(op.operands[1 + 2 * k])?;
+            let voff = self.w(op.operands[2 + 2 * k])?;
+            let voff = self.to_v(voff);
+            let dst = self.vgpr(w);
+            specs.push((rsrc, voff, dst, w));
+        }
+        let saved = self.mreg();
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [r(saved)], [self.exec()]));
+        self.depth += 1;
+        let head = self.new_block();
+        for &(rsrc, voff, dst, w) in &specs {
+            let opc = if w == 4 { Opc::BufLoadB128 } else { Opc::BufLoadB64 };
+            self.emit(MInst::new(opc, [r(dst)], [voff, r(rsrc), Opnd::Imm(0)]).with_mods(mods));
+        }
+        let mut waiting: Option<Opnd> = None;
+        for &(_, _, dst, w) in &specs {
+            for lane in (1..w).step_by(2) {
+                let ne = self.mreg();
+                self.valu(Opc::VCmp(0x45), [r(ne)], [tag, r(sub(dst, lane, 1))], 0);
+                waiting = Some(match waiting {
+                    None => r(ne),
+                    Some(acc) => self.m_bin(Opc::SOrB32, acc, r(ne)),
+                });
+            }
+        }
+        let waiting = waiting.ok_or_else(|| unsupported("tile.tagged_poll without a tag word"))?;
+        self.salu(self.lm(Opc::SAndB32), [self.exec()], [self.exec(), waiting]);
+        self.emit(MInst::new(Opc::SCbranchExecz, [], []));
+        let leave = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
+        self.new_block();
+        match op.str_attr("pause").unwrap_or("s_nop 0") {
+            _ if super::lever("nopause") => {}
+            "" => {}
+            "s_sleep 1" => self.emit(MInst::new(Opc::Gfx9(Gfx9Op::SSleep), [], []).with_imm(1)),
+            "s_nop 0" => self.emit(MInst::new(Opc::SNop, [], []).with_imm(0)),
+            other => return Err(unsupported(format!("tile.tagged_poll pause {other:?}"))),
+        }
+        self.emit(MInst::new(Opc::SBranch, [], []).with_imm(head as i64));
+        self.depth -= 1;
+        let done = self.new_block();
+        self.f.blocks[leave.0].insts[leave.1].imm = done as i64;
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [self.exec()], [r(saved)]));
+        for (k, &(_, _, dst, _)) in specs.iter().enumerate() {
+            self.set(op.results[k], Val::T(dst));
+        }
+        Ok(())
+    }
+
+    /// `tile.global_atomic_add_scoped` on gfx950: `global_atomic_add[_x2]`
+    /// through `saddr` (the uniform base) and the voffset, `sc1` at system
+    /// scope, `sc0` with the old value when it returns (the asm form of
+    /// `device_ops.atomic_add_scoped` waits for it, here the first read
+    /// does). Scheduling fences around it stand for the asm's memory clobber.
+    fn atomic_add_scoped(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let wide = *self.k.ty(op.operands[1]) == Type::Scalar(Scalar::I64);
+        let voff = self.w(op.operands[0])?;
+        let voff = self.to_v(voff);
+        let data = if wide {
+            let (lo, hi) = self.d(op.operands[1])?;
+            r(self.pair_v(lo, hi))
+        } else {
+            let x = self.w(op.operands[1])?;
+            self.to_v(x)
+        };
+        let (lo, hi) = self.d(op.operands[2])?;
+        let base = self.pair_s(lo, hi);
+        let returns = op.bool_attr("returns") == Some(true);
+        let mut mods = M_SADDR;
+        if op.str_attr("scope") == Some("system") {
+            mods |= crate::target::gfx9::cpol::M_SC1;
+        }
+        let (plain, returning) = if wide {
+            (Opc::Gfx9(Gfx9Op::GAtomicAddX2), Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn))
+        } else {
+            (Opc::GAtomicAddU32, Opc::GAtomicAddU32Rtn)
+        };
+        self.emit(MInst::new(Opc::SchedBarrier, [], []));
+        if returns {
+            let dst = self.vgpr(if wide { 2 } else { 1 });
+            self.emit(MInst::new(returning, [r(dst)], [voff, r(base), data]).with_mods(mods | M_GLC));
+            let v = op.results[0];
+            self.set(v, if wide { Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))) } else { Val::W(r(dst)) });
+        } else {
+            self.emit(MInst::new(plain, [], [voff, r(base), data]).with_mods(mods));
+        }
+        self.emit(MInst::new(Opc::SchedBarrier, [], []));
+        Ok(())
+    }
+
     /// `memref.global_flag_store` on gfx950 (`target::gfx9::cpol`).
     fn flag_store(&mut self, op: &Op) -> Result<(), CompileError> {
         Self::flag_scope(op)?;
@@ -3986,6 +4796,22 @@ impl<'a> Isel<'a> {
     }
 
     /// The LDS tag of what an LDS DMA load to address `lds` may write.
+    /// rust-compiler-v2 levers `dmamanual` / `dmamanualring` (`manual_dma_allocs`, requests R1): the LDS reads selected
+    /// from position `from` of `block` on for an access of `smem` carry `M_DMA_MANUAL`.
+    #[inline(never)]
+    fn mark_manual(&mut self, smem: ValueId, block: usize, from: usize) {
+        if !self.dma_manual.contains(&smem) {
+            return;
+        }
+        let writes = self.dma_manual_writes;
+        for inst in self.f.blocks[block].insts.iter_mut().skip(from) {
+            let lds = crate::target::gfx9::lds_dma::accesses_lds_memory(inst.op) && !crate::target::gfx9::lds_dma::is_dma(inst.op);
+            if lds && (writes || !inst.defs.is_empty()) && inst.op.flags() & F_FENCE == 0 {
+                inst.mods |= M_DMA_MANUAL;
+            }
+        }
+    }
+
     fn dma_tag(&self, lds: ValueId) -> u16 {
         match self.lds_dma.provenance.get(&lds) {
             Some(&alloc) => self.lds_tag(alloc),
@@ -4008,6 +4834,7 @@ impl<'a> Isel<'a> {
     }
 
     /// A buffer load into LDS (gfx950, `lds_dma::select`).
+    #[inline(never)]
     fn buffer_load_lds(&mut self, op: &Op) -> Result<(), CompileError> {
         use crate::target::gfx9::lds_dma::{Dma, Source};
         let rsrc = self.tuple(op.operands[0])?;
@@ -4017,6 +4844,9 @@ impl<'a> Isel<'a> {
         let soffset = self.soffset(op.operands[3])?;
         let offset = op.int_attr("offset").unwrap_or(0);
         let (dwords, aux, tag) = (op.int_attr("dwords").unwrap_or(0) as u8, op.int_attr("aux").unwrap_or(0), self.dma_tag_at(op.operands[1], offset));
+        // rustgemm lever `m0share` (`rir::reassoc::share_m0`): a DMA that reads a neighbour's LDS address keeps the LDS
+        // range of its own allocation.
+        let tag = op.int_attr("dma_tag").map_or(tag, |t| t as u16);
         let dma = Dma { source: Source::Buffer { rsrc, voffset, soffset }, lds, dwords, aux, tag, offset };
         crate::target::gfx9::lds_dma::select(&mut self.f, self.cur, dma)
     }
@@ -4053,35 +4883,101 @@ impl<'a> Isel<'a> {
             return Ok((self.to_v(a), total));
         }
         let va = self.to_v(a);
-        // `ds_rebase`: the 64 KiB-aligned part is added once per block and
-        // address, and the accesses after it take the rest in their offset
-        // field, unless EXEC was written in between (the sum holds only the
-        // lanes active where it was made). The rest leaves room for the
-        // dwords of an access split into several instructions.
+        // Lever `dsrebase` (the kernel's `ds_rebase`): an offset past the 16-bit field splits into a 64 KiB-aligned
+        // part added once per block and address (shared by the accesses near it, as COMGR's rebased LDS pointers)
+        // and the field, unless EXEC was written in between (the sum holds only the lanes active where it was made).
+        // With `ds_rebase` the field keeps room for the dwords of an access split into several instructions.
         let (hi, lo) = (total & !0xffff, total & 0xffff);
-        if self.k.passes.ds_rebase && (65536..1 << 31).contains(&total) && lo <= 0xff00 {
+        let room = !self.k.passes.ds_rebase || lo <= 0xff00;
+        if (self.k.passes.ds_rebase || crate::rir::lever("dsrebase")) && (65536..1 << 31).contains(&total) && room {
+            if crate::rir::lever("dshoist") {
+                if let Some(sum) = self.hoisted_ds_base(va, hi) {
+                    return Ok((sum, lo));
+                }
+            }
             let key = (self.cur, va, hi);
             if let Some(&(sum, at)) = self.ds_bases.get(&key) {
                 let insts = &self.f.blocks[self.cur].insts;
-                let exec = insts[at.min(insts.len())..]
-                    .iter()
-                    .any(|i| i.op.flags() & F_DEF_EXEC != 0 || i.defs.iter().any(|d| matches!(d, Opnd::P(Phys::ExecLo, _))));
+                let exec = insts[at.min(insts.len())..].iter().any(|i| i.op.flags() & F_DEF_EXEC != 0 || i.defs.iter().any(|d| matches!(d, Opnd::P(Phys::ExecLo, _))));
                 if !exec {
                     return Ok((sum, lo));
                 }
             }
             let sum = self.v_bin(Opc::VAddNcU32, Opnd::Imm(hi as u32), va);
-            self.ds_bases.insert(key, (sum, self.f.blocks[self.cur].insts.len()));
+            let at = self.f.blocks[self.cur].insts.len();
+            self.ds_bases.insert(key, (sum, at));
             return Ok((sum, lo));
         }
         let sum = self.v_bin(Opc::VAddNcU32, Opnd::Imm(total as u32), va);
         Ok((sum, 0))
     }
 
+    /// `tile.sched_barrier`: mask 0 is a scheduling fence. rustgemm: a mask that keeps vector memory (0x10 / 0x20 /
+    /// 0x40) from crossing it is a VMEM-only fence (`post::block_dag`): VMEM issue order is the program order around
+    /// it (rocKE's static `vmcnt(n)` model relies on it); other passes see a fence (conservative). Out of line, as
+    /// every rustgemm addition reached from `op`: its frame bounds the nesting a small stack takes.
+    #[inline(never)]
+    fn sched_barrier(&mut self, op: &Op) {
+        let mask = op.int_attr("mask").unwrap_or(0);
+        if mask == 0 && !super::lever("nofence") {
+            self.emit(MInst::new(Opc::SchedBarrier, [], []));
+        } else if mask != 0 && mask & 0x70 == 0 && !super::lever("novmfence") {
+            self.emit(MInst::new(Opc::SchedBarrier, [], []).with_imm(mask));
+        }
+    }
+
+    /// `tile.sched_group_barrier`: nothing, or under rust-compiler-v2 lever `sgb` a group marker for
+    /// `target::gfx9::sched_groups`.
+    #[inline(never)]
+    fn sched_group_barrier(&mut self, op: &Op) {
+        if super::lever("sgb") {
+            let (mask, count, group) = (op.int_attr("mask").unwrap_or(0), op.int_attr("count").unwrap_or(0), op.int_attr("group").unwrap_or(0));
+            self.emit(crate::target::gfx9::sched_groups::marker(mask, count, group));
+        }
+    }
+
+    /// rustgemm: rocKE's `"=a,0"` accumulator pin, an identity (the allocator picks the register file).
+    #[inline(never)]
+    fn agpr_pin(&mut self, op: &Op) -> Result<(), CompileError> {
+        let val = self.get(op.operands[0])?;
+        self.set(op.results[0], val);
+        Ok(())
+    }
+
+    /// rustgemm lever `dshoist`: `va + hi` computed once in the innermost loop's preheader when `va` is invariant
+    /// in the loop (a register from before its body and not one it carries); `None` otherwise.
+    #[inline(never)]
+    fn hoisted_ds_base(&mut self, va: Opnd, hi: i64) -> Option<Opnd> {
+        let frame = self.loop_frames.last()?;
+        let Opnd::R(v) = va else { return None };
+        if v.reg >= frame.first_vreg || frame.carried.contains(&v.reg) || self.f.vregs[v.reg as usize].class != Class::V {
+            return None;
+        }
+        let key = (frame.block, va, hi);
+        if let Some(&sum) = self.ds_hoisted.get(&key) {
+            return Some(sum);
+        }
+        let (block, at) = (frame.block, frame.at + frame.n);
+        let cur = self.cur;
+        self.cur = block;
+        let before = self.f.blocks[block].insts.len();
+        let sum = self.v_bin(Opc::VAddNcU32, Opnd::Imm(hi as u32), va);
+        self.cur = cur;
+        let new: Vec<MInst> = self.f.blocks[block].insts.drain(before..).collect();
+        let k = new.len();
+        self.f.blocks[block].insts.splice(at..at, new);
+        self.loop_frames.last_mut().expect("frame").n += k;
+        self.ds_hoisted.insert(key, sum);
+        Some(sum)
+    }
+
     fn lload(&mut self, op: &Op) -> Result<(), CompileError> {
         let v = op.results[0];
         if let Some(&quad) = self.chains.quads.get(&v) {
             return self.lload_quad(op, quad);
+        }
+        if let Some(&duo) = self.chains.duos.get(&v) {
+            return self.lload_duo(op, duo);
         }
         let ty = self.k.ty(v).clone();
         let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
@@ -4103,7 +4999,7 @@ impl<'a> Isel<'a> {
         }
         if bytes == 2 {
             self.emit(MInst::new(Opc::DsLoadU16, [r(dst)], [addr]).with_imm(offset));
-            if self.k.passes.u16_zext {
+            if self.k.passes.u16_zext || super::lever("u16zext") {
                 self.zero_hi16.insert(dst.reg);
             }
         } else {
@@ -4172,6 +5068,19 @@ impl<'a> Isel<'a> {
         let dst = self.vgpr(4);
         self.emit(MInst::new(Opc::DsLoadB128, [r(dst)], [addr]).with_imm(offset));
         for (k, v) in quad.into_iter().enumerate() {
+            let part = sub(dst, k as u8, 1);
+            self.set(v, if matches!(self.k.ty(v), Type::Vec(..)) { Val::T(part) } else { Val::W(r(part)) });
+        }
+        Ok(())
+    }
+
+    /// The two loads of `find_dword_duos` that start at `op`, as one
+    /// `ds_read_b64` whose dwords they read.
+    fn lload_duo(&mut self, op: &Op, duo: [ValueId; 2]) -> Result<(), CompileError> {
+        let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
+        let dst = self.vgpr(2);
+        self.emit(MInst::new(Opc::DsLoadB64, [r(dst)], [addr]).with_imm(offset));
+        for (k, v) in duo.into_iter().enumerate() {
             let part = sub(dst, k as u8, 1);
             self.set(v, if matches!(self.k.ty(v), Type::Vec(..)) { Val::T(part) } else { Val::W(r(part)) });
         }
@@ -4326,6 +5235,13 @@ impl<'a> Isel<'a> {
             (Some(l), Some(u)) => l.hi < u.lo,
             _ => false,
         };
+        self.loop_frames.push(LoopFrame {
+            block: self.cur,
+            at: self.f.blocks[self.cur].insts.len(),
+            n: 0,
+            first_vreg: self.f.vregs.len() as u32,
+            carried: carried.iter().map(|c| c.reg).collect(),
+        });
         let skip_branch = if always_runs {
             None
         } else {
@@ -4367,8 +5283,10 @@ impl<'a> Isel<'a> {
         self.salu(Opc::SCmpLtI32, [], [r(iv), ub]);
         self.emit(MInst::new(Opc::SCbranchScc1, [], []).with_imm(body_block as i64));
         self.depth -= 1;
+        let frame = self.loop_frames.pop().expect("the loop's frame");
         let exit = self.new_block();
         if let Some((block, index)) = skip_branch {
+            let index = if block == frame.block { index + frame.n } else { index };
             self.f.blocks[block].insts[index].imm = exit as i64;
         }
         for (i, &res) in op.results.iter().enumerate() {
@@ -4558,6 +5476,22 @@ impl<'a> Isel<'a> {
     }
 }
 
+/// The `MInst` modifiers of a cache policy `aux` (`rocke.core.ir.CPOL_*`:
+/// sc0 1, nt 2, sc1 16): `M_GLC` is the sc0 bit of gfx950's memory formats.
+fn cache_policy_mods(aux: i64) -> u32 {
+    let mut mods = 0;
+    if aux & 1 != 0 {
+        mods |= M_GLC;
+    }
+    if aux & 2 != 0 {
+        mods |= crate::target::gfx9::cpol::M_NT;
+    }
+    if aux & 16 != 0 {
+        mods |= crate::target::gfx9::cpol::M_SC1;
+    }
+    mods
+}
+
 /// The nontemporal bit of a legalized global access (only gfx950's carry the
 /// `nt` attribute: `target::gfx9::cpol`).
 fn nontemporal(op: &Op) -> u32 {
@@ -4673,6 +5607,12 @@ fn has_side_effects(kind: OpKind) -> bool {
             | GlobalAtomicAdd
             | GAtomicAdd
             | Fence
+            | BufferStoreCp
+            | TaggedPoll
+            | SSleep
+            | AtomicAddScoped
+            | L2TouchLoad
+            | L2TouchDrain
     )
 }
 
@@ -4743,6 +5683,9 @@ struct Chains {
     /// First of four dword LDS loads made one (`find_dword_quads`) -> the four
     /// results; the other three are in `skip`.
     quads: FxHashMap<ValueId, [ValueId; 4]>,
+    /// Lever `ldsduos`: first of two dword LDS loads made one `ds_read_b64`
+    /// (`find_dword_duos`) -> the two results; the second is in `skip`.
+    duos: FxHashMap<ValueId, [ValueId; 2]>,
 }
 
 struct ChainCx<'a> {
@@ -4899,10 +5842,10 @@ fn lds_chain(cx: &ChainCx, region: &Region, pos: &FxHashMap<ValueId, usize>, cha
 /// address at byte offsets `o` to `o + 12`, in program order with nothing
 /// in between that has a side effect, the address and `o` 16-byte aligned:
 /// one `ds_load_b128` at the first (the scalar reads of a block reduction).
-fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>, out: &mut Chains) {
+fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>, out: &mut Chains, all: bool) {
     for op in &region.ops {
         for inner in &op.regions {
-            find_dword_quads(cx, inner, gathers, out);
+            find_dword_quads(cx, inner, gathers, out, all);
         }
     }
     let dword = |v: ValueId| {
@@ -4919,7 +5862,7 @@ fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>,
     }
     let mut taken = FxHashSet::default();
     for (i, op) in region.ops.iter().enumerate() {
-        if op.kind != OpKind::LLoad || taken.contains(&i) {
+        if op.kind != OpKind::LLoad || taken.contains(&i) || !(all || super::op_lever(op, "ldsquads")) {
             continue;
         }
         let (smem, addr, first) = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
@@ -4941,6 +5884,53 @@ fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>,
         taken.extend([i, rest[0], rest[1], last]);
         out.skip.extend(&quad[1..]);
         out.quads.insert(quad[0], quad);
+    }
+}
+
+/// Two dword LDS loads (f32 or i32, scalar or one-element vectors) of one
+/// address at byte offsets `o` and `o + 4`, in program order with nothing in
+/// between that has a side effect, the address and `o` 8-byte aligned, not
+/// already in a quad: one `ds_read_b64` at the first (lever `ldsduos`).
+fn find_dword_duos(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>, out: &mut Chains) {
+    for op in &region.ops {
+        for inner in &op.regions {
+            find_dword_duos(cx, inner, gathers, out);
+        }
+    }
+    let dword = |v: ValueId| {
+        matches!(cx.k.ty(v), Type::Scalar(Scalar::F32 | Scalar::I32) | Type::Vec(Scalar::F32 | Scalar::I32, 1))
+    };
+    let in_quad: FxHashSet<ValueId> = out.quads.values().flatten().copied().collect();
+    let mut effects = vec![0u32; region.ops.len() + 1];
+    let mut at: FxHashMap<(ValueId, ValueId, i64), Option<usize>> = FxHashMap::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        effects[i + 1] = effects[i] + has_side_effects(op.kind) as u32;
+        if op.kind == OpKind::LLoad && dword(op.results[0]) && !gathers.contains(&op.results[0]) && !in_quad.contains(&op.results[0]) {
+            let key = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+            at.entry(key).and_modify(|p| *p = None).or_insert(Some(i));
+        }
+    }
+    let mut taken = FxHashSet::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        if op.kind != OpKind::LLoad || taken.contains(&i) || !super::op_lever(op, "ldsduos") {
+            continue;
+        }
+        let (smem, addr, first) = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+        if at.get(&(smem, addr, first)) != Some(&Some(i)) {
+            continue;
+        }
+        let Some(&base) = cx.lds.get(&smem) else { continue };
+        if (base as i64 + first) % 8 != 0 || known_align(cx, addr, 0) % 8 != 0 {
+            continue;
+        }
+        let Some(second) = at.get(&(smem, addr, first + 4)).copied().flatten() else { continue };
+        if second <= i || effects[second + 1] != effects[i] || taken.contains(&second) || !super::op_lever(&region.ops[second], "ldsduos") {
+            continue;
+        }
+        let duo = [i, second].map(|p| region.ops[p].results[0]);
+        taken.extend([i, second]);
+        out.skip.insert(duo[1]);
+        out.duos.insert(duo[0], duo);
     }
 }
 
@@ -5121,14 +6111,14 @@ fn find_trunc_products(cx: &ChainCx, region: &Region, found: &mut FxHashMap<Valu
     }
 }
 
-/// `tile.wave_any` / `tile.wave_all` of a single-use `select(c, k1, k2)` of
+/// `tile.wave_any` / `tile.wave_all` / `tile.wave_ballot` of a single-use `select(c, k1, k2)` of
 /// constants: the vote reads c's lane mask and the select is never emitted.
 fn find_vote_selects(cx: &ChainCx, region: &Region, votes: &mut FxHashMap<ValueId, (ValueId, bool, bool)>, skip: &mut FxHashSet<ValueId>) {
     for op in &region.ops {
         for inner in &op.regions {
             find_vote_selects(cx, inner, votes, skip);
         }
-        if !matches!(op.kind, OpKind::WaveAny | OpKind::WaveAll) {
+        if !matches!(op.kind, OpKind::WaveAny | OpKind::WaveAll | OpKind::WaveBallot) {
             continue;
         }
         let p = op.operands[0];
@@ -5242,6 +6232,38 @@ pub fn select(
 }
 
 /// Selection for `target`; the machine function carries it on.
+/// rust-compiler-v2 (requests R1): the allocations whose reads skip the waits for DMA into them: under lever
+/// `dmamanual` the `tile.smem_alloc` results with `dma_sync = "manual"`, under lever `dmamanualring` those named
+/// `%ring*` (rocKE's MXFP6 line rings, `name_hint="ring{X}"`, without a rocKE-side attribute).
+fn manual_dma_allocs(kernel: &Kernel) -> FxHashSet<ValueId> {
+    let by_attr = super::kernel_lever("dmamanual") || super::scoped_anywhere(kernel, "dmamanual");
+    let by_name = super::kernel_lever("dmamanualring") || super::scoped_anywhere(kernel, "dmamanualring")
+        || manual_dma_writes(kernel);
+    let mut out = FxHashSet::default();
+    if !(by_attr || by_name) {
+        return out;
+    }
+    super::analysis::preorder(&kernel.body, |op| {
+        if op.kind != OpKind::SmemAlloc {
+            return;
+        }
+        let marked = by_attr && op.str_attr("dma_sync") == Some("manual");
+        for &r in &op.results {
+            if marked || (by_name && kernel.name_of(r).starts_with("%ring")) {
+                out.insert(r);
+            }
+        }
+    });
+    out
+}
+
+/// kernel-agent lever `dmamanualringw` (implies `dmamanualring`): the LDS writes of the `%ring*` allocations skip
+/// the waits for DMA into them as well (the kernel keeps writes and in-flight DMAs on disjoint bytes -- rocKE's line2m
+/// remnant buffer -- and orders them with its own vmcnt / barrier model).
+fn manual_dma_writes(kernel: &Kernel) -> bool {
+    super::kernel_lever("dmamanualringw") || super::scoped_anywhere(kernel, "dmamanualringw")
+}
+
 pub fn select_for(
     target: Target,
     kernel: &Kernel,
@@ -5266,8 +6288,15 @@ pub fn select_for(
     let mut chains = Chains::default();
     let cx = ChainCx { k: kernel, facts, lds, uses: &uses, defs: &defs };
     find_chains(&cx, &kernel.body, &mut chains);
-    if target == Target::Gfx1151 {
-        find_dword_quads(&cx, &kernel.body, &gathers, &mut chains);
+    // Lever `ldsquads`: gfx950 merges four aligned dword LDS loads too.
+    // Read per load: the first load's scope decides.
+    if target == Target::Gfx1151 || super::kernel_lever("ldsquads") || super::scoped_anywhere(kernel, "ldsquads") {
+        find_dword_quads(&cx, &kernel.body, &gathers, &mut chains, target == Target::Gfx1151);
+    }
+    // Lever `ldsduos` (PLAN decision 18): two aligned dword LDS loads of one address merge into one
+    // `ds_read_b64` (the loads `ldsquads` left), as LLVM's load-store optimizer merges a value / index pair.
+    if target == Target::Gfx950 && (super::kernel_lever("ldsduos") || super::scoped_anywhere(kernel, "ldsduos")) {
+        find_dword_duos(&cx, &kernel.body, &gathers, &mut chains);
     }
     find_finite_tests(&cx, &kernel.body, &mut chains);
     find_half_packs(&cx, &kernel.body, &uniform, &mut chains);
@@ -5282,17 +6311,21 @@ pub fn select_for(
     let fneg_fma = negs.into_iter().filter(|(v, _)| fma_uses.get(v) == Some(&uses[v.0 as usize])).collect();
     let mut isel = Isel {
         burs: None,
+        scope: 0,
         k: kernel,
         facts,
         uniform,
         f: MFunc { target, ..MFunc::default() },
         cur: 0,
+        cur_loc: NO_LOC,
+        loc_ids: FxHashMap::default(),
         vals: vec![None; kernel.values.len()],
         lds,
         depth: 0,
         single_wave: kernel.max_workgroup_size <= target.info().wave,
         t: target.info(),
         kernarg_ptr: VRef { reg: 0, off: 0, n: 2 },
+        preload: FxHashMap::default(),
         tid: VRef { reg: 0, off: 0, n: 1 },
         bid: [None; 3],
         zero_v: None,
@@ -5314,9 +6347,18 @@ pub fn select_for(
             Target::Gfx1151 => Default::default(),
         },
         ds_bases: FxHashMap::default(),
+        loop_frames: Vec::new(),
+        ds_hoisted: FxHashMap::default(),
+        zero_hi16: Default::default(),
+        dma_manual: manual_dma_allocs(kernel),
+        dma_manual_writes: manual_dma_writes(kernel),
         const_vecs: FxHashMap::default(),
-        zero_hi16: FxHashSet::default(),
     };
+    // With lever scopes every op of the source has one (`opt::inherit_scopes`; outside every scope the empty
+    // one): scope 0 is left to the ops passes made, whose instructions take their neighbours' (`MFunc::fill_scopes`).
+    if super::scoped_kernel(kernel) && isel.f.scopes.is_empty() {
+        isel.f.scopes.push(std::sync::Arc::default());
+    }
     if super::debug_flag("burs") {
         isel.burs = Some(burs::plan(&isel));
     }
@@ -5324,7 +6366,19 @@ pub fn select_for(
     let kernarg = isel.vreg(Class::S, 2, 2);
     isel.f.vregs[kernarg.reg as usize].fixed = Some(0);
     isel.kernarg_ptr = kernarg;
-    let mut next_sgpr = 2u16;
+    // Kernarg preload (gfx950): the hardware writes the preloaded arguments
+    // into the user SGPRs after the kernarg pointer.
+    if target == Target::Gfx1151 && (kernel.passes.kernarg_preload || kernel.params.iter().any(|p| p.inreg)) {
+        return Err(unsupported("kernarg preload (inreg) on gfx1151"));
+    }
+    let (preloaded, preload) = super::opt::kernarg_preload(kernel);
+    for (index, first) in preloaded {
+        let dwords = kernel.params[index].ty.dwords() as u8;
+        let fixed = isel.vreg(Class::S, dwords, dwords.min(2));
+        isel.f.vregs[fixed.reg as usize].fixed = Some(2 + first as u16);
+        isel.preload.insert(index, fixed);
+    }
+    let mut next_sgpr = 2 + preload as u16;
     for axis in 0..3 {
         if wg_ids[axis] {
             let fixed = isel.vreg(Class::S, 1, 1);
@@ -5358,6 +6412,7 @@ pub fn select_for(
         kernarg_size,
         lds_size,
         wg_ids,
+        preload,
     })
 }
 
@@ -5480,6 +6535,63 @@ mod tests {
         assert_eq!(class[0].uses[1], Opnd::Imm(0x1f8));
         // %gty has a second use, so y's test keeps its two compares.
         assert_eq!((count(&insts, Opc::VCmp(0x14)), count(&insts, Opc::VCmp(0x11))), (1, 1));
+    }
+
+    #[test]
+    fn unordered_fcmp_predicates_select_vopc_codes() {
+        // W15 PORT K2-moe: every LLVM unordered / ordered predicate maps to its gfx9 VOPC f32 compare.
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<i32,global>\n";
+        let preds = [("ord", 0x17u8), ("uno", 0x18), ("ult", 0x19), ("ueq", 0x1a), ("ule", 0x1b), ("ugt", 0x1c), ("uge", 0x1e)];
+        for (pred, code) in preds {
+            let body = [
+                "    %x : f32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"f32\" }".to_string(),
+                "    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }".to_string(),
+                "    %t2 : i32 = arith.add ( %tid, %c64 )".to_string(),
+                "    %y : f32 = memref.global_load_typed ( %X, %t2 ) { align = i:4, elem_type = s:\"f32\" }".to_string(),
+                format!("    %m : i1 = arith.fcmp ( %x, %y ) {{ pred = s:\"{pred}\" }}"),
+                "    %one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }".to_string(),
+                "    %zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }".to_string(),
+                "    %r : i32 = arith.select ( %m, %one, %zero )".to_string(),
+                "    memref.global_store_typed ( %Y, %tid, %r ) { align = i:4, elem_type = s:\"i32\" }".to_string(),
+            ]
+            .join("\n")
+                + "\n";
+            let insts = insts(&kernel(params, &body));
+            assert_eq!(count(&insts, Opc::VCmp(code)), 1, "{pred}");
+        }
+    }
+
+    #[test]
+    fn wave_ballot_is_one_compare_into_an_sgpr_pair() {
+        // W15 PORT K2-moe: ballot(select(x == y, 1, 0)) reads the compare's lane mask (no select, no second
+        // compare), copies it to an SGPR pair, and its low half is stored.
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<i32,global>\n";
+        let body = [
+            "    %x : f32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"f32\" }",
+            "    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }",
+            "    %t2 : i32 = arith.add ( %tid, %c64 )",
+            "    %y : f32 = memref.global_load_typed ( %X, %t2 ) { align = i:4, elem_type = s:\"f32\" }",
+            "    %m : i1 = arith.fcmp ( %x, %y ) { pred = s:\"oeq\" }",
+            "    %one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }",
+            "    %zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }",
+            "    %p : i32 = arith.select ( %m, %one, %zero )",
+            "    %b : i64 = tile.wave_ballot ( %p )",
+            "    %lo : i32 = arith.trunc ( %b )",
+            "    memref.global_store_typed ( %Y, %tid, %lo ) { align = i:4, elem_type = s:\"i32\" }",
+        ]
+        .join("\n")
+            + "\n";
+        // wave32 (the default target): the mask's one half and a zero high half
+        let w32 = insts(&kernel(params, &body));
+        let ops: Vec<String> = w32.iter().map(|i| format!("{:?}", i.op)).collect();
+        assert_eq!(count(&w32, Opc::VCmp(0x12)), 1, "one v_cmp_eq_f32: {ops:?}");
+        assert_eq!(w32.iter().filter(|i| matches!(i.op, Opc::VCmp(_))).count(), 1, "no second compare: {ops:?}");
+        // gfx950 (wave64): a 64-bit lane mask in an SGPR pair
+        let c = super::super::compile_for(&kernel(params, &body), crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let w64: Vec<MInst> = c.func.blocks.into_iter().flat_map(|b| b.insts).collect();
+        let ops: Vec<String> = w64.iter().map(|i| format!("{:?}", i.op)).collect();
+        assert_eq!(w64.iter().filter(|i| matches!(i.op, Opc::VCmp(_))).count(), 1, "gfx950: one compare: {ops:?}");
+        assert!(count(&w64, Opc::SMovB64) + count(&w64, Opc::SAndB64) >= 1, "gfx950: the mask in an SGPR pair: {ops:?}");
     }
 }
 
@@ -6012,6 +7124,39 @@ mod convmem_tests {
 
     fn count(insts: &[MInst], op: Opc) -> usize {
         all(insts, op).len()
+    }
+
+    /// Regression (mxfp6 GEMM swap_ab=False epilogue): a one-element bf16 vector `tile.buffer_store_vN` is a 16-bit
+    /// `buffer_store_short`, never a dword store (which would write the neighbouring element / past the buffer).
+    #[test]
+    fn one_element_bf16_vector_store_is_16_bits() {
+        let params = "    %c : ptr<bf16,global>
+    %n : i32
+";
+        let body = r#"    %rs : vec<i32x4> = tile.buffer_rsrc ( %c, %n )
+    %c0 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c2 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+    %bo : i32 = arith.mul ( %tid, %c2 )
+    %f : f32 = arith.constant (  ) { ity = s:"f32", value = f:1.5 }
+    %v4 : vec<f32x4> = vector.pack ( %f, %f, %f, %f ) { elem = s:"f32", vec = i:4 }
+    %h4 : vec<bf16x4> = vector.trunc_f32_to ( %v4 ) { target = s:"bf16" }
+    %e : bf16 = vector.extract ( %h4 ) { index = i:1 }
+    %v1 : vec<bf16x1> = vector.pack ( %e ) { elem = s:"bf16", vec = i:1 }
+    tile.buffer_store_vN ( %rs, %bo, %c0, %v1 )
+    %w : vec<bf16x2> = vector.pack ( %e, %e ) { elem = s:"bf16", vec = i:2 }
+    tile.buffer_store_vN ( %rs, %bo, %c0, %w )
+"#;
+        let text = kernel(params, body);
+        let insts = insts(&text);
+        let narrow = count(&insts, Opc::BufStoreB16) + count(&insts, Opc::BufStoreD16HiB16);
+        assert_eq!((narrow, count(&insts, Opc::BufStoreB32)), (1, 1));
+        // ISA regression: the listing has exactly one 16-bit and one dword buffer store
+        let listing = crate::rir::compile_any_target(&text, crate::target::Target::Gfx950)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .listing();
+        let n16 = listing.lines().filter(|l| l.contains("buffer_store_short")).count();
+        let n32 = listing.lines().filter(|l| l.contains("buffer_store_dword ")).count();
+        assert_eq!((n16, n32), (1, 1), "{listing}");
     }
 
     #[test]

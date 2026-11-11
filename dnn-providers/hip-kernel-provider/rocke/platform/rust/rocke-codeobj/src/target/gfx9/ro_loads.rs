@@ -63,6 +63,11 @@ fn breaks_run(op: &Op) -> bool {
                 | OpKind::InlineAsmIdentity
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
+                | OpKind::TaggedPoll
+                | OpKind::L2TouchDrain
+                | OpKind::SSleep
+                | OpKind::GlobalLoadCp
+                | OpKind::SNop
         )
 }
 

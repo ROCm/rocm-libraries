@@ -93,6 +93,7 @@ pub fn run(f: &mut MFunc) -> usize {
                 k += 1;
                 continue;
             };
+            let (start, loc) = (out.len(), insts[k].loc);
             let once = defs[y.reg as usize] <= 1;
             let p = match pairs.get(&y).filter(|_| once) {
                 Some(&p) => p,
@@ -108,6 +109,7 @@ pub fn run(f: &mut MFunc) -> usize {
                 }
             };
             out.push(MInst::new(Opc::Gfx9(Gfx9Op::VLshlAddU64), [Opnd::R(d)], [Opnd::R(p), Opnd::Imm(0), base]));
+            inherit_loc(&mut out, start, loc);
             fused += 1;
             k += 2;
         }

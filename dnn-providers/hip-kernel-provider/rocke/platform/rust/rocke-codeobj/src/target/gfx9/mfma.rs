@@ -68,12 +68,19 @@ pub fn shape(op_id: &str) -> Option<Shape> {
     Some(Shape { op, ab, cd, ctl: 0 })
 }
 
-/// The block-scaled 32x32x64 atom `mfma_gfx950_f32_32x32x64_<a>_<b>_scale_e8m0_e8m0_k32`
-/// (A and B formats fp8, bf8, fp6, bf6 or fp4, one E8M0 scale per 32 K
-/// elements): the MFMA with cbsz and blgp naming the formats, and the
-/// dwords of A and B the instruction reads (the IR pads both to 8).
+/// The block-scaled atoms `mfma_gfx950_f32_<shape>_<a>_<b>_scale_e8m0_e8m0_k32`,
+/// shape 32x32x64 or 16x16x128 (A and B formats fp8, bf8, fp6, bf6 or fp4,
+/// one E8M0 scale per 32 K elements): the MFMA with cbsz and blgp naming the
+/// formats, and the dwords of A and B the instruction reads (the IR pads
+/// both to 8).
 pub fn scaled(op_id: &str) -> Option<(Shape, u8, u8)> {
-    let formats = op_id.strip_prefix("mfma_gfx950_f32_32x32x64_")?.strip_suffix("_scale_e8m0_e8m0_k32")?;
+    let rest = op_id.strip_prefix("mfma_gfx950_f32_")?.strip_suffix("_scale_e8m0_e8m0_k32")?;
+    let (shape, formats) = rest.split_once('_')?;
+    let (op, cd) = match shape {
+        "32x32x64" => (Gfx9Op::VMfmaScale32x32x64F8f6f4, 16),
+        "16x16x128" => (Gfx9Op::VMfmaScale16x16x128F8f6f4, 4),
+        _ => return None,
+    };
     let (a, b) = formats.split_once('_')?;
     let format = |f: &str| match f {
         "fp8" => Some((0, 8)),
@@ -84,11 +91,30 @@ pub fn scaled(op_id: &str) -> Option<(Shape, u8, u8)> {
         _ => None,
     };
     let ((ca, na), (cb, nb)) = (format(a)?, format(b)?);
-    Some((Shape { op: Gfx9Op::VMfmaScale32x32x64F8f6f4, ab: 8, cd: 16, ctl: ca | cb << 7 }, na, nb))
+    Some((Shape { op, ab: 8, cd, ctl: ca | cb << 7 }, na, nb))
+}
+
+/// The MX op (`IRBuilder.mfma_scale_f32_16x16x128_f8f6f4`): the block-scaled
+/// 16x16x128 atom with the formats of A and B in its `a_format` and
+/// `b_format` attributes.
+pub const MX_16X16X128: &str = "mfma_scale_f32_16x16x128_f8f6f4";
+
+/// The `scaled` atom an MX op with formats `a` and `b` (rocKE's matrix format
+/// names, fp8e4m3 where absent) is.
+pub fn mx_atom(a: Option<&str>, b: Option<&str>) -> Option<String> {
+    let short = |f: Option<&str>| match f.unwrap_or("fp8e4m3") {
+        "fp8e4m3" => Some("fp8"),
+        "bf8e5m2" => Some("bf8"),
+        "fp6e2m3" => Some("fp6"),
+        "fp6e3m2" => Some("bf6"),
+        "fp4e2m1" => Some("fp4"),
+        _ => None,
+    };
+    Some(format!("mfma_gfx950_f32_16x16x128_{}_{}_scale_e8m0_e8m0_k32", short(a)?, short(b)?))
 }
 
 pub fn is_scaled(op_id: &str) -> bool {
-    scaled(op_id).is_some()
+    op_id == MX_16X16X128 || scaled(op_id).is_some()
 }
 
 /// The control bits of a block-scaled MFMA's scale bytes: which byte of its
@@ -171,11 +197,20 @@ impl Emit<'_> {
     /// reads after C.
     fn scaled_mfma(&mut self, shape: Shape, (na, nb): (u8, u8), a: VRef, b: VRef, c: VRef, (sa, sb): (Opnd, Opnd)) -> VRef {
         let (a, b) = (self.in_vgprs(a), self.in_vgprs(b));
-        let (sa, sb) = (self.scale_vgpr(sa), self.scale_vgpr(sb));
+        // The scales: copied into a fresh VGPR pair, or with lever `scalesep` (the rust track) read where
+        // they are when they are single VGPRs already (no move and no VALU-to-MFMA wait per MFMA).
+        let (sa, sb) = if crate::rir::lever("scalesep") {
+            (Opnd::R(self.scale_vgpr(sa)), Opnd::R(self.scale_vgpr(sb)))
+        } else {
+            let pair = self.reg(Class::V, 2);
+            self.copy(VRef { n: 1, ..pair }, sa);
+            self.copy(VRef { off: 1, n: 1, ..pair }, sb);
+            (Opnd::R(VRef { n: 1, ..pair }), Opnd::R(VRef { off: 1, n: 1, ..pair }))
+        };
         let d = self.reg(Class::V, shape.cd);
         self.copy(d, Opnd::R(c));
         let (a, b) = (VRef { n: na, ..a }, VRef { n: nb, ..b });
-        let uses = [Opnd::R(a), Opnd::R(b), Opnd::R(d), Opnd::R(sa), Opnd::R(sb)];
+        let uses = [Opnd::R(a), Opnd::R(b), Opnd::R(d), sa, sb];
         self.push(MInst::new(Opc::Gfx9(shape.op), [Opnd::R(d)], uses).with_imm(shape.ctl));
         d
     }
@@ -240,6 +275,39 @@ impl Emit<'_> {
     }
 }
 
+/// Selects `tile.mfma_scale_mx` (the Qwen3.8 MX form: free A and B formats,
+/// `fmt_a` / `fmt_b` 0..4 = fp8, bf8, fp6, bf6, fp4, and scale byte selects
+/// `opsel_a` / `opsel_b` 0..3) over A, B and C of exactly the formats' sizes
+/// into block `block` of `f`: the 16x16x128 (`wide` false, a 4-dword C) or the
+/// 32x32x64 (16 dwords) block-scaled MFMA. Returns D.
+#[allow(clippy::too_many_arguments)]
+pub fn select_mx(
+    f: &mut MFunc,
+    block: usize,
+    wide: bool,
+    (fmt_a, fmt_b): (u8, u8),
+    (opsel_a, opsel_b): (u8, u8),
+    a: VRef,
+    b: VRef,
+    c: VRef,
+    scales: (Opnd, Opnd),
+) -> Result<VRef, CompileError> {
+    let dwords = |format: u8| [8u8, 8, 6, 6, 4].get(format as usize).copied();
+    let (Some(na), Some(nb)) = (dwords(fmt_a), dwords(fmt_b)) else {
+        return Err(unsupported(format!("tile.mfma_scale_mx formats {fmt_a}, {fmt_b}")));
+    };
+    let (op, cd) = if wide { (Gfx9Op::VMfmaScale32x32x64F8f6f4, 16) } else { (Gfx9Op::VMfmaScale16x16x128F8f6f4, 4) };
+    if (a.n, b.n, c.n) != (na, nb, cd) || opsel_a > 3 || opsel_b > 3 {
+        return Err(unsupported(format!(
+            "tile.mfma_scale_mx: operands of {}, {} and {} dwords (formats {fmt_a}, {fmt_b} take {na}, {nb} and {cd}) or scale selects {opsel_a}, {opsel_b}",
+            a.n, b.n, c.n
+        )));
+    }
+    let ctl = fmt_a as i64 | (fmt_b as i64) << 7 | (opsel_a as i64) << 10 | (opsel_b as i64) << 12;
+    let mut emit = Emit { f, block };
+    Ok(emit.scaled_mfma(Shape { op, ab: 8, cd, ctl }, (na, nb), a, b, c, scales))
+}
+
 /// Selects `tile.mma` `op_id` over the tuples A, B and C (and a block-scaled
 /// atom's A and B scales, and the bytes of them it reads) into block `block`
 /// of `f`, and returns D.
@@ -257,10 +325,19 @@ pub fn select(
     if let Some((s, na, nb)) = scaled(op_id) {
         let scales = scales.ok_or_else(|| unsupported(format!("tile.mma {op_id} without its A and B scales")))?;
         if (a.n, b.n, c.n) != (s.ab, s.ab, s.cd) {
-            return Err(unsupported(format!("tile.mma {op_id}: operands of {}, {} and {} dwords where gfx950 takes 8, 8 and 16", a.n, b.n, c.n)));
+            return Err(unsupported(format!(
+                "tile.mma {op_id}: operands of {}, {} and {} dwords where gfx950 takes 8, 8 and {}",
+                a.n, b.n, c.n, s.cd
+            )));
         }
         let sel = scale_sel_ctl(scale_sel.unwrap_or((0, 0)))
             .ok_or_else(|| unsupported(format!("tile.mma {op_id}: scale_sel {scale_sel:?} names a byte past 3")))?;
+        // Both scales the constant 0 mean no scale, as LLVM selects the
+        // 16x16x128 intrinsic with literal zero scales: the unscaled MFMA.
+        if s.op == Gfx9Op::VMfmaScale16x16x128F8f6f4 && scales == (Opnd::Imm(0), Opnd::Imm(0)) {
+            let (a, b) = (emit.in_vgprs(a), emit.in_vgprs(b));
+            return Ok(emit.mfma(Shape { op: Gfx9Op::VMfma16x16x128F8f6f4, ..s }, VRef { n: na, ..a }, VRef { n: nb, ..b }, c));
+        }
         return Ok(emit.scaled_mfma(Shape { ctl: s.ctl | sel, ..s }, (na, nb), a, b, c, scales));
     }
     if scales.is_some() || scale_sel.is_some() {
@@ -357,6 +434,19 @@ mod tests {
             // gfx1151 has no MFMA.
             assert!(rir::compile(&text).is_err());
         }
+    }
+
+    /// Instructions `select` pushes into the block itself carry the op's location.
+    #[test]
+    fn selected_mfmas_carry_the_ops_location() {
+        let text = kernel("mfma_f32_16x16x32_f16", "vec<f16x8>", 4, 4, &ones(4));
+        let compiled = rir::compile_any_target(&crate::srcloc::with_test_locs(&text), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(compiled.listing(), rir::compile_any_target(&text, Target::Gfx950).unwrap().listing());
+        let map = compiled.source_map.expect("a source map");
+        let mfma = map.rows.iter().find(|r| r.mnemonic.starts_with("v_mfma")).expect("the MFMA");
+        assert!(!mfma.synthetic, "{mfma:?}");
+        let mma_line = text.lines().position(|l| l.contains("tile.mma")).expect("the mma op") as u32;
+        assert_eq!(map.chains[mfma.chain.unwrap()][0].line, mma_line);
     }
 
     #[test]
@@ -462,11 +552,15 @@ mod tests {
         let lines = mfma_lines(&listing);
         assert_eq!(lines.len(), 1, "{listing}");
         assert!(lines[0].starts_with("v_mfma_scale_f32_32x32x64_f8f6f4"), "{}", lines[0]);
-        // D (16) on C, A as fp6 (6 dwords), B as fp4 (4), then the A and B
-        // scales, one VGPR each (here the same one, read in place); cbsz 2, blgp 4.
+        // D (16) on C, A as fp6 (6 dwords), B as fp4 (4), the A and B scales; cbsz 2, blgp 4.
         let ops = operands(lines[0].split(" imm:").next().unwrap());
         assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [16, 6, 4, 16, 1, 1], "{}", lines[0]);
-        assert_eq!((&ops[0], &ops[4]), (&ops[3], &ops[5]));
+        assert_eq!(ops[0], ops[3]);
+        // With lever `scalesep` each scale is read where it is (here both the same VGPR).
+        let listing = rir::with_levers(&["scalesep"], || rir::compile_any_target(text, Target::Gfx950)).unwrap_or_else(|e| panic!("{e}")).listing();
+        let sep = mfma_lines(&listing);
+        let ops = operands(sep[0].split(" imm:").next().unwrap());
+        assert_eq!((&ops[0], &ops[4]), (&ops[3], &ops[5]), "{}", sep[0]);
         assert!(lines[0].ends_with(&format!("imm:{}", 2 | 4 << 7)), "{}", lines[0]);
         assert_eq!(scaled("mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32").map(|(s, a, b)| (s.ctl, a, b)), Some((1 | 3 << 7, 8, 6)));
         assert!(!is_scaled("mfma_gfx950_f32_32x32x64_fp9_fp8_scale_e8m0_e8m0_k32") && !is_scaled("mfma_f32_32x32x16_f16"));
@@ -489,6 +583,117 @@ mod tests {
         // Scale bytes are only taken with a scaled atom.
         let plain = kernel("mfma_f32_16x16x32_f16", "vec<f16x8>", 4, 4, &ones(4)).replace("\" }\n    %e", "\", scale_sel = l:[ i:0, i:0 ] }\n    %e");
         assert!(plain.contains("scale_sel") && rir::compile_any_target(&plain, Target::Gfx950).is_err());
+    }
+
+    /// One wave: A from global memory, its scale too (`%sa`) and a constant 0
+    /// (`%z`), C of `cd` ones, then `tile.mma ( %a, %a, %c<scales> ) { attrs }`,
+    /// `then` (more ops on `%d`), and the last element of `%e`'s source stored.
+    fn scaled_kernel(attrs: &str, cd: u32, scales: &str, then: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @scaled {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %X : ptr<i32,global>\n    \
+             %S : ptr<i32,global>\n    %Y : ptr<f32,global>\n  }}\n  region @entry {{\n    \
+             %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c8 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:8 }}\n    %o : i32 = arith.mul ( %tid, %c8 )\n    \
+             %a : vec<i32x8> = memref.global_load_vN ( %X, %o ) {{ align = i:32, elem_type = s:\"i32\", vec = i:8 }}\n    \
+             %sa : i32 = memref.global_load_typed ( %S, %tid ) {{ align = i:4, elem_type = s:\"i32\" }}\n    \
+             %z : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    \
+             %c : vec<f32x{cd}> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:1.0, vec = i:{cd} }}\n    \
+             %d : vec<f32x{cd}> = tile.mma ( %a, %a, %c{scales} ) {{ {attrs} }}\n    {then}\
+             %e : f32 = vector.extract ( %d ) {{ index = i:{} }}\n    \
+             memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n",
+            cd - 1
+        )
+    }
+
+    fn listing_of(text: &str) -> String {
+        rir::compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}")).listing()
+    }
+
+    /// The scaled 16x16x128 atom, by its block-scaled name and as the MX op
+    /// with format attributes: D (4) on C, A and B of their formats' sizes,
+    /// the scales, cbsz and blgp, and the scale bytes.
+    #[test]
+    fn block_scaled_16x16x128_atoms_read_their_formats_and_scales() {
+        let atom = |a: &str, b: &str| format!("op_id = s:\"mfma_gfx950_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k32\"");
+        let mx = |formats: &str| format!("{formats}op_id = s:\"{MX_16X16X128}\"");
+        let listing = listing_of(&scaled_kernel(&atom("fp6", "fp6"), 4, ", %sa, %sa", ""));
+        let lines = mfma_lines(&listing);
+        assert_eq!(lines.len(), 1, "{listing}");
+        assert!(lines[0].starts_with("v_mfma_scale_f32_16x16x128_f8f6f4"), "{}", lines[0]);
+        let ops = operands(lines[0].split(" imm:").next().unwrap());
+        assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [4, 6, 6, 4, 1, 1], "{}", lines[0]);
+        assert_eq!(ops[0], ops[3]);
+        assert!(lines[0].ends_with(&format!("imm:{}", 2 | 2 << 7)), "{}", lines[0]);
+        // Under lever `scalesep` both scales are `%sa`'s VGPR, read in place.
+        let inplace = crate::rir::with_levers(&["scalesep"], || listing_of(&scaled_kernel(&atom("fp6", "fp6"), 4, ", %sa, %sa", "")));
+        let ops = operands(mfma_lines(&inplace)[0].split(" imm:").next().unwrap());
+        assert_eq!(ops[4], ops[5], "{inplace}");
+        // The MX op names the formats in attributes (fp8e4m3 where absent),
+        // and is the same instruction.
+        let e2m3 = "a_format = s:\"fp6e2m3\", b_format = s:\"fp6e2m3\", ";
+        assert_eq!(listing_of(&scaled_kernel(&mx(e2m3), 4, ", %sa, %sa", "")), listing);
+        for (formats, a, b, spans, ctl) in [
+            ("", "fp8", "fp8", [4, 8, 8, 4, 1, 1], 0),
+            ("a_format = s:\"fp6e3m2\", b_format = s:\"fp6e3m2\", ", "bf6", "bf6", [4, 6, 6, 4, 1, 1], 3 | 3 << 7),
+            ("b_format = s:\"fp4e2m1\", ", "fp8", "fp4", [4, 8, 4, 4, 1, 1], 4 << 7),
+            ("a_format = s:\"bf8e5m2\", b_format = s:\"fp6e2m3\", ", "bf8", "fp6", [4, 8, 6, 4, 1, 1], 1 | 2 << 7),
+        ] {
+            let listing = listing_of(&scaled_kernel(&mx(formats), 4, ", %sa, %sa", ""));
+            assert_eq!(listing, listing_of(&scaled_kernel(&atom(a, b), 4, ", %sa, %sa", "")), "{formats}");
+            let line = &mfma_lines(&listing)[0];
+            let ops = operands(line.split(" imm:").next().unwrap());
+            assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), spans, "{line}");
+            assert!(if ctl == 0 { !line.contains(" imm:") } else { line.ends_with(&format!(" imm:{ctl}")) }, "{line}");
+        }
+        // Byte 2 of the A scale and byte 3 of the B scale: the controls above
+        // blgp, and the ld_scale half's op_sel (bit 0 of each) and op_sel_hi (bit 1).
+        let listing = listing_of(&scaled_kernel(&format!("{}, scale_sel = l:[ i:2, i:3 ]", mx(e2m3)), 4, ", %sa, %sa", ""));
+        let line = listing.lines().find(|l| l.contains("v_mfma")).expect("one MFMA");
+        assert!(line.split("//").next().unwrap().trim().ends_with(&format!("imm:{}", 2 | 2 << 7 | (2 | 3 << 2) << SCALE_SEL_SHIFT)), "{line}");
+        let words: Vec<u32> = line.split(": ").last().unwrap().split_whitespace().map(|w| u32::from_str_radix(w, 16).unwrap()).collect();
+        assert_eq!((words.len(), words[0] >> 11 & 3, words[1] >> 27 & 3, words[2] >> 16 & 0x7f), (4, 0b10, 0b11, 0x2d), "{line}");
+        // Both scales the constant 0: the unscaled instruction, as LLVM selects it.
+        for sel in ["", ", scale_sel = l:[ i:1, i:1 ]"] {
+            let listing = listing_of(&scaled_kernel(&format!("{}{sel}", mx(e2m3)), 4, ", %z, %z", ""));
+            let lines = mfma_lines(&listing);
+            assert!(lines.len() == 1 && lines[0].starts_with("v_mfma_f32_16x16x128_f8f6f4 "), "{listing}");
+            let ops = operands(lines[0].split(" imm:").next().unwrap());
+            assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [4, 6, 6, 4], "{}", lines[0]);
+            assert!(lines[0].ends_with(&format!("imm:{}", 2 | 2 << 7)), "{}", lines[0]);
+        }
+        // One of them 0 is a scale like any other.
+        let one_zero = listing_of(&scaled_kernel(&mx(e2m3), 4, ", %z, %sa", ""));
+        assert!(mfma_lines(&one_zero)[0].starts_with("v_mfma_scale_f32_16x16x128_f8f6f4"), "{one_zero}");
+        // An accumulation chain (C the previous D) issues back to back, its
+        // scales read in place (lever `scalesep`: no copies between them).
+        let chain = format!("%d2 : vec<f32x4> = tile.mma ( %a, %a, %d, %sa, %sa ) {{ {} }}\n    ", atom("fp6", "fp6"));
+        let chained = scaled_kernel(&atom("fp6", "fp6"), 4, ", %sa, %sa", &chain).replace("extract ( %d )", "extract ( %d2 )");
+        let listing = crate::rir::with_levers(&["scalesep"], || listing_of(&chained));
+        let body: Vec<&str> = listing.lines().map(|l| l.split("//").next().unwrap_or(l).trim()).filter(|l| !l.is_empty()).collect();
+        let at: Vec<usize> = (0..body.len()).filter(|&k| body[k].starts_with("v_mfma_scale_f32_16x16x128")).collect();
+        assert_eq!(at.len(), 2, "{listing}");
+        assert!(!body[at[0]..at[1]].iter().any(|l| l.starts_with("s_nop")), "{listing}");
+        assert_eq!(operands(body[at[0]])[0], operands(body[at[1]])[3], "{listing}");
+        // Formats past rocKE's five, a format that is not a string, C of the
+        // 32x32x64 size, and the MX op without its scales are refused.
+        for (text, what) in [
+            (scaled_kernel(&mx("a_format = s:\"fp7e2m4\", "), 4, ", %sa, %sa", ""), "formats"),
+            (scaled_kernel(&mx("a_format = i:2, "), 4, ", %sa, %sa", ""), "formats"),
+            (scaled_kernel(&atom("fp6", "fp6"), 16, ", %sa, %sa", ""), "8, 8 and 4"),
+        ] {
+            let error = rir::compile_any_target(&text, Target::Gfx950).err().expect("refused");
+            assert!(error.to_string().contains(what), "{error}");
+        }
+        assert!(rir::compile_any_target(&scaled_kernel(&mx(e2m3), 4, "", ""), Target::Gfx950).is_err());
+        // The names.
+        assert_eq!(
+            scaled("mfma_gfx950_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k32").map(|(s, a, b)| (s.op, s.ab, s.cd, s.ctl, a, b)),
+            Some((Gfx9Op::VMfmaScale16x16x128F8f6f4, 8, 4, 3, 6, 8))
+        );
+        assert!(scaled("mfma_gfx950_f32_16x16x64_fp6_fp6_scale_e8m0_e8m0_k32").is_none() && scaled(MX_16X16X128).is_none());
+        assert!(is_scaled(MX_16X16X128) && is_scaled("mfma_gfx950_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32"));
+        assert_eq!(mx_atom(None, Some("fp4e2m1")).as_deref(), Some("mfma_gfx950_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k32"));
+        assert_eq!(mx_atom(Some("fp6"), None), None);
     }
 
     #[test]

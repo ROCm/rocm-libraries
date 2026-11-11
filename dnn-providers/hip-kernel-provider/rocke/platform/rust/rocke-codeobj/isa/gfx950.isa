@@ -71,6 +71,7 @@ modset mix "v_fma_mix: f16 sources (op_sel_hi)" bits=9,10,11
 modset glc "sc0: an atomic returns the old value" bits=12
 modset sc1 "sc1: coherent at agent scope (target/gfx9/cpol.rs M_SC1)" bits=13
 modset nt "nt: nontemporal, streaming (target/gfx9/cpol.rs M_NT)" bits=14
+modset abs "|x| of float sources 0-2 (VOP3 abs; target/gfx9/q38.rs M_ABS0)" bits=20,21,22
 
 [fmt]
 # Rust formats (mir.rs Fmt) and their gfx9 encodings; vop3: opcode offset of the VOP3 form.
@@ -154,6 +155,7 @@ imm dpp16 "DPP control: bits 31:8 of the DPP word (gfx9 controls only; no fi bit
 imm pksel "lane selects of a packed 32-bit instruction: op_sel in bits 2:0, the op_sel_hi bits cleared in 6:4 (0: each lane reads its own half)"
 imm cpol "cache policy: sc0 in bit 0, sc1 in bit 1"
 imm mai "MFMA controls: cbsz in bits 2:0, abid in bits 6:3, blgp in bits 9:7"
+imm bitop3 "v_bitop3 truth table (source bytes 0xf0, 0xcc, 0xaa): bits 2:0 in neg, 5:3 in abs, 7:6 in omod"
 imm off12cpol "12-bit unsigned byte offset in bits 11:0, then the cache policy: sc0 in bit 12, nt in bit 13, sc1 in bit 14"
 form plain "the format's general encoding"
 form noshort "a VOP2 opcode always encoded as VOP3 (its lane mask is explicit)"
@@ -174,11 +176,12 @@ form pk32 "VOP3P on two 32-bit lanes: register sources at even registers, imm ho
 form swap "VOP1 exchanging lanes of two VGPRs, both read and written: defs and uses are (vdst, vsrc)"
 form nodata "MUBUF cache control with no address or data: imm holds the cache policy"
 form mai "VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls"
-form mai_scale "VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scales, then the MFMA as in mai (abid refused)"
+form mai_scale "VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scale VGPRs, then the MFMA as in mai (abid refused)"
 form acc_read "VOP3P v_accvgpr_read: src0 is an AGPR, encoded by its index"
 form acc_write "VOP3P v_accvgpr_write: vdst is an AGPR, encoded by its index"
 form acc_mov "VOP1 v_accvgpr_mov: vdst is an AGPR encoded by its index, src0 an AGPR encoded as 256 + index"
 form lds "load into LDS (MUBUF with the lds bit, GLOBAL's global_load_lds): no data register, M0 the LDS address; imm holds the offset and the cache policy"
+form nobase "SMEM without an address (s_memrealtime): sdata only, the imm bit clear"
 
 [unit]
 # Execution units.
@@ -377,7 +380,7 @@ inst   SBarrierBare      s_barrier                 SOPP    0xa    flags=FENCE un
 inst   SSetprio          s_setprio                 SOPP    0xf    flags=FENCE imm=simm16 unit=CTRL lat=ctrl
 inst   SWaitcntExplicit  s_waitcnt                 SOPP    0xc    flags=FENCE imm=waitcnt unit=CTRL lat=ctrl
 group SMEM
-inst   SLoadB32          s_load_dword              SMEM    0x0    flags=SMEM d=sdata:s1 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+inst   SLoadB32          s_load_dword              SMEM    0x0    flags=SMEM d=sdata:s1 u=sbase:s2 imm=soff21 m=glc unit=SMEM lat=smem
 inst   SLoadB64          s_load_dwordx2            SMEM    0x1    flags=SMEM d=sdata:s2 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
 inst   SLoadB128         s_load_dwordx4            SMEM    0x2    flags=SMEM d=sdata:s4 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
 inst   SLoadB256         s_load_dwordx8            SMEM    0x3    flags=SMEM d=sdata:s8 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
@@ -506,19 +509,19 @@ inst   DsStoreB8         ds_write_b8               DS      0x1e   flags=LDS u=ad
 inst   DsStoreB8D16Hi    ds_write_b8_d16_hi        DS      0x54   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
 group GLOBAL
 inst   GLoadU16          global_load_ushort        GLOBAL  0x12   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB32          global_load_dword         GLOBAL  0x14   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB64          global_load_dwordx2       GLOBAL  0x15   flags=VMEM_LOAD d=vdst:v2 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB32          global_load_dword         GLOBAL  0x14   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB64          global_load_dwordx2       GLOBAL  0x15   flags=VMEM_LOAD d=vdst:v2 u=vaddr:v2 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   GLoadB96          global_load_dwordx3       GLOBAL  0x16   flags=VMEM_LOAD d=vdst:v3 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB128         global_load_dwordx4       GLOBAL  0x17   flags=VMEM_LOAD d=vdst:v4 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB128         global_load_dwordx4       GLOBAL  0x17   flags=VMEM_LOAD d=vdst:v4 u=vaddr:v2 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   GStoreB16         global_store_short        GLOBAL  0x1a   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB32         global_store_dword        GLOBAL  0x1c   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB64         global_store_dwordx2      GLOBAL  0x1d   flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB32         global_store_dword        GLOBAL  0x1c   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB64         global_store_dwordx2      GLOBAL  0x1d   flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 inst   GStoreB96         global_store_dwordx3      GLOBAL  0x1e   flags=VMEM_STORE u=vaddr:v2,vdata:v3 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB128        global_store_dwordx4      GLOBAL  0x1f   flags=VMEM_STORE u=vaddr:v2,vdata:v4 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB128        global_store_dwordx4      GLOBAL  0x1f   flags=VMEM_STORE u=vaddr:v2,vdata:v4 imm=off13s m=saddr,glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 inst   GLoadD16B16       global_load_short_d16     GLOBAL  0x24   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   GLoadD16HiB16     global_load_short_d16_hi  GLOBAL  0x25   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   GStoreD16HiB16    global_store_short_d16_hi GLOBAL  0x1b   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
-inst   GAtomicAddU32     global_atomic_add         GLOBAL  0x42   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicAddU32     global_atomic_add         GLOBAL  0x42   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1 imp=use:exec unit=VMEM lat=vmem_store
 inst   GAtomicAddF32     global_atomic_add_f32     GLOBAL  0x4d   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
 inst   ScratchLoadB32    scratch_load_dword        SCRATCH 0x14   fmt=Global flags=VMEM_LOAD d=vdst:v1 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
 inst   ScratchLoadB64    scratch_load_dwordx2      SCRATCH 0x15   fmt=Global flags=VMEM_LOAD d=vdst:v2 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
@@ -528,19 +531,19 @@ inst   ScratchStoreB32   scratch_store_dword       SCRATCH 0x1c   fmt=Global fla
 inst   ScratchStoreB64   scratch_store_dwordx2     SCRATCH 0x1d   fmt=Global flags=VMEM_STORE u=vdata:v2 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
 inst   ScratchStoreB96   scratch_store_dwordx3     SCRATCH 0x1e   fmt=Global flags=VMEM_STORE u=vdata:v3 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
 inst   ScratchStoreB128  scratch_store_dwordx4     SCRATCH 0x1f   fmt=Global flags=VMEM_STORE u=vdata:v4 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
-inst   GAtomicAddU32Rtn  global_atomic_add         GLOBAL  0x42   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
+inst   GAtomicAddU32Rtn  global_atomic_add         GLOBAL  0x42   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc,sc1 imp=use:exec unit=VMEM lat=vmem_load
 inst   GAtomicAddF32Rtn  global_atomic_add_f32     GLOBAL  0x4d   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
 inst   GLoadU8           global_load_ubyte         GLOBAL  0x10   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   GStoreB8          global_store_byte         GLOBAL  0x18   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 inst   GStoreD16HiB8     global_store_byte_d16_hi  GLOBAL  0x19   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 group MUBUF
-inst   BufLoadB32        buffer_load_dword         MUBUF   0x14   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
-inst   BufLoadB64        buffer_load_dwordx2       MUBUF   0x15   flags=VMEM_LOAD d=vdata:v2 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
-inst   BufLoadB128       buffer_load_dwordx4       MUBUF   0x17   flags=VMEM_LOAD d=vdata:v4 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadB32        buffer_load_dword         MUBUF   0x14   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadB64        buffer_load_dwordx2       MUBUF   0x15   flags=VMEM_LOAD d=vdata:v2 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadB128       buffer_load_dwordx4       MUBUF   0x17   flags=VMEM_LOAD d=vdata:v4 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
 inst   BufStoreB16       buffer_store_short        MUBUF   0x1a   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
-inst   BufStoreB32       buffer_store_dword        MUBUF   0x1c   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
-inst   BufStoreB64       buffer_store_dwordx2      MUBUF   0x1d   flags=VMEM_STORE u=vdata:v2,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
-inst   BufStoreB128      buffer_store_dwordx4      MUBUF   0x1f   flags=VMEM_STORE u=vdata:v4,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB32       buffer_store_dword        MUBUF   0x1c   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB64       buffer_store_dwordx2      MUBUF   0x1d   flags=VMEM_STORE u=vdata:v2,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB128      buffer_store_dwordx4      MUBUF   0x1f   flags=VMEM_STORE u=vdata:v4,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 m=glc,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 inst   BufLoadU16        buffer_load_ushort        MUBUF   0x12   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
 inst   BufLoadD16B16     buffer_load_short_d16     MUBUF   0x24   flags=VMEM_LOAD|TIED d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1,vdata:v1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
 inst   BufLoadD16HiB16   buffer_load_short_d16_hi  MUBUF   0x25   flags=VMEM_LOAD|TIED d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1,vdata:v1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
@@ -592,9 +595,10 @@ inst   VMfma32x32x2F32   v_mfma_f32_32x32x2_f32    VOP3P   0x44   opc=gfx9 flags
 inst   VMfma16x16x4F64   v_mfma_f64_16x16x4_f64    VOP3P   0x6e   opc=gfx9 flags=VALU d=vdst:av8 u=src0:av2,src1:av2,src2:avi8 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm16 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 inst   VMfma4x4x4F64     v_mfma_f64_4x4x4_4b_f64   VOP3P   0x6f   opc=gfx9 flags=VALU d=vdst:av2 u=src0:av2,src1:av2,src2:avi2 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm4 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 # The block-scaled MFMA (VOP3PX2, four words): v_mfma_ld_scale_b32 (op 0x2c) with the A and B E8M0 scales,
-# then this MFMA. The A and B scales are two VGPRs, its src0 and src1, each read from its low byte;
-# cbsz and blgp name the A and B formats, which fix their sizes (8 dwords for fp8 and bf8, 6 for fp6 and
-# bf6, 4 for fp4) and its passes (16 with an 8-bit format, 8 without).
+# then this MFMA. The A and B scales are two VGPRs, its src0 and src1 (a pair, A's low, unless lever scalesep
+# reads them where they are), each read from the byte imm bits 13:10 select (byte 0 by default); cbsz and
+# blgp name the A and B formats, which fix their sizes (8 dwords for fp8 and bf8, 6 for fp6 and bf6, 4 for
+# fp4) and, with lever fp6pass, its passes (16 with an 8-bit format, 8 without).
 inst   VMfmaScale32x32x64F8f6f4 v_mfma_scale_f32_32x32x64_f8f6f4 VOP3P 0x2e opc=gfx9 flags=VALU d=vdst:av16 u=src0:av8,src1:av8,src2:avi16,scale_a:v1,scale_b:v1 imm=mai imp=use:exec unit=VALU lat=mfma_xdl16 form=mai_scale haz=m1,m2,m3,m4,m5,m6,m7
 # LDS DMA: each lane's dwords at its buffer offset go to LDS at M0 + offset + 4 * dwords * lane, counted on vmcnt.
 # M0 is implicit, so the rows are fences: no instruction is scheduled across one (it reads M0 and writes LDS).
@@ -620,4 +624,84 @@ inst   VCvtPkBf8F32      v_cvt_pk_bf8_f32          VOP3    0x2a3  opc=gfx9 flags
 # The packed f16 atomic add (llvm.amdgcn.global.atomic.fadd.v2f16): each half of the dword adds its f16.
 inst   GAtomicPkAddF16   global_atomic_pk_add_f16  GLOBAL  0x4e   opc=gfx9 flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
 inst   GAtomicPkAddF16Rtn global_atomic_pk_add_f16 GLOBAL  0x4e   opc=gfx9 flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
+# The Qwen3.8 monokernel device ops (rocKE IR `tile.s_getreg`, `tile.s_sleep`, `tile.memrealtime`,
+# `tile.global_atomic_add_scoped` of an i64, `arith.cvt_scalef32_pk_bf16_fp4`; rir/isel.rs). The scaled
+# convert's byte select is op_sel[1:0] (source 0 high-half bits OPSEL_SRC0 and OPSEL_SRC1).
+inst   SGetregB32        s_getreg_b32              SOPK    0x11   opc=gfx9 flags=0 d=sdst:s1 imm=simm16 unit=SALU lat=salu
+inst   SSleep            s_sleep                   SOPP    0xe    opc=gfx9 flags=FENCE imm=simm16 unit=CTRL lat=ctrl
+inst   SMemrealtime      s_memrealtime             SMEM    0x25   opc=gfx9 flags=SMEM|FENCE d=sdata:s2 unit=SMEM lat=smem form=nobase
+inst   GAtomicAddX2      global_atomic_add_x2      GLOBAL  0x62   opc=gfx9 flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr,sc1 imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicAddX2Rtn   global_atomic_add_x2      GLOBAL  0x62   opc=gfx9 flags=VMEM_LOAD|VMEM_STORE d=vdst:v2 u=vaddr:v2,vdata:v2 imm=off13s m=saddr,glc,sc1 imp=use:exec unit=VMEM lat=vmem_load
+inst   VCvtScalef32PkBf16Fp4 v_cvt_scalef32_pk_bf16_fp4 VOP3 0x251 opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=opsel imp=use:exec unit=VALU lat=valu
+# `tile.l2_touch_drain`'s hold on the L2-touch destinations: up to four register uses that keep them allocated to
+# here (a fence, so nothing moves the hold up), dropped after allocation (target/gfx9/mod.rs `finish`).
+inst   KeepAlive         KEEP_ALIVE                PSEUDO  0x00   opc=gfx9 flags=FENCE unit=PSEUDO lat=pseudo
+# `v_add_u32_dpp`: a v_mov_b32_dpp folded into the add that reads it (lever `dppcombine`, target/gfx9/dpp.rs):
+# source 0 through the DPP control in imm (bits 31:8 of the DPP word, as VMovB32Dpp), vsrc1 a VGPR.
+inst   VAddU32Dpp        v_add_u32                 VOP2    0x34   opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
 family VCmp              v_cmp_*                   VOPC    code   flags=macro d=sdst:s2 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+# The Qwen3.8 true-mono ops of the rust track (rocKE IR `arith.cvt_scalef32_pk_{fp8,bf8}_f32`,
+# `tile.mfma_scale_mx` 16x16x128, `arith.maximum3_f32`, `tile.dpp_op`; rir/isel.rs, target/gfx9/q38.rs).
+# The scaled converts round two f32 divided by the scale's exponent into bytes 0-1 (op_sel[3] clear) or 2-3 of
+# the destination and keep the other word: the old value is a fourth use, tied and not encoded.
+inst   VCvtScalef32PkFp8F32 v_cvt_scalef32_pk_fp8_f32 VOP3 0x235 opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1,old:v1 m=opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtScalef32PkBf8F32 v_cvt_scalef32_pk_bf8_f32 VOP3 0x236 opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1,old:v1 m=opsel_dst imp=use:exec unit=VALU lat=valu
+# The block-scaled 16x16x128 MFMA (VOP3PX2 as the 32x32x64 one); imm bits 13:10 hold the scale byte selects (A's
+# in 11:10, B's in 13:12: op_sel and op_sel_hi of the v_mfma_ld_scale_b32 word).
+inst   VMfmaScale16x16x128F8f6f4 v_mfma_scale_f32_16x16x128_f8f6f4 VOP3P 0x2d opc=gfx9 flags=VALU d=vdst:av4 u=src0:av8,src1:av8,src2:avi4,scale_a:v1,scale_b:v1 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai_scale haz=m1,m2,m3,m4,m5,m6,m7
+# IEEE maximum of three (a NaN operand gives a NaN), with abs on any source (the MXFP8 amax).
+inst   VMaximum3F32      v_maximum3_f32            VOP3    0x2a9  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,abs imp=use:exec unit=VALU lat=valu
+inst   VBitop3B32        v_bitop3_b32              VOP3    0x234  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imm=bitop3 imp=use:exec unit=VALU lat=valu
+inst   VBfiB32           v_bfi_b32                 VOP3    0x1ca  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   SBufLoadB32       s_buffer_load_dword       SMEM    0x8    opc=gfx9 flags=SMEM d=sdata:s1 u=sbase:s4 imm=soff21 m=glc unit=SMEM lat=smem
+inst   SDcacheInv        s_dcache_inv              SMEM    0x20   opc=gfx9 flags=SMEM|FENCE unit=SMEM lat=smem form=nobase
+# DPP moves and max whose row or bank mask leaves lanes unwritten, or whose out-of-row lanes are not written
+# (bound_ctrl clear): those lanes keep the destination's old value, a last use tied and not encoded.
+inst   VMovB32DppOld     v_mov_b32                 VOP1    0x1    opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:v1,old:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMaxU32DppOld     v_max_u32                 VOP2    0xf    opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:v1,vsrc1:v1,old:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+# More rust-track rows: f32 <-> f64 converts and the f64 reciprocal square root (`math.sqrt` of an f64, LLVM's
+# expansion), v_bcnt (`tile.bcnt`), s_ff1 of a dword (`tile.s_ff1`), s_memtime (`tile.memtime`), and LDS accesses
+# at a raw byte address (`tile.ds_or_b32` / `ds_write_b32` / `ds_read_b32`), which are fences: their address is
+# outside the LDS allocations the scheduler tracks.
+inst   VCvtF64F32        v_cvt_f64_f32             VOP1    0x10   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VCvtF32F64        v_cvt_f32_f64             VOP1    0xf    opc=gfx9 flags=VALU|64BIT_SRC d=vdst:v1 u=src0:vs2 m=neg imp=use:exec unit=VALU lat=valu form=f64
+inst   VRsqF64           v_rsq_f64                 VOP1    0x26   opc=gfx9 flags=VALU|TRANS|64BIT_SRC d=vdst:v2 u=src0:vs2 m=neg imp=use:exec unit=TRANS lat=trans form=f64
+# W15 PORT K2-moe: v_sqrt_f32 for `math.sqrt` of an f32 (LLVM's correctly rounded expansion; V4.1 route's sqrtsoftplus).
+inst   VSqrtF32          v_sqrt_f32                VOP1    0x27   opc=gfx9 flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg imp=use:exec unit=TRANS lat=trans
+inst   VBcntU32B32       v_bcnt_u32_b32            VOP3    0x28b  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 imp=use:exec unit=VALU lat=valu
+inst   SFf1I32B32        s_ff1_i32_b32             SOP1    0x10   opc=gfx9 flags=0 d=sdst:s1 u=ssrc0:ss1 unit=SALU lat=salu
+inst   SMemtime          s_memtime                 SMEM    0x24   opc=gfx9 flags=SMEM|FENCE d=sdata:s2 unit=SMEM lat=smem form=nobase
+inst   DsOrB32Raw        ds_or_b32                 DS      0xa    opc=gfx9 flags=LDS|FENCE u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsWriteB32Raw     ds_write_b32              DS      0xd    opc=gfx9 flags=LDS|FENCE u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsReadB32Raw      ds_read_b32               DS      0x36   opc=gfx9 flags=LDS|FENCE d=vdst:v1 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+# `ds_read2_b32` (lever `ldspairs`, target/gfx9/lds_pairs.rs): two dwords at the two 8-bit dword offsets of imm.
+inst   DsLoad2addrB32    ds_read2_b32              DS      0x37   opc=gfx9 flags=LDS d=vdst:v2 u=addr:v1 imm=off2x8 imp=use:exec unit=LDS lat=lds
+# The f32 add / multiply / max and u32 max with a DPP source 0 (lever `dppcombinef`, target/gfx9/dpp.rs), as VAddU32Dpp.
+inst   VAddF32Dpp        v_add_f32                 VOP2    0x1    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMulF32Dpp        v_mul_f32                 VOP2    0x5    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMaxF32Dpp        v_max_f32                 VOP2    0xb    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMaxU32Dpp        v_max_u32                 VOP2    0xf    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+# A workgroup release under lever `wgfence` (target/gfx9/isel_hooks.rs `fence`): the waitcnt pass waits there for
+# LDS (lgkmcnt 0) and for the LDS DMA loads and stores still in flight (not for plain loads), then drops it.
+inst   WaitRelease       WAIT_RELEASE              PSEUDO  0x00   opc=gfx9 flags=FENCE unit=PSEUDO lat=pseudo
+# PLAN decision 18 (the never-regress track): the i32 max / min and u32 min with a DPP source 0 (lever `dppcombinei`,
+# target/gfx9/dpp.rs), and the three-operand integer min / max / median (lever `minmax3`, target/gfx9/minmax3.rs),
+# as LLVM's GCNDPPCombine and its min / max / med3 selection emit them.
+inst   VMaxI32Dpp        v_max_i32                 VOP2    0xd    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMinI32Dpp        v_min_i32                 VOP2    0xc    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMinU32Dpp        v_min_u32                 VOP2    0xe    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMin3I32          v_min3_i32                VOP3    0x1d1  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMin3U32          v_min3_u32                VOP3    0x1d2  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMax3I32          v_max3_i32                VOP3    0x1d4  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMax3U32          v_max3_u32                VOP3    0x1d5  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMed3U32          v_med3_u32                VOP3    0x1d8  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+# The scaled f32 -> E2M1 pack (`v_cvt_scalef32_pk_fp4_f32`, the large-batch MoE's fp4 requant as inline asm, assembled
+# by rir/isel_asm.rs): two f32 / the scale's exponent into byte 0 of the destination (op_sel selects the byte; the
+# template uses byte 0 and reads only it, so the destination is a plain output here).
+inst   VCvtScalef32PkFp4F32 v_cvt_scalef32_pk_fp4_f32 VOP3 0x23d opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+# rustgemm (rust-compiler-v2): the 96-bit LDS reads for fp6 operands (an MFMA fp6 fragment is 6 dwords = 2 x 96 bits):
+# `ds_read_b96` (lever `dsb96` / tile.ds_read_b96 / inline asm, rir/isel.rs) and gfx950's transposing reads of 6-bit
+# (96 bits per lane) and 4-bit (64 bits per lane) elements (tile.ds_read_tr_b6 / tile.ds_read_tr_b4, target/gfx9/lds_tr.rs).
+inst   DsReadB96         ds_read_b96               DS      0xfe   opc=gfx9 flags=LDS d=vdst:v3 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsReadB96TrB6     ds_read_b96_tr_b6         DS      0xe1   opc=gfx9 flags=LDS d=vdst:v3 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsReadB64TrB4     ds_read_b64_tr_b4         DS      0xe0   opc=gfx9 flags=LDS d=vdst:v2 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds

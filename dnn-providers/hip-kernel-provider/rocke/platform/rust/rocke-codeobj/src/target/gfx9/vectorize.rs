@@ -139,11 +139,12 @@ fn region_ops(kernel: &mut Kernel, region: &mut Region) -> bool {
             let offset = head.int_attr("offset").unwrap_or(0);
             let vector = kernel.new_value("vload", Type::Vec(merge.elem, merge.loads.len() as u32));
             let attrs = vec![("offset".into(), Attr::Int(offset)), ("align".into(), Attr::Int(align))];
-            out.push(Op { kind: OpKind::GLoad, results: Results::from([vector]), operands, attrs, regions: Vec::new(), block_args: Vec::new() });
+            let loc = head.loc.clone();
+            out.push(Op { kind: OpKind::GLoad, results: Results::from([vector]), operands, attrs, regions: Vec::new(), block_args: Vec::new(), loc });
             for (index, &j) in merge.loads.iter().enumerate() {
                 let load = taken[j].take().expect("each load is in one merge");
                 let attrs = vec![("index".into(), Attr::Int(index as i64))];
-                out.push(Op { kind: OpKind::Extract, results: load.results, operands: Operands::from([vector]), attrs, regions: Vec::new(), block_args: Vec::new() });
+                out.push(Op { kind: OpKind::Extract, results: load.results, operands: Operands::from([vector]), attrs, regions: Vec::new(), block_args: Vec::new(), loc: load.loc });
             }
             continue;
         }
@@ -260,6 +261,7 @@ fn pair_region(kernel: &mut Kernel, region: &mut Region) -> bool {
         attrs,
         regions: Vec::new(),
         block_args: Vec::new(),
+        loc: None,
     };
     let index = |i: u32| vec![("index".into(), Attr::Int(i64::from(i)))];
     let mut taken: Vec<Option<Op>> = old.into_iter().map(Some).collect();
@@ -298,9 +300,9 @@ fn pair_region(kernel: &mut Kernel, region: &mut Region) -> bool {
             _ => OpKind::VecFma,
         };
         let r = kernel.new_value("packed", vec2.clone());
-        out.push(op(kind, &[r], &operands, first.attrs.clone()));
-        out.push(op(OpKind::Extract, &[first.results[0]], &[r], index(0)));
-        out.push(op(OpKind::Extract, &[second.results[0]], &[r], index(1)));
+        out.push(Op { loc: first.loc.clone(), ..op(kind, &[r], &operands, first.attrs.clone()) });
+        out.push(Op { loc: first.loc.clone(), ..op(OpKind::Extract, &[first.results[0]], &[r], index(0)) });
+        out.push(Op { loc: second.loc.clone(), ..op(OpKind::Extract, &[second.results[0]], &[r], index(1)) });
         result[j] = Some(r);
     }
     region.ops = out;
@@ -566,6 +568,7 @@ mod tests {
                 attrs,
                 regions: Vec::new(),
                 block_args: Vec::new(),
+                loc: None,
             };
             let index = |i: u32| vec![("index".into(), Attr::Int(i64::from(i)))];
             let mut taken: Vec<Option<Op>> = old.into_iter().map(Some).collect();
@@ -604,9 +607,9 @@ mod tests {
                     _ => OpKind::VecFma,
                 };
                 let r = kernel.new_value("packed", vec2.clone());
-                out.push(op(kind, &[r], &operands, first.attrs.clone()));
-                out.push(op(OpKind::Extract, &[first.results[0]], &[r], index(0)));
-                out.push(op(OpKind::Extract, &[second.results[0]], &[r], index(1)));
+                out.push(Op { loc: first.loc.clone(), ..op(kind, &[r], &operands, first.attrs.clone()) });
+                out.push(Op { loc: first.loc.clone(), ..op(OpKind::Extract, &[first.results[0]], &[r], index(0)) });
+                out.push(Op { loc: second.loc.clone(), ..op(OpKind::Extract, &[second.results[0]], &[r], index(1)) });
                 result[j] = Some(r);
             }
             region.ops = out;

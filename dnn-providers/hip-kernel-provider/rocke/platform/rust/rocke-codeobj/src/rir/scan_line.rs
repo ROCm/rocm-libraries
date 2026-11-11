@@ -106,7 +106,7 @@ fn const_key_masked<'a>(line: &'a str, m: &Masks) -> Option<(&'a str, &'a str)> 
     if j == i + 3 || !b[j..].starts_with(b" = arith.constant (  )") {
         return None;
     }
-    Some((&line[..i], &line[i..]))
+    Some((&line[..i], super::hashcons::without_loc(&line[i..])))
 }
 
 #[cfg(test)]

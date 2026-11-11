@@ -394,7 +394,7 @@ impl Webs {
                 near.clear();
                 near.extend(placed.iter().filter(|&&(h, _, _)| gmem[h].iter().any(|&j| gadj[g].get(j as usize))).map(|&(_, hb, hs)| (hb, hs)));
                 let fits = |at: u32| near.iter().all(|&(hb, hs)| at + size <= hb || hb + hs <= at);
-                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                match (0..=AGPRS.min(crate::rir::agpr_cap()).saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
                     Some(at) => placed.push((g, at, size)),
                     None => {
                         placed.truncate(mark);
@@ -523,7 +523,10 @@ pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
     for b in 0..f.blocks.len() {
         let old = std::mem::take(&mut f.blocks[b].insts);
         let mut out = Vec::with_capacity(old.len() + 8);
+        let mut served = (0, NO_LOC);
         for mut inst in old {
+            inherit_loc(&mut out, served.0, served.1);
+            served = (out.len(), inst.loc);
             if inst.op == Opc::Copy && (banked(&inst.defs[0]) || banked(&inst.uses[0])) {
                 let (dst, src) = (inst.defs[0], inst.uses[0]);
                 let side = |o: &Opnd| match *o {
@@ -606,6 +609,7 @@ pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
             out.push(inst);
             out.extend(writes);
         }
+        inherit_loc(&mut out, served.0, served.1);
         f.blocks[b].insts = out;
     }
     loop {
@@ -1136,7 +1140,7 @@ mod tests {
                 let size = f.vregs[members[g] as usize].size as u32;
                 let align = if size >= 4 { 4 } else { size.max(1) };
                 let fits = |at: u32| placed.iter().all(|&(h, hb, hs)| !gadj[g].intersects(&gmem[h]) || at + size <= hb || hb + hs <= at);
-                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                match (0..=AGPRS.min(crate::rir::agpr_cap()).saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
                     Some(at) => placed.push((g, at, size)),
                     None => {
                         placed.truncate(mark);

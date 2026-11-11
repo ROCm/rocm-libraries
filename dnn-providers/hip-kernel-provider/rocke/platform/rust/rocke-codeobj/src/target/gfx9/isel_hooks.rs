@@ -16,7 +16,23 @@ use crate::target::Target;
 /// asks only for lgkmcnt: the conservative wait); an acquire then
 /// invalidates the caches below the scope (`buffer_inv`; a workgroup shares
 /// one CU's).
+///
+/// Lever `wgfence` (the rust track): a workgroup-scope fence waits as the
+/// model asks, as LLVM's `SIGfx90ACacheControl` and COMGR do outside
+/// threadgroup split mode: a release waits for LDS (`lgkmcnt(0)`) and for the
+/// LDS DMA loads and stores in flight (the bytes other waves read next), not
+/// for plain loads; an acquire waits for nothing. All waves of a workgroup run
+/// on one CU and share its vL1D; vector loads in flight (weights issued ahead
+/// of a barrier) are no longer drained by it.
 pub fn fence(scope: &str, acquire: bool) -> Result<Vec<MInst>, CompileError> {
+    if scope == "workgroup" && crate::rir::lever("wgfence") {
+        if acquire {
+            return Ok(Vec::new());
+        }
+        // LDS, and the LDS DMA loads (other waves read their bytes) and stores in flight
+        // (`waitcnt` places the wait: `WAIT_RELEASE`).
+        return Ok(vec![MInst::new(Opc::Gfx9(Gfx9Op::WaitRelease), [], [])]);
+    }
     let cpol = match scope {
         "workgroup" => None,
         "agent" => Some(2),
@@ -32,6 +48,23 @@ pub fn fence(scope: &str, acquire: bool) -> Result<Vec<MInst>, CompileError> {
         out.push(MInst::new(Opc::Gfx9(Gfx9Op::BufferInv), [], []).with_imm(c));
     }
     Ok(out)
+}
+
+/// An acquire-only fence (lever `acqfence`): the waits, then `buffer_inv` at
+/// agent (sc1) or system (sc0 sc1) scope, as LLVM's `SIGfx940CacheControl::
+/// insertAcquire`; no `buffer_wbl2` (that is a release's). A workgroup
+/// acquire is nothing (one CU's vL1D).
+pub fn acquire_fence(scope: &str) -> Result<Vec<MInst>, CompileError> {
+    let cpol = match scope {
+        "workgroup" => return Ok(Vec::new()),
+        "agent" => 2,
+        "system" => 3,
+        other => return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("memory fence scope {other}"))),
+    };
+    Ok(vec![
+        MInst::new(Opc::SWaitcntExplicit, [], []).with_imm(super::waitcnt::waitcnt_imm(0, 0)),
+        MInst::new(Opc::Gfx9(Gfx9Op::BufferInv), [], []).with_imm(cpol),
+    ])
 }
 
 /// Whether a d16 load on `target` keeps the other half of its destination,
@@ -72,10 +105,22 @@ pub enum XorShuffle {
 }
 
 pub fn xor_shuffle(mask: u32) -> XorShuffle {
+    xor_shuffle_with(mask, crate::rir::lever("dppmirror"))
+}
+
+/// `xor_shuffle`; with `mirror` (lever `dppmirror`) the masks a 16-lane row
+/// permutes without row_xmask take their register-only DPP control too, as
+/// the LLVM lowering (`rocke.core.ir.DPP_XOR_CTRL_NO_ROW_XMASK`): 7
+/// row_half_mirror, 8 row_ror:8, 15 row_mirror. (`QuadPerm` holds any DPP16
+/// control.)
+pub fn xor_shuffle_with(mask: u32, mirror: bool) -> XorShuffle {
     match mask {
         1 => XorShuffle::QuadPerm(0xb1),
         2 => XorShuffle::QuadPerm(0x4e),
         3 => XorShuffle::QuadPerm(0x1b),
+        7 if mirror => XorShuffle::QuadPerm(0x141),
+        8 if mirror => XorShuffle::QuadPerm(0x128),
+        15 if mirror => XorShuffle::QuadPerm(0x140),
         m => XorShuffle::Swizzle(m << 10 | 0x1f),
     }
 }

@@ -266,6 +266,9 @@ pub struct KernelObjectSpec<'a> {
     pub private_segment_size: u32,
     /// VGPR dwords spilled, for the metadata.
     pub vgpr_spill_count: u32,
+    /// The descriptor's `kernarg_preload` (gfx950): preloaded kernarg dwords
+    /// (`KERNARG_PRELOAD_SPEC_LENGTH`, bits 6:0) from dword offset 0.
+    pub kernarg_preload: u16,
 }
 
 fn metadata_argument(bytes: &mut Vec<u8>, arg: &KernelArgMeta) {
@@ -323,6 +326,7 @@ fn gemm_spec<'a>(symbol: &'a str, code: &'a [u8]) -> KernelObjectSpec<'a> {
         rsrc3: 0x60,
         private_segment_size: 0,
         vgpr_spill_count: 0,
+        kernarg_preload: 0,
     }
 }
 
@@ -611,6 +615,7 @@ fn kernel_descriptor(text_vaddr: usize, rodata: usize, spec: &KernelObjectSpec) 
     put_u32(&mut descriptor, 48, spec.rsrc1);
     put_u32(&mut descriptor, 52, spec.rsrc2);
     put_u16(&mut descriptor, 56, spec.target.kernel_code_properties);
+    put_u16(&mut descriptor, 58, spec.kernarg_preload);
     descriptor
 }
 
@@ -689,7 +694,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
         || symbol.len() > MAX_SYMBOL
         || !symbol
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-'))
     {
         return Err(format!("unsupported ELF kernel symbol {symbol:?}"));
     }
@@ -1099,6 +1104,73 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     Ok(image)
 }
 
+fn get_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+}
+
+fn get_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+}
+
+fn get_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(bytes.get(offset..offset + 8)?.try_into().ok()?))
+}
+
+/// The virtual address and size of `.text` in a code object this module wrote.
+pub fn text_section(image: &[u8]) -> Option<(u64, u64)> {
+    let table = get_u64(image, 0x28)? as usize;
+    let count = get_u16(image, 0x3c)? as usize;
+    let names = table + SECTION_HEADER_SIZE * get_u16(image, 0x3e)? as usize;
+    let names = get_u64(image, names + 0x18)? as usize;
+    (0..count).find_map(|i| {
+        let header = table + SECTION_HEADER_SIZE * i;
+        let name = names + get_u32(image, header)? as usize;
+        if image.get(name..name + 6)? != b".text\0" {
+            return None;
+        }
+        Some((get_u64(image, header + 0x10)?, get_u64(image, header + 0x20)?))
+    })
+}
+
+/// `image` with non-allocated `sections` (name, contents) added after its
+/// last one: the section names and headers move to the end of the file,
+/// and nothing the loader reads changes.
+pub fn with_sections(image: &[u8], sections: &[(&str, Vec<u8>)]) -> Option<Vec<u8>> {
+    let table = get_u64(image, 0x28)? as usize;
+    let count = get_u16(image, 0x3c)? as usize;
+    let names_index = get_u16(image, 0x3e)? as usize;
+    let end = table + SECTION_HEADER_SIZE * count;
+    if end != image.len() {
+        return None;
+    }
+    let mut headers = image.get(table..end)?.to_vec();
+    let names_header = SECTION_HEADER_SIZE * names_index;
+    let names_at = get_u64(&headers, names_header + 0x18)? as usize;
+    let names_size = get_u64(&headers, names_header + 0x20)? as usize;
+    let mut names = image.get(names_at..names_at + names_size)?.to_vec();
+    let mut out = image[..table].to_vec();
+    for (name, contents) in sections {
+        let name = append_section_name(&mut names, name);
+        let mut header = [0u8; SECTION_HEADER_SIZE];
+        put_u32(&mut header, 0, name);
+        put_u32(&mut header, 4, SHT_PROGBITS);
+        put_u64(&mut header, 0x18, out.len() as u64);
+        put_u64(&mut header, 0x20, contents.len() as u64);
+        put_u64(&mut header, 0x30, 1);
+        headers.extend_from_slice(&header);
+        out.extend_from_slice(contents);
+    }
+    put_u64(&mut headers, names_header + 0x18, out.len() as u64);
+    put_u64(&mut headers, names_header + 0x20, names.len() as u64);
+    out.extend_from_slice(&names);
+    out.resize(align_up(out.len(), 8), 0);
+    let new_table = out.len();
+    out.extend_from_slice(&headers);
+    put_u64(&mut out, 0x28, new_table as u64);
+    put_u16(&mut out, 0x3c, u16::try_from(count + sections.len()).ok()?);
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1200,6 +1272,7 @@ mod tests {
             rsrc3: r.rsrc3,
             private_segment_size: 0,
             vgpr_spill_count: 0,
+            kernarg_preload: 0,
         };
         let image = write_kernel_object(&spec).unwrap();
         let comment = 0xaf0;

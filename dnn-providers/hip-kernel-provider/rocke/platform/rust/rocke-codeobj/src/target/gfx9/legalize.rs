@@ -31,6 +31,7 @@ use super::gen_isa::{self as t, Class as Kind, Form};
 use crate::rir::mir::*;
 
 pub fn run(f: &mut MFunc) {
+    f.fill_scopes();
     for info in f.vregs.iter_mut() {
         if info.class == Class::V && info.size >= 2 {
             info.align = info.align.max(2);
@@ -41,9 +42,19 @@ pub fn run(f: &mut MFunc) {
     let mut blocks = std::mem::take(&mut f.blocks);
     for block in &mut blocks {
         let mut out = Vec::with_capacity(block.insts.len());
-        let mut cache = Literals { reuse: reuse && block.loop_depth > 0, held: Vec::new(), copies: copy_reuse && block.loop_depth > 0, copied: Vec::new() };
+        let mut cache = Literals { reuse: false, held: Vec::new(), copies: false, copied: Vec::new() };
         for inst in block.insts.drain(..) {
+            // Lever `litreuse` (the instruction's scope): straight-line blocks reuse literal registers and SGPR
+            // copies too.
+            let here = block.loop_depth > 0 || f.lever(&inst, "litreuse");
+            (cache.reuse, cache.copies) = (reuse && here, copy_reuse && here);
+            let (from, scope, loc) = (out.len(), inst.scope, inst.loc);
             legalize(f, inst, &mut out, &mut cache);
+            // What legalizing made (literal moves, copies) is in the instruction's lever scope.
+            for made in &mut out[from..] {
+                made.scope = scope;
+            }
+            inherit_loc(&mut out, from, loc);
         }
         block.insts = out;
     }
@@ -69,7 +80,7 @@ impl Literals {
     fn get(&mut self, f: &mut MFunc, class: Class, v: u32, dwords: u8, lit: Lit, out: &mut Vec<MInst>) -> Opnd {
         let key = (v, dwords, lit, class);
         let at = out.len();
-        if let Some(e) = self.held.iter_mut().find(|e| e.0 == key && at - e.2 <= REUSE) {
+        if let Some(e) = self.held.iter_mut().find(|e| self.reuse && e.0 == key && at - e.2 <= REUSE) {
             e.2 = at;
             return e.1;
         }
@@ -390,6 +401,21 @@ mod tests {
         far.push(cmp(2));
         let code = run_in_loop(&mut f, far);
         assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2);
+    }
+
+    #[test]
+    fn litreuse_moves_a_literal_once_in_straight_line_code() {
+        let mut f = func(&[(Class::V, 1), (Class::S, 2), (Class::S, 2), (Class::V, 1), (Class::V, 1)]);
+        let inf = Opnd::Imm(0x7f80_0000);
+        let cmp = |d: u32| MInst::new(Opc::VCmp(0x11), [r(d, 2)], [inf, r(0, 1)]);
+        let sel = |d: u32, m: u32| MInst::new(Opc::VCndmaskB32, [r(d, 1)], [inf, r(0, 1), r(m, 2)]);
+        let code = crate::rir::with_levers(&["litreuse"], || run_on(&mut f, vec![cmp(1), sel(3, 1), cmp(2), sel(4, 2)]));
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2, "{code:?}");
+        // Past an EXEC write the VGPR is moved again there too.
+        let exec = MInst::new(Opc::SAndSaveexecB64, [r(2, 2)], [r(1, 2)]);
+        let code = crate::rir::with_levers(&["litreuse"], || run_on(&mut f, vec![cmp(1), sel(3, 1), exec, cmp(2), sel(4, 2)]));
+        let copies: Vec<&MInst> = code.iter().filter(|i| i.op == Opc::Copy).collect();
+        assert_eq!(copies.iter().map(|c| class(&f, &c.defs[0])).collect::<Vec<_>>(), [Class::S, Class::V, Class::V]);
     }
 
     #[test]

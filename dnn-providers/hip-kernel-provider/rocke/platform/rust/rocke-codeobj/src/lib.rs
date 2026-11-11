@@ -13,6 +13,7 @@ mod gfx1151_isa;
 mod hsaco_writer;
 pub mod native;
 pub mod rir;
+pub mod srcloc;
 pub mod target;
 
 pub use direct_gemm::{

@@ -162,6 +162,16 @@ fn push_attr(words: &mut Vec<u32>, attr: &Attr) {
     }
 }
 
+/// The attributes of an op's key, without its lever scope (`dlevers`): ops
+/// that differ only in it are the same value.
+fn push_op_attrs(words: &mut Vec<u32>, attrs: &[(Text, Attr)]) {
+    if attrs.iter().all(|(key, _)| key != SCOPE_ATTR) {
+        return push_attrs(words, attrs);
+    }
+    let kept: Vec<(Text, Attr)> = attrs.iter().filter(|(key, _)| key != SCOPE_ATTR).cloned().collect();
+    push_attrs(words, &kept);
+}
+
 fn push_attrs(words: &mut Vec<u32>, attrs: &[(Text, Attr)]) {
     words.push(attrs.len() as u32);
     for (key, value) in attrs {
@@ -180,6 +190,8 @@ struct Def {
     count: u8,
     wrap: bool,
     splat: bool,
+    /// The third operand of a ternary op (a select's false value), else `u32::MAX`.
+    third: ValueId,
 }
 
 impl Def {
@@ -191,6 +203,7 @@ impl Def {
             count: op.operands.len().min(2) as u8,
             wrap: op.attr("wrap").is_some(),
             splat: op.operands.iter().all(|&v| v == at(0)),
+            third: at(2),
         }
     }
 
@@ -219,6 +232,59 @@ fn wrap(ty: &Type, value: i128) -> i64 {
     }
 }
 
+/// An op's lever scope attribute (`rir::lever`).
+pub(crate) const SCOPE_ATTR: &str = "dlevers";
+
+/// Enters the lever scope of `op` on this thread (`rir::set_scope`): the
+/// previous scope and `op`'s scope attribute, for [`leave_scope`].
+fn enter_scope(op: &Op) -> Option<(Option<std::sync::Arc<super::LeverDelta>>, Attr)> {
+    let attr = op.attr(SCOPE_ATTR)?.clone();
+    let Attr::Str(text) = &attr else { return None };
+    let prev = super::set_scope(Some(std::sync::Arc::new(super::LeverDelta::parse(text))));
+    Some((prev, attr))
+}
+
+/// Leaves a scope entered by [`enter_scope`]: the ops made since `from`
+/// that have no scope of their own get it.
+fn leave_scope(entered: Option<(Option<std::sync::Arc<super::LeverDelta>>, Attr)>, out: &mut [Op], from: usize) {
+    let Some((prev, attr)) = entered else { return };
+    for op in out.iter_mut().skip(from) {
+        if op.attr(SCOPE_ATTR).is_none() {
+            op.attrs.push((SCOPE_ATTR.into(), attr.clone()));
+        }
+    }
+    super::set_scope(prev);
+}
+
+/// Gives every op nested in the regions of an op with a lever scope and
+/// without its own the enclosing scope, so passes see each op's scope on
+/// the op itself.
+///
+/// In a kernel with any scope, an op outside every scope gets the empty one
+/// (`dlevers = ""`: the kernel's levers), so an op without `dlevers` after
+/// this is one a later pass made: its instructions take the scope of their
+/// neighbours (`MFunc::fill_scopes`).
+pub fn inherit_scopes(kernel: &mut Kernel) {
+    if !super::scoped_kernel(kernel) {
+        return;
+    }
+    // An explicit stack: nesting depth is unbounded until `validate`.
+    let mut stack: Vec<(&mut Region, Option<Attr>)> = vec![(&mut kernel.body, Some(Attr::Str("".into())))];
+    while let Some((region, outer)) = stack.pop() {
+        for op in &mut region.ops {
+            if op.attr(SCOPE_ATTR).is_none() {
+                if let Some(attr) = &outer {
+                    op.attrs.push((SCOPE_ATTR.into(), attr.clone()));
+                }
+            }
+            let own = op.attr(SCOPE_ATTR).cloned();
+            for inner in &mut op.regions {
+                stack.push((inner, own.clone()));
+            }
+        }
+    }
+}
+
 fn mk_op(
     kind: OpKind,
     results: impl Into<Results>,
@@ -232,6 +298,18 @@ fn mk_op(
         attrs: attrs.into(),
         regions: Vec::new(),
         block_args: Vec::new(),
+        loc: None,
+    }
+}
+
+/// Gives the ops made for an op (`out[start..]`) its location, where they have none.
+fn stamp(out: &mut [Op], start: usize, loc: &Option<super::ast::Loc>) {
+    if loc.is_some() {
+        for op in out.get_mut(start..).unwrap_or_default() {
+            if op.loc.is_none() {
+                op.loc = loc.clone();
+            }
+        }
     }
 }
 
@@ -510,7 +588,7 @@ impl<'k> Simplifier<'k> {
         push_type(&mut key, self.kernel.ty(op.results[0]));
         key.push(op.operands.len() as u32);
         key.extend(op.operands.iter().map(|v| v.0));
-        push_attrs(&mut key, &op.attrs);
+        push_op_attrs(&mut key, &op.attrs);
         key
     }
 
@@ -591,7 +669,11 @@ impl<'k> Simplifier<'k> {
         loop {
             let top = regions.last_mut().expect("the body stays open until the end");
             while let Some(op) = top.input.pop_front() {
-                self.visit(op, &mut top.out)?;
+                let (entered, from, loc) = (enter_scope(&op), top.out.len(), op.loc.clone());
+                let visited = self.visit(op, &mut top.out);
+                leave_scope(entered, &mut top.out, from);
+                visited?;
+                stamp(&mut top.out, from, &loc);
                 if self.failure.is_some() || !matches!(self.step, Step::Done) {
                     break;
                 }
@@ -1068,6 +1150,16 @@ impl<'k> Simplifier<'k> {
                         if a == b {
                             return Ok(Some(self.int_const(&ty, 0)));
                         }
+                        // Lever `subadd`: k1 - (x + k2) -> (k1 - k2) - x (the router's
+                        // 511 - (8 lane + i)): exact when the add is nsw and k1 - k2 fits.
+                        if let (Some(k1), true) = (ca, super::lever("subadd")) {
+                            if let Some((inner, k2)) = self.add_const_parts(b) {
+                                if self.fits(&ty, k1 as i128 - k2 as i128) {
+                                    let k = self.int_const(&ty, k1 - k2);
+                                    return Ok(Some(self.emit(OpKind::Sub, ty, [k, inner], [], out)));
+                                }
+                            }
+                        }
                         // (x + y) - x -> y and (x + y) - y -> x
                         if let Some((x, y)) = self.def_of(a).and_then(|d| d.nsw_add()) {
                             if x == b {
@@ -1150,6 +1242,42 @@ impl<'k> Simplifier<'k> {
                                 };
                                 return Ok(Some(self.emit(OpKind::And, ty, [x, b], [], out)));
                             }
+                            // Lever `selxor`: (x ^ s) & K -> x ^ (s & K) for a high mask K = -2^j
+                            // when x has j low zero bits (x & K = x); s & K of a select of
+                            // constants folds into the select (the router's monotone keys: the
+                            // mask goes into the selected constant, as LLVM's known bits do).
+                            if let (Some(mask), true) = (cb, super::lever("selxor")) {
+                                let low = !mask;
+                                if mask < 0 && low >= 0 && (low as u64 + 1).is_power_of_two() {
+                                    let j = (low as u64 + 1).trailing_zeros();
+                                    if let Some(d) = self.def_of(a).filter(|d| d.kind == OpKind::Xor && d.count == 2) {
+                                        let (p, q) = (d.operand(0), d.operand(1));
+                                        let pick = if self.low_zeros(p, LOW_ZEROS_DEPTH) >= j {
+                                            Some((p, q))
+                                        } else if self.low_zeros(q, LOW_ZEROS_DEPTH) >= j {
+                                            Some((q, p))
+                                        } else {
+                                            None
+                                        };
+                                        if let Some((x, s_)) = pick {
+                                            let masked = match self.def_of(s_) {
+                                                Some(sd) if sd.kind == OpKind::Select => {
+                                                    match (self.int(sd.operand(1)), self.int(sd.third)) {
+                                                        (Some(ka), Some(kb)) => {
+                                                            let (ka, kb) = (self.int_const(&ty, ka & mask), self.int_const(&ty, kb & mask));
+                                                            Some(self.emit(OpKind::Select, ty.clone(), [sd.operand(0), ka, kb], [], out))
+                                                        }
+                                                        _ => None,
+                                                    }
+                                                }
+                                                _ => None,
+                                            };
+                                            let masked = masked.unwrap_or_else(|| self.emit(OpKind::And, ty.clone(), [s_, b], [], out));
+                                            return Ok(Some(self.emit(OpKind::Xor, ty, [x, masked], [], out)));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     OpKind::Or => {
@@ -1223,6 +1351,28 @@ impl<'k> Simplifier<'k> {
                     }
                     _ => None,
                 };
+                // Lever `xorcmp`: a signed compare of two values with their sign bits
+                // flipped is the unsigned compare of the values (LLVM's InstCombine; the
+                // MoE router's top-k keys): slt(x ^ S, y ^ S) = ult(x, y), sgt = ult(y, x).
+                if super::lever("xorcmp") && matches!(pred, "lt" | "gt") && self.ty(a) == Type::Scalar(Scalar::I32) {
+                    let flipped = |s: &Self, v: ValueId| -> Option<ValueId> {
+                        let d = s.def_of(v)?;
+                        if d.kind != OpKind::Xor || d.count != 2 {
+                            return None;
+                        }
+                        let (p, q) = (d.operand(0), d.operand(1));
+                        match (s.int(p), s.int(q)) {
+                            (_, Some(k)) if k as i32 == i32::MIN => Some(p),
+                            (Some(k), _) if k as i32 == i32::MIN => Some(q),
+                            _ => None,
+                        }
+                    };
+                    if let (Some(x), Some(y)) = (flipped(self, a), flipped(self, b)) {
+                        let (p, q) = if pred == "lt" { (x, y) } else { (y, x) };
+                        let attrs = vec![(Text::from("pred"), Attr::Str("ult".into()))];
+                        return Ok(Some(self.emit(OpKind::Cmp, bool_ty, [p, q], attrs, out)));
+                    }
+                }
                 if let Some((kind, na, nb)) = extensions {
                     let i32t = Type::Scalar(Scalar::I32);
                     if self.ty(na) == i32t && self.ty(nb) == i32t {
@@ -1263,6 +1413,28 @@ impl<'k> Simplifier<'k> {
                 let (cond, a, b) = (operands[0], operands[1], operands[2]);
                 if a == b {
                     return Ok(Some(a));
+                }
+                // Lever `selxor`: select(c, x ^ A, x ^ B) -> x ^ select(c, A, B) for
+                // constants A, B (the router's monotone keys: one xor instead of two).
+                if super::lever("selxor") && is_int(&ty) {
+                    let parts = |s: &Self, v: ValueId| -> Option<(ValueId, ValueId)> {
+                        let d = s.def_of(v)?;
+                        if d.kind != OpKind::Xor || d.count != 2 {
+                            return None;
+                        }
+                        let (p, q) = (d.operand(0), d.operand(1));
+                        match (s.int(p), s.int(q)) {
+                            (None, Some(_)) => Some((p, q)),
+                            (Some(_), None) => Some((q, p)),
+                            _ => None,
+                        }
+                    };
+                    if let (Some((x, ka)), Some((y, kb))) = (parts(self, a), parts(self, b)) {
+                        if x == y {
+                            let m = self.emit(OpKind::Select, ty.clone(), [cond, ka, kb], [], out);
+                            return Ok(Some(self.emit(OpKind::Xor, ty, [x, m], [], out)));
+                        }
+                    }
                 }
                 match self.int(cond) {
                     Some(0) => Ok(Some(b)),
@@ -1637,11 +1809,18 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::DsBpermute
                 | OpKind::WaveAny
                 | OpKind::WaveAll
+                | OpKind::WaveBallot
                 | OpKind::DsReadTr16
                 | OpKind::DsReadTr8
                 | OpKind::LdsReadTr
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
+                | OpKind::BufferLoadCp
+                | OpKind::BufferStoreCp
+                | OpKind::Permlane16Swap
+                | OpKind::SGetreg
+                | OpKind::MemRealtime
+                | OpKind::L2TouchLoad
         ))
 }
 
@@ -2023,6 +2202,15 @@ fn release_uses(op: &Op, uses: &mut [u32]) {
     }
 }
 
+/// A general inline asm (not an identity pin) marked `sideeffect` or clobbering memory (the probes'
+/// polls, CCL's state machines): kept even when nothing reads its results, as LLVM keeps it (a memory
+/// clobber makes the call read and write memory).
+fn asm_effects(op: &Op) -> bool {
+    op.kind == OpKind::InlineAsmIdentity
+        && op.asm_pin().is_none()
+        && (op.bool_attr("sideeffect") == Some(true) || op.str_attr("constraints").is_some_and(|c| c.contains("~{memory}")))
+}
+
 /// Removes, walking backwards, ops whose results are all unused. A
 /// structured op's regions are swept before it is decided: it goes when its
 /// results are unused and nothing left inside it has a side effect (what
@@ -2099,7 +2287,7 @@ fn dce_region(body: &mut Region, uses: &mut [u32]) -> bool {
             if !deciding {
                 let removable = match op.kind {
                     OpKind::Yield | OpKind::Return => false,
-                    kind => dead_results(op, uses) && kind.is_removable() && !op.results.is_empty(),
+                    kind => dead_results(op, uses) && kind.is_removable() && !op.results.is_empty() && !asm_effects(op),
                 };
                 if removable {
                     release_uses(op, uses);
@@ -2108,7 +2296,7 @@ fn dce_region(body: &mut Region, uses: &mut [u32]) -> bool {
                     continue;
                 }
                 if top.track {
-                    top.effects |= op.kind != OpKind::Yield && !op.kind.is_removable();
+                    top.effects |= op.kind != OpKind::Yield && (!op.kind.is_removable() || asm_effects(op));
                 }
             }
             if op.regions.is_empty() {
@@ -2201,6 +2389,10 @@ struct Legalizer<'k> {
     bases: Vec<ScalarBase>,
     /// Emptied term lists for reuse.
     spare: Vec<Vec<ValueId>>,
+    /// Pointers into memory no wave writes during the launch: `tile.int_to_ptr`
+    /// results of `ptr<T,constant>` (`space = "constant"`) and offsets of them.
+    /// Their loads are `invariant` (`analysis::smem_eligible`).
+    constant: Vec<bool>,
 }
 
 type Terms = (Vec<ValueId>, Vec<ValueId>, i64);
@@ -2259,6 +2451,123 @@ impl<'k> Legalizer<'k> {
             }
         }
         (Some(index), 0)
+    }
+
+    /// Lever `dsfold`: `index = base + k` through nested nsw adds and nsw
+    /// multiplies by a constant (`(x + c) * m` = `x * m + c * m`), as LLVM's
+    /// reassociation feeds the DS offset field: the constant parts of every
+    /// level leave the address, and equal remainders become one value (CSE).
+    /// New ops wrap (modular): the address is 32-bit either way.
+    fn split_deep(&mut self, index: ValueId, depth: u32, out: &mut Vec<Op>) -> (Option<ValueId>, i64) {
+        if let Some(k) = self.facts.int(index) {
+            return (None, k);
+        }
+        let Some(d) = (depth < 6).then(|| self.def(index)).flatten() else {
+            return (Some(index), 0);
+        };
+        let i32t = Type::Scalar(Scalar::I32);
+        // Every rewrite below is exact modulo 2^32 (an i32 address), whatever the ops' wrap flags.
+        if *self.kernel.ty(index) != i32t || d.count != 2 {
+            return (Some(index), 0);
+        }
+        match d.kind {
+            OpKind::Add => {
+                let (x, y) = (d.operand(0), d.operand(1));
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                let (by, ky) = self.split_deep(y, depth + 1, out);
+                if kx == 0 && ky == 0 {
+                    return (Some(index), 0);
+                }
+                let base = match (bx, by) {
+                    (None, None) => None,
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (Some(a), Some(b)) => Some(self.new_wrapping(OpKind::Add, [a, b], out)),
+                };
+                (base, kx.wrapping_add(ky) as i32 as i64)
+            }
+            OpKind::Mul => {
+                let (a, b) = (d.operand(0), d.operand(1));
+                let (x, c, cv) = match (self.facts.int(a), self.facts.int(b)) {
+                    (_, Some(m)) => (a, b, m),
+                    (Some(m), _) => (b, a, m),
+                    _ => return (Some(index), 0),
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                if kx == 0 {
+                    return (Some(index), 0);
+                }
+                let base = bx.map(|bx| self.new_wrapping(OpKind::Mul, [bx, c], out));
+                (base, kx.wrapping_mul(cv) as i32 as i64)
+            }
+            OpKind::Shl => {
+                let (x, c) = (d.operand(0), d.operand(1));
+                let Some(sh) = self.facts.int(c).filter(|s| (0..32).contains(s)) else {
+                    return (Some(index), 0);
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                if kx == 0 {
+                    return (Some(index), 0);
+                }
+                let base = bx.map(|bx| self.new_wrapping(OpKind::Shl, [bx, c], out));
+                (base, (kx << sh) as i32 as i64)
+            }
+            OpKind::Sub => {
+                let (x, y) = (d.operand(0), d.operand(1));
+                let Some(ky) = self.facts.int(y) else {
+                    return (Some(index), 0);
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                (bx, kx.wrapping_sub(ky))
+            }
+            _ => (Some(index), 0),
+        }
+    }
+
+    /// Lever `addrfold`: a buffer voffset rebuilt as `base + k` (`split_deep`), so that the accesses of one
+    /// base share it and each adds only its constant (as LLVM's reassociated `s_add` + `v_or` per access, one
+    /// VALU add here). A `select(c, x, K)` voffset (the out-of-range guard) folds its `x`. The constant goes to
+    /// the offset field (0..4095) when the base is known non-negative or with `bufoffany`, else into one add.
+    /// `(voffset, offset field)`, or None when nothing folds.
+    fn fold_voffset(&mut self, v: ValueId, out: &mut Vec<Op>) -> Option<(ValueId, i64)> {
+        let i32t = Type::Scalar(Scalar::I32);
+        if *self.kernel.ty(v) != i32t {
+            return None;
+        }
+        if let Some(d) = self.def(v) {
+            if d.kind == OpKind::Select && d.third != ValueId(u32::MAX) && self.facts.int(d.third).is_some() {
+                let (c, x, other) = (d.operand(0), d.operand(1), d.third);
+                let (b, k) = self.split_deep(x, 0, out);
+                let b = b?;
+                if k == 0 {
+                    return None;
+                }
+                let kv = self.konst(i32t.clone(), k, out);
+                let sum = self.new_wrapping(OpKind::Add, [b, kv], out);
+                let uniform = [c, sum, other].iter().all(|&u| self.uni(u));
+                let result = self.kernel.new_value("%a", i32t);
+                self.mark(result, uniform);
+                out.push(mk_op(OpKind::Select, [result], [c, sum, other], []));
+                return Some((result, 0));
+            }
+        }
+        let (b, k) = self.split_deep(v, 0, out);
+        let b = b?;
+        if k == 0 {
+            return None;
+        }
+        if (0..4096).contains(&k) && (self.facts.nonneg(b) || super::lever("bufoffany")) {
+            return Some((b, k));
+        }
+        let kv = self.konst(i32t, k, out);
+        Some((self.new_wrapping(OpKind::Add, [b, kv], out), 0))
+    }
+
+    fn new_wrapping(&mut self, kind: OpKind, operands: [ValueId; 2], out: &mut Vec<Op>) -> ValueId {
+        let uniform = operands.iter().all(|&v| self.uni(v));
+        let result = self.kernel.new_value("%a", Type::Scalar(Scalar::I32));
+        self.mark(result, uniform);
+        out.push(mk_op(kind, [result], operands, modular()));
+        result
     }
 
     /// `terms` of `index` in lists to hand back with `recycle`.
@@ -2540,7 +2849,7 @@ impl<'k> Legalizer<'k> {
         // lowering's i32 GEP arithmetic does.
         for (dim, &index) in indices.iter().enumerate() {
             let stride = shape[dim + 1..].iter().fold(1i64, |s, &d| s.wrapping_mul(d as i64));
-            let (base, k) = self.split(index);
+            let (base, k) = if super::lever("dsfold") { self.split_deep(index, 0, out) } else { self.split(index) };
             constant = constant.wrapping_add(k.wrapping_mul(stride));
             if let Some(base) = base {
                 let scaled = if stride == 1 {
@@ -2607,7 +2916,9 @@ impl<'k> Legalizer<'k> {
             let mut nested = None;
             for op in top.input.by_ref() {
                 if op.regions.is_empty() {
+                    let (start, loc) = (top.out.len(), op.loc.clone());
                     self.op(op, &mut top.out)?;
+                    stamp(&mut top.out, start, &loc);
                 } else {
                     nested = Some(op);
                     break;
@@ -2630,7 +2941,9 @@ impl<'k> Legalizer<'k> {
                     stack.push(Rebuild::new(next, scope));
                     continue;
                 }
+                let (start, loc) = (parent.out.len(), op.loc.clone());
                 self.op(op, &mut parent.out)?;
+                stamp(&mut parent.out, start, &loc);
                 continue;
             };
             let first = std::mem::take(&mut op.regions[0]);
@@ -2640,8 +2953,16 @@ impl<'k> Legalizer<'k> {
         }
     }
 
+    /// Legalizes `op` under its lever scope.
+    fn op(&mut self, op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
+        let (entered, from) = (enter_scope(&op), out.len());
+        let done = self.op_in_scope(op, out);
+        leave_scope(entered, out, from);
+        done
+    }
+
     #[inline(always)]
-    fn op(&mut self, mut op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
+    fn op_in_scope(&mut self, mut op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
         {
             if op.kind.is_pure() && op.results.len() == 1 {
                 let i = op.results[0].0 as usize;
@@ -2652,6 +2973,20 @@ impl<'k> Legalizer<'k> {
             }
             let align = op.int_attr("align");
             let vec = op.int_attr("vec").unwrap_or(1);
+            let is_constant = |c: &Vec<bool>, v: ValueId| c.get(v.0 as usize).copied().unwrap_or(false);
+            let constant_result = match op.kind {
+                OpKind::IntToPtr => op.str_attr("space") == Some("constant"),
+                OpKind::GlobalPtrAdd => is_constant(&self.constant, op.operands[0]),
+                _ => false,
+            };
+            if constant_result {
+                let i = op.results[0].0 as usize;
+                if self.constant.len() <= i {
+                    self.constant.resize(i + 1, false);
+                }
+                self.constant[i] = true;
+            }
+            let invariant = matches!(op.kind, OpKind::GlobalLoad | OpKind::GlobalLoadVec) && is_constant(&self.constant, op.operands[0]);
             match op.kind {
                 OpKind::GlobalLoad | OpKind::GlobalLoadVec => {
                     let step = index_step(op.kind, self.kernel.ty(op.results[0]));
@@ -2665,6 +3000,9 @@ impl<'k> Legalizer<'k> {
                     attrs.push(("align".into(), Attr::Int(align.unwrap_or(default))));
                     if nt {
                         attrs.push(("nt".into(), Attr::Bool(true)));
+                    }
+                    if invariant {
+                        attrs.push(("invariant".into(), Attr::Bool(true)));
                     }
                     out.push(mk_op(OpKind::GLoad, op.results, addr, attrs));
                 }
@@ -2743,12 +3081,45 @@ impl<'k> Legalizer<'k> {
                     let (addr, offset) = self.lds_address(smem, &op.operands[1..count - 1], out)?;
                     out.push(mk_op(OpKind::LAtomicAdd, op.results, [smem, addr, value], [("offset".into(), Attr::Int(offset))]));
                 }
-                OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar => {
-                    let voffset = op.operands[1];
+                // A constant part of the voffset (0..4095) moves to the instruction's offset field, when the
+                // rest is known non-negative, or with lever `bufoffany` always (as LLVM's buffer offset
+                // split: the hardware adds the field to the voffset in 32 bits and range-checks the sum).
+                OpKind::BufferLoadCp | OpKind::BufferStoreCp => {
+                    let at = usize::from(op.kind == OpKind::BufferStoreCp);
+                    let voffset = op.operands[at + 1];
+                    if super::lever("addrfold") {
+                        if let Some((v, offset)) = self.fold_voffset(voffset, out) {
+                            op.operands[at + 1] = v;
+                            op.set_attr("offset", Attr::Int(offset));
+                            out.push(op);
+                            return Ok(());
+                        }
+                    }
                     let (base, k) = self.split(voffset);
                     let mut offset = 0;
                     if let Some(base) = base {
-                        if (0..4096).contains(&k) && k != 0 && self.facts.nonneg(base) {
+                        if (0..4096).contains(&k) && k != 0 && (self.facts.nonneg(base) || super::lever("bufoffany")) {
+                            op.operands[at + 1] = base;
+                            offset = k;
+                        }
+                    }
+                    op.set_attr("offset", Attr::Int(offset));
+                    out.push(op);
+                }
+                OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar => {
+                    let voffset = op.operands[1];
+                    if super::lever("addrfold") {
+                        if let Some((v, offset)) = self.fold_voffset(voffset, out) {
+                            op.operands[1] = v;
+                            op.set_attr("offset", Attr::Int(offset));
+                            out.push(op);
+                            return Ok(());
+                        }
+                    }
+                    let (base, k) = self.split(voffset);
+                    let mut offset = 0;
+                    if let Some(base) = base {
+                        if (0..4096).contains(&k) && k != 0 && (self.facts.nonneg(base) || super::lever("bufoffany")) {
                             op.operands[1] = base;
                             offset = k;
                         }
@@ -2787,6 +3158,7 @@ pub fn legalize_addresses(kernel: &mut Kernel, facts: &Facts) -> Result<(), Comp
         uniform,
         bases: Vec::new(),
         spare: Vec::new(),
+        constant: Vec::new(),
     };
     legalizer.region(&mut body)?;
     kernel.body = body;
@@ -2809,6 +3181,41 @@ pub fn kernarg_layout(kernel: &Kernel) -> (Vec<u32>, u32) {
         offset += size;
     }
     (offsets, offset)
+}
+
+/// User SGPRs a gfx950 kernel may preload arguments into: 16 user SGPRs,
+/// less the kernarg segment pointer's two.
+pub const PRELOAD_SGPRS: u32 = 14;
+
+/// Argument SGPRs of a `devfn` build (s2 .. s65): the code is never launched as a kernel (its descriptor's preload
+/// fields are then not meaningful), only disassembled into a device function.
+pub const DEVFN_PRELOAD_SGPRS: u32 = 64;
+
+/// gfx950 kernarg preload, as LLVM's AMDGPU backend assigns it: the leading
+/// `inreg` parameters, in order, each preloaded into the user SGPRs after
+/// the kernarg segment pointer at its kernarg dword (s[2 + offset / 4]), up
+/// to the first parameter that is not `inreg` or that would end past
+/// `PRELOAD_SGPRS` dwords; the kernel attribute `kernarg_preload` makes
+/// every parameter `inreg`. Returns `(param index, first dword)` of each and
+/// the dwords preloaded (the descriptor's `KERNARG_PRELOAD_SPEC_LENGTH`,
+/// alignment padding between arguments included).
+pub fn kernarg_preload(kernel: &Kernel) -> (Vec<(usize, u32)>, u32) {
+    let (offsets, _) = kernarg_layout(kernel);
+    let mut out = Vec::new();
+    let mut end = 0;
+    // Lever `devfn` (W15 climb r0 fix, dsv41_mono/direct_fn.py): the code is wrapped as a DEVICE FUNCTION whose
+    // caller puts every argument in s[2 + dword] itself, so the hardware's 16 user SGPRs do not bound it.
+    let limit = if super::lever("devfn") { DEVFN_PRELOAD_SGPRS } else { PRELOAD_SGPRS };
+    for (index, param) in kernel.params.iter().enumerate() {
+        let first = offsets[index] / 4;
+        let last = first + param.ty.dwords();
+        if !(param.inreg || kernel.passes.kernarg_preload) || last > limit {
+            break;
+        }
+        out.push((index, first));
+        end = last;
+    }
+    (out, end)
 }
 
 fn mark_param_uses(region: &Region, param_of: &[Option<u32>], used: &mut [bool]) {
@@ -2943,11 +3350,26 @@ pub fn optimize_keeping_lds_loads(kernel: &mut Kernel, lds: &mut FxHashMap<Value
 
 fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws: Workspace) -> Result<Facts, CompileError> {
     super::unroll::unroll_loops(kernel, lds)?;
+    if !super::debug_flag("nopopcount") {
+        super::idioms::popcount(kernel);  // W15 climb r0 fix (rir::idioms)
+    }
     // LDS loads merge once addresses are legalized: equal addresses are then
     // equal values, and stores have extents.
     let keep_lds_loads = std::mem::replace(&mut ws.keep_lds_loads, true);
     sweep(kernel, &mut ws)?;
     compact(kernel, &mut ws, lds);
+    // rustgemm lever `sreassoc`: LDS DMA soffsets as (leaves) + constant, before LICM / CSE share the leaves.
+    if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") {
+        super::reassoc::run(kernel);
+    }
+    // rustgemm lever `m0share`: an LDS DMA next to one at a constant LDS distance reads its M0 value.
+    if super::kernel_lever("m0share") || super::scoped_anywhere(kernel, "m0share") {
+        super::reassoc::share_m0(kernel, lds);
+    }
+    // rustgemm lever `soffshare`: an LDS DMA reads the previous DMA's soffset through a rebased buffer resource.
+    if super::kernel_lever("soffshare") || super::scoped_anywhere(kernel, "soffshare") || super::kernel_lever("soffsharek") || super::scoped_anywhere(kernel, "soffsharek") {
+        super::reassoc::share_soffsets(kernel);
+    }
     // Once a round only renumbers constants, every later round and the next
     // sweep would only renumber them again, and the facts in `ws` hold.
     let mut settled = false;

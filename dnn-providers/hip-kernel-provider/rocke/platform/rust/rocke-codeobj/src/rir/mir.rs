@@ -130,6 +130,10 @@ pub const M_SADDR: u32 = 1 << 8;
 pub const M_MIX_F16_0: u32 = 1 << 9;
 /// Global/buffer GLC bit: an atomic returns the value before the operation.
 pub const M_GLC: u32 = 1 << 12;
+/// rust-compiler-v2: an LDS read of an allocation marked `dma_sync = "manual"` (`tile.smem_alloc`): the `waitcnt`
+/// pass does not make it wait for the LDS DMA loads into that allocation (the kernel's explicit waits and barriers
+/// order them). Not encoded.
+pub const M_DMA_MANUAL: u32 = 1 << 24;
 /// DPP16 control fields of `v_mov_b32_dpp`, as bits 31:8 of its second word.
 pub fn dpp16_ctrl(dpp_ctrl: u32, bound_ctrl: bool) -> u32 {
     (dpp_ctrl & 0x1ff) | (bound_ctrl as u32) << 11 | 0xf << 16 | 0xf << 20
@@ -292,7 +296,7 @@ impl<const N: usize> std::fmt::Debug for Opnds<N> {
 }
 
 pub type Defs = Opnds<2>;
-/// Five: gfx950's block-scaled MFMA reads A, B, C and its two scale VGPRs.
+/// Five: gfx950's block-scaled MFMA reads A, B, C and its A and B scales.
 pub type Uses = Opnds<5>;
 
 #[derive(Clone, Debug)]
@@ -306,6 +310,24 @@ pub struct MInst {
     /// The global memory a VMEM access may touch: `alias::ANY`, or the tag
     /// of the `noalias` kernel argument its address is based on.
     pub mem: u16,
+    /// The lever scope of the op this was selected for (`MFunc::scopes`; 0:
+    /// the kernel's levers, `rir::lever_at`).
+    pub scope: u16,
+    /// The source location of the IR op the instruction was selected for:
+    /// an index into `MFunc::locs` plus one, or `NO_LOC`. Passes that copy
+    /// an instruction keep it; instructions they make start without one
+    /// (`crate::srcloc` gives those the location of the code they serve).
+    pub loc: u32,
+}
+
+pub const NO_LOC: u32 = 0;
+
+/// Gives the instructions a rewrite pushed since `start` that have no
+/// location the location `loc` of the instruction they replace.
+pub fn inherit_loc(out: &mut [MInst], start: usize, loc: u32) {
+    for inst in out[start..].iter_mut().filter(|i| i.loc == NO_LOC) {
+        inst.loc = loc;
+    }
 }
 
 impl MInst {
@@ -317,6 +339,8 @@ impl MInst {
             imm: 0,
             mods: 0,
             mem: super::alias::ANY,
+            scope: 0,
+            loc: NO_LOC,
         }
     }
 
@@ -360,6 +384,8 @@ pub struct MFunc {
     /// AGPRs the allocation may use when fewer than the target's (the
     /// kernel's `agpr_alloc`).
     pub agpr_limit: Option<u32>,
+    /// The lever scopes of `MInst::scope` (index 0 unused: the kernel's).
+    pub scopes: Vec<std::sync::Arc<super::LeverDelta>>,
     /// The kernel orders its LDS DMA with explicit waits and barriers (its
     /// `lds_dma_explicit`), so LDS accesses do not wait for DMA loads.
     pub lds_dma_explicit: bool,
@@ -368,9 +394,54 @@ pub struct MFunc {
     pub m0_early: bool,
     /// The optional passes the kernel's attributes turn on.
     pub passes: super::ast::Passes,
+    /// The distinct op locations instructions point at (`MInst::loc`);
+    /// empty when the IR has no `@loc`.
+    pub locs: Vec<super::ast::Loc>,
 }
 
 impl MFunc {
+    /// Lever `name` for `inst` (its scope, else the kernel's).
+    pub fn lever(&self, inst: &MInst, name: &str) -> bool {
+        super::lever_at(&self.scopes, inst.scope, name)
+    }
+
+    /// Whether lever `name` is on for any instruction.
+    pub fn lever_anywhere(&self, name: &str) -> bool {
+        super::lever_anywhere(&self.scopes, name)
+    }
+
+    /// In a function with lever scopes, every selected instruction has one
+    /// (the kernel's own is an empty scope), so scope 0 marks an instruction a
+    /// later pass made: it takes the scope of the instruction before it (of
+    /// the block, else of the blocks before), or of the first after it. The
+    /// passes that read levers per instruction call this first; without
+    /// scopes it does nothing.
+    pub fn fill_scopes(&mut self) {
+        if self.scopes.is_empty() {
+            return;
+        }
+        let mut last = 0u16;
+        for block in &mut self.blocks {
+            for inst in &mut block.insts {
+                if inst.scope == 0 {
+                    inst.scope = last;
+                } else {
+                    last = inst.scope;
+                }
+            }
+        }
+        let mut next = 0u16;
+        for block in self.blocks.iter_mut().rev() {
+            for inst in block.insts.iter_mut().rev() {
+                if inst.scope == 0 {
+                    inst.scope = next;
+                } else {
+                    next = inst.scope;
+                }
+            }
+        }
+    }
+
     pub fn successors(&self, block: usize) -> Vec<usize> {
         let mut out = Vec::new();
         let insts = &self.blocks[block].insts;

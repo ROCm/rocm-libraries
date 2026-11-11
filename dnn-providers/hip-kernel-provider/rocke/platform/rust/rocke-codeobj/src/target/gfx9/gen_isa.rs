@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0xad11405c5a2bdc70;
+pub const DESCRIPTION_DIGEST: u64 = 0xab912eb75fbf1138;
 
 // ----- operand codes -----
 
@@ -492,7 +492,7 @@ impl EncVop3pMai {
 // ----- per-opcode facts -----
 
 /// The opcodes with a gfx950 row, in description order (the `VCmp` family excluded).
-pub const ALL: [Opc; 286] = [
+pub const ALL: [Opc; 332] = [
     Opc::SMovB32, Opc::SMovB64, Opc::SNotB32, Opc::SNotB64, Opc::SAndSaveexecB64, Opc::SAddU32,
     Opc::SSubU32, Opc::SAddI32, Opc::SSubI32, Opc::SAddcU32, Opc::SSubbU32, Opc::SLshlB32,
     Opc::SLshlB64, Opc::SLshrB32, Opc::SLshrB64, Opc::SAshrI32, Opc::SAshrI64, Opc::SLshl1AddU32,
@@ -540,7 +540,15 @@ pub const ALL: [Opc; 286] = [
     Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8), Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8), Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMfma16x16x4F32), Opc::Gfx9(Gfx9Op::VMfma32x32x2F32), Opc::Gfx9(Gfx9Op::VMfma16x16x4F64),
     Opc::Gfx9(Gfx9Op::VMfma4x4x4F64), Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4), Opc::Gfx9(Gfx9Op::BufLoadLdsB32), Opc::Gfx9(Gfx9Op::BufLoadLdsB128), Opc::Gfx9(Gfx9Op::GLoadLdsB32), Opc::Gfx9(Gfx9Op::GLoadLdsB128),
     Opc::Gfx9(Gfx9Op::DsReadB64TrB16), Opc::Gfx9(Gfx9Op::DsReadB64TrB8), Opc::Gfx9(Gfx9Op::VCvtF32Fp8), Opc::Gfx9(Gfx9Op::VCvtF32Bf8), Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8), Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8),
-    Opc::Gfx9(Gfx9Op::VCvtPkFp8F32), Opc::Gfx9(Gfx9Op::VCvtPkBf8F32), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn),
+    Opc::Gfx9(Gfx9Op::VCvtPkFp8F32), Opc::Gfx9(Gfx9Op::VCvtPkBf8F32), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn), Opc::Gfx9(Gfx9Op::SGetregB32), Opc::Gfx9(Gfx9Op::SSleep),
+    Opc::Gfx9(Gfx9Op::SMemrealtime), Opc::Gfx9(Gfx9Op::GAtomicAddX2), Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4), Opc::Gfx9(Gfx9Op::KeepAlive), Opc::Gfx9(Gfx9Op::VAddU32Dpp),
+    Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32), Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMaximum3F32), Opc::Gfx9(Gfx9Op::VBitop3B32), Opc::Gfx9(Gfx9Op::VBfiB32),
+    Opc::Gfx9(Gfx9Op::SBufLoadB32), Opc::Gfx9(Gfx9Op::SDcacheInv), Opc::Gfx9(Gfx9Op::VMovB32DppOld), Opc::Gfx9(Gfx9Op::VMaxU32DppOld), Opc::Gfx9(Gfx9Op::VCvtF64F32), Opc::Gfx9(Gfx9Op::VCvtF32F64),
+    Opc::Gfx9(Gfx9Op::VRsqF64), Opc::Gfx9(Gfx9Op::VSqrtF32), Opc::Gfx9(Gfx9Op::VBcntU32B32), Opc::Gfx9(Gfx9Op::SFf1I32B32), Opc::Gfx9(Gfx9Op::SMemtime), Opc::Gfx9(Gfx9Op::DsOrB32Raw),
+    Opc::Gfx9(Gfx9Op::DsWriteB32Raw), Opc::Gfx9(Gfx9Op::DsReadB32Raw), Opc::Gfx9(Gfx9Op::DsLoad2addrB32), Opc::Gfx9(Gfx9Op::VAddF32Dpp), Opc::Gfx9(Gfx9Op::VMulF32Dpp), Opc::Gfx9(Gfx9Op::VMaxF32Dpp),
+    Opc::Gfx9(Gfx9Op::VMaxU32Dpp), Opc::Gfx9(Gfx9Op::WaitRelease), Opc::Gfx9(Gfx9Op::VMaxI32Dpp), Opc::Gfx9(Gfx9Op::VMinI32Dpp), Opc::Gfx9(Gfx9Op::VMinU32Dpp), Opc::Gfx9(Gfx9Op::VMin3I32),
+    Opc::Gfx9(Gfx9Op::VMin3U32), Opc::Gfx9(Gfx9Op::VMax3I32), Opc::Gfx9(Gfx9Op::VMax3U32), Opc::Gfx9(Gfx9Op::VMed3U32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32), Opc::Gfx9(Gfx9Op::DsReadB96),
+    Opc::Gfx9(Gfx9Op::DsReadB96TrB6), Opc::Gfx9(Gfx9Op::DsReadB64TrB4),
 ];
 
 /// gfx950 mnemonic of an opcode.
@@ -621,7 +629,7 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::SLoadB256 => Some("s_load_dwordx8"),
         Opc::SLoadB512 => Some("s_load_dwordx16"),
         Opc::VNop => Some("v_nop"),
-        Opc::VMovB32 | Opc::VMovB32Dpp => Some("v_mov_b32"),
+        Opc::VMovB32 | Opc::VMovB32Dpp | Opc::Gfx9(Gfx9Op::VMovB32DppOld) => Some("v_mov_b32"),
         Opc::VReadfirstlaneB32 => Some("v_readfirstlane_b32"),
         Opc::VCvtF32I32 => Some("v_cvt_f32_i32"),
         Opc::VCvtF32U32 => Some("v_cvt_f32_u32"),
@@ -639,26 +647,26 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::VRndneF32 => Some("v_rndne_f32"),
         Opc::VRcpF64 => Some("v_rcp_f64"),
         Opc::VCndmaskB32 => Some("v_cndmask_b32"),
-        Opc::VAddF32 => Some("v_add_f32"),
+        Opc::VAddF32 | Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some("v_add_f32"),
         Opc::VSubF32 => Some("v_sub_f32"),
         Opc::VSubrevF32 => Some("v_subrev_f32"),
-        Opc::VMulF32 => Some("v_mul_f32"),
+        Opc::VMulF32 | Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some("v_mul_f32"),
         Opc::VMulI32I24 => Some("v_mul_i32_i24"),
         Opc::VMulU32U24 => Some("v_mul_u32_u24"),
         Opc::VMulHiU32U24 => Some("v_mul_hi_u32_u24"),
         Opc::VMinF32 => Some("v_min_f32"),
-        Opc::VMaxF32 => Some("v_max_f32"),
-        Opc::VMinI32 => Some("v_min_i32"),
-        Opc::VMaxI32 => Some("v_max_i32"),
-        Opc::VMinU32 => Some("v_min_u32"),
-        Opc::VMaxU32 => Some("v_max_u32"),
+        Opc::VMaxF32 | Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some("v_max_f32"),
+        Opc::VMinI32 | Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some("v_min_i32"),
+        Opc::VMaxI32 | Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some("v_max_i32"),
+        Opc::VMinU32 | Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some("v_min_u32"),
+        Opc::VMaxU32 | Opc::Gfx9(Gfx9Op::VMaxU32DppOld) | Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some("v_max_u32"),
         Opc::VLshlrevB32 => Some("v_lshlrev_b32"),
         Opc::VLshrrevB32 => Some("v_lshrrev_b32"),
         Opc::VAshrrevI32 => Some("v_ashrrev_i32"),
         Opc::VAndB32 => Some("v_and_b32"),
         Opc::VOrB32 => Some("v_or_b32"),
         Opc::VXorB32 => Some("v_xor_b32"),
-        Opc::VAddNcU32 => Some("v_add_u32"),
+        Opc::VAddNcU32 | Opc::Gfx9(Gfx9Op::VAddU32Dpp) => Some("v_add_u32"),
         Opc::VSubNcU32 => Some("v_sub_u32"),
         Opc::VSubrevNcU32 => Some("v_subrev_u32"),
         Opc::VFmacF32 => Some("v_fmac_f32"),
@@ -719,11 +727,11 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::DsAddF32 => Some("ds_add_f32"),
         Opc::DsAddRtnU32 => Some("ds_add_rtn_u32"),
         Opc::DsAddRtnF32 => Some("ds_add_rtn_f32"),
-        Opc::DsStoreB32 => Some("ds_write_b32"),
+        Opc::DsStoreB32 | Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some("ds_write_b32"),
         Opc::DsStore2addrB32 => Some("ds_write2_b32"),
         Opc::DsStoreB16 => Some("ds_write_b16"),
         Opc::DsSwizzleB32 => Some("ds_swizzle_b32"),
-        Opc::DsLoadB32 => Some("ds_read_b32"),
+        Opc::DsLoadB32 | Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some("ds_read_b32"),
         Opc::DsLoadU16 => Some("ds_read_u16"),
         Opc::DsStoreB64 => Some("ds_write_b64"),
         Opc::DsLoadB64 => Some("ds_read_b64"),
@@ -825,6 +833,39 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) => Some("v_cvt_pk_fp8_f32"),
         Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some("v_cvt_pk_bf8_f32"),
         Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some("global_atomic_pk_add_f16"),
+        Opc::Gfx9(Gfx9Op::SGetregB32) => Some("s_getreg_b32"),
+        Opc::Gfx9(Gfx9Op::SSleep) => Some("s_sleep"),
+        Opc::Gfx9(Gfx9Op::SMemrealtime) => Some("s_memrealtime"),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2) | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Some("global_atomic_add_x2"),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) => Some("v_cvt_scalef32_pk_bf16_fp4"),
+        Opc::Gfx9(Gfx9Op::KeepAlive) => Some("KEEP_ALIVE"),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) => Some("v_cvt_scalef32_pk_fp8_f32"),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) => Some("v_cvt_scalef32_pk_bf8_f32"),
+        Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Some("v_mfma_scale_f32_16x16x128_f8f6f4"),
+        Opc::Gfx9(Gfx9Op::VMaximum3F32) => Some("v_maximum3_f32"),
+        Opc::Gfx9(Gfx9Op::VBitop3B32) => Some("v_bitop3_b32"),
+        Opc::Gfx9(Gfx9Op::VBfiB32) => Some("v_bfi_b32"),
+        Opc::Gfx9(Gfx9Op::SBufLoadB32) => Some("s_buffer_load_dword"),
+        Opc::Gfx9(Gfx9Op::SDcacheInv) => Some("s_dcache_inv"),
+        Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some("v_cvt_f64_f32"),
+        Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some("v_cvt_f32_f64"),
+        Opc::Gfx9(Gfx9Op::VRsqF64) => Some("v_rsq_f64"),
+        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some("v_sqrt_f32"),
+        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some("v_bcnt_u32_b32"),
+        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some("s_ff1_i32_b32"),
+        Opc::Gfx9(Gfx9Op::SMemtime) => Some("s_memtime"),
+        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some("ds_or_b32"),
+        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some("ds_read2_b32"),
+        Opc::Gfx9(Gfx9Op::WaitRelease) => Some("WAIT_RELEASE"),
+        Opc::Gfx9(Gfx9Op::VMin3I32) => Some("v_min3_i32"),
+        Opc::Gfx9(Gfx9Op::VMin3U32) => Some("v_min3_u32"),
+        Opc::Gfx9(Gfx9Op::VMax3I32) => Some("v_max3_i32"),
+        Opc::Gfx9(Gfx9Op::VMax3U32) => Some("v_max3_u32"),
+        Opc::Gfx9(Gfx9Op::VMed3U32) => Some("v_med3_u32"),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some("v_cvt_scalef32_pk_fp4_f32"),
+        Opc::Gfx9(Gfx9Op::DsReadB96) => Some("ds_read_b96"),
+        Opc::Gfx9(Gfx9Op::DsReadB96TrB6) => Some("ds_read_b96_tr_b6"),
+        Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Some("ds_read_b64_tr_b4"),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -866,11 +907,14 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::SMulHiU32 | Opc::SMulHiI32 | Opc::SCselectB32 | Opc::SCselectB64 | Opc::SCmpEqI32
         | Opc::SCmpLgI32 | Opc::SCmpGtI32 | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32 | Opc::SCmpEqU32
         | Opc::SCmpLgU32 | Opc::SCmpGtU32 | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 | Opc::SCmpEqU64
-        | Opc::SCmpLgU64 | Opc::SMovkI32 | Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64) => Unit::Salu,
+        | Opc::SCmpLgU64 | Opc::SMovkI32 | Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64)
+        | Opc::Gfx9(Gfx9Op::SGetregB32) | Opc::Gfx9(Gfx9Op::SFf1I32B32) => Unit::Salu,
         Opc::SNop | Opc::SWaitcnt | Opc::SEndpgm | Opc::SSendmsg | Opc::SBarrier | Opc::SBarrierLds
-        | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit => Unit::Ctrl,
+        | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit | Opc::Gfx9(Gfx9Op::SSleep) => Unit::Ctrl,
         Opc::SBranch | Opc::SCbranchScc0 | Opc::SCbranchScc1 | Opc::SCbranchExecz | Opc::SCbranchExecnz => Unit::Branch,
-        Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512 => Unit::Smem,
+        Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512
+        | Opc::Gfx9(Gfx9Op::SMemrealtime) | Opc::Gfx9(Gfx9Op::SBufLoadB32) | Opc::Gfx9(Gfx9Op::SDcacheInv)
+        | Opc::Gfx9(Gfx9Op::SMemtime) => Unit::Smem,
         Opc::VNop | Opc::VMovB32 | Opc::VReadfirstlaneB32 | Opc::VCvtF32I32 | Opc::VCvtF32U32 | Opc::VCvtU32F32
         | Opc::VCvtI32F32 | Opc::VCvtF16F32 | Opc::VCvtF32F16 | Opc::VTruncF32 | Opc::VMovB32Dpp | Opc::VNotB32
         | Opc::VRndneF32 | Opc::VCndmaskB32 | Opc::VAddF32 | Opc::VSubF32 | Opc::VSubrevF32 | Opc::VMulF32
@@ -904,13 +948,27 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) | Opc::Gfx9(Gfx9Op::VMfma4x4x4F64)
         | Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4) | Opc::Gfx9(Gfx9Op::VCvtF32Fp8)
         | Opc::Gfx9(Gfx9Op::VCvtF32Bf8) | Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8) | Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8)
-        | Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Unit::Valu,
-        Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Unit::Trans,
+        | Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32)
+        | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) | Opc::Gfx9(Gfx9Op::VAddU32Dpp)
+        | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32)
+        | Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) | Opc::Gfx9(Gfx9Op::VMaximum3F32)
+        | Opc::Gfx9(Gfx9Op::VBitop3B32) | Opc::Gfx9(Gfx9Op::VBfiB32) | Opc::Gfx9(Gfx9Op::VMovB32DppOld)
+        | Opc::Gfx9(Gfx9Op::VMaxU32DppOld) | Opc::Gfx9(Gfx9Op::VCvtF64F32) | Opc::Gfx9(Gfx9Op::VCvtF32F64)
+        | Opc::Gfx9(Gfx9Op::VBcntU32B32) | Opc::Gfx9(Gfx9Op::VAddF32Dpp) | Opc::Gfx9(Gfx9Op::VMulF32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMaxF32Dpp) | Opc::Gfx9(Gfx9Op::VMaxU32Dpp) | Opc::Gfx9(Gfx9Op::VMaxI32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMinI32Dpp) | Opc::Gfx9(Gfx9Op::VMinU32Dpp) | Opc::Gfx9(Gfx9Op::VMin3I32)
+        | Opc::Gfx9(Gfx9Op::VMin3U32) | Opc::Gfx9(Gfx9Op::VMax3I32) | Opc::Gfx9(Gfx9Op::VMax3U32)
+        | Opc::Gfx9(Gfx9Op::VMed3U32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Unit::Valu,
+        Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64
+        | Opc::Gfx9(Gfx9Op::VRsqF64) | Opc::Gfx9(Gfx9Op::VSqrtF32) => Unit::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
         | Opc::DsStoreB64 | Opc::DsLoadB64 | Opc::DsStoreB16D16Hi | Opc::DsLoadU16D16 | Opc::DsLoadU16D16Hi
         | Opc::DsBpermuteB32 | Opc::DsStoreB128 | Opc::DsLoadB128 | Opc::DsLoadU8 | Opc::DsStoreB8
-        | Opc::DsStoreB8D16Hi | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8) => Unit::Lds,
+        | Opc::DsStoreB8D16Hi | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8)
+        | Opc::Gfx9(Gfx9Op::DsOrB32Raw) | Opc::Gfx9(Gfx9Op::DsWriteB32Raw) | Opc::Gfx9(Gfx9Op::DsReadB32Raw)
+        | Opc::Gfx9(Gfx9Op::DsLoad2addrB32) | Opc::Gfx9(Gfx9Op::DsReadB96) | Opc::Gfx9(Gfx9Op::DsReadB96TrB6)
+        | Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Unit::Lds,
         Opc::GLoadU16 | Opc::GLoadB32 | Opc::GLoadB64 | Opc::GLoadB96 | Opc::GLoadB128 | Opc::GStoreB16
         | Opc::GStoreB32 | Opc::GStoreB64 | Opc::GStoreB96 | Opc::GStoreB128 | Opc::GLoadD16B16
         | Opc::GLoadD16HiB16 | Opc::GStoreD16HiB16 | Opc::GAtomicAddU32 | Opc::GAtomicAddF32
@@ -922,8 +980,10 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2)
         | Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) | Opc::Gfx9(Gfx9Op::GLoadLdsB32)
         | Opc::Gfx9(Gfx9Op::GLoadLdsB128) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16)
-        | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Unit::Vmem,
-        Opc::Copy | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier => Unit::Pseudo,
+        | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) | Opc::Gfx9(Gfx9Op::GAtomicAddX2)
+        | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Unit::Vmem,
+        Opc::Copy | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier | Opc::Gfx9(Gfx9Op::KeepAlive)
+        | Opc::Gfx9(Gfx9Op::WaitRelease) => Unit::Pseudo,
         Opc::VCmp(_) => Unit::Valu,
         #[allow(unreachable_patterns)]
         _ => Unit::Pseudo,
@@ -1052,11 +1112,14 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::SMulHiU32 | Opc::SMulHiI32 | Opc::SCselectB32 | Opc::SCselectB64 | Opc::SCmpEqI32
         | Opc::SCmpLgI32 | Opc::SCmpGtI32 | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32 | Opc::SCmpEqU32
         | Opc::SCmpLgU32 | Opc::SCmpGtU32 | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 | Opc::SCmpEqU64
-        | Opc::SCmpLgU64 | Opc::SMovkI32 | Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64) => Lat::Salu,
+        | Opc::SCmpLgU64 | Opc::SMovkI32 | Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64)
+        | Opc::Gfx9(Gfx9Op::SGetregB32) | Opc::Gfx9(Gfx9Op::SFf1I32B32) => Lat::Salu,
         Opc::SNop | Opc::SWaitcnt | Opc::SBranch | Opc::SCbranchScc0 | Opc::SCbranchScc1 | Opc::SCbranchExecz
         | Opc::SCbranchExecnz | Opc::SEndpgm | Opc::SSendmsg | Opc::SBarrier | Opc::SBarrierLds
-        | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit => Lat::Ctrl,
-        Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512 => Lat::Smem,
+        | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit | Opc::Gfx9(Gfx9Op::SSleep) => Lat::Ctrl,
+        Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512
+        | Opc::Gfx9(Gfx9Op::SMemrealtime) | Opc::Gfx9(Gfx9Op::SBufLoadB32) | Opc::Gfx9(Gfx9Op::SDcacheInv)
+        | Opc::Gfx9(Gfx9Op::SMemtime) => Lat::Smem,
         Opc::VNop | Opc::VMovB32 | Opc::VReadfirstlaneB32 | Opc::VCvtF32I32 | Opc::VCvtF32U32 | Opc::VCvtU32F32
         | Opc::VCvtI32F32 | Opc::VCvtF16F32 | Opc::VCvtF32F16 | Opc::VTruncF32 | Opc::VMovB32Dpp | Opc::VNotB32
         | Opc::VRndneF32 | Opc::VCndmaskB32 | Opc::VAddF32 | Opc::VSubF32 | Opc::VSubrevF32 | Opc::VMulF32
@@ -1080,25 +1143,40 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::Gfx9(Gfx9Op::VAccvgprReadB32) | Opc::Gfx9(Gfx9Op::VAccvgprWriteB32)
         | Opc::Gfx9(Gfx9Op::VAccvgprMovB32) | Opc::Gfx9(Gfx9Op::VCvtF32Fp8) | Opc::Gfx9(Gfx9Op::VCvtF32Bf8)
         | Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8) | Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8) | Opc::Gfx9(Gfx9Op::VCvtPkFp8F32)
-        | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Lat::Valu,
-        Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Lat::Trans,
+        | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4)
+        | Opc::Gfx9(Gfx9Op::VAddU32Dpp) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32)
+        | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) | Opc::Gfx9(Gfx9Op::VMaximum3F32)
+        | Opc::Gfx9(Gfx9Op::VBitop3B32) | Opc::Gfx9(Gfx9Op::VBfiB32) | Opc::Gfx9(Gfx9Op::VMovB32DppOld)
+        | Opc::Gfx9(Gfx9Op::VMaxU32DppOld) | Opc::Gfx9(Gfx9Op::VCvtF64F32) | Opc::Gfx9(Gfx9Op::VCvtF32F64)
+        | Opc::Gfx9(Gfx9Op::VBcntU32B32) | Opc::Gfx9(Gfx9Op::VAddF32Dpp) | Opc::Gfx9(Gfx9Op::VMulF32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMaxF32Dpp) | Opc::Gfx9(Gfx9Op::VMaxU32Dpp) | Opc::Gfx9(Gfx9Op::VMaxI32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMinI32Dpp) | Opc::Gfx9(Gfx9Op::VMinU32Dpp) | Opc::Gfx9(Gfx9Op::VMin3I32)
+        | Opc::Gfx9(Gfx9Op::VMin3U32) | Opc::Gfx9(Gfx9Op::VMax3I32) | Opc::Gfx9(Gfx9Op::VMax3U32)
+        | Opc::Gfx9(Gfx9Op::VMed3U32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Lat::Valu,
+        Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64
+        | Opc::Gfx9(Gfx9Op::VRsqF64) | Opc::Gfx9(Gfx9Op::VSqrtF32) => Lat::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
         | Opc::DsStoreB64 | Opc::DsLoadB64 | Opc::DsStoreB16D16Hi | Opc::DsLoadU16D16 | Opc::DsLoadU16D16Hi
         | Opc::DsBpermuteB32 | Opc::DsStoreB128 | Opc::DsLoadB128 | Opc::DsLoadU8 | Opc::DsStoreB8
-        | Opc::DsStoreB8D16Hi | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8) => Lat::Lds,
+        | Opc::DsStoreB8D16Hi | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8)
+        | Opc::Gfx9(Gfx9Op::DsOrB32Raw) | Opc::Gfx9(Gfx9Op::DsWriteB32Raw) | Opc::Gfx9(Gfx9Op::DsReadB32Raw)
+        | Opc::Gfx9(Gfx9Op::DsLoad2addrB32) | Opc::Gfx9(Gfx9Op::DsReadB96) | Opc::Gfx9(Gfx9Op::DsReadB96TrB6)
+        | Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Lat::Lds,
         Opc::GLoadU16 | Opc::GLoadB32 | Opc::GLoadB64 | Opc::GLoadB96 | Opc::GLoadB128 | Opc::GLoadD16B16
         | Opc::GLoadD16HiB16 | Opc::ScratchLoadB32 | Opc::ScratchLoadB64 | Opc::ScratchLoadB96
         | Opc::ScratchLoadB128 | Opc::GAtomicAddU32Rtn | Opc::GAtomicAddF32Rtn | Opc::GLoadU8 | Opc::BufLoadB32
         | Opc::BufLoadB64 | Opc::BufLoadB128 | Opc::BufLoadU16 | Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16
         | Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) | Opc::Gfx9(Gfx9Op::GLoadLdsB32)
-        | Opc::Gfx9(Gfx9Op::GLoadLdsB128) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Lat::VmemLoad,
+        | Opc::Gfx9(Gfx9Op::GLoadLdsB128) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn)
+        | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Lat::VmemLoad,
         Opc::GStoreB16 | Opc::GStoreB32 | Opc::GStoreB64 | Opc::GStoreB96 | Opc::GStoreB128
         | Opc::GStoreD16HiB16 | Opc::GAtomicAddU32 | Opc::GAtomicAddF32 | Opc::ScratchStoreB32
         | Opc::ScratchStoreB64 | Opc::ScratchStoreB96 | Opc::ScratchStoreB128 | Opc::GStoreB8
         | Opc::GStoreD16HiB8 | Opc::BufStoreB16 | Opc::BufStoreB32 | Opc::BufStoreB64 | Opc::BufStoreB128
-        | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Lat::VmemStore,
-        Opc::Copy | Opc::ImplicitDef | Opc::SchedBarrier => Lat::Pseudo,
+        | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Lat::VmemStore,
+        Opc::Copy | Opc::ImplicitDef | Opc::SchedBarrier | Opc::Gfx9(Gfx9Op::KeepAlive)
+        | Opc::Gfx9(Gfx9Op::WaitRelease) => Lat::Pseudo,
         Opc::PackF16 => Lat::PseudoValu,
         Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Lat::Cache,
         Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16)
@@ -1107,7 +1185,7 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Lat::MfmaXdl4,
         Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16)
         | Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16)
-        | Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Lat::MfmaXdl8,
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) | Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Lat::MfmaXdl8,
         Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) | Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16) => Lat::MfmaXdl2,
         Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Lat::MfmaSmfma8,
         Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Lat::MfmaSmfma16,
@@ -1179,10 +1257,12 @@ pub enum Form {
     AccMov,
     /// VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls
     Mai,
-    /// VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scales, then the MFMA as in mai (abid refused)
+    /// VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scale VGPRs, then the MFMA as in mai (abid refused)
     MaiScale,
     /// load into LDS (MUBUF with the lds bit, GLOBAL's global_load_lds): no data register, M0 the LDS address; imm holds the offset and the cache policy
     Lds,
+    /// SMEM without an address (s_memrealtime): sdata only, the imm bit clear
+    Nobase,
 }
 
 /// What the encoder reads of an opcode, in one load.
@@ -1202,7 +1282,7 @@ pub struct Info {
 
 /// `Info` of each opcode in `ALL` order, then the compare family's fields that do not
 /// depend on its code.
-static INFO: [Info; 287] = [
+static INFO: [Info; 333] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x004, vop3: 0x004, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1489,6 +1569,52 @@ static INFO: [Info; 287] = [
     Info { code: 0x2a3, vop3: 0x2a3, flags: 0x01010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
     Info { code: 0x04e, vop3: 0x04e, flags: 0x00040, fmt: Fmt::Global, form: Form::Plain, table: true },
     Info { code: 0x04e, vop3: 0x04e, flags: 0x00060, fmt: Fmt::Global, form: Form::Plain, table: true },
+    Info { code: 0x011, vop3: 0x011, flags: 0x00000, fmt: Fmt::Sopk, form: Form::Plain, table: true },
+    Info { code: 0x00e, vop3: 0x00e, flags: 0x40000, fmt: Fmt::Sopp, form: Form::Plain, table: true },
+    Info { code: 0x025, vop3: 0x025, flags: 0x40100, fmt: Fmt::Smem, form: Form::Nobase, table: true },
+    Info { code: 0x062, vop3: 0x062, flags: 0x00040, fmt: Fmt::Global, form: Form::Plain, table: true },
+    Info { code: 0x062, vop3: 0x062, flags: 0x00060, fmt: Fmt::Global, form: Form::Plain, table: true },
+    Info { code: 0x251, vop3: 0x251, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x000, vop3: 0x000, flags: 0x40000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
+    Info { code: 0x034, vop3: 0x134, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x235, vop3: 0x235, flags: 0x01010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x236, vop3: 0x236, flags: 0x01010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x02d, vop3: 0x02d, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::MaiScale, table: true },
+    Info { code: 0x2a9, vop3: 0x2a9, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x234, vop3: 0x234, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x1ca, vop3: 0x1ca, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x008, vop3: 0x008, flags: 0x00100, fmt: Fmt::Smem, form: Form::Plain, table: true },
+    Info { code: 0x020, vop3: 0x020, flags: 0x40100, fmt: Fmt::Smem, form: Form::Nobase, table: true },
+    Info { code: 0x001, vop3: 0x141, flags: 0x01010, fmt: Fmt::Vop1, form: Form::Dpp16, table: true },
+    Info { code: 0x00f, vop3: 0x10f, flags: 0x01010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x010, vop3: 0x150, flags: 0x00010, fmt: Fmt::Vop1, form: Form::Plain, table: true },
+    Info { code: 0x00f, vop3: 0x14f, flags: 0x02010, fmt: Fmt::Vop1, form: Form::F64, table: true },
+    Info { code: 0x026, vop3: 0x166, flags: 0x02410, fmt: Fmt::Vop1, form: Form::F64, table: true },
+    Info { code: 0x027, vop3: 0x167, flags: 0x00410, fmt: Fmt::Vop1, form: Form::Plain, table: true },
+    Info { code: 0x28b, vop3: 0x28b, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x010, vop3: 0x010, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
+    Info { code: 0x024, vop3: 0x024, flags: 0x40100, fmt: Fmt::Smem, form: Form::Nobase, table: true },
+    Info { code: 0x00a, vop3: 0x00a, flags: 0x40080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x00d, vop3: 0x00d, flags: 0x40080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x036, vop3: 0x036, flags: 0x40080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x037, vop3: 0x037, flags: 0x00080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x001, vop3: 0x101, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x005, vop3: 0x105, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x00b, vop3: 0x10b, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x00f, vop3: 0x10f, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x000, vop3: 0x000, flags: 0x40000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
+    Info { code: 0x00d, vop3: 0x10d, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x00c, vop3: 0x10c, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x00e, vop3: 0x10e, flags: 0x00010, fmt: Fmt::Vop2, form: Form::Dpp16, table: true },
+    Info { code: 0x1d1, vop3: 0x1d1, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x1d2, vop3: 0x1d2, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x1d4, vop3: 0x1d4, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x1d5, vop3: 0x1d5, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x1d8, vop3: 0x1d8, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x23d, vop3: 0x23d, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x0fe, vop3: 0x0fe, flags: 0x00080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x0e1, vop3: 0x0e1, flags: 0x00080, fmt: Fmt::Ds, form: Form::Plain, table: true },
+    Info { code: 0x0e0, vop3: 0x0e0, flags: 0x00080, fmt: Fmt::Ds, form: Form::Plain, table: true },
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Vopc, form: Form::Plain, table: true },
 ];
 
@@ -1782,7 +1908,53 @@ fn index(op: Opc) -> Option<usize> {
         Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some(283),
         Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Some(284),
         Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(285),
-        Opc::VCmp(_) => Some(286),
+        Opc::Gfx9(Gfx9Op::SGetregB32) => Some(286),
+        Opc::Gfx9(Gfx9Op::SSleep) => Some(287),
+        Opc::Gfx9(Gfx9Op::SMemrealtime) => Some(288),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Some(289),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Some(290),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) => Some(291),
+        Opc::Gfx9(Gfx9Op::KeepAlive) => Some(292),
+        Opc::Gfx9(Gfx9Op::VAddU32Dpp) => Some(293),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) => Some(294),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) => Some(295),
+        Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Some(296),
+        Opc::Gfx9(Gfx9Op::VMaximum3F32) => Some(297),
+        Opc::Gfx9(Gfx9Op::VBitop3B32) => Some(298),
+        Opc::Gfx9(Gfx9Op::VBfiB32) => Some(299),
+        Opc::Gfx9(Gfx9Op::SBufLoadB32) => Some(300),
+        Opc::Gfx9(Gfx9Op::SDcacheInv) => Some(301),
+        Opc::Gfx9(Gfx9Op::VMovB32DppOld) => Some(302),
+        Opc::Gfx9(Gfx9Op::VMaxU32DppOld) => Some(303),
+        Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some(304),
+        Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some(305),
+        Opc::Gfx9(Gfx9Op::VRsqF64) => Some(306),
+        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(307),
+        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(308),
+        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(309),
+        Opc::Gfx9(Gfx9Op::SMemtime) => Some(310),
+        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some(311),
+        Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(312),
+        Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(313),
+        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(314),
+        Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some(315),
+        Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some(316),
+        Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some(317),
+        Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some(318),
+        Opc::Gfx9(Gfx9Op::WaitRelease) => Some(319),
+        Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some(320),
+        Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some(321),
+        Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(322),
+        Opc::Gfx9(Gfx9Op::VMin3I32) => Some(323),
+        Opc::Gfx9(Gfx9Op::VMin3U32) => Some(324),
+        Opc::Gfx9(Gfx9Op::VMax3I32) => Some(325),
+        Opc::Gfx9(Gfx9Op::VMax3U32) => Some(326),
+        Opc::Gfx9(Gfx9Op::VMed3U32) => Some(327),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(328),
+        Opc::Gfx9(Gfx9Op::DsReadB96) => Some(329),
+        Opc::Gfx9(Gfx9Op::DsReadB96TrB6) => Some(330),
+        Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Some(331),
+        Opc::VCmp(_) => Some(332),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -1908,11 +2080,103 @@ pub enum Gfx9Op {
     GAtomicPkAddF16,
     /// global_atomic_pk_add_f16
     GAtomicPkAddF16Rtn,
+    /// s_getreg_b32
+    SGetregB32,
+    /// s_sleep
+    SSleep,
+    /// s_memrealtime
+    SMemrealtime,
+    /// global_atomic_add_x2
+    GAtomicAddX2,
+    /// global_atomic_add_x2
+    GAtomicAddX2Rtn,
+    /// v_cvt_scalef32_pk_bf16_fp4
+    VCvtScalef32PkBf16Fp4,
+    /// KEEP_ALIVE
+    KeepAlive,
+    /// v_add_u32
+    VAddU32Dpp,
+    /// v_cvt_scalef32_pk_fp8_f32
+    VCvtScalef32PkFp8F32,
+    /// v_cvt_scalef32_pk_bf8_f32
+    VCvtScalef32PkBf8F32,
+    /// v_mfma_scale_f32_16x16x128_f8f6f4
+    VMfmaScale16x16x128F8f6f4,
+    /// v_maximum3_f32
+    VMaximum3F32,
+    /// v_bitop3_b32
+    VBitop3B32,
+    /// v_bfi_b32
+    VBfiB32,
+    /// s_buffer_load_dword
+    SBufLoadB32,
+    /// s_dcache_inv
+    SDcacheInv,
+    /// v_mov_b32
+    VMovB32DppOld,
+    /// v_max_u32
+    VMaxU32DppOld,
+    /// v_cvt_f64_f32
+    VCvtF64F32,
+    /// v_cvt_f32_f64
+    VCvtF32F64,
+    /// v_rsq_f64
+    VRsqF64,
+    /// v_sqrt_f32
+    VSqrtF32,
+    /// v_bcnt_u32_b32
+    VBcntU32B32,
+    /// s_ff1_i32_b32
+    SFf1I32B32,
+    /// s_memtime
+    SMemtime,
+    /// ds_or_b32
+    DsOrB32Raw,
+    /// ds_write_b32
+    DsWriteB32Raw,
+    /// ds_read_b32
+    DsReadB32Raw,
+    /// ds_read2_b32
+    DsLoad2addrB32,
+    /// v_add_f32
+    VAddF32Dpp,
+    /// v_mul_f32
+    VMulF32Dpp,
+    /// v_max_f32
+    VMaxF32Dpp,
+    /// v_max_u32
+    VMaxU32Dpp,
+    /// WAIT_RELEASE
+    WaitRelease,
+    /// v_max_i32
+    VMaxI32Dpp,
+    /// v_min_i32
+    VMinI32Dpp,
+    /// v_min_u32
+    VMinU32Dpp,
+    /// v_min3_i32
+    VMin3I32,
+    /// v_min3_u32
+    VMin3U32,
+    /// v_max3_i32
+    VMax3I32,
+    /// v_max3_u32
+    VMax3U32,
+    /// v_med3_u32
+    VMed3U32,
+    /// v_cvt_scalef32_pk_fp4_f32
+    VCvtScalef32PkFp4F32,
+    /// ds_read_b96
+    DsReadB96,
+    /// ds_read_b96_tr_b6
+    DsReadB96TrB6,
+    /// ds_read_b64_tr_b4
+    DsReadB64TrB4,
 }
 
 impl Gfx9Op {
     /// Every one of them, in description order.
-    pub const ALL: [Gfx9Op; 51] = [
+    pub const ALL: [Gfx9Op; 97] = [
         Gfx9Op::VPkFmaF32, Gfx9Op::VPkMulF32, Gfx9Op::VPkAddF32, Gfx9Op::VPkMovB32, Gfx9Op::VMovB64,
         Gfx9Op::VLshlAddU64, Gfx9Op::VCvtPkF16F32, Gfx9Op::VCvtPkBf16F32, Gfx9Op::VPermlane16SwapB32, Gfx9Op::VPermlane32SwapB32,
         Gfx9Op::BufferInv, Gfx9Op::BufferWbl2, Gfx9Op::VAccvgprReadB32, Gfx9Op::VAccvgprWriteB32, Gfx9Op::VAccvgprMovB32,
@@ -1923,7 +2187,16 @@ impl Gfx9Op {
         Gfx9Op::VMfma4x4x4F64, Gfx9Op::VMfmaScale32x32x64F8f6f4, Gfx9Op::BufLoadLdsB32, Gfx9Op::BufLoadLdsB128, Gfx9Op::GLoadLdsB32,
         Gfx9Op::GLoadLdsB128, Gfx9Op::DsReadB64TrB16, Gfx9Op::DsReadB64TrB8, Gfx9Op::VCvtF32Fp8, Gfx9Op::VCvtF32Bf8,
         Gfx9Op::VCvtPkF32Fp8, Gfx9Op::VCvtPkF32Bf8, Gfx9Op::VCvtPkFp8F32, Gfx9Op::VCvtPkBf8F32, Gfx9Op::GAtomicPkAddF16,
-        Gfx9Op::GAtomicPkAddF16Rtn,
+        Gfx9Op::GAtomicPkAddF16Rtn, Gfx9Op::SGetregB32, Gfx9Op::SSleep, Gfx9Op::SMemrealtime, Gfx9Op::GAtomicAddX2,
+        Gfx9Op::GAtomicAddX2Rtn, Gfx9Op::VCvtScalef32PkBf16Fp4, Gfx9Op::KeepAlive, Gfx9Op::VAddU32Dpp, Gfx9Op::VCvtScalef32PkFp8F32,
+        Gfx9Op::VCvtScalef32PkBf8F32, Gfx9Op::VMfmaScale16x16x128F8f6f4, Gfx9Op::VMaximum3F32, Gfx9Op::VBitop3B32, Gfx9Op::VBfiB32,
+        Gfx9Op::SBufLoadB32, Gfx9Op::SDcacheInv, Gfx9Op::VMovB32DppOld, Gfx9Op::VMaxU32DppOld, Gfx9Op::VCvtF64F32,
+        Gfx9Op::VCvtF32F64, Gfx9Op::VRsqF64, Gfx9Op::VSqrtF32, Gfx9Op::VBcntU32B32, Gfx9Op::SFf1I32B32,
+        Gfx9Op::SMemtime, Gfx9Op::DsOrB32Raw, Gfx9Op::DsWriteB32Raw, Gfx9Op::DsReadB32Raw, Gfx9Op::DsLoad2addrB32,
+        Gfx9Op::VAddF32Dpp, Gfx9Op::VMulF32Dpp, Gfx9Op::VMaxF32Dpp, Gfx9Op::VMaxU32Dpp, Gfx9Op::WaitRelease,
+        Gfx9Op::VMaxI32Dpp, Gfx9Op::VMinI32Dpp, Gfx9Op::VMinU32Dpp, Gfx9Op::VMin3I32, Gfx9Op::VMin3U32,
+        Gfx9Op::VMax3I32, Gfx9Op::VMax3U32, Gfx9Op::VMed3U32, Gfx9Op::VCvtScalef32PkFp4F32, Gfx9Op::DsReadB96,
+        Gfx9Op::DsReadB96TrB6, Gfx9Op::DsReadB64TrB4,
     ];
 
     /// The shared flags (`Opc::flags`).
@@ -1981,6 +2254,52 @@ impl Gfx9Op {
             Gfx9Op::VCvtPkBf8F32 => 0x01010,
             Gfx9Op::GAtomicPkAddF16 => 0x00040,
             Gfx9Op::GAtomicPkAddF16Rtn => 0x00060,
+            Gfx9Op::SGetregB32 => 0x00000,
+            Gfx9Op::SSleep => 0x40000,
+            Gfx9Op::SMemrealtime => 0x40100,
+            Gfx9Op::GAtomicAddX2 => 0x00040,
+            Gfx9Op::GAtomicAddX2Rtn => 0x00060,
+            Gfx9Op::VCvtScalef32PkBf16Fp4 => 0x00010,
+            Gfx9Op::KeepAlive => 0x40000,
+            Gfx9Op::VAddU32Dpp => 0x00010,
+            Gfx9Op::VCvtScalef32PkFp8F32 => 0x01010,
+            Gfx9Op::VCvtScalef32PkBf8F32 => 0x01010,
+            Gfx9Op::VMfmaScale16x16x128F8f6f4 => 0x00010,
+            Gfx9Op::VMaximum3F32 => 0x00010,
+            Gfx9Op::VBitop3B32 => 0x00010,
+            Gfx9Op::VBfiB32 => 0x00010,
+            Gfx9Op::SBufLoadB32 => 0x00100,
+            Gfx9Op::SDcacheInv => 0x40100,
+            Gfx9Op::VMovB32DppOld => 0x01010,
+            Gfx9Op::VMaxU32DppOld => 0x01010,
+            Gfx9Op::VCvtF64F32 => 0x00010,
+            Gfx9Op::VCvtF32F64 => 0x02010,
+            Gfx9Op::VRsqF64 => 0x02410,
+            Gfx9Op::VSqrtF32 => 0x00410,
+            Gfx9Op::VBcntU32B32 => 0x00010,
+            Gfx9Op::SFf1I32B32 => 0x00000,
+            Gfx9Op::SMemtime => 0x40100,
+            Gfx9Op::DsOrB32Raw => 0x40080,
+            Gfx9Op::DsWriteB32Raw => 0x40080,
+            Gfx9Op::DsReadB32Raw => 0x40080,
+            Gfx9Op::DsLoad2addrB32 => 0x00080,
+            Gfx9Op::VAddF32Dpp => 0x00010,
+            Gfx9Op::VMulF32Dpp => 0x00010,
+            Gfx9Op::VMaxF32Dpp => 0x00010,
+            Gfx9Op::VMaxU32Dpp => 0x00010,
+            Gfx9Op::WaitRelease => 0x40000,
+            Gfx9Op::VMaxI32Dpp => 0x00010,
+            Gfx9Op::VMinI32Dpp => 0x00010,
+            Gfx9Op::VMinU32Dpp => 0x00010,
+            Gfx9Op::VMin3I32 => 0x00010,
+            Gfx9Op::VMin3U32 => 0x00010,
+            Gfx9Op::VMax3I32 => 0x00010,
+            Gfx9Op::VMax3U32 => 0x00010,
+            Gfx9Op::VMed3U32 => 0x00010,
+            Gfx9Op::VCvtScalef32PkFp4F32 => 0x00010,
+            Gfx9Op::DsReadB96 => 0x00080,
+            Gfx9Op::DsReadB96TrB6 => 0x00080,
+            Gfx9Op::DsReadB64TrB4 => 0x00080,
         }
     }
 
@@ -2038,6 +2357,52 @@ impl Gfx9Op {
             Gfx9Op::VCvtPkBf8F32 => "v_cvt_pk_bf8_f32",
             Gfx9Op::GAtomicPkAddF16 => "global_atomic_pk_add_f16",
             Gfx9Op::GAtomicPkAddF16Rtn => "global_atomic_pk_add_f16",
+            Gfx9Op::SGetregB32 => "s_getreg_b32",
+            Gfx9Op::SSleep => "s_sleep",
+            Gfx9Op::SMemrealtime => "s_memrealtime",
+            Gfx9Op::GAtomicAddX2 => "global_atomic_add_x2",
+            Gfx9Op::GAtomicAddX2Rtn => "global_atomic_add_x2",
+            Gfx9Op::VCvtScalef32PkBf16Fp4 => "v_cvt_scalef32_pk_bf16_fp4",
+            Gfx9Op::KeepAlive => "KEEP_ALIVE",
+            Gfx9Op::VAddU32Dpp => "v_add_u32",
+            Gfx9Op::VCvtScalef32PkFp8F32 => "v_cvt_scalef32_pk_fp8_f32",
+            Gfx9Op::VCvtScalef32PkBf8F32 => "v_cvt_scalef32_pk_bf8_f32",
+            Gfx9Op::VMfmaScale16x16x128F8f6f4 => "v_mfma_scale_f32_16x16x128_f8f6f4",
+            Gfx9Op::VMaximum3F32 => "v_maximum3_f32",
+            Gfx9Op::VBitop3B32 => "v_bitop3_b32",
+            Gfx9Op::VBfiB32 => "v_bfi_b32",
+            Gfx9Op::SBufLoadB32 => "s_buffer_load_dword",
+            Gfx9Op::SDcacheInv => "s_dcache_inv",
+            Gfx9Op::VMovB32DppOld => "v_mov_b32",
+            Gfx9Op::VMaxU32DppOld => "v_max_u32",
+            Gfx9Op::VCvtF64F32 => "v_cvt_f64_f32",
+            Gfx9Op::VCvtF32F64 => "v_cvt_f32_f64",
+            Gfx9Op::VRsqF64 => "v_rsq_f64",
+            Gfx9Op::VSqrtF32 => "v_sqrt_f32",
+            Gfx9Op::VBcntU32B32 => "v_bcnt_u32_b32",
+            Gfx9Op::SFf1I32B32 => "s_ff1_i32_b32",
+            Gfx9Op::SMemtime => "s_memtime",
+            Gfx9Op::DsOrB32Raw => "ds_or_b32",
+            Gfx9Op::DsWriteB32Raw => "ds_write_b32",
+            Gfx9Op::DsReadB32Raw => "ds_read_b32",
+            Gfx9Op::DsLoad2addrB32 => "ds_read2_b32",
+            Gfx9Op::VAddF32Dpp => "v_add_f32",
+            Gfx9Op::VMulF32Dpp => "v_mul_f32",
+            Gfx9Op::VMaxF32Dpp => "v_max_f32",
+            Gfx9Op::VMaxU32Dpp => "v_max_u32",
+            Gfx9Op::WaitRelease => "WAIT_RELEASE",
+            Gfx9Op::VMaxI32Dpp => "v_max_i32",
+            Gfx9Op::VMinI32Dpp => "v_min_i32",
+            Gfx9Op::VMinU32Dpp => "v_min_u32",
+            Gfx9Op::VMin3I32 => "v_min3_i32",
+            Gfx9Op::VMin3U32 => "v_min3_u32",
+            Gfx9Op::VMax3I32 => "v_max3_i32",
+            Gfx9Op::VMax3U32 => "v_max3_u32",
+            Gfx9Op::VMed3U32 => "v_med3_u32",
+            Gfx9Op::VCvtScalef32PkFp4F32 => "v_cvt_scalef32_pk_fp4_f32",
+            Gfx9Op::DsReadB96 => "ds_read_b96",
+            Gfx9Op::DsReadB96TrB6 => "ds_read_b96_tr_b6",
+            Gfx9Op::DsReadB64TrB4 => "ds_read_b64_tr_b4",
         }
     }
 }
@@ -2135,6 +2500,8 @@ pub enum Imm {
     Mai,
     /// 12-bit unsigned byte offset in bits 11:0, then the cache policy: sc0 in bit 12, nt in bit 13, sc1 in bit 14
     Off12cpol,
+    /// v_bitop3 truth table (source bytes 0xf0, 0xcc, 0xaa): bits 2:0 in neg, 5:3 in abs, 7:6 in omod
+    Bitop3,
 }
 
 /// One operand of a signature: role, class and size in dwords.
@@ -2249,7 +2616,7 @@ const SIG_15: Sig = Sig {
     defs: &[Operand { role: Role::Sdata, class: Class::S, dwords: 1 }],
     uses: &[Operand { role: Role::Sbase, class: Class::S, dwords: 2 }],
     imm: Imm::Soff21,
-    mods: 0x0,
+    mods: 0x1000,
 };
 const SIG_16: Sig = Sig {
     defs: &[Operand { role: Role::Sdata, class: Class::S, dwords: 2 }],
@@ -2516,324 +2883,450 @@ const SIG_59: Sig = Sig {
     mods: 0x6100,
 };
 const SIG_60: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
+    imm: Imm::Off13s,
+    mods: 0x7100,
+};
+const SIG_61: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off13s,
-    mods: 0x6100,
-};
-const SIG_61: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 3 }],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
-    imm: Imm::Off13s,
-    mods: 0x6100,
+    mods: 0x7100,
 };
 const SIG_62: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 4 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 3 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off13s,
     mods: 0x6100,
 };
 const SIG_63: Sig = Sig {
-    defs: &[],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 4 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off13s,
-    mods: 0x6100,
+    mods: 0x7100,
 };
 const SIG_64: Sig = Sig {
     defs: &[],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off13s,
     mods: 0x6100,
 };
 const SIG_65: Sig = Sig {
     defs: &[],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 3 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off13s,
-    mods: 0x6100,
+    mods: 0x7100,
 };
 const SIG_66: Sig = Sig {
     defs: &[],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 4 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
     imm: Imm::Off13s,
-    mods: 0x6100,
+    mods: 0x7100,
 };
 const SIG_67: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
-    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    defs: &[],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 3 }],
     imm: Imm::Off13s,
     mods: 0x6100,
 };
 const SIG_68: Sig = Sig {
     defs: &[],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 4 }],
+    imm: Imm::Off13s,
+    mods: 0x7100,
+};
+const SIG_69: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    imm: Imm::Off13s,
+    mods: 0x6100,
+};
+const SIG_70: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
+    imm: Imm::Off13s,
+    mods: 0x2100,
+};
+const SIG_71: Sig = Sig {
+    defs: &[],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off13s,
     mods: 0x100,
 };
-const SIG_69: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
-    uses: &[],
-    imm: Imm::Off13s,
-    mods: 0x0,
-};
-const SIG_70: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
-    uses: &[],
-    imm: Imm::Off13s,
-    mods: 0x0,
-};
-const SIG_71: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 3 }],
-    uses: &[],
-    imm: Imm::Off13s,
-    mods: 0x0,
-};
 const SIG_72: Sig = Sig {
-    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 4 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
     uses: &[],
     imm: Imm::Off13s,
     mods: 0x0,
 };
 const SIG_73: Sig = Sig {
-    defs: &[],
-    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[],
     imm: Imm::Off13s,
     mods: 0x0,
 };
 const SIG_74: Sig = Sig {
-    defs: &[],
-    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 3 }],
+    uses: &[],
     imm: Imm::Off13s,
     mods: 0x0,
 };
 const SIG_75: Sig = Sig {
-    defs: &[],
-    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 3 }],
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 4 }],
+    uses: &[],
     imm: Imm::Off13s,
     mods: 0x0,
 };
 const SIG_76: Sig = Sig {
     defs: &[],
-    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 4 }],
+    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off13s,
     mods: 0x0,
 };
 const SIG_77: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
+    imm: Imm::Off13s,
+    mods: 0x0,
+};
+const SIG_78: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 3 }],
+    imm: Imm::Off13s,
+    mods: 0x0,
+};
+const SIG_79: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 4 }],
+    imm: Imm::Off13s,
+    mods: 0x0,
+};
+const SIG_80: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
+    imm: Imm::Off13s,
+    mods: 0x3100,
+};
+const SIG_81: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off13s,
     mods: 0x1100,
 };
-const SIG_78: Sig = Sig {
+const SIG_82: Sig = Sig {
     defs: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
-    mods: 0x0,
+    mods: 0x7000,
 };
-const SIG_79: Sig = Sig {
+const SIG_83: Sig = Sig {
     defs: &[Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
-    mods: 0x0,
+    mods: 0x7000,
 };
-const SIG_80: Sig = Sig {
+const SIG_84: Sig = Sig {
     defs: &[Operand { role: Role::Vdata, class: Class::V, dwords: 4 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
-    mods: 0x0,
+    mods: 0x7000,
 };
-const SIG_81: Sig = Sig {
+const SIG_85: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }, Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
     mods: 0x0,
 };
-const SIG_82: Sig = Sig {
+const SIG_86: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }, Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
+    imm: Imm::Off12,
+    mods: 0x7000,
+};
+const SIG_87: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 2 }, Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
-    mods: 0x0,
+    mods: 0x7000,
 };
-const SIG_83: Sig = Sig {
+const SIG_88: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vdata, class: Class::V, dwords: 4 }, Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12,
+    mods: 0x7000,
+};
+const SIG_89: Sig = Sig {
+    defs: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
+    imm: Imm::Off12,
     mods: 0x0,
 };
-const SIG_84: Sig = Sig {
+const SIG_90: Sig = Sig {
     defs: &[Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }, Operand { role: Role::Vdata, class: Class::V, dwords: 1 }],
     imm: Imm::Off12,
     mods: 0x0,
 };
-const SIG_85: Sig = Sig {
+const SIG_91: Sig = Sig {
     defs: &[Operand { role: Role::Dst, class: Class::A, dwords: 1 }],
     uses: &[Operand { role: Role::Src, class: Class::A, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_86: Sig = Sig {
+const SIG_92: Sig = Sig {
     defs: &[Operand { role: Role::Dst, class: Class::A, dwords: 1 }],
     uses: &[],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_87: Sig = Sig {
+const SIG_93: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src2, class: Class::Vr, dwords: 2 }],
     imm: Imm::Pksel,
     mods: 0x7,
 };
-const SIG_88: Sig = Sig {
+const SIG_94: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }],
     imm: Imm::Pksel,
     mods: 0x7,
 };
-const SIG_89: Sig = Sig {
+const SIG_95: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }],
     imm: Imm::Pksel,
     mods: 0x0,
 };
-const SIG_90: Sig = Sig {
+const SIG_96: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_91: Sig = Sig {
+const SIG_97: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src2, class: Class::Vs, dwords: 2 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_92: Sig = Sig {
+const SIG_98: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc, class: Class::V, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_93: Sig = Sig {
+const SIG_99: Sig = Sig {
     defs: &[],
     uses: &[],
     imm: Imm::Cpol,
     mods: 0x0,
 };
-const SIG_94: Sig = Sig {
+const SIG_100: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Acc, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_95: Sig = Sig {
+const SIG_101: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Acc, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vi, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_96: Sig = Sig {
+const SIG_102: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Acc, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Acc, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_97: Sig = Sig {
+const SIG_103: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 1 }],
     uses: &[Operand { role: Role::Ssrc0, class: Class::Ss, dwords: 2 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_98: Sig = Sig {
+const SIG_104: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 4 }, Operand { role: Role::Src1, class: Class::Av, dwords: 4 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_99: Sig = Sig {
+const SIG_105: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_100: Sig = Sig {
+const SIG_106: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 4 }, Operand { role: Role::Src1, class: Class::Av, dwords: 4 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_101: Sig = Sig {
+const SIG_107: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_102: Sig = Sig {
+const SIG_108: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_103: Sig = Sig {
+const SIG_109: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 1 }, Operand { role: Role::Src1, class: Class::Av, dwords: 1 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_104: Sig = Sig {
+const SIG_110: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 1 }, Operand { role: Role::Src1, class: Class::Av, dwords: 1 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_105: Sig = Sig {
+const SIG_111: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 8 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 8 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_106: Sig = Sig {
+const SIG_112: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 2 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_107: Sig = Sig {
+const SIG_113: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
     uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }, Operand { role: Role::ScaleA, class: Class::V, dwords: 1 }, Operand { role: Role::ScaleB, class: Class::V, dwords: 1 }],
     imm: Imm::Mai,
     mods: 0x0,
 };
-const SIG_108: Sig = Sig {
+const SIG_114: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 1 }, Operand { role: Role::Srsrc, class: Class::S, dwords: 4 }, Operand { role: Role::Soffset, class: Class::Ss, dwords: 1 }],
     imm: Imm::Off12cpol,
     mods: 0x0,
 };
-const SIG_109: Sig = Sig {
+const SIG_115: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off12cpol,
     mods: 0x0,
 };
-const SIG_110: Sig = Sig {
+const SIG_116: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }],
     imm: Imm::None,
     mods: 0x70,
 };
-const SIG_111: Sig = Sig {
+const SIG_117: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Old, class: Class::V, dwords: 1 }],
     imm: Imm::None,
     mods: 0x80,
 };
-const SIG_112: Sig = Sig {
+const SIG_118: Sig = Sig {
+    defs: &[Operand { role: Role::Sdata, class: Class::S, dwords: 2 }],
+    uses: &[],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_119: Sig = Sig {
+    defs: &[],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
+    imm: Imm::Off13s,
+    mods: 0x2100,
+};
+const SIG_120: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }, Operand { role: Role::Vdata, class: Class::V, dwords: 2 }],
+    imm: Imm::Off13s,
+    mods: 0x3100,
+};
+const SIG_121: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc1, class: Class::V, dwords: 1 }],
+    imm: Imm::Dpp16,
+    mods: 0x0,
+};
+const SIG_122: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src2, class: Class::Vs, dwords: 1 }, Operand { role: Role::Old, class: Class::V, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x80,
+};
+const SIG_123: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }, Operand { role: Role::ScaleA, class: Class::V, dwords: 1 }, Operand { role: Role::ScaleB, class: Class::V, dwords: 1 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_124: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src2, class: Class::Vs, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x700007,
+};
+const SIG_125: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src2, class: Class::Vs, dwords: 1 }],
+    imm: Imm::Bitop3,
+    mods: 0x0,
+};
+const SIG_126: Sig = Sig {
+    defs: &[Operand { role: Role::Sdata, class: Class::S, dwords: 1 }],
+    uses: &[Operand { role: Role::Sbase, class: Class::S, dwords: 4 }],
+    imm: Imm::Soff21,
+    mods: 0x1000,
+};
+const SIG_127: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::V, dwords: 1 }, Operand { role: Role::Old, class: Class::V, dwords: 1 }],
+    imm: Imm::Dpp16,
+    mods: 0x0,
+};
+const SIG_128: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc1, class: Class::V, dwords: 1 }, Operand { role: Role::Old, class: Class::V, dwords: 1 }],
+    imm: Imm::Dpp16,
+    mods: 0x0,
+};
+const SIG_129: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x7,
+};
+const SIG_130: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }],
+    imm: Imm::None,
+    mods: 0x7,
+};
+const SIG_131: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Addr, class: Class::V, dwords: 1 }],
+    imm: Imm::Off2x8,
+    mods: 0x0,
+};
+const SIG_132: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 3 }],
+    uses: &[Operand { role: Role::Addr, class: Class::V, dwords: 1 }],
+    imm: Imm::Off16,
+    mods: 0x0,
+};
+const SIG_133: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }],
     imm: Imm::None,
     mods: 0x7,
 };
-const SIG_113: Sig = Sig {
+const SIG_134: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 2 }],
     imm: Imm::None,
@@ -2844,9 +3337,9 @@ const SIG_113: Sig = Sig {
 #[inline]
 pub fn signature(op: Opc) -> Option<&'static Sig> {
     match op {
-        Opc::VCmp(c) if VCMP64.contains(&c) => Some(&SIG_113),
-        Opc::VCmp(_) => Some(&SIG_112),
-        Opc::SMovB32 | Opc::SNotB32 => Some(&SIG_0),
+        Opc::VCmp(c) if VCMP64.contains(&c) => Some(&SIG_134),
+        Opc::VCmp(_) => Some(&SIG_133),
+        Opc::SMovB32 | Opc::SNotB32 | Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(&SIG_0),
         Opc::SMovB64 | Opc::SNotB64 => Some(&SIG_1),
         Opc::SAndSaveexecB64 => Some(&SIG_2),
         Opc::SAddU32 | Opc::SSubU32 | Opc::SAddI32 | Opc::SSubI32 | Opc::SAddcU32 | Opc::SSubbU32
@@ -2859,13 +3352,14 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::SCmpEqI32 | Opc::SCmpLgI32 | Opc::SCmpGtI32 | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32
         | Opc::SCmpEqU32 | Opc::SCmpLgU32 | Opc::SCmpGtU32 | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 => Some(&SIG_6),
         Opc::SCmpEqU64 | Opc::SCmpLgU64 => Some(&SIG_7),
-        Opc::SMovkI32 => Some(&SIG_8),
+        Opc::SMovkI32 | Opc::Gfx9(Gfx9Op::SGetregB32) => Some(&SIG_8),
         Opc::SNop => Some(&SIG_9),
         Opc::SWaitcnt | Opc::SWaitcntExplicit => Some(&SIG_10),
         Opc::SBranch | Opc::SCbranchScc0 | Opc::SCbranchScc1 | Opc::SCbranchExecz | Opc::SCbranchExecnz => Some(&SIG_11),
-        Opc::SEndpgm | Opc::SBarrier | Opc::SBarrierLds | Opc::SBarrierBare | Opc::VNop | Opc::SchedBarrier => Some(&SIG_12),
+        Opc::SEndpgm | Opc::SBarrier | Opc::SBarrierLds | Opc::SBarrierBare | Opc::VNop | Opc::SchedBarrier
+        | Opc::Gfx9(Gfx9Op::KeepAlive) | Opc::Gfx9(Gfx9Op::SDcacheInv) | Opc::Gfx9(Gfx9Op::WaitRelease) => Some(&SIG_12),
         Opc::SSendmsg => Some(&SIG_13),
-        Opc::SSetprio => Some(&SIG_14),
+        Opc::SSetprio | Opc::Gfx9(Gfx9Op::SSleep) => Some(&SIG_14),
         Opc::SLoadB32 => Some(&SIG_15),
         Opc::SLoadB64 => Some(&SIG_16),
         Opc::SLoadB128 => Some(&SIG_17),
@@ -2875,10 +3369,10 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         | Opc::Gfx9(Gfx9Op::VCvtF32Bf8) => Some(&SIG_20),
         Opc::VReadfirstlaneB32 => Some(&SIG_21),
         Opc::VCvtU32F32 | Opc::VCvtI32F32 | Opc::VCvtF16F32 | Opc::VTruncF32 | Opc::VExpF32 | Opc::VLogF32
-        | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRndneF32 => Some(&SIG_22),
+        | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRndneF32 | Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(&SIG_22),
         Opc::VCvtF32F16 => Some(&SIG_23),
         Opc::VMovB32Dpp => Some(&SIG_24),
-        Opc::VRcpF64 => Some(&SIG_25),
+        Opc::VRcpF64 | Opc::Gfx9(Gfx9Op::VRsqF64) => Some(&SIG_25),
         Opc::VCndmaskB32 => Some(&SIG_26),
         Opc::VAddF32 | Opc::VSubF32 | Opc::VSubrevF32 | Opc::VMulF32 | Opc::VMinF32 | Opc::VMaxF32
         | Opc::VFmacF32 => Some(&SIG_27),
@@ -2887,14 +3381,17 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         | Opc::VXorB32 | Opc::VAddNcU32 | Opc::VSubNcU32 | Opc::VSubrevNcU32 => Some(&SIG_28),
         Opc::VAddCoCiU32 | Opc::VSubCoCiU32 => Some(&SIG_29),
         Opc::VMadU32U24 | Opc::VBfeU32 | Opc::VBfeI32 | Opc::VMed3I32 | Opc::VPermB32 | Opc::VLshlAddU32
-        | Opc::VAddLshlU32 | Opc::VAdd3U32 | Opc::VLshlOrB32 | Opc::VAndOrB32 | Opc::VOr3B32 => Some(&SIG_30),
+        | Opc::VAddLshlU32 | Opc::VAdd3U32 | Opc::VLshlOrB32 | Opc::VAndOrB32 | Opc::VOr3B32
+        | Opc::Gfx9(Gfx9Op::VBfiB32) | Opc::Gfx9(Gfx9Op::VMin3I32) | Opc::Gfx9(Gfx9Op::VMin3U32)
+        | Opc::Gfx9(Gfx9Op::VMax3I32) | Opc::Gfx9(Gfx9Op::VMax3U32) | Opc::Gfx9(Gfx9Op::VMed3U32)
+        | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(&SIG_30),
         Opc::VFmaF32 | Opc::VMin3F32 | Opc::VMax3F32 | Opc::VDivFixupF32 | Opc::VDivFmasF32 => Some(&SIG_31),
         Opc::VMbcntLoU32B32 | Opc::VMbcntHiU32B32 | Opc::VMulLoU32 | Opc::VMulHiU32 | Opc::VMulHiI32
-        | Opc::PackF16 => Some(&SIG_32),
+        | Opc::PackF16 | Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(&SIG_32),
         Opc::VDivScaleF32 => Some(&SIG_33),
         Opc::VMadU64U32 | Opc::VMadI64I32 => Some(&SIG_34),
         Opc::VAddCoU32 | Opc::VSubCoU32 | Opc::VSubrevCoU32 => Some(&SIG_35),
-        Opc::VPackB32F16 => Some(&SIG_36),
+        Opc::VPackB32F16 | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) => Some(&SIG_36),
         Opc::VLdexpF32 | Opc::Gfx9(Gfx9Op::VCvtPkF16F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf16F32) => Some(&SIG_37),
         Opc::VLshlrevB64 | Opc::VLshrrevB64 | Opc::VAshrrevI64 => Some(&SIG_38),
         Opc::VReadlaneB32 => Some(&SIG_39),
@@ -2908,72 +3405,97 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::VFmaMixF32 | Opc::VFmaMixloF16 => Some(&SIG_47),
         Opc::VFmaMixhiF16 => Some(&SIG_48),
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsStoreB32 | Opc::DsStoreB16 | Opc::DsStoreB16D16Hi
-        | Opc::DsStoreB8 | Opc::DsStoreB8D16Hi => Some(&SIG_49),
+        | Opc::DsStoreB8 | Opc::DsStoreB8D16Hi | Opc::Gfx9(Gfx9Op::DsOrB32Raw)
+        | Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(&SIG_49),
         Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsBpermuteB32 => Some(&SIG_50),
         Opc::DsStore2addrB32 => Some(&SIG_51),
         Opc::DsSwizzleB32 => Some(&SIG_52),
-        Opc::DsLoadB32 | Opc::DsLoadU16 | Opc::DsLoadU8 => Some(&SIG_53),
+        Opc::DsLoadB32 | Opc::DsLoadU16 | Opc::DsLoadU8 | Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(&SIG_53),
         Opc::DsStoreB64 => Some(&SIG_54),
-        Opc::DsLoadB64 | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8) => Some(&SIG_55),
+        Opc::DsLoadB64 | Opc::Gfx9(Gfx9Op::DsReadB64TrB16) | Opc::Gfx9(Gfx9Op::DsReadB64TrB8)
+        | Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Some(&SIG_55),
         Opc::DsLoadU16D16 | Opc::DsLoadU16D16Hi => Some(&SIG_56),
         Opc::DsStoreB128 => Some(&SIG_57),
         Opc::DsLoadB128 => Some(&SIG_58),
-        Opc::GLoadU16 | Opc::GLoadB32 | Opc::GLoadU8 => Some(&SIG_59),
-        Opc::GLoadB64 => Some(&SIG_60),
-        Opc::GLoadB96 => Some(&SIG_61),
-        Opc::GLoadB128 => Some(&SIG_62),
-        Opc::GStoreB16 | Opc::GStoreB32 | Opc::GStoreD16HiB16 | Opc::GStoreB8 | Opc::GStoreD16HiB8 => Some(&SIG_63),
-        Opc::GStoreB64 => Some(&SIG_64),
-        Opc::GStoreB96 => Some(&SIG_65),
-        Opc::GStoreB128 => Some(&SIG_66),
-        Opc::GLoadD16B16 | Opc::GLoadD16HiB16 => Some(&SIG_67),
-        Opc::GAtomicAddU32 | Opc::GAtomicAddF32 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Some(&SIG_68),
-        Opc::ScratchLoadB32 => Some(&SIG_69),
-        Opc::ScratchLoadB64 => Some(&SIG_70),
-        Opc::ScratchLoadB96 => Some(&SIG_71),
-        Opc::ScratchLoadB128 => Some(&SIG_72),
-        Opc::ScratchStoreB32 => Some(&SIG_73),
-        Opc::ScratchStoreB64 => Some(&SIG_74),
-        Opc::ScratchStoreB96 => Some(&SIG_75),
-        Opc::ScratchStoreB128 => Some(&SIG_76),
-        Opc::GAtomicAddU32Rtn | Opc::GAtomicAddF32Rtn | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(&SIG_77),
-        Opc::BufLoadB32 | Opc::BufLoadU16 => Some(&SIG_78),
-        Opc::BufLoadB64 => Some(&SIG_79),
-        Opc::BufLoadB128 => Some(&SIG_80),
-        Opc::BufStoreB16 | Opc::BufStoreB32 | Opc::BufStoreD16HiB16 => Some(&SIG_81),
-        Opc::BufStoreB64 => Some(&SIG_82),
-        Opc::BufStoreB128 => Some(&SIG_83),
-        Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16 => Some(&SIG_84),
-        Opc::Copy => Some(&SIG_85),
-        Opc::ImplicitDef => Some(&SIG_86),
-        Opc::Gfx9(Gfx9Op::VPkFmaF32) => Some(&SIG_87),
-        Opc::Gfx9(Gfx9Op::VPkMulF32) | Opc::Gfx9(Gfx9Op::VPkAddF32) => Some(&SIG_88),
-        Opc::Gfx9(Gfx9Op::VPkMovB32) => Some(&SIG_89),
-        Opc::Gfx9(Gfx9Op::VMovB64) => Some(&SIG_90),
-        Opc::Gfx9(Gfx9Op::VLshlAddU64) => Some(&SIG_91),
-        Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) | Opc::Gfx9(Gfx9Op::VPermlane32SwapB32) => Some(&SIG_92),
-        Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Some(&SIG_93),
-        Opc::Gfx9(Gfx9Op::VAccvgprReadB32) => Some(&SIG_94),
-        Opc::Gfx9(Gfx9Op::VAccvgprWriteB32) => Some(&SIG_95),
-        Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Some(&SIG_96),
-        Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64) => Some(&SIG_97),
-        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) => Some(&SIG_98),
+        Opc::GLoadU16 | Opc::GLoadU8 => Some(&SIG_59),
+        Opc::GLoadB32 => Some(&SIG_60),
+        Opc::GLoadB64 => Some(&SIG_61),
+        Opc::GLoadB96 => Some(&SIG_62),
+        Opc::GLoadB128 => Some(&SIG_63),
+        Opc::GStoreB16 | Opc::GStoreD16HiB16 | Opc::GStoreB8 | Opc::GStoreD16HiB8 => Some(&SIG_64),
+        Opc::GStoreB32 => Some(&SIG_65),
+        Opc::GStoreB64 => Some(&SIG_66),
+        Opc::GStoreB96 => Some(&SIG_67),
+        Opc::GStoreB128 => Some(&SIG_68),
+        Opc::GLoadD16B16 | Opc::GLoadD16HiB16 => Some(&SIG_69),
+        Opc::GAtomicAddU32 => Some(&SIG_70),
+        Opc::GAtomicAddF32 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Some(&SIG_71),
+        Opc::ScratchLoadB32 => Some(&SIG_72),
+        Opc::ScratchLoadB64 => Some(&SIG_73),
+        Opc::ScratchLoadB96 => Some(&SIG_74),
+        Opc::ScratchLoadB128 => Some(&SIG_75),
+        Opc::ScratchStoreB32 => Some(&SIG_76),
+        Opc::ScratchStoreB64 => Some(&SIG_77),
+        Opc::ScratchStoreB96 => Some(&SIG_78),
+        Opc::ScratchStoreB128 => Some(&SIG_79),
+        Opc::GAtomicAddU32Rtn => Some(&SIG_80),
+        Opc::GAtomicAddF32Rtn | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(&SIG_81),
+        Opc::BufLoadB32 => Some(&SIG_82),
+        Opc::BufLoadB64 => Some(&SIG_83),
+        Opc::BufLoadB128 => Some(&SIG_84),
+        Opc::BufStoreB16 | Opc::BufStoreD16HiB16 => Some(&SIG_85),
+        Opc::BufStoreB32 => Some(&SIG_86),
+        Opc::BufStoreB64 => Some(&SIG_87),
+        Opc::BufStoreB128 => Some(&SIG_88),
+        Opc::BufLoadU16 => Some(&SIG_89),
+        Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16 => Some(&SIG_90),
+        Opc::Copy => Some(&SIG_91),
+        Opc::ImplicitDef => Some(&SIG_92),
+        Opc::Gfx9(Gfx9Op::VPkFmaF32) => Some(&SIG_93),
+        Opc::Gfx9(Gfx9Op::VPkMulF32) | Opc::Gfx9(Gfx9Op::VPkAddF32) => Some(&SIG_94),
+        Opc::Gfx9(Gfx9Op::VPkMovB32) => Some(&SIG_95),
+        Opc::Gfx9(Gfx9Op::VMovB64) => Some(&SIG_96),
+        Opc::Gfx9(Gfx9Op::VLshlAddU64) => Some(&SIG_97),
+        Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) | Opc::Gfx9(Gfx9Op::VPermlane32SwapB32) => Some(&SIG_98),
+        Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Some(&SIG_99),
+        Opc::Gfx9(Gfx9Op::VAccvgprReadB32) => Some(&SIG_100),
+        Opc::Gfx9(Gfx9Op::VAccvgprWriteB32) => Some(&SIG_101),
+        Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Some(&SIG_102),
+        Opc::Gfx9(Gfx9Op::SBcnt1I32B64) | Opc::Gfx9(Gfx9Op::SFf1I32B64) => Some(&SIG_103),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) => Some(&SIG_104),
         Opc::Gfx9(Gfx9Op::VMfma16x16x16F16) | Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16)
         | Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) | Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16)
         | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8)
-        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Some(&SIG_99),
-        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) => Some(&SIG_100),
-        Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) => Some(&SIG_101),
-        Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Some(&SIG_102),
-        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Some(&SIG_103),
-        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Some(&SIG_104),
-        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Some(&SIG_105),
-        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Some(&SIG_106),
-        Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4) => Some(&SIG_107),
-        Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) => Some(&SIG_108),
-        Opc::Gfx9(Gfx9Op::GLoadLdsB32) | Opc::Gfx9(Gfx9Op::GLoadLdsB128) => Some(&SIG_109),
-        Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8) | Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8) => Some(&SIG_110),
-        Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some(&SIG_111),
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Some(&SIG_105),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) => Some(&SIG_106),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) => Some(&SIG_107),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Some(&SIG_108),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Some(&SIG_109),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Some(&SIG_110),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Some(&SIG_111),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Some(&SIG_112),
+        Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4) => Some(&SIG_113),
+        Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) => Some(&SIG_114),
+        Opc::Gfx9(Gfx9Op::GLoadLdsB32) | Opc::Gfx9(Gfx9Op::GLoadLdsB128) => Some(&SIG_115),
+        Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8) | Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8) => Some(&SIG_116),
+        Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some(&SIG_117),
+        Opc::Gfx9(Gfx9Op::SMemrealtime) | Opc::Gfx9(Gfx9Op::SMemtime) => Some(&SIG_118),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Some(&SIG_119),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Some(&SIG_120),
+        Opc::Gfx9(Gfx9Op::VAddU32Dpp) | Opc::Gfx9(Gfx9Op::VAddF32Dpp) | Opc::Gfx9(Gfx9Op::VMulF32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMaxF32Dpp) | Opc::Gfx9(Gfx9Op::VMaxU32Dpp) | Opc::Gfx9(Gfx9Op::VMaxI32Dpp)
+        | Opc::Gfx9(Gfx9Op::VMinI32Dpp) | Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(&SIG_121),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) => Some(&SIG_122),
+        Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Some(&SIG_123),
+        Opc::Gfx9(Gfx9Op::VMaximum3F32) => Some(&SIG_124),
+        Opc::Gfx9(Gfx9Op::VBitop3B32) => Some(&SIG_125),
+        Opc::Gfx9(Gfx9Op::SBufLoadB32) => Some(&SIG_126),
+        Opc::Gfx9(Gfx9Op::VMovB32DppOld) => Some(&SIG_127),
+        Opc::Gfx9(Gfx9Op::VMaxU32DppOld) => Some(&SIG_128),
+        Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some(&SIG_129),
+        Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some(&SIG_130),
+        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(&SIG_131),
+        Opc::Gfx9(Gfx9Op::DsReadB96) | Opc::Gfx9(Gfx9Op::DsReadB96TrB6) => Some(&SIG_132),
         #[allow(unreachable_patterns)]
         _ => None,
     }

@@ -132,6 +132,16 @@ pub fn lds_layout(kernel: &Kernel) -> (FxHashMap<ValueId, u32>, u32) {
         }
     }
     live.sort_by_key(|(value, _)| intervals.get(value).map_or(0, |iv| iv.0));
+    // rustgemm lever `ldsgroup`: allocations of at most 4 KiB first (in the same order among themselves), so small
+    // per-stage tiles of different operands (the MXFP6 GEMM's A- and B-scale tiles) sit within one 12-bit DMA
+    // instruction offset of each other (`m0share`). Offsets only move; every access still names its allocation.
+    if super::kernel_lever("ldsgroup") {
+        let bytes = |v: &ValueId| match kernel.ty(*v) {
+            Type::Smem(elem, shape) => elem.bytes() as usize * shape.iter().map(|&d| d as usize).product::<usize>(),
+            _ => 0,
+        };
+        live.sort_by_key(|(value, _)| bytes(value) > 4096);
+    }
     if live.is_empty() {
         return (offsets, 0);
     }
@@ -221,8 +231,11 @@ pub fn classify(kernel: &Kernel) -> Vec<bool> {
                 Rule::Always(value) => value,
                 Rule::Inputs(inputs) => inputs.iter().all(|v| u(&uniform, v)),
             };
-            for &result in &op.results {
-                set(&mut uniform, result, value);
+            // A general inline asm (not an identity pin): its SGPR outputs are uniform.
+            let classes = if op.asm_pin().is_none() { op.asm_output_classes() } else { None };
+            for (k, &result) in op.results.iter().enumerate() {
+                let one = classes.as_ref().and_then(|c| c.get(k)).map_or(value, |&c| c == 's');
+                set(&mut uniform, result, one);
             }
             if op.kind.writes_global() {
                 top.written = true;
@@ -332,8 +345,15 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         OpKind::SmemAddrOf => Rule::Always(true),
         OpKind::SmemPtrAdd => Rule::Inputs(&op.operands),
         // Wave votes: one value for the whole wave.
-        OpKind::WaveAny | OpKind::WaveAll => Rule::Always(true),
+        OpKind::WaveAny | OpKind::WaveAll | OpKind::WaveBallot => Rule::Always(true),
         OpKind::ReadLane => Rule::Always(true),
+        // Scalar reads of hardware state (`s_getreg_b32`, `s_memrealtime`).
+        OpKind::SGetreg | OpKind::MemRealtime | OpKind::MemTime => Rule::Always(true),
+        // A scalar instruction of a uniform value (validation refuses a divergent one).
+        OpKind::SFf1 => Rule::Inputs(&op.operands),
+        OpKind::IntToPtr => Rule::Inputs(&op.operands),
+        // An SGPR pin keeps a uniform value uniform (validation refuses it on a divergent one).
+        OpKind::InlineAsmIdentity if op.asm_pin() == Some('s') => Rule::Inputs(&op.operands),
         OpKind::Not | OpKind::GlobalPtrToI64 => Rule::Inputs(&op.operands),
         OpKind::VecBitcast => Rule::Inputs(op.operands.get(..1).unwrap_or(&[])),
         OpKind::Add
@@ -506,7 +526,9 @@ pub fn smem_eligible(kernel: &Kernel, op: &Op, uniform: &[bool], written: bool) 
 
 /// `smem_eligible` but for the uniformity of the address.
 fn smem_eligible_statically(kernel: &Kernel, op: &Op, written: bool) -> bool {
-    if op.kind != OpKind::GLoad || written {
+    // A load through a `ptr<T,constant>` (`invariant`) reads memory no wave
+    // writes during the launch, so earlier global writes do not matter.
+    if op.kind != OpKind::GLoad || (written && op.bool_attr("invariant") != Some(true)) {
         return false;
     }
     let Some(&result) = op.results.first() else { return false };
@@ -608,7 +630,7 @@ fn canonical_rule<'a>(kernel: &Kernel, facts: &Facts, op: &'a Op) -> Rule<'a> {
     let first = |n: usize| op.operands.get(..n).unwrap_or(&[]);
     match op.kind {
         // An inline-asm LDS read (gfx950) gives what memory holds.
-        OpKind::InlineAsmIdentity if op.str_attr("template").is_some_and(|t| !t.is_empty()) => Rule::Always(false),
+        OpKind::InlineAsmIdentity if op.asm_pin().is_none() => Rule::Always(false),
         OpKind::Constant => {
             let konst = op.results.first().and_then(|r| facts.konst.get(r.0 as usize).copied().flatten());
             Rule::Always(match konst {
@@ -643,7 +665,10 @@ fn canonical_rule<'a>(kernel: &Kernel, facts: &Facts, op: &'a Op) -> Rule<'a> {
         | OpKind::RcpFast
         | OpKind::Rsqrt
         | OpKind::Tanh
-        | OpKind::SitofpF32 => Rule::Always(true),
+        | OpKind::SitofpF32
+        | OpKind::Exp
+        | OpKind::MfmaScaleMx
+        | OpKind::CvtF64ToF32 => Rule::Always(true),
         // A bf16 widens by a shift, which keeps a signaling NaN.
         OpKind::CastToF32 => Rule::Always(op.operands.first().is_some_and(|&v| kernel.ty(v).elem() != Scalar::BF16)),
         OpKind::VecAdd | OpKind::VecSub | OpKind::VecMul | OpKind::VecFma => {
