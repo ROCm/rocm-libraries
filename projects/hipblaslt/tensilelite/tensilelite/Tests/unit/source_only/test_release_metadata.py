@@ -81,7 +81,41 @@ def test_cli_ignores_the_rocm_environment(tmp_path):
     assert result.stdout == "5.0.0\n"
 
 
-@pytest.mark.parametrize("args", [[], ["rocm-root"], ["version", "extra"], ["/opt/rocm"]])
+@pytest.mark.parametrize(
+    ("identity", "label"),
+    [
+        ("7.12.0", "rocm7.12.0"),
+        ("7.12.0rc1", "rocm7.12.0rc1"),
+        ("7.12.0a20261110", "rocm7.12.0a20261110"),
+        ("7.12.0+bkc.20261110", "rocm7.12.0.bkc.20261110"),
+        (f"7.12.0.dev0+{_SHA}", f"devrocm7.12.0.dev0.{_SHA}"),
+        (f"7.12.0.dev0+{_SHA}.asan", f"devrocm7.12.0.dev0.{_SHA}.asan"),
+    ],
+)
+def test_rocm_identity_replaces_the_commit_label(tmp_path, identity, label):
+    script = _copy_metadata(tmp_path / "src")
+    metadata = runpy.run_path(str(script))
+
+    assert metadata["distribution_version"](_SHA, identity) == f"5.0.0+{label}"
+    result = _run(script, "version", "--rocm-identity", identity, TENSILELITE_SOURCE_REVISION=_SHA)
+    assert result.stdout == f"5.0.0+{label}\n", result.stderr
+
+
+@pytest.mark.parametrize("identity", ["git", "seven", "7.12", ""])
+def test_rocm_identity_must_be_a_version(tmp_path, identity):
+    metadata = runpy.run_path(str(_copy_metadata(tmp_path / "src")))
+
+    if identity:
+        with pytest.raises(RuntimeError, match="ROCm identity must look like"):
+            metadata["distribution_version"](_SHA, identity)
+    else:
+        assert metadata["distribution_version"](_SHA, identity) == f"5.0.0+g{_SHA}"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [[], ["rocm-root"], ["version", "extra"], ["/opt/rocm"], ["source-revision", "--rocm-identity", "7.2.4"]],
+)
 def test_cli_rejects_other_arguments(tmp_path, args):
     script = _copy_metadata(tmp_path / "src")
 

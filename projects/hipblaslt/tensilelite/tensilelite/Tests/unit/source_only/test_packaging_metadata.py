@@ -4,10 +4,12 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
+import os
 import re
 import runpy
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -99,6 +101,94 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     }
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
+
+
+def _pip_wheel(source, out, env):
+    subprocess.run(
+        [sys.executable, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
+         "--disable-pip-version-check", "--wheel-dir", str(out), str(source)],
+        cwd=source, env=env, check=True, capture_output=True, text=True,
+    )
+    (wheel,) = Path(out).glob("*.whl")
+    return wheel
+
+
+def _clean_env(**extra):
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("TENSILELITE_ROCM_VERSION", "ROCM_PATH", "TENSILELITE_SOURCE_REVISION")
+    }
+    env.update(extra)
+    return env
+
+
+def test_explicit_rocm_identity_labels_the_wheel_and_keeps_the_source_root_clean(tmp_path):
+    source_root = _isolated_source(tmp_path)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+
+    wheel = _pip_wheel(
+        source_root,
+        tmp_path / "out",
+        _clean_env(TENSILELITE_ROCM_VERSION="7.12.0rc1", TENSILELITE_SOURCE_REVISION=sha),
+    )
+
+    assert wheel.name == "tensilelite-5.0.0+rocm7.12.0rc1-py3-none-any.whl"
+    with zipfile.ZipFile(wheel) as archive:
+        assert f"SOURCE_REVISION = {sha!r}" in archive.read("tensilelite/_build_info.py").decode()
+    assert not (source_root / "tensilelite.egg-info").exists()
+
+
+def test_sdist_keeps_its_rocm_identity_when_built_into_a_wheel(tmp_path):
+    source_root = _isolated_source(tmp_path)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    sdist_dir = tmp_path / "sdist"
+    subprocess.run(
+        [sys.executable, "-c",
+         "import sys; from setuptools import build_meta; build_meta.build_sdist(sys.argv[1])",
+         str(sdist_dir)],
+        cwd=source_root,
+        env=_clean_env(TENSILELITE_ROCM_VERSION="7.12.0", TENSILELITE_SOURCE_REVISION=sha),
+        check=True, capture_output=True, text=True,
+    )
+    (sdist,) = sdist_dir.glob("*.tar.gz")
+    assert sdist.name == "tensilelite-5.0.0+rocm7.12.0.tar.gz"
+    with tarfile.open(sdist) as archive:
+        archive.extractall(tmp_path / "unpacked", filter="data")
+    (unpacked,) = (tmp_path / "unpacked").iterdir()
+
+    wheel = _pip_wheel(unpacked, tmp_path / "wheel", _clean_env())
+    assert wheel.name == "tensilelite-5.0.0+rocm7.12.0-py3-none-any.whl"
+
+    mismatch = subprocess.run(
+        [sys.executable, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
+         "--wheel-dir", str(tmp_path / "other"), str(unpacked)],
+        env=_clean_env(TENSILELITE_ROCM_VERSION="7.13.0"),
+        capture_output=True, text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "this sdist was made as 5.0.0+rocm7.12.0" in mismatch.stdout + mismatch.stderr
+
+
+def test_cmake_stamps_an_identity_only_for_therock_builds():
+    python_cmake = (_PROJECT_ROOT.parent / "cmake/hipblaslt_python.cmake").read_text(
+        encoding="utf-8"
+    )
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    resolver = python_cmake.split("function(hipblaslt_resolve_build_rocm_version", 1)[1].split(
+        "endfunction()", 1
+    )[0]
+
+    # No provisional 0.0.0, no THEROCK_ROCM_VERSION and no .info/version: a
+    # build without TheRock's real package version is a development build.
+    for retired in ("0.0.0", "THEROCK_ROCM_VERSION", ".info/version", "version.json"):
+        assert retired not in resolver
+    for retired in ("THEROCK_ROCM_VERSION", "version.json"):
+        assert retired not in cmake
+    assert '"release_metadata.py" version ${_tensilelite_identity_args}' in cmake.replace(
+        "${_tensilelite_source_root}/", ""
+    )
+    assert '"TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"' in cmake
 
 
 def test_installed_test_artifact_includes_client_binding_modules():
