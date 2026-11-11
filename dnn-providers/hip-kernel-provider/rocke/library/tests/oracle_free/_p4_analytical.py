@@ -333,8 +333,14 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
                 "+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3"
             ),
             code_objects=(
-                ("fp16", "ba92c6283870841e1e8405ac07ea04f294a25c15e8704e9a493a46807f43ac3d"),
-                ("bf16", "e34c0c0287fcf41f71f7a4cec2dc00758194beb090c4a2131aef21ad6ccebfad"),
+                (
+                    "fp16",
+                    "ba92c6283870841e1e8405ac07ea04f294a25c15e8704e9a493a46807f43ac3d",
+                ),
+                (
+                    "bf16",
+                    "e34c0c0287fcf41f71f7a4cec2dc00758194beb090c4a2131aef21ad6ccebfad",
+                ),
             ),
             single_lanes=frozenset({0, 1}),
             evidence="ISA, and every coordinate of both Phase 4 gfx942 captures",
@@ -345,8 +351,14 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
                 "1b0eada6b0ee93e2e694c8c146d23fca90bc11c5"
             ),
             code_objects=(
-                ("fp16", "b6184c4035a00ca49af86f90215b70f06c9fbce01dcaa95ceeeca7fbc866dd06"),
-                ("bf16", "d748447b7b854f82f12bf2e04a5aab1ed13d0a4a4f2402a696669591e2c6be19"),
+                (
+                    "fp16",
+                    "b6184c4035a00ca49af86f90215b70f06c9fbce01dcaa95ceeeca7fbc866dd06",
+                ),
+                (
+                    "bf16",
+                    "d748447b7b854f82f12bf2e04a5aab1ed13d0a4a4f2402a696669591e2c6be19",
+                ),
             ),
             single_lanes=frozenset({0, 3}),
             evidence="ISA only; never launched",
@@ -487,9 +499,7 @@ def target_value(bits: int, dtype: str) -> Fraction:
 _TARGET_FORMAT = {"fp16": (10, 5, 15), "bf16": (7, 8, 127)}
 
 
-def ordered_distance(
-    first: tuple[int, int], second: tuple[int, int]
-) -> int:
+def ordered_distance(first: tuple[int, int], second: tuple[int, int]) -> int:
     """Target-ULP gap between two bit ranges of nonnegative values; 0 if they meet."""
     if first[1] < second[0]:
         return second[0] - first[1]
@@ -540,8 +550,14 @@ _FIXTURE_SHIFT = {
 def _is_signed_power_of_two(value: Fraction) -> bool:
     magnitude = abs(value)
     return magnitude > 0 and (
-        (magnitude.denominator == 1 and magnitude.numerator & (magnitude.numerator - 1) == 0)
-        or (magnitude.numerator == 1 and magnitude.denominator & (magnitude.denominator - 1) == 0)
+        (
+            magnitude.denominator == 1
+            and magnitude.numerator & (magnitude.numerator - 1) == 0
+        )
+        or (
+            magnitude.numerator == 1
+            and magnitude.denominator & (magnitude.denominator - 1) == 0
+        )
     )
 
 
@@ -608,7 +624,11 @@ class P4Case:
     def residue_shift(self) -> int:
         """``r`` such that key ``k`` is distinguished for row ``q`` iff
         ``k + r = q (mod 64)``."""
-        return self.shift if self.fixture is P4Fixture.CYCLIC else _FIXTURE_SHIFT[self.fixture]
+        return (
+            self.shift
+            if self.fixture is P4Fixture.CYCLIC
+            else _FIXTURE_SHIFT[self.fixture]
+        )
 
     @property
     def case_id(self) -> str:
@@ -753,9 +773,7 @@ def p4_query_key(case: P4Case) -> tuple[np.ndarray, np.ndarray]:
 P4_EXPOSURES = (*(f"basis@{offset}" for offset in UNIFORM_BASIS_OFFSETS), "folded")
 
 
-def p4_inputs(
-    case: P4Case, exposure: str
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def p4_inputs(case: P4Case, exposure: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Q, K and the P3 exposure's V (scaled ``2**h`` per KV head)."""
     q, k = p4_query_key(case)
     if exposure == "folded":
@@ -891,7 +909,11 @@ def exposure_key(case: P4Case, exposure: str, dim: int, tile: int) -> int | None
     if exposure == "folded":
         return start + dim
     key = _basis_offset(exposure) + dim
-    return key if start <= key < start + case.block_n and key < case.base.seqlen_k else None
+    return (
+        key
+        if start <= key < start + case.block_n and key < case.base.seqlen_k
+        else None
+    )
 
 
 @cache
@@ -899,7 +921,9 @@ def _scaled_cast(dtype: str, weight: F32Interval, exponent: int) -> F32Interval:
     """PV product interval ``q_T(p~) * 2**h``: exact in FP32."""
     low, high = cast_bits_hull(weight, dtype)
     scale = Fraction(2) ** exponent
-    return F32Interval(target_value(low, dtype) * scale, target_value(high, dtype) * scale)
+    return F32Interval(
+        target_value(low, dtype) * scale, target_value(high, dtype) * scale
+    )
 
 
 MFMA_ROUNDING = ("faithful", "rn")
@@ -1074,16 +1098,19 @@ def certified_target_bits(
     with localcontext() as context:
         context.prec = digits
         growth = (Decimal(item.logit.numerator) / Decimal(item.logit.denominator)).exp()
-        value = Fraction(
-            (item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0)
-        ) * scale
+        value = (
+            Fraction((item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0))
+            * scale
+        )
     bits = target_bits(value.numerator, value.denominator, dtype)
     center = target_value(bits, dtype)
     below = (target_value(bits - 1, dtype) + center) / 2 if bits else Fraction(0)
     above = (target_value(bits + 1, dtype) + center) / 2
     margin = value * Fraction(1, 10 ** (digits - 10))
     if not below + margin < value < above - margin:
-        raise ArithmeticError(f"target {float(value)!r} is not certified at {digits} digits")
+        raise ArithmeticError(
+            f"target {float(value)!r} is not certified at {digits} digits"
+        )
     return bits
 
 
@@ -1109,8 +1136,8 @@ def tier_a_bounds(
                 center[:, query, head, dim] = certified_target_bits(
                     case.dtype, exponent, item
                 )
-                radius[:, query, head, dim] = 0 if item.is_zero else (
-                    1 if item.is_row_max else 2
+                radius[:, query, head, dim] = (
+                    0 if item.is_zero else (1 if item.is_row_max else 2)
                 )
     return center, radius
 
@@ -1178,9 +1205,7 @@ def emulate_row(
     single_lanes = (
         P4_EPILOGUE_ARTIFACTS[artifact].single_lanes if artifact else frozenset()
     )
-    accumulator, reciprocal = _emulate_path(
-        case, exposure, query, head, rng, mutation
-    )
+    accumulator, reciprocal = _emulate_path(case, exposure, query, head, rng, mutation)
     bits = []
     for dim, value in enumerate(accumulator):
         if mode is EmulationMode.RANDOMIZED_SEMANTIC:
@@ -1201,7 +1226,10 @@ def epilogue_alternatives(
     accumulator, reciprocal = _emulate_path(case, exposure, query, head, None, None)
     double, single = (
         np.array(
-            [_store_bits(value, reciprocal, case.dtype, single=s) for value in accumulator],
+            [
+                _store_bits(value, reciprocal, case.dtype, single=s)
+                for value in accumulator
+            ],
             dtype=np.uint16,
         )
         for s in (False, True)
@@ -1288,7 +1316,9 @@ def _emulate_path(
             key = exposure_key(case, exposure, dim, tile)
             if key is None:
                 continue
-            cast = target_value(_cast_bits(weights[key - start], case.dtype), case.dtype)
+            cast = target_value(
+                _cast_bits(weights[key - start], case.dtype), case.dtype
+            )
             product = np.float32(float(cast)) * scale
             if product == 0:
                 continue
@@ -1325,7 +1355,9 @@ def fixture_family(fixture: P4Fixture) -> str:
     return "walsh" if P4Fixture(fixture) is P4Fixture.WALSH else "periodic"
 
 
-def _logit_case(base: UniformCase, block_m: int, family: str, logits: Sequence[Fraction]) -> P4Case:
+def _logit_case(
+    base: UniformCase, block_m: int, family: str, logits: Sequence[Fraction]
+) -> P4Case:
     """A case whose head ``h`` has logit ``logits[h]`` with ``b_h = 1``."""
     fixture = P4Fixture.WALSH if family == "walsh" else P4Fixture.IDENTITY
     factor = Fraction(1, 8) if family == "walsh" else Fraction(8)
@@ -1340,7 +1372,12 @@ def _logit_case(base: UniformCase, block_m: int, family: str, logits: Sequence[F
 
 @cache
 def logit_gap(
-    base: UniformCase, block_m: int, family: str, head: int, logit: Fraction, other: Fraction
+    base: UniformCase,
+    block_m: int,
+    family: str,
+    head: int,
+    logit: Fraction,
+    other: Fraction,
 ) -> int:
     """Largest Tier B separation, over the sampled rows and every exposure, of
     head ``head`` computed with logit ``logit`` versus ``other``."""
@@ -1402,12 +1439,18 @@ def search_head_scales(
     """Maximize :func:`head_scale_margin` over signed power-of-two ``a_h``;
     ``b_h`` follows from the head logit. Ties prefer scales nearest one."""
     logits = P4_HEAD_LOGITS[family]
-    choices = [Fraction(sign) * Fraction(2) ** power for power in exponents for sign in (1, -1)]
+    choices = [
+        Fraction(sign) * Fraction(2) ** power for power in exponents for sign in (1, -1)
+    ]
     product_of = (lambda c: c / 8) if family == "walsh" else (lambda c: c * 8)
 
     def k_scale(head: int, a: Fraction) -> Fraction | None:
         b = product_of(logits[head]) / a
-        return b if _is_signed_power_of_two(b) and Fraction(1, 64) <= abs(b) <= 64 else None
+        return (
+            b
+            if _is_signed_power_of_two(b) and Fraction(1, 64) <= abs(b) <= 64
+            else None
+        )
 
     best: tuple[int, int, tuple, tuple] | None = None
     for combination in itertools.product(choices, repeat=len(logits)):
@@ -1447,7 +1490,9 @@ P4_HEAD_SCALES: Mapping[str, tuple[tuple[Fraction, ...], tuple[Fraction, ...]]] 
         }
     )
 )
-P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType({"periodic": 181, "walsh": 181})
+P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType(
+    {"periodic": 181, "walsh": 181}
+)
 P4_CYCLIC_SHIFT = 37
 P4_LATE_KEYS = 64
 # Tile sizes of the calibrated P3 quick specs (the same dispatch identities).
@@ -1829,7 +1874,14 @@ def analyze_p4_policy(
         labels[valid & required_zero & (bits != 0)] = P4Label.STRUCTURAL.value
         outside = valid & ~required_zero & ~inside
         judged[exposure] = (
-            bits, low, high, center, radius, required_zero, labels, outside
+            bits,
+            low,
+            high,
+            center,
+            radius,
+            required_zero,
+            labels,
+            outside,
         )
 
     basis = [name for name in judged if name != "folded"]
@@ -1910,9 +1962,13 @@ def analyze_p4_policy(
                     if label != P4Label.PASS.value:
                         group.labels[label] = group.labels.get(label, 0) + 1
                 if decoded is not None:
-                    stored = float(np.max(np.abs(
-                        decoded[cell].sum(axis=-1) - targets[cell].sum(axis=-1)
-                    )))
+                    stored = float(
+                        np.max(
+                            np.abs(
+                                decoded[cell].sum(axis=-1) - targets[cell].sum(axis=-1)
+                            )
+                        )
+                    )
                     real = float(np.max(np.abs(decoded[cell].sum(axis=-1) - 1.0)))
                     group.max_row_sum_stored = max(group.max_row_sum_stored, stored)
                     group.max_row_sum_real = max(group.max_row_sum_real, real)
@@ -2103,9 +2159,11 @@ def p4_records(
                 "two_value_b": result.ambiguous,
                 "two_value_b_upper": result.ambiguous_high,
                 "cpu_gap": None if separation is None else separation.gap,
-                "cpu_gap_at": None
-                if separation is None or separation.coordinate is None
-                else [separation.exposure, list(separation.coordinate)],
+                "cpu_gap_at": (
+                    None
+                    if separation is None or separation.coordinate is None
+                    else [separation.exposure, list(separation.coordinate)]
+                ),
             }
         )
     records.append(

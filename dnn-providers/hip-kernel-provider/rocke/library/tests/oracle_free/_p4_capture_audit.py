@@ -149,7 +149,9 @@ def audit_case(
                     )
                 unexplained.extend(
                     ((exposure, query, head, int(dim)), int(observed[dim]))
-                    for dim in np.nonzero((observed != double) & (observed != single))[0]
+                    for dim in np.nonzero((observed != double) & (observed != single))[
+                        0
+                    ]
                 )
     return CaseAudit(
         case.case_id,
