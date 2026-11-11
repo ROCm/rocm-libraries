@@ -38,6 +38,7 @@
  * only piece still a peer port (no C constructor for the opaque field).
  */
 
+#include "rocke/instance_conv_fwd_split_k_reduce.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
@@ -552,10 +553,11 @@ bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
 
 /* ---- split-K forward admission ------------------------------------------ *
  *
- * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
- * (mem / wavelet) run over one slice, with an fp32 store into the workspace
- * slab. The paths that drive the K loop differently, remap the grid, merge
- * groups, or take the pointwise fast path are not wired for it. */
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain K loop
+ * (WMMA mem / wavelet; MFMA mem / compv3 / compv4) run over one slice, with an
+ * fp32 store into the workspace slab. The paths that drive the K loop
+ * differently, remap the grid, merge groups, or take the pointwise fast path
+ * are not wired for it. */
 bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                                       const char* family,
                                       const char* arch,
@@ -567,10 +569,41 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
     }
+    /* MFMA pipelines whose K loop is the single scf.for the slice bounds
+     * drive (Python _FWD_SPLIT_K_MFMA_PIPELINES). A NULL pipeline is rejected
+     * like Python's pipeline=None, not read as "mem": the spec default already
+     * supplies "mem", so NULL only comes from a caller that cleared it. */
     if(family == NULL || strcmp(family, "wmma") != 0)
     {
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "split-K forward is WMMA-only (built and tested on wave32)");
+        const char* pl = s->pipeline;
+        if(pl == NULL
+           || (strcmp(pl, "mem") != 0 && strcmp(pl, "compv3") != 0 && strcmp(pl, "compv4") != 0))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward on MFMA runs the plain K loop only "
+                            "(mem, compv3, compv4; got %s)",
+                            pl != NULL ? pl : "None");
+        }
+    }
+    /* The two-stage form folds the slabs through Stage 2 on every family, and
+     * the cluster form folds them in Stage 1 with the same cast, so ask Stage
+     * 2's own validator for the output dtype: fp32 (plain or under mma_dtype
+     * "tf32") stays unsplit. Python: fwd_split_k_reduce_reason. */
+    if(s->split_k > 1)
+    {
+        rocke_fwd_split_k_reduce_spec_t r = rocke_fwd_split_k_reduce_spec_default();
+        char why[256] = {0};
+        r.dtype_d = s->dtype_d;
+        if(!rocke_fwd_split_k_reduce_is_valid_spec(&r, why, sizeof(why)))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward %s: %s",
+                            s->split_k_cluster ? "folds through the cluster"
+                                               : "reduces through Stage 2",
+                            why);
+        }
     }
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
     {
@@ -1129,6 +1162,17 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
+    /* A NULL pipeline / epilogue (Python None) is a malformed spec, not a
+     * request for the "mem" / "default" defaults: refused before any rule
+     * reads them, as Python is_valid_spec does. */
+    if(s->pipeline == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pipeline must be set (got None)");
+    }
+    if(s->epilogue == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "epilogue must be set (got None)");
+    }
     if(arch == NULL)
     {
         arch = "gfx950";
@@ -1228,12 +1272,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     }
 
     /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
-     * Mirrors the Python is_valid_spec LDS check (added on this branch):
+     * Mirrors Python implicit_gemm_lds_bytes / is_valid_spec:
      *   _ab_dtype_bytes = 4 if dtype_a == "fp32" else 2
      *   _a_shape = effective_lds_layout().storage_shape(tile_m) = (tile_m, row_stride)
      *   _b_shape = effective_lds_layout().storage_shape(tile_n) = (tile_n, row_stride)
      *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
-     *   _ab_lds   = _ab_bytes * (2 if double_buffer else 1)
+     *   _double   = async_dma or unroll_k  (the builders' double_buffer; compv4
+     *               alone runs the single-buffer loop and allocates one A/B tile)
+     *   _ab_lds   = _ab_bytes * (2 if _double else 1)
      *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
      *   _total_lds = (ab_lds + c_lds) if cshuffle_no_alias else max(ab_lds, c_lds)
      *               (aliased default overlaps C onto A/B -> max; no-alias gives C
@@ -1260,10 +1306,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
-        double_buf
-            = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
-                  ? 1
-                  : 0;
+        double_buf = (s->async_dma || s->unroll_k) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
@@ -1285,9 +1328,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
-                            "LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
+                            "LDS budget %d bytes (A/B=%s%d, C=%d) > %d cap on %s",
                             total_lds,
-                            ab_lds,
+                            double_buf ? "x2 " : "",
+                            ab_bytes,
                             c_lds,
                             target->lds_capacity_bytes,
                             arch);

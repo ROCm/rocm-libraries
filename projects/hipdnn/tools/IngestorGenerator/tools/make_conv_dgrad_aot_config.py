@@ -6,10 +6,10 @@
 One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
 ``--arch`` (:func:`arches`): ``hipkernel:Gfx950ConvDgradAot`` (the default) and
 ``hipkernel:Gfx1250ConvDgradAot``.
-The dgrad sibling of ``make_conv_aot_config.py``: same input (JSON lists of rocKE
-``KernelIdentity`` dicts, or objects carrying one under ``"identity"``), same output
-(a packaged-dialect generator config), same ``--stabilize-ids`` step. It reuses that
-tool's YAML dumper, variant layout and id derivation, with each engine as its own
+The input is JSON lists of rocKE ``KernelIdentity`` dicts (or objects carrying one
+under ``"identity"``); the output is a packaged-dialect generator config, followed by
+a ``--stabilize-ids`` step. The YAML dumper, variant layout and id derivation are the
+conv AOT tools' shared ones (``conv_aot_common.py``), with each engine as its own
 product engine: kernel ids are ``uuid5(INSTANCE_UUID_NAMESPACE, instance_id)`` and the
 bundle names its own native symbols (no ``native_symbols_from``).
 
@@ -52,8 +52,9 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import conv_aot_common as _common  # noqa: E402
 import launch_surface  # noqa: E402
-import make_conv_aot_config as _fwd  # noqa: E402
+from codegen.models import EngineSpec  # noqa: E402
 
 #: The default architecture. Its engine, like every other's, is the adapter's
 #: ``TARGETS[arch].engine`` (:func:`product_engine`), read once rocKE is bound.
@@ -177,6 +178,12 @@ def product_engine(arch: str = DEFAULT_ARCH) -> str:
     """``arch``'s shipped dgrad engine, its own product engine (ids are uuid5 of
     instance_id): the adapter's ``TARGETS[arch].engine``."""
     return _target(arch).engine
+
+
+def product_native_namespace(arch: str = DEFAULT_ARCH) -> str:
+    """The native-symbol namespace :func:`product_engine` registers, which a borrowing
+    engine states verbatim as its ``native_symbols_from``."""
+    return EngineSpec(name=product_engine(arch)).own_native_symbol_namespace
 
 
 def adapter_builder(arch: str = DEFAULT_ARCH) -> str:
@@ -357,28 +364,28 @@ def _variant_name(template: str, arch: str) -> str:
     return template.replace("{arch}", arch)
 
 
-_bind_rocke = _fwd._bind_rocke
-engine_slug = _fwd.engine_slug
-dump_config = _fwd.dump_config
-INSTANCE_UUID_NAMESPACE = _fwd.INSTANCE_UUID_NAMESPACE
+_bind_rocke = _common.bind_rocke
+engine_slug = _common.engine_slug
+dump_config = _common.dump_config
+INSTANCE_UUID_NAMESPACE = _common.INSTANCE_UUID_NAMESPACE
 
 
 def kernel_uuid(
     instance_id: str, engine_name: str | None = None, arch: str = DEFAULT_ARCH
 ) -> str:
-    """:func:`make_conv_aot_config.kernel_uuid` with ``arch``'s engine as the
+    """:func:`conv_aot_common.kernel_uuid` with ``arch``'s engine as the
     product (and, by default, as ``engine_name``)."""
     product = product_engine(arch)
-    return _fwd.kernel_uuid(instance_id, engine_name or product, product)
+    return _common.kernel_uuid(instance_id, engine_name or product, product)
 
 
 def stabilize_ids(
     kdp_path: Path, engine_name: str | None = None, arch: str = DEFAULT_ARCH
 ) -> int:
-    """:func:`make_conv_aot_config.stabilize_ids` with ``arch``'s engine as the
+    """:func:`conv_aot_common.stabilize_ids` with ``arch``'s engine as the
     product (and, by default, as ``engine_name``)."""
     product = product_engine(arch)
-    return _fwd.stabilize_ids(kdp_path, engine_name or product, product)
+    return _common.stabilize_ids(kdp_path, engine_name or product, product)
 
 
 def spec_order(spec) -> tuple:
@@ -583,7 +590,6 @@ def build_config(
     engine_name: str | None = None,
     authored_subpath: str = "",
     sharding: str = "pipeline",
-    native_symbols_from_slug: str | None = None,
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated, all of
     one architecture's engine).
@@ -592,10 +598,8 @@ def build_config(
     implicit-GEMM instances are one variant, and each direct or helper variant its
     own, stating DIRECT_FIELDS and its knobs and leaving the others to their
     builder_default. ``engine_name`` (by default the architecture's product engine,
-    :func:`product_engine`) other than that product engine borrows its native symbols;
-    ``native_symbols_from_slug`` carries the product engine's own ``slug_override``
-    through when it has one, as ``make_conv_aot_config.build_config`` does -- this
-    tool has no way to read that engine's config otherwise.
+    :func:`product_engine`) other than that product engine borrows its native symbols
+    (``native_symbols_from`` states :func:`product_native_namespace`).
     """
     spec_arches = {spec.ARCH for spec in specs}
     if len(spec_arches) != 1:
@@ -615,7 +619,7 @@ def build_config(
         implicit = [s for s in shards[shard] if not s.is_direct]
         if implicit:
             variants.append(
-                _fwd._variant(
+                _common.variant(
                     _variant_name(IMPLICIT_VARIANT_NAME, arch),
                     spec_order(implicit[0]),
                     implicit,
@@ -629,7 +633,7 @@ def build_config(
             ]
             if members:
                 variants.append(
-                    _fwd._variant(
+                    _common.variant(
                         _variant_name(_DIRECT_VARIANT_NAMES[variant_name], arch),
                         spec_order(members[0]),
                         members,
@@ -649,14 +653,14 @@ def build_config(
         )
     engine = {
         "name": engine_name,
-        "sdk_version": "1.0.0",
+        # 1.3.0: the graph matcher gates tensor alignment (multiples of 16 bytes) and
+        # declines ragged tensors, so graphs declaring either reach it.
+        "sdk_version": "1.3.0",
         "knobs": list(engine_knobs(arch)),
         "heuristic": "native",
     }
     if engine_name != product:
-        engine["native_symbols_from"] = product
-        if native_symbols_from_slug is not None:
-            engine["native_symbols_from_slug"] = native_symbols_from_slug
+        engine["native_symbols_from"] = product_native_namespace(arch)
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
@@ -674,6 +678,16 @@ def build_config(
         },
         "packs": packs,
     }
+
+
+def check_arch(parser: argparse.ArgumentParser, arch: str) -> None:
+    """Refuse ``--arch`` through ``parser`` unless ``arch`` is one of :func:`arches`;
+    rocKE must already be bound. Every dgrad tool's command line checks with it."""
+    if arch not in arches():
+        parser.error(
+            f"argument --arch: invalid choice: {arch!r} "
+            f"(choose from {', '.join(sorted(arches()))})"
+        )
 
 
 def main(argv=None) -> int:
@@ -736,11 +750,7 @@ def main(argv=None) -> int:
     # The engines and arches are the adapter's TARGETS, so rocKE is bound first,
     # --stabilize-ids included.
     _bind_rocke(args.rocke_root)
-    if args.arch not in arches():
-        parser.error(
-            f"argument --arch: invalid choice: {args.arch!r} "
-            f"(choose from {', '.join(sorted(arches()))})"
-        )
+    check_arch(parser, args.arch)
     args.engine_name = args.engine_name or product_engine(args.arch)
 
     if args.stabilize_ids:

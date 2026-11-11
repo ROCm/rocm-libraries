@@ -28,7 +28,7 @@ _JOBS = min(16, os.cpu_count() or 1)
 
 @pytest.fixture(scope="module", autouse=True)
 def _rocke_on_path():
-    """Bind rocKE for this module only (see test_enumerate_conv_aot_instances)."""
+    """Bind rocKE for this module only: restore sys.path after it."""
     before = list(sys.path)
     tool._bind_rocke(_ROCKE)
     yield
@@ -160,10 +160,8 @@ def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
 
 
 def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
-    import enumerate_conv_aot_instances as fwd
-
     forward = next(
-        i for i in fwd.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
+        i for i in tool._common.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
     )
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
     monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [forward])
@@ -245,3 +243,10 @@ def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatc
     assert root.resolve() == _ROCKE.resolve()
     other = _bound_root(monkeypatch, tool, "_bind_rocke", argv + ["--rocke-root", "/x"])
     assert other == Path("/x")
+
+
+def test_main_refuses_an_arch_the_adapter_does_not_package(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        tool.main(["--arch", "gfx942", "--output-dir", str(tmp_path)])
+    assert "invalid choice: 'gfx942'" in capsys.readouterr().err
+    assert not any(tmp_path.iterdir())

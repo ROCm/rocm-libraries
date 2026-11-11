@@ -4,9 +4,9 @@
 """Build the rocKE backward-data conv AOT instance lists a hipkernel dgrad pack ships.
 
 One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
-``--arch`` (gfx950 by default, or gfx1250). The dgrad sibling of
-``enumerate_conv_aot_instances.py``. The catalog is rocKE's own registered instance
-list of the architecture (``dispatch/grouped_convolution_instances/<arch>_dgrad.json``,
+``--arch`` (gfx950 by default, or gfx1250). The catalog is rocKE's own registered
+instance list of the architecture
+(``dispatch/grouped_convolution_instances/<arch>_dgrad.json``,
 read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
 exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
 absent) names instances rocKE registers that the pack must not ship (for example a
@@ -52,17 +52,17 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-import enumerate_conv_aot_instances as _fwd  # noqa: E402
-import launch_surface  # noqa: E402
+import conv_aot_common as _common  # noqa: E402
+import make_conv_dgrad_aot_config as _cfg  # noqa: E402
 
 #: The default architecture. The ones with a dgrad engine are the adapter's
 #: ``TARGETS`` (``make_conv_dgrad_aot_config.arches``), read once rocKE is bound.
-ARCH = _fwd.ARCH
-DTYPES = _fwd.DTYPES
+ARCH = _common.ARCH
+DTYPES = _common.DTYPES
 
 #: File name of one architecture's and dtype's instance list.
 INSTANCE_LIST = "{arch}_conv_dgrad_aot_{dtype}.instances.json"
-DEFAULT_OUTPUT_DIR = _fwd.DEFAULT_OUTPUT_DIR
+DEFAULT_OUTPUT_DIR = _common.DEFAULT_OUTPUT_DIR
 #: Known-bug exclusions of an architecture: instances rocKE registers that its pack
 #: must not ship, each with a reason. JSON list of ``{"label": ..., "reason": ...}``;
 #: absent file means no exclusions.
@@ -70,23 +70,19 @@ EXCLUDES = str(DEFAULT_OUTPUT_DIR / "{arch}_conv_dgrad_aot.excludes.json")
 #: The family order of the written lists.
 FAMILIES = ("implicit", "direct", "helper")
 
-_bind_rocke = _fwd._bind_rocke
-#: The in-repo rocKE tree, the default ``--rocke-root``.
-DEFAULT_ROCKE_ROOT = (
-    launch_surface.find_repo_root(_HERE) / "dnn-providers/hip-kernel-provider/rocke"
-)
-read_excludes = _fwd.read_excludes
-stable_hash = _fwd.stable_hash
-compact_identity = _fwd.compact_identity
-write_instances = _fwd.write_instances
-identity_label = _fwd.identity_label
+_bind_rocke = _common.bind_rocke
+#: The in-repo rocKE tree, the default ``--rocke-root`` (the converter's).
+DEFAULT_ROCKE_ROOT = _cfg.DEFAULT_ROCKE_ROOT
+read_excludes = _common.read_excludes
+stable_hash = _common.stable_hash
+compact_identity = _common.compact_identity
+write_instances = _common.write_instances
+identity_label = _common.identity_label
 
 
 def _converter():
     """``make_conv_dgrad_aot_config``, the tool that consumes the list."""
-    import make_conv_dgrad_aot_config
-
-    return make_conv_dgrad_aot_config
+    return _cfg
 
 
 def family(identity: dict) -> str:
@@ -267,11 +263,7 @@ def main(argv=None) -> int:
     if args.excludes is None:
         args.excludes = Path(EXCLUDES.format(arch=arch))
     _bind_rocke(args.rocke_root)
-    if arch not in _converter().arches():
-        parser.error(
-            f"argument --arch: invalid choice: {arch!r} "
-            f"(choose from {', '.join(sorted(_converter().arches()))})"
-        )
+    _cfg.check_arch(parser, arch)
 
     rocke_catalog = read_rocke_catalog(arch)
     excludes = read_excludes(args.excludes)

@@ -63,7 +63,10 @@ def test_the_committed_vectors_are_what_the_tool_writes(
         assert tool.main(argv) == 0
     finally:
         sys.path[:] = before
-    assert out.read_bytes() == (_HEADERS / header).read_bytes(), (
+    # Text, both UTF-8: the header's (c) sign is not ASCII, and a checkout's line endings
+    # do not matter.
+    written = out.read_text(encoding="utf-8")
+    assert written == (_HEADERS / header).read_text(encoding="utf-8"), (
         f"{header} is stale: regenerate it with "
         "tools/make_conv_dgrad_aot_test_vectors.py"
     )

@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "8b71d7d1-3dae-4b17-a4c0-0c438d3ba56c",
   "name": "hipkernel:Gfx1250ConvDgradAot",
-  "sdk_version": "1.0.0",
+  "sdk_version": "1.3.0",
   "graph_match": {
     "native": "hipkernel.gfx1250_conv_dgrad_aot.graph_match"
   },

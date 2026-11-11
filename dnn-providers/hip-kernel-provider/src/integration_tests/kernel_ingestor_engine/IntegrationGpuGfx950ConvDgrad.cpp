@@ -156,6 +156,11 @@ TEST_F(IntegrationGpuGfx950ConvDgradAot, ABatchPastTheChunkLimitRunsAsSlicesOnDe
     aBatchPastTheChunkLimitRunsAsSlicesOnDevice();
 }
 
+TEST_F(IntegrationGpuGfx950ConvDgradAot, ServesGraphsDeclaringWiderAlignments)
+{
+    servesGraphsDeclaringWiderAlignments();
+}
+
 // ---- Per dtype: every catalog instance pinned and checked ----
 
 class IntegrationGpuGfx950ConvDgradAotCatalog : public ConvDgradAotHarness<Gfx950Traits>

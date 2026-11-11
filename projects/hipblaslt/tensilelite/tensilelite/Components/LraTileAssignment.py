@@ -33,7 +33,8 @@ from rocisa.functions import vectorStaticRemainder, \
 from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift, mxSegmentSplit
+from ..SolutionStructs.segment_interleave import wave_tile_span
 from dataclasses import dataclass
 
 
@@ -943,7 +944,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
-        # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
+        # keep the baseline wave stride. MX scales use separate addressing; split MXSA's
+        # post-pad component jump is handled below.
         segILWaveSpansComp = False
         # Active tensor only: the baseline tensor keeps its normal wave stride.
         # [2,2] interleaves both; bcontig ([4,1]) sets bBaseline on B; the [1,4] mirror sets aBaseline on A.
@@ -953,7 +955,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 (tc == "B" and not _segOff.get("bBaseline", False)))
         if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
-            segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
+            segILWaveSpansComp = wave_tile_span(kernel, tc, vectorWidth) >= _compCols
             # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True
@@ -1148,6 +1150,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
                     module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
                                              "seg interleave: component byte offset = wtid0 * (fA+fB)"))
+                    tP["gpr"]["segWaveByteOff"] = segOff
+                elif mxSegmentSplit(kernel, tc):
+                    segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
+                    module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["mxsaStrideBytes"], tmpSgprInfo, \
+                                             "MXSA M-half jump (post-pad)"))
                     tP["gpr"]["segWaveByteOff"] = segOff
                 else:
                     module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \

@@ -83,6 +83,9 @@ inline constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
 inline constexpr int64_t DIRECT_FAMILY = 1;
 inline constexpr int64_t HELPER_FAMILY = 2;
 inline constexpr size_t BENCHMARK_LIMIT = 64;
+/// The NaN tail executeAndVerify places after dX: a kernel's store past dX's end lands in
+/// it. Wider than any one workgroup's dX tile row.
+inline constexpr size_t DX_GUARD_BYTES = 64 * 1024;
 inline constexpr int64_t DY_UID = 1;
 inline constexpr int64_t W_UID = 2;
 inline constexpr int64_t DX_UID = 3;
@@ -177,11 +180,6 @@ inline void PrintTo(const DgradVariant& variant, std::ostream* stream)
     *stream << variant.name;
 }
 
-inline std::string dtypeSuffix(DataType dtype)
-{
-    return dtype == DataType::HALF ? "Fp16" : "Bf16";
-}
-
 inline std::string dtypeToken(DataType dtype)
 {
     return dtype == DataType::HALF ? "fp16" : "bf16";
@@ -208,8 +206,12 @@ inline std::vector<DgradVariant> dtypeVariants()
             DgradVariant{"Bf16", DataType::BFLOAT16, std::nullopt}};
 }
 
-inline std::shared_ptr<Graph>
-    buildDgradGraph(DataType dtype, const DgradProblem& problem, const std::string& name)
+/// @p alignment is each tensor's declared byte alignment; anything but 16 makes the graph
+/// need graph schema 1.3.0.
+inline std::shared_ptr<Graph> buildDgradGraph(DataType dtype,
+                                              const DgradProblem& problem,
+                                              const std::string& name,
+                                              int64_t alignment = 16)
 {
     auto graph = std::make_shared<Graph>();
     graph->set_name(name)
@@ -225,7 +227,8 @@ inline std::shared_ptr<Graph>
         .set_name("DY")
         .set_dim({problem.n, problem.k, ho, wo})
         .set_stride({problem.k * ho * wo, 1, wo * problem.k, problem.k})
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
     // W [K, C/groups, Y, X] stored KYXC over the group's channels.
     const auto cpg = problem.cpg();
     const auto w = std::make_shared<TensorAttributes>();
@@ -233,7 +236,8 @@ inline std::shared_ptr<Graph>
         .set_name("W")
         .set_dim({problem.k, cpg, problem.y, problem.x})
         .set_stride({cpg * problem.y * problem.x, 1, problem.x * cpg, cpg})
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
 
     ConvDgradAttributes attributes;
     attributes.set_name(name)
@@ -247,18 +251,14 @@ inline std::shared_ptr<Graph>
         .set_dim({problem.n, problem.c, problem.hi, problem.wi})
         .set_stride({problem.c * problem.hi * problem.wi, 1, problem.wi * problem.c, problem.c})
         .set_output(true)
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
     return graph;
 }
 
 inline KnobSetting benchmarkingKnob(bool enabled)
 {
     return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{enabled ? 1 : 0});
-}
-
-inline std::string candidateCount(size_t candidates)
-{
-    return std::to_string(candidates) + " candidate(s)";
 }
 
 /// The kernel id following @p marker (one of detail::KERNEL_SELECTION_LOG_MARKERS) in the
@@ -605,9 +605,10 @@ protected:
         return Traits::graphs().at(variant.graph.value());
     }
 
-    static std::shared_ptr<Graph> buildGraph(DataType dtype, const DgradProblem& problem)
+    static std::shared_ptr<Graph>
+        buildGraph(DataType dtype, const DgradProblem& problem, int64_t alignment = 16)
     {
-        return buildDgradGraph(dtype, problem, Traits::GRAPH_NAME);
+        return buildDgradGraph(dtype, problem, Traits::GRAPH_NAME, alignment);
     }
 
     /// How many catalog instances of @p variant serve @p graph in @p dtype.
@@ -744,12 +745,36 @@ protected:
             ASSERT_EQ(hipMemsetAsync(_workspace, 0xFF, _workspaceSize, _stream), hipSuccess);
         }
         // Every dX element the kernel does not write stays NaN and fails the comparison.
-        reference.gpu->getTensor(DX_UID).fillWithSentinelValue();
+        auto& dx = reference.gpu->getTensor(DX_UID);
+        dx.fillWithSentinelValue();
         auto buffers = reference.gpu->toDeviceVariantPack();
+        // dX runs in a copy followed by a NaN guard tail, which a write past its end would
+        // change: the comparison below sees only dX itself.
+        const auto dxBytes = dx.elementSpace() * dx.elementSize();
+        void* guarded = nullptr;
+        ASSERT_EQ(hipMalloc(&guarded, dxBytes + DX_GUARD_BYTES), hipSuccess);
+        const std::unique_ptr<void, hipError_t (*)(void*)> guardedOwner(guarded, hipFree);
+        auto* tail = static_cast<char*>(guarded) + dxBytes;
+        ASSERT_EQ(
+            hipMemcpyAsync(guarded, buffers.at(DX_UID), dxBytes, hipMemcpyDeviceToDevice, _stream),
+            hipSuccess);
+        ASSERT_EQ(hipMemsetAsync(tail, 0xFF, DX_GUARD_BYTES, _stream), hipSuccess);
+        buffers[DX_UID] = guarded;
         result = graph.execute(_handle, buffers, workspaceSize > 0 ? _workspace : nullptr);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(
+            hipMemcpyAsync(dx.rawDeviceData(), guarded, dxBytes, hipMemcpyDeviceToDevice, _stream),
+            hipSuccess);
+        std::vector<unsigned char> guard(DX_GUARD_BYTES);
+        ASSERT_EQ(
+            hipMemcpyAsync(guard.data(), tail, DX_GUARD_BYTES, hipMemcpyDeviceToHost, _stream),
+            hipSuccess);
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-        reference.gpu->getTensor(DX_UID).markDeviceModified();
+        dx.markDeviceModified();
+        const auto written
+            = std::find_if(guard.begin(), guard.end(), [](unsigned char b) { return b != 0xFF; });
+        EXPECT_EQ(written, guard.end())
+            << "the plan wrote " << (written - guard.begin()) << " byte(s) past the end of dX";
 
         // FP32 accumulation followed by a low-precision store; inputs bounded to [-1,1].
         const float relativeTolerance = dtype == DataType::HALF ? 0.002F : 0.016F;
@@ -990,20 +1015,77 @@ protected:
     /// never otherwise runs: every other case's images fit the kernels' 32-bit ABI whole.
     /// With the chunk limit lowered for the test alone, N=3 of a 64x64x64 fp16 image (one
     /// image 524288 bytes; the limit below fits one but not two) splits into three
-    /// single-image launches, each checked against the CPU reference.
+    /// single-image launches, each checked against the CPU reference. Only the
+    /// implicit-GEMM plan slices, so the family is pinned, and the provider's launch count
+    /// must grow by three: an unsliced launch of the graph fails it.
     void aBatchPastTheChunkLimitRunsAsSlicesOnDevice()
     {
+        constexpr int64_t CHUNK_LIMIT = 600000;
         const DgradVariant variant{"BatchChunk", DataType::HALF, std::nullopt};
         const DgradProblem problem{3, 64, 64, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1};
-        const ScopedBatchChunkLimit chunkLimit(600000);
+        {
+            // The geometry's own slicing at this limit, in this binary's copy of it.
+            auto& limit = ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::
+                batchChunkByteLimitForTesting();
+            const auto saved = limit;
+            limit = CHUNK_LIMIT;
+            const ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::Problem p{
+                problem.n,
+                problem.c,
+                problem.k,
+                problem.hi,
+                problem.wi,
+                problem.y,
+                problem.x,
+                problem.strideH,
+                problem.strideW,
+                problem.padH,
+                problem.padW,
+                problem.dilationH,
+                problem.dilationW,
+                problem.groups};
+            const auto geometry
+                = ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::deriveGeometry(p);
+            const auto chunks
+                = geometry ? ::hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot::
+                                 batchChunks(p, *geometry)
+                           : std::nullopt;
+            limit = saved;
+            ASSERT_TRUE(chunks);
+            ASSERT_EQ(chunks->size(), 3U);
+        }
+        const ScopedBatchChunkLimit chunkLimit(CHUNK_LIMIT);
         auto reference = makeReference(variant, problem, 97);
 
         const auto graph = buildGraph(variant.dtype, problem);
-        // The implicit-GEMM plan is the one that slices a batch.
         ASSERT_NO_FATAL_FAILURE(buildAndCompile(
             *graph,
             {KnobSetting(KERNEL_FAMILY_KNOB, IMPLICIT_GEMM_FAMILY), benchmarkingKnob(false)}));
+        std::string error;
+        const auto before = detail::providerDgradImplicitLaunchCount(error);
+        ASSERT_GE(before, 0) << error;
         ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+        EXPECT_EQ(detail::providerDgradImplicitLaunchCount(error) - before, 3)
+            << "the plan did not run as three slices";
+    }
+
+    /// A graph whose tensors declare 32- or 64-byte alignment needs graph schema 1.3.0. The
+    /// engine's graph matcher gates alignment (multiples of 16 bytes) and ragged tensors,
+    /// and its UED claims 1.3.0, so neither the provider's schema guard
+    /// (ApplicabilityManager) nor the plan builder holds it back: the plan is built on this
+    /// engine and matches the reference.
+    void servesGraphsDeclaringWiderAlignments()
+    {
+        const DgradProblem problem{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1};
+        for(const int64_t alignment : {32, 64})
+        {
+            SCOPED_TRACE("alignment " + std::to_string(alignment));
+            const DgradVariant variant{"Aligned", DataType::HALF, std::nullopt};
+            auto reference = makeReference(variant, problem, 61);
+            const auto graph = buildGraph(variant.dtype, problem, alignment);
+            ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
+            ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+        }
     }
 
     /// Every selectable instance of the dtype is pinned on every graph whose capability it

@@ -285,24 +285,24 @@ for each thread's coalesced output chunk:
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
 
-### Split-K Forward (gfx1250)
+### Split-K Forward (gfx1250, gfx950)
 
-`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA only; `mem` or `wavelet` pipeline, 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
+`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA `mem` or `wavelet` pipeline on gfx1250, MFMA `mem` / `compv3` / `compv4` on gfx950; fp16 / bf16 output on both, not fp32 or TF32, since Stage 2 has no fp32 form -- the plain K loop whose bounds become the slice; 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
 
 - The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
 - The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
 - Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
-- `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, K and kpg multiples of 4, a target with workgroup-cluster launch, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
+- `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, K and kpg multiples of 4, fp16 / bf16 output since the fold casts like Stage 2, a target with workgroup-cluster launch, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
 
 `split_k = -1` (auto) is resolved before validation by the conv split-K resolver (`resolve_conv_split_k("fwd", ...)`), as for wgrad and dgrad. Its degree comes from `rocke.helpers.split_k.select_split_k_fwd`:
 - It splits only when the unsplit grid is under half of 8 workgroups per CU and the reduction is at least 512 deep.
 - The degree is a power of two toward that target grid, at most 32, and keeps at least 2 K tiles per slice.
 - It is then held to the gridDim.z budget and the i32 workspace.
-- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and on pointwise or 3-D problems.
+- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and gfx950 and on pointwise or 3-D problems.
 
 The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
 
-Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23) and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
+Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23), and the two-stage form in the gfx950 one on the `CACHE_FWD_SPLIT_K_MFMA_*` subset (32..128 output tiles, the 128-row ones with two or more waves only (one wave there spills), `mem` / `compv3`, cshuffle, 16-byte vectors; gfx950 has no workgroup clusters), and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
 
 ### Step-By-Step Trace (one workgroup)
 
@@ -465,7 +465,7 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 - `prefetch_global_regs` (wgrad, MFMA only) is the register-prefetch form of the plain single-buffer synchronous K loop shared by `mem`/`compv3`/`compv4`/`basic`. A prologue issues tile `k_lo`'s global reads into VGPRs (`CoalescedTileLoader.load_global`). Each iteration writes the carried tile to LDS (`store_lds`), publishes it with an LDS-only barrier (`sync_lds_only`: `lgkmcnt(0)` + `s_barrier`), issues tile k+1's reads, runs tile k's MFMAs and closes with a second LDS-only barrier, so the global reads stay in flight under the MFMAs instead of being drained at every barrier. The reads of the last iteration lie past the slice and are never stored. It is rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA, and when a tile needs more than 32 global loads per thread per operand (each one is a carried loop value; both engines share the limit), and tags the kernel name `pgr` (identity field `prefetch_global_regs`, out of the hash while False). It is a different loop from `register_prefetch` (tag `rpf`), which only applies to compv3 with `prefetch_addr` and carries the load offsets. On gfx950 the AOT grid builds it next to the plain loop of the 8/8-wide kernels on the `CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES` cover (cshuffle epilogue with `split_k` 1 or the atomic split, and two-stage split-K).
 - The packed 16-bit split-K atomic (wgrad, cshuffle epilogue) stores `vector_size_c` elements per thread from the LDS-staged tile, one `<2 x dtype>` atomic per pair. On gfx950 the AOT grid builds these kernels at `vector_size_c` = 2 (`CACHE_WGRAD_ATOMIC_VEC_C`): one pair per lane, so a wave's atomics cover consecutive dwords of a dW row instead of a 16-byte run per lane. Other arches keep dW at the X width.
 - `async_dma` is a swept axis on the wgrad sweep driver, not a run-level flag. Unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the K-outer row pad to 0 and coarsens the load-width ladder to the widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes.
-- WMMA wgrad (gfx1250): `async_dma` is a ping-pong over `global_load_async_to_lds` (`CoalescedTileLoader.load_async_to_lds`, one barrier per tile, drained by `s_wait_asynccnt`). It reuses the synchronous K-outer loaders' slot partition, needs `lds_k_outer` and a 4-, 8- or 16-byte chunk on both operands, and ANDs the buffer-range check (`byte offset < num_bytes`, unsigned as the resource compares it) into each chunk's `valid`, zero-filling failing chunks with an LDS store of the tile's element type. `epilogue="cshuffle"` is admitted on WMMA too: both cshuffle epilogues (direct store and split-K atomic) read the WMMA fragment through `CShuffleEpilogue.from_grid_op`. Two-stage (f32 workspace) split-K runs on gfx1250 as well: the Stage 1 scratch epilogue decodes the WMMA fragment through `op.c_layout()` (`wgrad_two_stage_available` needs the arch's float global atomics on wave32). `pipeline` stays `mem`; `unroll_k`, `prefetch_addr` and `chiplet_swizzle` stay rejected on WMMA.
+- WMMA wgrad (gfx1250): `async_dma` is a ping-pong over `global_load_async_to_lds` (`CoalescedTileLoader.load_async_to_lds`, one barrier per tile, drained by `s_wait_asynccnt`). It reuses the synchronous K-outer loaders' slot partition, needs `lds_k_outer` and a 4-, 8- or 16-byte chunk on both operands, and ANDs the buffer-range check (`byte offset < num_bytes`, unsigned as the resource compares it) into each chunk's `valid`, zero-filling failing chunks with an LDS store of the tile's element type. `epilogue="cshuffle"` is admitted on WMMA too: both cshuffle epilogues (direct store and split-K atomic) read the WMMA fragment through `CShuffleEpilogue.from_grid_op`. Two-stage (f32 workspace) split-K runs on gfx1250 as well: the Stage 1 scratch epilogue decodes the WMMA fragment through `op.dst_layout()` (`wgrad_two_stage_available` needs the arch's float global atomics on wave32). `pipeline` stays `mem`; `unroll_k`, `prefetch_addr` and `chiplet_swizzle` stay rejected on WMMA.
 - No K loop is unrolled at build time any more: `async_dma` runs `SoftwarePipeline.run_ping_pong_dynamic` and `unroll_k` a hand-rolled 2x ping-pong, both over the runtime extent, so the former `_MAX_UNROLLED_K_ITERS` / `ROCKE_MAX_UNROLLED_K_ITERS` cap is gone.
 - wgrad `split_k`: `1` = no split (direct store); any value `> 1` builds the one split-K kernel (name tag `spk`), whose degree is the `ks_count` / `ks` kernargs chosen at launch. There is no `split_k=0` "runtime degree" encoding.
 - Removed: the `--lds-k-outer`, `--lds-k-pad` and `--dtype-d` CLI flags and the `ROCKE_WGRAD_LDS_K_OUTER` env override. All replaced by deduction or dropped.
@@ -1002,7 +1002,7 @@ resident-fragment estimate `mfma_frag_vgprs()` within
 `DW_DGRAD_MFMA_MAX_FRAG_VGPRS`, and `mfma_lds_bytes()` within
 `DW_DGRAD_MFMA_LDS_BUDGET`.
 
-**Forward pass (`fwd=True`, MFMA form only).** The kernel reads the filter
+**Forward pass (`fwd=True`, Toeplitz form only).** The kernel reads the filter
 rotated by 180 degrees (`W[k, KH-1-r, s]` instead of `W[k, r, KW-1-s]`), which
 makes it the stride-1 depthwise *forward* convolution of the transposed
 problem: dY is the forward input, dX the forward output and `PAD` is
@@ -1050,11 +1050,14 @@ the target's wave size and records it in the cache entry
 the record and the run-side guard `direct_entry_wave_reason`); the VALU form
 keeps its logical wave64. On gfx1250 the wave64 MFMA form is refused with the
 hint `set wave_size=32`. The non-finite semantics are those of the MFMA form.
-The forward mode is wave64 only: the one Toeplitz builder loads the grouped
-form's dense A row as one 8-channel K chunk per lane, which does not fit the
-WMMA's two chunks per lane, and the depthwise forward is validated only at
-wave64. Both engines reject `fwd` (and so `out_stride=2` and the grouped
-form) at `wave_size=32`.
+At `wave_size=32` the forward mode runs the depthwise forward at stride 1
+only: the Toeplitz builder loads the grouped form's dense A row as one
+8-channel K chunk per lane, which does not fit the WMMA's two chunks per lane,
+and the stride-2 output is validated only at wave64. Both engines reject the
+grouped form and `out_stride=2` at `wave_size=32`. The depthwise forward at
+wave32 is what serves the gfx1250 depthwise forward (`DwFwdWmmaSpec`, below).
+In `fwd` the window columns are offset by the row padding, so the forward
+`PAD` applies to both axes of a rectangular filter.
 
 AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
 filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of
@@ -1466,9 +1469,11 @@ per group. The AOT grid is `FWD_GSTREAM_KNOBS` over cpg 8 / 16 / 32 / 64 and
 ### Depthwise (`DwFwdWmmaSpec`)
 
 `library/kernels/common/conv_direct_dw_fwd_wmma.py` (C++ twin
-`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward,
-the forward twin of the windowed depthwise dgrad's matrix form (stride 1,
-`cpg = kpg = 1`, `groups` a multiple of 8). Each wave owns 8 channels; one
+`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward
+(stride 1, `cpg = kpg = 1`, `groups` a multiple of 8). It owns the spec, the
+kernel name and the limits; the kernel is the windowed depthwise dgrad's
+Toeplitz builder in its wave32 `fwd` form over the transposed problem
+(`dw_fwd_wmma_win_spec`). Each wave owns 8 channels; one
 16x16x32 WMMA multiplies one-hot weights (A) by 4 window columns x 8 channels
 of an input row (B) into 32 output columns x 8 channels (D), so a filter row
 of `KW` taps takes `ceil((KW + 1) / 4)` passes. Input rows stream through the
@@ -1481,6 +1486,9 @@ Knobs: `block_waves` (8 channels each, up to 16), `block_h` output rows per
 block, `w_fold` images folded into the 32 tile columns (1, 2 or 4) and
 `prefetch_rows` (1..4). The validator bounds the register-resident fragments
 (tighter for 16-wave blocks), the unrolled WMMA count and the LDS staging.
+These limits are wider than the windowed spec's (16 waves, 1024 unrolled
+WMMAs), so the family validates with its own rules and calls the Toeplitz
+builder directly.
 Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
 knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
 7x7 (variant `direct_dw_fwd_wmma`).

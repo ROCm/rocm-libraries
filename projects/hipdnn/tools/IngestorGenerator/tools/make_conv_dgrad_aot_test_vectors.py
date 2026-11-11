@@ -450,7 +450,7 @@ def main(argv=None) -> int:
         return 1
     specs.sort(key=lambda s: (s.dtype, s.instance_id))
     problems = synthetic_problems(specs)
-    args.output.write_text(render(specs, problems))
+    args.output.write_text(render(specs, problems), encoding="utf-8")
     print(f"{len(specs)} instances, {len(problems)} problems written to {args.output}")
     return 0
 
