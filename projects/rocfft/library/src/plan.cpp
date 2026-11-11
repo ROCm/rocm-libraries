@@ -1350,9 +1350,8 @@ rocfft_status
             }
         }
 
-        // planar array types only supported with empty fields
-        const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
-        if(array_type_is_planar(io_array_type) && !io_fields.empty())
+        // planar array types only supported if no field is set (on input or output)
+        if(array_type_is_planar(io_array_type) && (!inFields.empty() || !outFields.empty()))
             return rocfft_status_invalid_array_type;
 
         switch(dft_type)
