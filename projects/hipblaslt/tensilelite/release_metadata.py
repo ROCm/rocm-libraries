@@ -9,11 +9,15 @@ version read from ``ROCM_PATH`` or ``/opt/rocm`` there depends on the frontend
 rather than on the build. A build with no explicit ROCm identity is a
 development build and is labelled with the source commit instead.
 
+Only TheRock's CMake build passes an identity (``TENSILELITE_ROCM_VERSION``),
+and only one TheRock actually published: release, rc and nightly identities
+become ``+rocm<identity>``, development identities ``+devrocm<identity>``.
+
 CMake runs this file to give the native client the same values:
 
-    release_metadata.py version          # the distribution version
+    release_metadata.py version [--rocm-identity X]  # the distribution version
     release_metadata.py source-revision  # complete revision, including dirty suffix, or "none"
-    release_metadata.py metadata         # JSON: distribution_version and source_revision
+    release_metadata.py metadata [--rocm-identity X]  # JSON: distribution_version and source_revision
 
 The metadata command resolves the source revision once for both fields.
 Build ROCm is resolved separately by the native build's metadata generator.
@@ -29,8 +33,24 @@ import sys
 from typing import Optional
 
 _COMPONENT_RELEASE_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}$")
+_ROCM_IDENTITY_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[a-z0-9.]+)?$")
 _SOURCE_ROOT = Path(__file__).resolve().parent
 _source_revision = runpy.run_path(str(_SOURCE_ROOT / "tensilelite" / "_source_revision.py"))
+
+
+def canonical_rocm_identity(value: str) -> str:
+    """Normalize a ROCm identity for a PEP 440 local version label.
+
+    A wheel version has one ``+``, so TheRock's ``7.12.0.dev0+<sha>.asan``
+    becomes ``7.12.0.dev0.<sha>.asan``.
+    """
+    value = re.sub(r"[-_+]+", ".", value.strip().lower()).strip(".")
+    if not _ROCM_IDENTITY_RE.fullmatch(value):
+        raise RuntimeError(
+            "A ROCm identity must look like '7.2.4', '7.12.0rc1', '7.12.0a20261110' or "
+            f"'7.12.0.dev0+<commit>'; got {value!r}"
+        )
+    return value
 
 
 def component_version() -> str:
@@ -48,28 +68,44 @@ def render_build_info(revision: Optional[str]) -> str:
     return _source_revision["render_build_info"](revision)
 
 
-def distribution_version(revision: Optional[str]) -> str:
-    """Return ``<component>+g<sha>[.dirty]``, or the bare component without a revision."""
+def distribution_version(revision: Optional[str], rocm_identity: Optional[str] = None) -> str:
+    """Return the distribution version.
+
+    With a ROCm identity: ``<component>+rocm<identity>`` or, for a development
+    identity, ``<component>+devrocm<identity>``; the commit is then recorded only
+    in ``_build_info.py``. Without one: ``<component>+g<sha>[.dirty]``, or the bare
+    component when there is no revision either.
+    """
+    if rocm_identity:
+        identity = canonical_rocm_identity(rocm_identity)
+        tag = "devrocm" if ".dev" in identity else "rocm"
+        return f"{component_version()}+{tag}{identity}"
     return _source_revision["distribution_version"](component_version(), revision)
 
 
 def main(argv: list[str]) -> int:
-    commands = ("version", "source-revision", "metadata")
-    if len(argv) != 1 or argv[0] not in commands:
-        print(f"usage: {Path(sys.argv[0]).name} {{{'|'.join(commands)}}}", file=sys.stderr)
+    usage = (
+        f"usage: {Path(sys.argv[0]).name} "
+        "{version [--rocm-identity IDENTITY] | metadata [--rocm-identity IDENTITY] | source-revision}"
+    )
+    identity = None
+    if argv[:1] in (["version"], ["metadata"]) and len(argv) == 3 and argv[1] == "--rocm-identity":
+        identity = argv[2] or None
+        argv = argv[:1]
+    if len(argv) != 1 or argv[0] not in ("version", "source-revision", "metadata"):
+        print(usage, file=sys.stderr)
         return 2
     revision = source_revision()
     if argv[0] == "version":
-        print(distribution_version(revision))
+        print(distribution_version(revision, identity))
     elif argv[0] == "metadata":
-        print(
-            json.dumps(
-                {
-                    "distribution_version": distribution_version(revision),
-                    "source_revision": revision or "none",
-                }
-            )
-        )
+        metadata = {
+            "distribution_version": distribution_version(revision, identity),
+            "source_revision": revision or "none",
+        }
+        if identity:
+            metadata["rocm_identity"] = canonical_rocm_identity(identity)
+        print(json.dumps(metadata))
     else:
         print(revision or "none")
     return 0

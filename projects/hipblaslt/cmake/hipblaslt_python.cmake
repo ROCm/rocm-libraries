@@ -30,6 +30,21 @@ function(hipblaslt_resolve_build_rocm_root output)
     set(${output} "${_root}" PARENT_SCOPE)
 endfunction()
 
+# Sets ${output} to the ROCm identity stamped into the tensilelite wheel, or to
+# an empty string for a development build (version +g<commit>). Only TheRock
+# builds pass one: THEROCK_PACKAGE_VERSION, when it is set and is not the
+# local-build placeholder "git". Standalone builds never stamp an identity;
+# the ROCm the client is compiled against is recorded on the client instead
+# (tensilelite-client --build-rocm).
+function(hipblaslt_resolve_build_rocm_version output)
+    set(_version "")
+    if(HIPBLASLT_ENABLE_THEROCK AND THEROCK_PACKAGE_VERSION
+            AND NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
+        set(_version "${THEROCK_PACKAGE_VERSION}")
+    endif()
+    set(${output} "${_version}" PARENT_SCOPE)
+endfunction()
+
 # Sets the HIPBLASLT_PYTHON_COMMAND variable in the parent scope such that it
 # can invoke the Python interpreter valid for the build parameters. Because
 # this may involve a multi token list, it must be used without quotes in
