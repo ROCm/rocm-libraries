@@ -141006,7 +141006,7 @@
       }
     },
     {
-      "id": "hf194f2_b1h64k64v64_1024x1024_d5_bfp16_none_bshd_toldl",
+      "id": "hf194f2_b1h64k64v64_1024x1024_d5_bfp16_none_bshd_told",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -141208,7 +141208,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "DL",
+        "tol_class": "D",
         "inputs": {
           "0": {
             "kind": "free",

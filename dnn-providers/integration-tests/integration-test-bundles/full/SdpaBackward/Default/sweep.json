@@ -4381,7 +4381,7 @@
       }
     },
     {
-      "id": "hf050f3_b1h8k2v2_2048x2048_d512_bfp16_tlcausal_bshd_tolp",
+      "id": "hf050f3_b1h8k2v2_2048x2048_d512_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -4585,7 +4585,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -6915,7 +6915,7 @@
       }
     },
     {
-      "id": "hf041f1_b1h32k4v4_1023x1023_d512_bfp16_tlcausal_bshd_tolp",
+      "id": "hf041f1_b1h32k4v4_1023x1023_d512_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -7119,7 +7119,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -29535,7 +29535,7 @@
       }
     },
     {
-      "id": "hf301f1_b1h128k64v64_1023x1023_d192v128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf301f1_b1h128k64v64_1023x1023_d192v128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -29739,7 +29739,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -30460,7 +30460,7 @@
       }
     },
     {
-      "id": "hf054f3_b1h56k8v8_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf054f3_b1h56k8v8_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -30663,7 +30663,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -39674,7 +39674,7 @@
       }
     },
     {
-      "id": "hf275f3_b1h48k2v2_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
+      "id": "hf275f3_b1h48k2v2_2048x2048_d128_bfp16_tlcausal_bshd_dom0p25to0p25_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -39877,7 +39877,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -39896,8 +39896,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "probe: heads; HF census g275F_b1h48k2_2048x2048_d128_causal_bfp16_bshd: 1 models, e.g. zai-org/GLM-4-32B-0414"
@@ -51902,7 +51902,7 @@
       }
     },
     {
-      "id": "hf014f3_b1h40k8v8_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf014f3_b1h40k8v8_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -52105,7 +52105,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -53512,7 +53512,7 @@
       }
     },
     {
-      "id": "hf142f3_b1h40k10v10_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf142f3_b1h40k10v10_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -53715,7 +53715,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -54898,7 +54898,7 @@
       }
     },
     {
-      "id": "hf239f3_b1h40k10v10_2048x2048_d128_bfp16_tlw2047_bshd_tolp",
+      "id": "hf239f3_b1h40k10v10_2048x2048_d128_bfp16_tlw2047_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -55102,7 +55102,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -55129,7 +55129,7 @@
       }
     },
     {
-      "id": "hf285f3_b1h40k8v8_2048x2048_d128_bfp16_tlcausal_bshd_s0p088388_tolp",
+      "id": "hf285f3_b1h40k8v8_2048x2048_d128_bfp16_tlcausal_bshd_s0p088388_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -55333,7 +55333,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -55360,7 +55360,7 @@
       }
     },
     {
-      "id": "hf304f3_b1h40k8v8_2048x2048_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf304f3_b1h40k8v8_2048x2048_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -55564,7 +55564,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -57661,7 +57661,7 @@
       }
     },
     {
-      "id": "hf287f3_b1h64k8v8_2048x2048_d96_bfp16_tlcausal_bshd_tolp",
+      "id": "hf287f3_b1h64k8v8_2048x2048_d96_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -57865,7 +57865,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -65036,7 +65036,7 @@
       }
     },
     {
-      "id": "hf020f3_b1h32k4v4_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf020f3_b1h32k4v4_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -65239,7 +65239,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -69183,7 +69183,7 @@
       }
     },
     {
-      "id": "hf228f3_b1h32k4v4_2048x2048_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf228f3_b1h32k4v4_2048x2048_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -69387,7 +69387,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -73338,7 +73338,7 @@
       }
     },
     {
-      "id": "hf212f1_b1h128k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
+      "id": "hf212f1_b1h128k8v8_1023x1023_d128_bfp16_tlcausal_bshd_dom0p25to0p25_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -73541,7 +73541,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -73560,8 +73560,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "probe: heads; HF census g212F_b1h128k8_1023x1023_d128_causal_bfp16_bshd: 3 models, e.g. NousResearch/Hermes-3-Llama-3.1-405B, CohereLabs/command-a-plus-05-2026-w4a4, RedHatAI/Meta-Llama-3.1-405B-Instruct-FP8-dynamic"
@@ -73797,7 +73797,7 @@
       }
     },
     {
-      "id": "hf310f1_b1h128k8v8_1023x1023_d128_bfp16_tlw4096_bshd_tolu",
+      "id": "hf310f1_b1h128k8v8_1023x1023_d128_bfp16_tlw4096_bshd_dom0p25to0p25_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -74001,7 +74001,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -74020,8 +74020,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "probe: heads; HF census g310F_b1h128k8_1023x1023_d128_swa4096_bfp16_bshd: 1 models, e.g. CohereLabs/command-a-plus-05-2026-w4a4"
@@ -75645,7 +75645,7 @@
       }
     },
     {
-      "id": "hf024f3_b1h8k2v2_2048x2048_d256_bfp16_tlcausal_bshd_tolp",
+      "id": "hf024f3_b1h8k2v2_2048x2048_d256_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -75849,7 +75849,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -99191,7 +99191,7 @@
       }
     },
     {
-      "id": "hf209f3_b1h32k4v4_2048x2048_d128_bfp16_tlw1024_bshd_tolp",
+      "id": "hf209f3_b1h32k4v4_2048x2048_d128_bfp16_tlw1024_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -99395,7 +99395,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -102879,7 +102879,7 @@
       }
     },
     {
-      "id": "hf164f3_b1h24k4v4_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
+      "id": "hf164f3_b1h24k4v4_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -103082,7 +103082,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -105637,7 +105637,7 @@
       }
     },
     {
-      "id": "hf004f2_b1h24k4v4_1024x1024_d256_bfp16_tlcausal_bshd_tolp",
+      "id": "hf004f2_b1h24k4v4_1024x1024_d256_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -105841,7 +105841,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -105868,7 +105868,7 @@
       }
     },
     {
-      "id": "hf004p1_b1h24k4v4_1024x1024_d256_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf004p1_b1h24k4v4_1024x1024_d256_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -106072,7 +106072,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -110012,7 +110012,7 @@
       }
     },
     {
-      "id": "hf004f1_b1h24k4v4_1023x1023_d256_bfp16_tlcausal_bshd_tolp",
+      "id": "hf004f1_b1h24k4v4_1023x1023_d256_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -110216,7 +110216,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -115541,7 +115541,7 @@
       }
     },
     {
-      "id": "hf174f3_b1h20k5v5_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf174f3_b1h20k5v5_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -115744,7 +115744,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -119007,7 +119007,7 @@
       }
     },
     {
-      "id": "hf068f1_b1h80k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf068f1_b1h80k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -119210,7 +119210,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -119237,7 +119237,7 @@
       }
     },
     {
-      "id": "hf081f1_b1h80k8v8_1023x1023_d128_bfp16_tlw1024_bshd_tolp",
+      "id": "hf081f1_b1h80k8v8_1023x1023_d128_bfp16_tlw1024_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -119441,7 +119441,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -119468,7 +119468,7 @@
       }
     },
     {
-      "id": "hf186f1_b1h80k8v8_1023x1023_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf186f1_b1h80k8v8_1023x1023_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -119672,7 +119672,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -125452,7 +125452,7 @@
       }
     },
     {
-      "id": "hf332f3_b1h32k4v4_2048x2048_d96_bfp16_tlcausal_bshd_tolp",
+      "id": "hf332f3_b1h32k4v4_2048x2048_d96_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -125656,7 +125656,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -131921,7 +131921,7 @@
       }
     },
     {
-      "id": "hf158f1_b1h128k8v8_1023x1023_d192_bfp16_tlw128_bshd_tolu",
+      "id": "hf158f1_b1h128k8v8_1023x1023_d192_bfp16_tlw128_bshd_dom0p25to0p25_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -132126,7 +132126,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -132145,8 +132145,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "probe: heads; d192 x window; HF census g158F_b1h128k8_1023x1023_d192_swa128_bfp16_bshd: 2 models, e.g. XiaomiMiMo/MiMo-V2.5-Pro, XiaomiMiMo/MiMo-V2.6-Pro-RL"
@@ -135853,7 +135853,7 @@
       }
     },
     {
-      "id": "hf049f2_b1h64k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf049f2_b1h64k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -136056,7 +136056,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -136083,7 +136083,7 @@
       }
     },
     {
-      "id": "hf049p1_b1h64k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf049p1_b1h64k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -136286,7 +136286,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -139766,7 +139766,7 @@
       }
     },
     {
-      "id": "hf029f3_b1h16k2v2_2048x2048_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf029f3_b1h16k2v2_2048x2048_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -139969,7 +139969,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -149686,7 +149686,7 @@
       }
     },
     {
-      "id": "hf159f1_b1h64k2v2_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
+      "id": "hf159f1_b1h64k2v2_1023x1023_d128_bfp16_tlcausal_bshd_dom0p25to0p25_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -149889,7 +149889,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -149908,8 +149908,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "probe: heads; HF census g159F_b1h64k2_1023x1023_d128_causal_bfp16_bshd: 2 models, e.g. nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16, nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4"
@@ -153143,7 +153143,7 @@
       }
     },
     {
-      "id": "hf077r1_b1h2k2v2_32760x512_d128_bfp16_none_bshd_qm3to3_km3to3_dom0p5to0p5_tolu",
+      "id": "hf077r1_b1h2k2v2_32760x512_d128_bfp16_none_bshd_qm3to3_km3to3_dom0p25to0p25_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -153364,8 +153364,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "HF census g077R_b1h2k2_32760x512_d128_none_bfp16_bshd_tolu: 6 models, e.g. Comfy-Org/Wan-2.2, Wan-AI/Wan2.1-T2V-14B-Diffusers, Wan-AI/Wan2.2-I2V-A14B-Diffusers"
@@ -156362,7 +156362,7 @@
       }
     },
     {
-      "id": "hf077t1_b1h2k2v2_32759x511_d128_bfp16_none_bshd_qm3to3_km3to3_dom0p5to0p5_tolu",
+      "id": "hf077t1_b1h2k2v2_32759x511_d128_bfp16_none_bshd_qm3to3_km3to3_dom0p25to0p25_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -156583,8 +156583,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5
+            "lo": -0.25,
+            "hi": 0.25
           }
         },
         "notes": "HF census g077T_b1h2k2_32759x511_d128_none_bfp16_bshd_tolu: 6 models, e.g. Comfy-Org/Wan-2.2, Wan-AI/Wan2.1-T2V-14B-Diffusers, Wan-AI/Wan2.2-I2V-A14B-Diffusers"
@@ -158662,7 +158662,7 @@
       }
     },
     {
-      "id": "hf002u2_b1h2k2v2_7999x7999_d64_bfp16_none_bshd_tols",
+      "id": "hf002u2_b1h2k2v2_7999x7999_d64_bfp16_none_bshd_toldl",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -158864,7 +158864,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "S",
+        "tol_class": "DL",
         "inputs": {
           "0": {
             "kind": "free",
@@ -176924,7 +176924,7 @@
       }
     },
     {
-      "id": "hf054f2_b1h56k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf054f2_b1h56k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -177127,7 +177127,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -177154,7 +177154,7 @@
       }
     },
     {
-      "id": "hf054p1_b1h56k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf054p1_b1h56k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -177357,7 +177357,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -178775,7 +178775,7 @@
       }
     },
     {
-      "id": "hf054f1_b1h56k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf054f1_b1h56k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -178978,7 +178978,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -189377,7 +189377,7 @@
       }
     },
     {
-      "id": "hf072f2_b1h48k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf072f2_b1h48k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -189580,7 +189580,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -193752,7 +193752,7 @@
       }
     },
     {
-      "id": "hf275f2_b1h48k2v2_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
+      "id": "hf275f2_b1h48k2v2_1024x1024_d128_bfp16_tlcausal_bshd_dom0p0078125to0p0078125_tols",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -193955,7 +193955,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "S",
         "inputs": {
           "0": {
             "kind": "free",
@@ -193974,15 +193974,15 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.0078125,
+            "hi": 0.0078125
           }
         },
         "notes": "probe: heads; HF census g275F_b1h48k2_1024x1024_d128_causal_bfp16_bshd: 1 models, e.g. zai-org/GLM-4-32B-0414"
       }
     },
     {
-      "id": "hf275p2_b1h48k2v2_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
+      "id": "hf275p2_b1h48k2v2_1024x1024_d128_bfp16_tlcausal_qkvpk_dom0p0078125to0p0078125_tols",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -194185,7 +194185,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "S",
         "inputs": {
           "0": {
             "kind": "free",
@@ -194204,8 +194204,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -1,
-            "hi": 1
+            "lo": -0.0078125,
+            "hi": 0.0078125
           }
         },
         "notes": "probe: heads; HF census g275P_b1h48k2_1024x1024_d128_causal_bfp16_qkvpk: 1 models, e.g. zai-org/GLM-4-32B-0414"
@@ -195132,7 +195132,7 @@
       }
     },
     {
-      "id": "hf072f1_b1h48k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf072f1_b1h48k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -195335,7 +195335,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -196982,7 +196982,7 @@
       }
     },
     {
-      "id": "hf275f1_b1h48k2v2_1023x1023_d128_bfp16_tlcausal_bshd_dom0p0078125to0p0078125_tols",
+      "id": "hf275f1_b1h48k2v2_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -197185,7 +197185,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "S",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -197204,8 +197204,8 @@
           },
           "7": {
             "kind": "free",
-            "lo": -0.0078125,
-            "hi": 0.0078125
+            "lo": -1,
+            "hi": 1
           }
         },
         "notes": "probe: heads; HF census g275F_b1h48k2_1023x1023_d128_causal_bfp16_bshd: 1 models, e.g. zai-org/GLM-4-32B-0414"
@@ -203428,7 +203428,7 @@
       }
     },
     {
-      "id": "hf014f2_b1h40k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf014f2_b1h40k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -203631,7 +203631,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -203887,7 +203887,7 @@
       }
     },
     {
-      "id": "hf142f2_b1h40k10v10_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf142f2_b1h40k10v10_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -204090,7 +204090,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -204117,7 +204117,7 @@
       }
     },
     {
-      "id": "hf142p1_b1h40k10v10_1024x1024_d128_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf142p1_b1h40k10v10_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -204320,7 +204320,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -204347,7 +204347,7 @@
       }
     },
     {
-      "id": "hf239f2_b1h40k10v10_1024x1024_d128_bfp16_tlw2047_bshd_tolp",
+      "id": "hf239f2_b1h40k10v10_1024x1024_d128_bfp16_tlw2047_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -204551,7 +204551,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -204578,7 +204578,7 @@
       }
     },
     {
-      "id": "hf239p1_b1h40k10v10_1024x1024_d128_bfp16_tlw2047_qkvpk_tolp",
+      "id": "hf239p1_b1h40k10v10_1024x1024_d128_bfp16_tlw2047_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -204782,7 +204782,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -204809,7 +204809,7 @@
       }
     },
     {
-      "id": "hf285f2_b1h40k8v8_1024x1024_d128_bfp16_tlcausal_bshd_s0p088388_tolp",
+      "id": "hf285f2_b1h40k8v8_1024x1024_d128_bfp16_tlcausal_bshd_s0p088388_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -205013,7 +205013,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -205040,7 +205040,7 @@
       }
     },
     {
-      "id": "hf304f2_b1h40k8v8_1024x1024_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf304f2_b1h40k8v8_1024x1024_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -205244,7 +205244,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -206881,7 +206881,7 @@
       }
     },
     {
-      "id": "hf014f1_b1h40k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf014f1_b1h40k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -207084,7 +207084,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -207340,7 +207340,7 @@
       }
     },
     {
-      "id": "hf142f1_b1h40k10v10_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf142f1_b1h40k10v10_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -207543,7 +207543,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -207570,7 +207570,7 @@
       }
     },
     {
-      "id": "hf239f1_b1h40k10v10_1023x1023_d128_bfp16_tlw2047_bshd_tolp",
+      "id": "hf239f1_b1h40k10v10_1023x1023_d128_bfp16_tlw2047_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -207774,7 +207774,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -207801,7 +207801,7 @@
       }
     },
     {
-      "id": "hf285f1_b1h40k8v8_1023x1023_d128_bfp16_tlcausal_bshd_s0p088388_tolp",
+      "id": "hf285f1_b1h40k8v8_1023x1023_d128_bfp16_tlcausal_bshd_s0p088388_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -208005,7 +208005,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -208032,7 +208032,7 @@
       }
     },
     {
-      "id": "hf304f1_b1h40k8v8_1023x1023_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf304f1_b1h40k8v8_1023x1023_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -208236,7 +208236,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -210795,7 +210795,7 @@
       }
     },
     {
-      "id": "hf287f2_b1h64k8v8_1024x1024_d96_bfp16_tlcausal_bshd_tolp",
+      "id": "hf287f2_b1h64k8v8_1024x1024_d96_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -210999,7 +210999,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -211257,7 +211257,7 @@
       }
     },
     {
-      "id": "hf116f1_b1h48k8v8_1023x1023_d128_bfp16_tlw512_bshd_tolp",
+      "id": "hf116f1_b1h48k8v8_1023x1023_d128_bfp16_tlw512_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -211461,7 +211461,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -211488,7 +211488,7 @@
       }
     },
     {
-      "id": "hf116f2_b1h48k8v8_1024x1024_d128_bfp16_tlw512_bshd_tolp",
+      "id": "hf116f2_b1h48k8v8_1024x1024_d128_bfp16_tlw512_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -211692,7 +211692,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -214025,7 +214025,7 @@
       }
     },
     {
-      "id": "hf287f1_b1h64k8v8_1023x1023_d96_bfp16_tlcausal_bshd_tolp",
+      "id": "hf287f1_b1h64k8v8_1023x1023_d96_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -214229,7 +214229,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -217019,7 +217019,7 @@
       }
     },
     {
-      "id": "hf190f2_b1h64k8v8_1024x1024_d192_bfp16_tlw128_bshd_tolp",
+      "id": "hf190f2_b1h64k8v8_1024x1024_d192_bfp16_tlw128_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -217224,7 +217224,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -221413,7 +221413,7 @@
       }
     },
     {
-      "id": "hf268f3_b1h64k8v8_2048x2048_d128_bfp16_tlw128_bshd_tolp",
+      "id": "hf268f3_b1h64k8v8_2048x2048_d128_bfp16_tlw128_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -221617,7 +221617,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -221644,7 +221644,7 @@
       }
     },
     {
-      "id": "hf311f3_b1h32k4v4_2048x2048_d64_bfp16_tlcausal_bshd_tolu",
+      "id": "hf311f3_b1h32k4v4_2048x2048_d64_bfp16_tlcausal_bshd_tolp",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -221848,7 +221848,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "U",
+        "tol_class": "P",
         "inputs": {
           "0": {
             "kind": "free",
@@ -223028,7 +223028,7 @@
       }
     },
     {
-      "id": "hf003f2_b1h32k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf003f2_b1h32k8v8_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -223231,7 +223231,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -223258,7 +223258,7 @@
       }
     },
     {
-      "id": "hf003p1_b1h32k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf003p1_b1h32k8v8_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -223461,7 +223461,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -224869,7 +224869,7 @@
       }
     },
     {
-      "id": "hf020f2_b1h32k4v4_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf020f2_b1h32k4v4_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -225072,7 +225072,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -227392,7 +227392,7 @@
       }
     },
     {
-      "id": "hf035f2_b1h32k8v8_1024x1024_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf035f2_b1h32k8v8_1024x1024_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -227596,7 +227596,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -227623,7 +227623,7 @@
       }
     },
     {
-      "id": "hf035p1_b1h32k8v8_1024x1024_d128_bfp16_tlw4096_qkvpk_tolp",
+      "id": "hf035p1_b1h32k8v8_1024x1024_d128_bfp16_tlw4096_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -227827,7 +227827,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -228087,7 +228087,7 @@
       }
     },
     {
-      "id": "hf090f2_b1h32k8v8_1024x1024_d128_bfp16_tlw8192_bshd_tolp",
+      "id": "hf090f2_b1h32k8v8_1024x1024_d128_bfp16_tlw8192_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -228291,7 +228291,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -228550,7 +228550,7 @@
       }
     },
     {
-      "id": "hf131f2_b1h32k8v8_1024x1024_d128_bfp16_tlw2048_bshd_tolp",
+      "id": "hf131f2_b1h32k8v8_1024x1024_d128_bfp16_tlw2048_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -228754,7 +228754,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -229012,7 +229012,7 @@
       }
     },
     {
-      "id": "hf209f2_b1h32k4v4_1024x1024_d128_bfp16_tlw1024_bshd_tolp",
+      "id": "hf209f2_b1h32k4v4_1024x1024_d128_bfp16_tlw1024_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -229216,7 +229216,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -231093,7 +231093,7 @@
       }
     },
     {
-      "id": "hf228f2_b1h32k4v4_1024x1024_d128_bfp16_tlw4096_bshd_tolp",
+      "id": "hf228f2_b1h32k4v4_1024x1024_d128_bfp16_tlw4096_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -231297,7 +231297,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -233166,7 +233166,7 @@
       }
     },
     {
-      "id": "hf266f2_b1h32k8v8_1024x1024_d128_bfp16_tlw32768_bshd_tolp",
+      "id": "hf266f2_b1h32k8v8_1024x1024_d128_bfp16_tlw32768_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -233370,7 +233370,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -260626,7 +260626,7 @@
       }
     },
     {
-      "id": "hf009f2_b1h28k4v4_1024x1024_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf009f2_b1h28k4v4_1024x1024_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -260829,7 +260829,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -261085,7 +261085,7 @@
       }
     },
     {
-      "id": "hf009p1_b1h28k4v4_1024x1024_d128_bfp16_tlcausal_qkvpk_tolp",
+      "id": "hf009p1_b1h28k4v4_1024x1024_d128_bfp16_tlcausal_qkvpk_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -261288,7 +261288,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -262240,7 +262240,7 @@
       }
     },
     {
-      "id": "hf009f1_b1h28k4v4_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf009f1_b1h28k4v4_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -262443,7 +262443,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -267774,7 +267774,7 @@
       }
     },
     {
-      "id": "hf089f2_b1h32k4v4_1024x1024_d128_bfp16_tlw513_bshd_tolp",
+      "id": "hf089f2_b1h32k4v4_1024x1024_d128_bfp16_tlw513_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -267978,7 +267978,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -272386,7 +272386,7 @@
       }
     },
     {
-      "id": "hf095f1_b1h24k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolp",
+      "id": "hf095f1_b1h24k8v8_1023x1023_d128_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -272589,7 +272589,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -304003,7 +304003,7 @@
       }
     },
     {
-      "id": "hf057f2_b1h64k8v8_1024x1024_d64_bfp16_tlcausal_bshd_tolp",
+      "id": "hf057f2_b1h64k8v8_1024x1024_d64_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -304207,7 +304207,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -304927,7 +304927,7 @@
       }
     },
     {
-      "id": "hf326f2_b1h64k16v16_1024x1024_d64_bfp16_tlcausal_bshd_tolp",
+      "id": "hf326f2_b1h64k16v16_1024x1024_d64_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -305131,7 +305131,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -308618,7 +308618,7 @@
       }
     },
     {
-      "id": "hf326f1_b1h64k16v16_1023x1023_d64_bfp16_tlcausal_bshd_tolp",
+      "id": "hf326f1_b1h64k16v16_1023x1023_d64_bfp16_tlcausal_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -308822,7 +308822,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -321269,7 +321269,7 @@
       }
     },
     {
-      "id": "hf011u2_b1h2k2v2_6400x6400_d40_bfp16_none_bshd_tols",
+      "id": "hf011u2_b1h2k2v2_6400x6400_d40_bfp16_none_bshd_toldl",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -321471,7 +321471,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "S",
+        "tol_class": "DL",
         "inputs": {
           "0": {
             "kind": "free",
@@ -321960,7 +321960,7 @@
       }
     },
     {
-      "id": "hf048f3_b1h16k4v4_2048x2048_d128_bfp16_tlw256_bshd_tolp",
+      "id": "hf048f3_b1h16k4v4_2048x2048_d128_bfp16_tlw256_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -322164,7 +322164,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -322651,7 +322651,7 @@
       }
     },
     {
-      "id": "hf268f2_b1h64k8v8_1024x1024_d128_bfp16_tlw128_bshd_tolp",
+      "id": "hf268f2_b1h64k8v8_1024x1024_d128_bfp16_tlw128_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -322855,7 +322855,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -386765,7 +386765,7 @@
       }
     },
     {
-      "id": "hf335f2_b1h32k8v8_1024x1024_d128_bfp16_tlw128_bshd_tolp",
+      "id": "hf335f2_b1h32k8v8_1024x1024_d128_bfp16_tlw128_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -386969,7 +386969,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",
@@ -425270,7 +425270,7 @@
       }
     },
     {
-      "id": "hf058f1_b1h64k8v8_1023x1023_d64_bfp16_tlw128_bshd_tolp",
+      "id": "hf058f1_b1h64k8v8_1023x1023_d64_bfp16_tlw128_bshd_tolu",
       "values": {
         "io_data_type": "bfloat16",
         "attributes": {
@@ -425475,7 +425475,7 @@
         "purpose": "probe",
         "size_class": "M",
         "seed": 0,
-        "tol_class": "P",
+        "tol_class": "U",
         "inputs": {
           "0": {
             "kind": "free",

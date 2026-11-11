@@ -3,7 +3,8 @@
 > **Status: draft for review (ALMIOPEN-2894).** This plan has not been reviewed yet. It
 > follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30). The RFC's methodology guide and
 > test-plans index do not exist yet, so this plan links the RFC's sections directly. The generator
-> is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --dry-run --report`
+> is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --bundle-dir
+> dnn-providers/integration-tests/integration-test-bundles --dry-run --report`
 > declares 5,080 cases, 4,962 written (quick 56, PR 1,198, nightly 945, full 2,763; 4,456 of them from the Hugging Face census, §3.6) and 118 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
@@ -585,9 +586,11 @@ case id is kept in each record. Nobody edits the file by hand.
 
 Each case is one **variant** of a geometry, in placement order: R real length, one KV group (MHA
 keeps 2 heads); F the real head counts; T the real length ±1 and ±63, 65, 127, 129 (tile tails at the
-real head dims); P packed QKV (layout `qkvpk`: Q, K, V and their gradients are views of one
-[B, S, Hq + Hk + Hv, D] buffer); V GPT-NeoX/BLOOM interleaved V (`bshd_vneox`: head stride 3D); H
-BHSD; D fp16; M Sq ≠ Skv (context-parallel steps, BR) and windows just past W; B batch > 1; X the
+real head dims); P packed QKV (layout `qkvpk`: Q, K, V and their gradients have the strides of one
+[B, S, Hq + Hk + Hv, D] buffer, each in its own allocation; Q, K and V could share one through
+`aliases` ([file-formats.md](../file-formats.md)), the gradients are outputs and cannot); V
+GPT-NeoX/BLOOM interleaved V (`bshd_vneox`: head stride 3D); H BHSD; D fp16; M Sq ≠ Skv
+(context-parallel steps, BR) and windows just past W; B batch > 1; X the
 model's bias forms (padding bias, learned bias with dBias, ALiBi); U a U(−1, 1) twin of a long
 case. Cases longer than 2,048 keys draw Q and K from U(−3, 3), the logit spread of trained attention.
 Everything else is BSHD in bf16.
@@ -607,9 +610,9 @@ case (RFC 0022 §7: quick is S shapes).
 | not run | 44 | — | — | HG6: no class holds both the guard and the margin (IBM Granite 4 layers, whose 1/D scale leaves every gradient tiny, Falcon-7B 71/1 and DeepSeek-V4-Pro 128/1 D512) |
 
 288 of the 347 geometries have a case in PR or nightly. 346 HF cases are claims (MHA, D 128 or 192,
-no bias); the rest are probes (§4.2). Tolerance classes: P 1,587, U 1,204, D 1,175, DL 461, S 29;
-256 cases scale dO. The magnitude estimate of a case over `ESTIMATE_CAP` runs on one KV group, in
-blocks of query rows (§6.1), so every HF case gets an estimated class and the kernel-model margin.
+no bias); the rest are probes (§4.2). Tolerance classes: P 1,517, U 1,273, D 1,176, DL 462, S 28;
+262 cases scale dO. The magnitude estimate runs on every head, in blocks of query rows (§6.1), so
+every HF case gets an estimated class and the kernel-model margin.
 
 ---
 
@@ -920,11 +923,12 @@ fails when a level crosses its limit; the HF placement (§3.6) fills PR and nigh
   from PR to nightly and M03.n, M12.n, M20.n, M36.n and M43.n (25.4 s) from nightly to full. When the
   dBias probes and GL-14 entered PR, M07.pr (1.7 s) moved to nightly and M26.n (4.5 s) to full
   (register R-M6). The HF placement now spends what the GPU-era model frees.
-- **Shards.** Each level lane runs two GTest shards in a 30-minute step; cases are ordered by
-  descending cost so heavy ones alternate. In TheRock prerelease the full lane shares each step with
-  other suites (HIP_MLOPS took 631–641 s per shard on 2026-10-25). With every HF case accepted, full
-  alone models at 3,491 s, about 29 min per shard on two shards; the lane owner signs off on that
-  share. Today ASM_SDPA_ENGINE declines most HF cases, so the measured full level is 153 s (§4.5).
+- **Shards.** Cases are ordered by descending cost so heavy ones alternate across the GTest shards.
+  TheRock runs full only in prerelease, in the `hipkernelprovider` job: 4 GTest shards on Linux and
+  Windows, one 30-minute step per shard shared with every other hip-kernel-provider entry. With every
+  HF case accepted, full alone models at 3,491 s, about 14.5 min per shard; the rest of the shard's
+  full-tier content is not measured, and the lane owner signs off on that sum. Today
+  ASM_SDPA_ENGINE declines most HF cases, so the measured full level is 153 s (§4.5).
 
 ### 4.5 Measured run
 
@@ -1083,13 +1087,13 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
   (FP32 accumulation, P and dS rounded to the IO dtype) passes the class with margin ≥ 2.5, or the
   generator moves the case to the next class whose guard holds, or scales the dO range by 2^k (exact),
   or stops. X05, X09, H96 and 44 HF cases fit no class and wait for HG6.
-- **Estimate size.** A large case is estimated on two batches. A case over 2·10⁷ scores
-  (`ESTIMATE_CAP`) keeps one KV group (its head counts divided by gcd(Hk, Hv)), since magnitudes are
-  per group, and the estimator walks query rows in blocks of 2·10⁷ scores, so memory stays bounded and
-  a case within one block computes what the unblocked estimator did. A case over 6·10⁸ scores
-  (`ESTIMATE_LIMIT`) gets the provisional class D; the kernel model runs up to 4·10¹⁰ scores × D.
-  `--calibrate --jobs N` computes the estimates on N processes (the census needs about 20 minutes on
-  64 CPUs).
+- **Estimate size.** A large case is estimated on two batches and on every head (the maxima the
+  guard and the margin rest on are taken over all of them). The estimator walks query rows in blocks
+  of 2·10⁷ scores, so memory stays bounded and a case within one block computes what the unblocked
+  estimator did. A case over 6·10⁸ scores (`ESTIMATE_LIMIT`) gets the provisional class D; the kernel
+  model runs up to 4·10¹⁰ scores × D.
+  `--calibrate --jobs N` computes the estimates on N processes (the census needs about 5 minutes on
+  64 CPUs, 3 CPU-hours).
 - **Never loosen a class to make an engine pass.** A failing engine has a defect (DEF) or a probe
   without a claim; fp16 cases at Skv ≤ 2 are probes until DEF-03 is fixed.
 - **Rows.** The generator owns 12 anchored `[[tolerance_overrides]]` rows,

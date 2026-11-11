@@ -334,10 +334,23 @@ def test_ceilings_hold(written):
 
 def test_cumulative_budgets_hold(cases):
     """Every level with a budget holds its cases inside the 5 % reserve, less
-    the reserved gates."""
-    cum, lim = G.cumulative_seconds(cases), G.budget_limits(cases)
+    the reserved gates: the not-run cases whose gate is a harness item, at
+    their target level and every level above it (§4.4)."""
+    total = gates = 0.0
     for lv in P.LEVELS:
-        assert cum[lv] <= lim[lv], (lv, cum[lv], lim[lv])
+        total += sum(
+            c["est_s_gpu"] for c in cases if c["runnable_now"] and c["level"] == lv
+        )
+        gates += sum(
+            c["est_s_gpu"]
+            for c in cases
+            if c["level"] == P.NOTRUN
+            and c.get("target_level") == lv
+            and "14358" not in c["oracle_status"]
+        )
+        if P.CUM_S[lv] is not None:
+            limit = P.CUM_S[lv] * (1 - P.RESERVE) - gates
+            assert total <= limit, (lv, total, limit)
 
 
 def test_hf_cases_fill_pr_and_nightly_in_priority_order(cases):
@@ -423,3 +436,36 @@ def test_estimator_reproduces_the_calibration(cases):
             assert got["atol_needed"] is None
         else:  # the kernel model's FP32 sums may round differently across BLAS builds
             assert got["atol_needed"] == pytest.approx(stored["atol_needed"], rel=1e-2)
+
+
+@pytest.mark.skipif(NUMPY_MISSING, reason="the magnitude estimator needs numpy")
+def test_row_blocked_estimate_matches_one_block(cases, monkeypatch):
+    """The estimate walked in blocks of three query rows gives what one block
+    gives: dQ's maximum over every block, dK and dV (and the kernel model's
+    FP32 dK and dV) summed over the blocks. The cases cover a full bias, GQA
+    with one and two KV heads, a window, BR alignment and fp16."""
+    picks = {
+        ("H75", "bf16"),  # full bias [1, 2, Sq, Skv], causal BR, Sq < Skv
+        ("TP-Cm07", "bf16"),  # GQA 4/1, causal
+        ("TP-Cg13", "bf16"),  # GQA 4/2, window 16, BR, Sq > Skv
+        ("C05", "fp16"),  # window 16, BR, Sq < Skv
+    }
+    reqs = [G.estimate_request(c) for c in cases if (c["id"], c["dtype"]) in picks]
+    assert len(reqs) == len(picks)
+    for key, _, p in reqs:
+        assert p["kernel_model"], key
+        assert p["B"] * p["Hq"] * p["Sq"] * p["Skv"] <= P.ESTIMATE_BLOCK, key
+        one = P.estimate(p)
+        monkeypatch.setattr(P, "ESTIMATE_BLOCK", p["B"] * p["Hq"] * p["Skv"] * 3)
+        blocked = P.estimate(p)
+        monkeypatch.undo()
+        assert blocked["lambda"] == one["lambda"], key
+        # max|ref|: FP64 sums in another order, rounded to the IO dtype
+        for g in ("dQ", "dK", "dV"):
+            assert blocked["max_ref"][g] == pytest.approx(
+                one["max_ref"][g], rel=1e-6
+            ), (key, g)
+        # atol_needed: the kernel model's FP32 sums round differently in another order
+        assert blocked["atol_needed"] == pytest.approx(
+            one["atol_needed"], rel=1e-2
+        ), key

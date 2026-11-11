@@ -127,6 +127,8 @@ TOPOLOGIES = OrderedDict([
 ISQ = "inv_sqrt"  # attn_scale_value = 1 / sqrt(Dqk)
 
 GEOMETRY = ("B", "Hq", "Hk", "Hv", "Sq", "Skv", "Dqk", "Dv")
+# A case's shape: its geometry, band (W, R, align) and scale.
+SHAPE_KEYS = GEOMETRY + ("W", "R", "align", "scale")
 # The default shape (§3): g = 1 and Dqk = Dv (deviation DV-1).
 DEFAULT = dict(B=2, Hq=3, Hk=3, Hv=3, Sq=72, Skv=120, Dqk=128, Dv=128)
 
@@ -296,10 +298,11 @@ LAYOUTS = {
     "perm6": dict(zip(IO, ("perm_bsh", "perm_hbs", "perm_hsb", "perm_sbh", "perm_shb", "bhsd",
                            "perm_bsh", "perm_hbs"))),
     "gaps": {t: "gaps" for t in IO},
-    # Hugging Face census layouts (§3.6): Q, K, V and their gradients as views of one
-    # fused-projection buffer [B, S, Hq + Hk + Hv, D] (stride kind "qkvpk", resolved in
-    # tensor_table because the row pitch needs every head count), and V as a GPT-NeoX/BLOOM
-    # interleaved view (head stride 3D, row stride 3HD).
+    # Hugging Face census layouts (§3.6): Q, K, V and their gradients with the strides of
+    # one fused-projection buffer [B, S, Hq + Hk + Hv, D], each in its own allocation
+    # (stride kind "qkvpk", resolved in tensor_table because the row pitch needs every
+    # head count), and V with the strides of a GPT-NeoX/BLOOM interleaved buffer (head
+    # stride 3D, row stride 3HD).
     "qkvpk": dict({t: "bshd" for t in IO}, **{t: "qkvpk" for t in ("Q", "K", "V", "dQ", "dK", "dV")}),
     "bshd_vneox": dict({t: "bshd" for t in IO}, V="vneox"),
 }
@@ -576,11 +579,16 @@ def seconds(c, dt):
     return round(cc["s"] * rpt, 3), round(alt * rpt, 3), round(cc["s_gpu"] * rpt, 3)
 
 
+def within_ceilings(level, seconds, nbytes):
+    """The per-case time and byte ceilings of a level hold (§4.4)."""
+    cb = CEIL_BYTES[level]
+    return seconds <= CEIL_S[level] and (cb is None or nbytes <= cb)
+
+
 def fits_level(cost):
     """Lowest level whose per-case time and byte ceilings hold (pilot)."""
     for lv in LEVELS:
-        cb = CEIL_BYTES[lv]
-        if cost["s"] <= CEIL_S[lv] and (cb is None or cost["bytes"] <= cb):
+        if within_ceilings(lv, cost["s"], cost["bytes"]):
             return lv
     return None
 
@@ -1052,9 +1060,7 @@ ASSIGNMENT_ORDER = ("F32", "K1", "U", "S", "P", "DL", "D")
 TOKEN = {k: v[0] for k, v in CLASSES.items()}
 GUARD = 0.1  # atol <= GUARD x min over non-zero gradients of max|ref|
 MARGIN = 2.5  # same-precision kernel model vs the FP32-accumulating reference
-# Estimator sizes, in scores of the estimate (min(B, 2) x Hq x Sq x Skv, after the
-# KV-group reduction of estimate_params):
-ESTIMATE_CAP = 2e7  # above it the estimate keeps one KV group of heads
+# Estimator sizes, in scores of the estimate (min(B, 2) x Hq x Sq x Skv):
 ESTIMATE_BLOCK = 2e7  # scores per block of query rows
 ESTIMATE_LIMIT = 6e8  # above it the class is provisional
 KERNEL_MODEL_CAP = 4e10  # scores x max(Dqk, Dv) above which the kernel model is not run
@@ -1160,19 +1166,9 @@ def modellable(c):
     )
 
 
-def estimate_heads(c):
-    """(Hq, Hk, Hv) of the estimate. Magnitudes are per KV group, so a case over
-    ESTIMATE_CAP keeps one group: the head counts divided by gcd(Hk, Hv)."""
-    Hq, Hk, Hv = c["Hq"], c["Hk"], c["Hv"]
-    if min(c["B"], 2) * Hq * c["Sq"] * c["Skv"] <= ESTIMATE_CAP:
-        return Hq, Hk, Hv
-    f = math.gcd(Hk, Hv)
-    return Hq // f, Hk // f, Hv // f
-
-
 def estimate_scores(c):
-    """Scores the estimate computes: min(B, 2) x Hq x Sq x Skv after the reduction."""
-    return min(c["B"], 2) * estimate_heads(c)[0] * c["Sq"] * c["Skv"]
+    """Scores the estimate computes: min(B, 2) x Hq x Sq x Skv (every head)."""
+    return min(c["B"], 2) * c["Hq"] * c["Sq"] * c["Skv"]
 
 
 def estimable(c):
@@ -1209,13 +1205,6 @@ def estimate_params(c, dt, km):
         p["B"] = 2
         if p.get("bias_dims") and len(p["bias_dims"]) == 4 and p["bias_dims"][0] > 2:
             p["bias_dims"] = [2] + p["bias_dims"][1:]
-    # and on one KV group when the case is over ESTIMATE_CAP
-    Hq, p["Hk"], p["Hv"] = estimate_heads(c)
-    if Hq != p["Hq"]:
-        bd = p.get("bias_dims")
-        if bd and len(bd) >= 3 and bd[-3] == p["Hq"]:
-            p["bias_dims"] = bd[:-3] + [Hq] + bd[-2:]
-        p["Hq"] = Hq
     return p
 
 
@@ -2045,8 +2034,7 @@ def reduce_model(m, target_s, s_floor, level, keep_window=False):
 
 
 def _m_key(v):
-    keys = GEOMETRY + ("W", "R", "align", "scale")
-    return tuple(v.get(k) for k in keys) + (tuple(v.get("seqlens") or ()),)
+    return tuple(v.get(k) for k in SHAPE_KEYS) + (tuple(v.get("seqlens") or ()),)
 
 
 def _m_record(mid, suffix, v):

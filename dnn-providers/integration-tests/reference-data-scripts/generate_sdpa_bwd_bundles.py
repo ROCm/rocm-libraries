@@ -806,7 +806,7 @@ def model_items():
         mid, sfx = r["id"].split(".")
         if r["id"] in M_DROP:
             continue
-        geo = {k: r[k] for k in P.GEOMETRY + ("W", "R", "align", "scale")}
+        geo = {k: r[k] for k in P.SHAPE_KEYS}
         level = {"pr": "pr", "n": "nightly", "fc": "full", "f": "full"}[sfx]
         it = P.new(
             id=r["id"],
@@ -855,7 +855,7 @@ def hf_items():
             set="M",
             level="full",
             dtypes=[r["dtype"]],
-            **{k: r[k] for k in P.GEOMETRY + ("W", "R", "align", "scale", "layout")},
+            **{k: r[k] for k in P.SHAPE_KEYS + ("layout",)},
             inputs=r.get("inputs"),
             seed=r.get("seed", 0),
         )
@@ -1376,6 +1376,22 @@ def _estimate_job(job):
     return key, dict(fp=fp, **P.estimate(params))
 
 
+def _runnable(c):
+    """The case runs: its oracle is ready and its level is one of LEVELS."""
+    return P.oracle_of(c) in P.READY and c["level"] in P.LEVELS
+
+
+def estimate_request(c):
+    """(key, fingerprint, params) of the magnitude estimate behind a case's
+    class, or None when the class rests on no estimate (golden cases,
+    rejection probes, cases that are not estimable)."""
+    if c.get("golden") or c.get("rejection") or not P.estimable(c):
+        return None
+    dt = c["dtype"]
+    params = P.estimate_params(c, dt, P.kernel_model(c, dt, _runnable(c)))
+    return f"{c['id']}/{dt}", P.fingerprint(params), params
+
+
 class Calibration:
     """The recorded magnitude estimates (sdpa_bwd_calibration.json). With
     `compute`, a missing or stale estimate is computed (NumPy), on `jobs`
@@ -1389,9 +1405,10 @@ class Calibration:
         self.used = set()
         self.computed = 0
 
-    def _request(self, c, dt, km):
-        params = P.estimate_params(c, dt, km)
-        return f"{c['id']}/{dt}", P.fingerprint(params), params
+    def stale(self, key, fp):
+        """The recorded estimate is missing or was computed for other inputs."""
+        e = self.entries.get(key)
+        return e is None or e["fp"] != fp
 
     def prefetch(self, cases):
         """Compute, in parallel, the missing or stale estimates that finalize()
@@ -1400,15 +1417,9 @@ class Calibration:
             return
         jobs = {}
         for c in cases:
-            if c.get("golden") or c.get("rejection") or not P.estimable(c):
-                continue
-            runnable = P.oracle_of(c) in P.READY and c["level"] in P.LEVELS
-            key, fp, params = self._request(
-                c, c["dtype"], P.kernel_model(c, c["dtype"], runnable)
-            )
-            e = self.entries.get(key)
-            if (e is None or e["fp"] != fp) and key not in jobs:
-                jobs[key] = (key, fp, params)
+            req = estimate_request(c)
+            if req and req[0] not in jobs and self.stale(req[0], req[1]):
+                jobs[req[0]] = req
         if not jobs:
             return
         work = sorted(jobs.values(), key=lambda j: -P.estimate_scores(j[2]))
@@ -1429,19 +1440,18 @@ class Calibration:
                 self.entries[key] = e
         self.computed += len(work)
 
-    def get(self, c, dt, km):
-        key, fp, params = self._request(c, dt, km)
+    def get(self, req):
+        """The estimate of an estimate_request()."""
+        key, fp, params = req
         self.used.add(key)
-        e = self.entries.get(key)
-        if e is None or e["fp"] != fp:
+        if self.stale(key, fp):
             if not self.compute:
                 raise SystemExit(
                     f"{key}: magnitude estimate missing or stale; rerun with --calibrate (needs numpy)"
                 )
-            e = dict(fp=fp, **P.estimate(params))
-            self.entries[key] = e
+            self.entries[key] = dict(fp=fp, **P.estimate(params))
             self.computed += 1
-        return e
+        return self.entries[key]
 
     def save(self):
         P.save_calibration(
@@ -1455,7 +1465,7 @@ def finalize(c, calib):
     dt = c["dtype"]
     c["topology"] = P.topology_of(c)
     c["oracle_status"] = P.oracle_of(c)
-    c["runnable_now"] = c["oracle_status"] in P.READY and c["level"] in P.LEVELS
+    c["runnable_now"] = _runnable(c)
     if not c["runnable_now"] and c["level"] in P.LEVELS:
         c["target_level"], c["level"] = (
             c["level"],
@@ -1463,15 +1473,14 @@ def finalize(c, calib):
         )  # a gated case has no level
     cost = P.case_cost(c)
     c["n_pairs"], c["n_live"], c["flop"] = cost["n_pairs"], cost["n_live"], cost["flop"]
-    c["est_s"], c["est_s_alt"], c["est_s_gpu"] = P.seconds(c, dt)
-    c["purpose_final"] = P.purpose(c, dt)
+    _timed(c, dt)
+    req = estimate_request(c)
     if c.get("golden"):
         cls, info = c["tol_class"], {"source": "golden set"}
     elif c.get("rejection"):
         cls, info = P.provisional_class(dt), {"rule": "rejection probe: never compared"}
-    elif P.estimable(c):
-        km = P.kernel_model(c, dt, c["runnable_now"])
-        cls, info, f = P.assign_class(c, dt, calib.get(c, dt, km))
+    elif req:
+        cls, info, f = P.assign_class(c, dt, calib.get(req))
         if f != 1.0:  # scale dO by 2^k: the gradients are linear in dO
             c["inputs"] = dict(c.get("inputs") or {}, do=_scaled(c.get("inputs"), f))
         if info.get("unassigned"):
@@ -1566,12 +1575,9 @@ def place_hf(base, hf):
     for c in hf_priority([c for c in hf if c["runnable_now"]]):
         t, nbytes = c["est_s_gpu"], c["record"]["bytes"]
         for lv in P.HF_LEVELS:
-            cap = P.CEIL_BYTES[lv]
             span = P.LEVELS[P.LEVELS.index(lv) : P.LEVELS.index(P.HF_LEVELS[-1]) + 1]
-            if (
-                t <= P.CEIL_S[lv]
-                and (cap is None or nbytes <= cap)
-                and all(cum[L] + t <= lim[L] for L in span)
+            if P.within_ceilings(lv, t, nbytes) and all(
+                cum[L] + t <= lim[L] for L in span
             ):
                 levels[c["id"]] = lv
                 for L in upper[upper.index(lv) :]:
@@ -1580,14 +1586,19 @@ def place_hf(base, hf):
     return levels
 
 
+def _timed(c, dt):
+    """Seconds and purpose, which placement reads."""
+    c["est_s"], c["est_s_alt"], c["est_s_gpu"] = P.seconds(c, dt)
+    c["purpose_final"] = P.purpose(c, dt)
+
+
 def _sized(c):
     """What placement needs of an all-pairs case without its tolerance class:
     level, cost, purpose and axis values (no estimate, no id)."""
     dt = c["dtype"]
     c["runnable_now"] = True
     c["oracle_status"] = P.oracle_of(c)
-    c["est_s"], c["est_s_alt"], c["est_s_gpu"] = P.seconds(c, dt)
-    c["purpose_final"] = P.purpose(c, dt)
+    _timed(c, dt)
     c["axis_values"] = P.axis_projection(c, dt)
 
 
@@ -2015,8 +2026,7 @@ def report(cases):
     over = [
         (c["case_id"], c["level"], c["est_s_gpu"])
         for c in run
-        if c["est_s_gpu"] > P.CEIL_S[c["level"]]
-        or c["record"]["bytes"] > (P.CEIL_BYTES[c["level"]] or float("inf"))
+        if not P.within_ceilings(c["level"], c["est_s_gpu"], c["record"]["bytes"])
     ]
     print(f"  cases over their level ceiling: {len(over)} {over[:5]}")
     print(
