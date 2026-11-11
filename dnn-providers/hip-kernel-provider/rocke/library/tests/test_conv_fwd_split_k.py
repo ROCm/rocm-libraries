@@ -520,7 +520,7 @@ class TestSplitKPolicy(unittest.TestCase):
     and the arch."""
 
     def _pick(self, M, N, K, tile=(16, 16, 64), groups=1, arch="gfx1250"):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         tm, tn, tk = tile
         return select_split_k_fwd(
@@ -528,7 +528,7 @@ class TestSplitKPolicy(unittest.TestCase):
         ).split_k
 
     def test_fills_toward_the_target_grid(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        from kernels.common.conv_split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
 
         target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
         # Deep enough that only the grid limits the degree.
@@ -540,7 +540,7 @@ class TestSplitKPolicy(unittest.TestCase):
                 self.assertLessEqual(got * tiles, target)
 
     def test_a_grid_that_fills_the_device_is_not_split(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        from kernels.common.conv_split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
 
         target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
         self.assertEqual(self._pick(16 * (target // 2), 16, 1 << 20), 1)
@@ -549,7 +549,7 @@ class TestSplitKPolicy(unittest.TestCase):
         self.assertGreater(self._pick(16 * 8, 16, 1 << 20, groups=2), 1)
 
     def test_shallow_reductions_are_not_split(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_MIN_GEMM_K
+        from kernels.common.conv_split_k import FWD_SPLIT_K_MIN_GEMM_K
 
         self.assertEqual(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K - 1), 1)
         self.assertGreater(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K), 1)
@@ -566,14 +566,14 @@ class TestSplitKPolicy(unittest.TestCase):
         )
 
     def test_a_smaller_part_splits_less(self):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         kw = dict(M=16 * 64, N=16, K=1 << 20, tile_m=16, tile_n=16, tile_k=64)
         full = select_split_k_fwd(**kw).split_k
         self.assertEqual(select_split_k_fwd(**kw, num_cus=128).split_k, full // 2)
 
     def test_degrees_stay_on_the_ladder_and_under_the_cap(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_MAX
+        from kernels.common.conv_split_k import FWD_SPLIT_K_MAX
 
         for M in (1, 49, 196, 784, 3136):
             for K in (512, 2304, 4608, 17280):
@@ -604,7 +604,7 @@ class TestSplitKResolver(unittest.TestCase):
         )
 
     def test_auto_follows_the_policy_on_gfx1250(self):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         p = TestSplitKDegrees._SMALL
         got = self._resolve(p)
@@ -615,7 +615,7 @@ class TestSplitKResolver(unittest.TestCase):
         self.assertGreater(want, 1)
 
     def test_auto_follows_the_policy_on_gfx950(self):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         p = TestSplitKDegrees._SMALL
         got = self._resolve(p, arch="gfx950")
@@ -767,16 +767,23 @@ class TestSplitKAutoBuild(unittest.TestCase):
         )
 
     def test_the_backend_resolves_auto_for_the_cpp_engine(self):
-        from rocke.core import backend
+        from kernels.conv import engine_bridge as backend
 
         seen = []
+        real_to_dict = backend.conv_implicit_gemm_spec_to_dict
 
-        def _fake_lower_family(family, spec, *a, **kw):
+        def _record(spec):
             seen.append(spec.split_k)
+            return real_to_dict(spec)
 
+        # The no-op lower_family takes keywords only, as the bridge must pass.
         with mock.patch.object(
-            backend, "_lower_family", _fake_lower_family
-        ), mock.patch.object(backend, "_import_engine", lambda: None):
+            backend, "conv_implicit_gemm_spec_to_dict", _record
+        ), mock.patch.object(
+            backend, "lower_family", lambda **kw: None
+        ), mock.patch.object(
+            backend, "import_engine", lambda module: None
+        ):
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx1250")
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx950")
         self.assertEqual(seen, [4, 1])
@@ -898,7 +905,7 @@ class TestSplitKSpecDict(unittest.TestCase):
     """The Python-to-C++ spec dict carries the split-K fields as they are."""
 
     def test_fields_are_forwarded(self):
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         d = conv_implicit_gemm_spec_to_dict(
             _spec(split_k=2, split_k_cluster=4, pipeline="mem", num_load_waves=3)
@@ -910,7 +917,7 @@ class TestSplitKSpecDict(unittest.TestCase):
     def test_a_spec_without_them_is_rejected(self):
         # A spec object missing a field is malformed: it must not be read as
         # an unsplit, cluster-free kernel with four load waves.
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         spec = _spec(split_k=2)
         for missing in ("split_k", "split_k_cluster", "num_load_waves"):
@@ -925,13 +932,97 @@ class TestSplitKSpecDict(unittest.TestCase):
                 with self.assertRaises(AttributeError):
                     conv_implicit_gemm_spec_to_dict(_Without())
 
+    def test_a_spec_or_problem_without_its_group_fields_is_rejected(self):
+        # Neither a missing group_merge nor a missing problem.groups may be
+        # read as the ungrouped / unmerged default.
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        spec = _spec()
+
+        def _without(obj, field, **override):
+            class _Without:
+                def __getattr__(self, name):
+                    if name == field:
+                        raise AttributeError(name)
+                    if name in override:
+                        return override[name]
+                    return getattr(obj, name)
+
+            return _Without()
+
+        with self.subTest(missing="group_merge"):
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(_without(spec, "group_merge"))
+        with self.subTest(missing="problem.groups"):
+            bad = _without(spec, None, problem=_without(spec.problem, "groups"))
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(bad)
+
+    def test_a_spec_without_its_data_is_rejected(self):
+        # A missing ConvDataSpec (or dtype on it) must not be read as the
+        # engine's fp16 default under the spec's name.
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        spec = _spec()
+
+        def _without(obj, field, **override):
+            class _Without:
+                def __getattr__(self, name):
+                    if name == field:
+                        raise AttributeError(name)
+                    if name in override:
+                        return override[name]
+                    return getattr(obj, name)
+
+            return _Without()
+
+        with self.subTest(missing="data"):
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(_without(spec, "data"))
+        with self.subTest(missing="data.dtype_d"):
+            bad = _without(spec, None, data=_without(spec.data, "dtype_d"))
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(bad)
+
+    def test_a_malformed_acc_epilogue_is_rejected(self):
+        # relu is a bool and the bounds real numbers: a truthy non-bool or a
+        # non-numeric field is rejected, not coerced by the bridge.
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+
+        for kw in (
+            dict(relu=1),
+            dict(relu="no"),
+            dict(relu=None),
+            dict(bias="1"),
+            dict(scale=True),
+            dict(clamp_min="0"),
+            dict(clamp_max=[1.0]),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaises(TypeError):
+                    ConvAccumulatorEpilogue(**kw)
+
+    def test_acc_epilogue_fields_are_forwarded_as_typed(self):
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        epi = ConvAccumulatorEpilogue(bias=1, scale=2.5, relu=True, clamp_max=6)
+        d = conv_implicit_gemm_spec_to_dict(_spec(acc_epilogue=epi))["acc_epilogue"]
+        self.assertIs(d["relu"], True)
+        self.assertEqual(
+            (d["bias"], d["scale"], d["clamp_min"], d["clamp_max"]),
+            (1.0, 2.5, None, 6.0),
+        )
+        self.assertIsInstance(d["bias"], float)
+        self.assertIsInstance(d["clamp_max"], float)
+
 
 def _engine_or_skip(case):
     try:
-        import rocke_engine  # type: ignore
+        import rocke_library_engine  # type: ignore
     except ImportError:
-        case.skipTest("rocke_engine (the C++ engine extension) is not built")
-    return rocke_engine
+        case.skipTest("rocke_library_engine (the conv C++ extension) is not built")
+    return rocke_library_engine
 
 
 class TestEngineAgreement(unittest.TestCase):
@@ -941,7 +1032,7 @@ class TestEngineAgreement(unittest.TestCase):
     def test_split_k_with_a_fused_epilogue_is_rejected_by_both(self):
         _engine_or_skip(self)
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         for epi in (
             ConvAccumulatorEpilogue(bias=1.0),
@@ -957,7 +1048,7 @@ class TestEngineAgreement(unittest.TestCase):
     def test_unsplit_fused_epilogue_lowers_identically(self):
         _engine_or_skip(self)
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         # fp16: the C++ conv implicit-GEMM builder stages A/B in LDS as f16
         # whatever the dtype (a separate, pre-existing mirror gap), so bf16
@@ -981,7 +1072,7 @@ class TestEngineAgreement(unittest.TestCase):
         # fp16 (see above): the gfx950 MFMA split binary on each plain K loop,
         # through both epilogues.
         _engine_or_skip(self)
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         fp16 = ConvDataSpec("fp16", "fp16", "fp16")
         for kw in (
@@ -999,7 +1090,7 @@ class TestEngineAgreement(unittest.TestCase):
 
     def test_mfma_split_on_another_k_loop_is_rejected_by_both(self):
         _engine_or_skip(self)
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         fp16 = ConvDataSpec("fp16", "fp16", "fp16")
         spec = _mfma_spec(data=fp16, split_k=2, pipeline="basic")
@@ -1010,7 +1101,7 @@ class TestEngineAgreement(unittest.TestCase):
 
     def test_fp32_two_stage_split_is_rejected_by_both(self):
         _engine_or_skip(self)
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         why = r"reduces through Stage 2: dtype_d must be fp16 or bf16 \(got fp32\)"
         for arch, spec in (
@@ -1033,7 +1124,7 @@ class TestEngineAgreement(unittest.TestCase):
         # pipeline / epilogue = None is malformed, not a request for the
         # "mem" / "default" defaults, split or not.
         _engine_or_skip(self)
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         fp16 = ConvDataSpec("fp16", "fp16", "fp16")
         for field in ("pipeline", "epilogue"):
@@ -1054,7 +1145,7 @@ class TestEngineAgreement(unittest.TestCase):
         # and a tile over the cap even single-buffered are refused with the
         # same reason by both engines.
         _engine_or_skip(self)
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         fp16 = ConvDataSpec("fp16", "fp16", "fp16")
         big = dict(data=fp16, tile_m=128, tile_n=64, tile_k=256, warp_m=4, lds_k_pad=0)
@@ -1107,16 +1198,20 @@ class TestSplitKReduceEngine(unittest.TestCase):
 
     def test_overlong_name_is_an_error_not_a_stale_builder(self):
         try:
-            import rocke_engine  # type: ignore
+            import rocke_library_engine  # type: ignore
         except ImportError:
-            self.skipTest("rocke_engine (the C++ engine extension) is not built")
+            self.skipTest("rocke_library_engine (the conv C++ extension) is not built")
         spec = dict(dtype_d="bf16", vec=4, name="x" * 300)
         with self.assertRaisesRegex(Exception, "kernel name does not fit"):
-            rocke_engine.conv_fwd_split_k_reduce_lower_llvm(spec, arch="gfx1250")
+            rocke_library_engine.conv_fwd_split_k_reduce_lower_llvm(
+                spec, arch="gfx1250"
+            )
         with self.assertRaisesRegex(Exception, "kernel name does not fit"):
-            rocke_engine.conv_fwd_split_k_reduce_serialize_ir(spec, arch="gfx1250")
+            rocke_library_engine.conv_fwd_split_k_reduce_serialize_ir(
+                spec, arch="gfx1250"
+            )
         # A name that fits still builds.
-        ll = rocke_engine.conv_fwd_split_k_reduce_lower_llvm(
+        ll = rocke_library_engine.conv_fwd_split_k_reduce_lower_llvm(
             dict(dtype_d="bf16", vec=4), arch="gfx1250"
         )
         self.assertIn("conv_fwd_splitk_reduce", ll)
