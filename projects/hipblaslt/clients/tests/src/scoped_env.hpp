@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "client_process.hpp"
+
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -32,14 +34,10 @@ namespace test_env
     private:
         void set(const char* value)
         {
-#ifdef _WIN32
-            _putenv_s(m_name, value ? value : "");
-#else
             if(value)
-                setenv(m_name, value, 1);
+                hipblaslt_clients::setEnv(m_name, value, 1);
             else
-                unsetenv(m_name);
-#endif
+                hipblaslt_clients::unsetEnv(m_name);
         }
 
         const char*                m_name;
