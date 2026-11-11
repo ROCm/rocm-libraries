@@ -414,3 +414,32 @@ BenchmarkProblems:
         - FactorDimArgs: [1]
         - ActivationArgs:
           - [Enum: relu]
+  ########################################
+  # Persistent spatial clusters, ClusterDim [2, 1] and [4, 1], with StreamK 3 and DataParallel
+  # (StreamKForceDPOnly): a peer's next-tile multicast waits on the cluster barrier, which the workgroup
+  # arrives at after its TDM store. MT64x64 gives 17 x 16 x 2 tiles: nwg0 = 17 leaves phantom peer tiles
+  # for both cluster sizes, each workgroup stores several tiles, and there are M-edge, N-edge and corner tiles.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - ClusterDim: [[2, 1], [4, 1]]
+        - TDMStoreInst: [0, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
