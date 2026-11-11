@@ -83,6 +83,7 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 /// reading one archive would answer each other's lookups.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
+compilation::KpackModuleCache& hipConvFwdRdnaKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();
