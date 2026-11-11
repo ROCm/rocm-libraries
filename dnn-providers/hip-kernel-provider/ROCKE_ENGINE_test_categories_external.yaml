@@ -4,7 +4,8 @@
 # rocKE CTest Categories (RFC0010) for pre-registered (non-GTest) CTest tests.
 #
 # rocke/platform/tests/cmake/*.cmake (C++ smoke binaries) and
-# rocke/platform/CMakeLists.txt (Python import/golden/pytest checks) register
+# rocke/platform/CMakeLists.txt (Python import/golden/pytest checks, plus the
+# library suites it includes from rocke/library/tests/ctest_lists.cmake) register
 # these tests directly via add_test(), not through a GTest binary categorized
 # by a shared YAML (rocKE's C++ client API and its GTest binaries were
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
@@ -110,14 +111,15 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
@@ -192,14 +194,15 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"

@@ -7,8 +7,9 @@
 # does not identify the compiler, toolchain, or final binary bytes.
 #
 # rocke_compute_build_id(<out_var> <root_dir>)
-#   Hashes the engine C++ sources and headers, replay CLI source, and CMake build
-#   recipes that produce those artifacts. Each file contributes its repo-relative
+#   Hashes the engine C++ sources and headers (plus the library-owned mirrors in
+#   ../library/cpp when present), replay CLI source, and CMake build recipes that
+#   produce those artifacts. Each file contributes its repo-relative
 #   path followed by a SHA-256 of its bytes; the sorted list is hashed again to
 #   yield the build-id. A rename or byte edit therefore changes the ID.
 
@@ -21,6 +22,24 @@ function(rocke_build_id_inputs out_var root_dir)
        "${root_dir}/cpp/*.h"
        "${root_dir}/cpp/*.hpp")
   list(FILTER _rocke_all EXCLUDE REGEX "/cpp/bindings/")
+
+  # Library-owned C++ mirrors (../library/cpp, e.g. conv) are built from this
+  # directory into rocke_library_core and rocke_library_engine, whose build_id()
+  # reports this same ID, so their sources and recipe are hashed too. They are
+  # hashed whenever the sibling tree is present, not only when
+  # ROCKE_BUILD_LIBRARY_CPP is on: online.py recomputes this ID from the tree
+  # alone and cannot see a cache option. Their pybind glue and host tests are
+  # left out, as cpp/bindings is above. A platform-only copy hashes nothing
+  # extra. Keep this mirrored in online.py.
+  get_filename_component(_rocke_library_cpp "${root_dir}/../library/cpp" ABSOLUTE)
+  if(EXISTS "${_rocke_library_cpp}/CMakeLists.txt")
+    file(GLOB_RECURSE _rocke_library
+         "${_rocke_library_cpp}/*.cpp"
+         "${_rocke_library_cpp}/*.h"
+         "${_rocke_library_cpp}/*.hpp")
+    list(FILTER _rocke_library EXCLUDE REGEX "/library/cpp/(bindings|tests)/")
+    list(APPEND _rocke_all ${_rocke_library} "${_rocke_library_cpp}/CMakeLists.txt")
+  endif()
 
   # The engine's arch-domain table is generated from these at build time
   # (tools/gen_arch_domain_cpp.py), so they change what the engine does as
