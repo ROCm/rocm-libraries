@@ -157,6 +157,24 @@ class WorkAssignment(Component):
         module.add(beforeReentry)
         return module
 
+    def _handoffSyncs(self, kernel):
+        """(tdm, epilogue, cluster, queue): the reasons the persistent tile handoff synchronizes the workgroup."""
+        debug = kernel.get("DebugPersistentKernelLoopForever", False)
+        tdm = ((kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))
+               and kernel["NumThreads"] > kernel["WavefrontSize"])
+        epilogue = (kernel.get("_PersistentVectorEpilogueLds", False)
+                    and not kernel["PrefetchAcrossPersistent"])
+        cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
+        # Hybrid calls the concrete assignment's closeLoop. Debug bypasses the queue.
+        queue = self.kernel["WorkAssignment"] == "DynamicWorkQueue" and not debug
+        return tdm, epilogue, cluster, queue
+
+    def handoffFencesLds(self, kernel):
+        """Whether the persistent tile handoff ends with a workgroup barrier before the next tile's work, which
+        then also keeps the next tile's LDS writes after every wave's reads of this tile's LDS. As in the handoff,
+        the work queue counts only for the DynamicWorkQueue component."""
+        return any(self._handoffSyncs(kernel))
+
     def splitPersistentTileHandoff(self, writer, kernel):
         """Return (always, beforeReentry) synchronization for this tile.
 
@@ -167,13 +185,7 @@ class WorkAssignment(Component):
         always = Module("Persistent tile completion")
         beforeReentry = Module("Persistent tile handoff")
         debug = kernel.get("DebugPersistentKernelLoopForever", False)
-        tdm = ((kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))
-               and kernel["NumThreads"] > kernel["WavefrontSize"])
-        epilogue = (kernel.get("_PersistentVectorEpilogueLds", False)
-                    and not kernel["PrefetchAcrossPersistent"])
-        cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
-        # Hybrid calls the concrete assignment's closeLoop. Debug bypasses the queue.
-        queue = self.kernel["WorkAssignment"] == "DynamicWorkQueue" and not debug
+        tdm, epilogue, cluster, queue = self._handoffSyncs(kernel)
         if not (tdm or epilogue or cluster or queue):
             return always, beforeReentry
 

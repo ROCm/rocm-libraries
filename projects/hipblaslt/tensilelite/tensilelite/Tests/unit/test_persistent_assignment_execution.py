@@ -269,3 +269,24 @@ def test_emitted_reservation_and_prefetch_are_consumed_once(
     if mode:
         assert observed["Acquired"] == (item,) * 64
         writer.sgprPool.checkIn(acquired)
+
+
+@pytest.mark.parametrize("assignment, overrides, fences", [
+    ("StaticGrid", {}, True),
+    ("StaticGrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, True),
+    ("Hybrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StaticGrid", {"enableTDMA": False, "enableTDMB": False, "_PersistentVectorEpilogueLds": True}, True),
+    ("StaticGrid", {"NumThreads": 32, "WavefrontSize": 32}, False),
+], ids=["tdm", "no_tdm", "queue", "hybrid", "epilogue_lds", "one_wave"])
+def test_handoff_fences_lds(assignment, overrides, fences):
+    """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one wave, with the
+    epilogue vectors in LDS, in a spatial cluster or in the DynamicWorkQueue component; the TDM flush relies on it."""
+    import sys
+
+    kernel = {"TileProcessingStrategy": "DataParallel", "WorkAssignment": assignment, "ClusterDim": [1, 1],
+              "NumThreads": 128, "WavefrontSize": 32, "PrefetchAcrossPersistent": 0, "enableTDMA": True,
+              "enableTDMB": True}
+    kernel.update(overrides)
+    component = getattr(sys.modules[StaticGrid.__module__], assignment)
+    assert component().handoffFencesLds(kernel) == fences
