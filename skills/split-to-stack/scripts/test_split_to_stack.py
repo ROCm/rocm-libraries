@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Self-test for the split-to-stack scripts.
+"""Tests for the split-to-stack scripts.
 
-usage: selftest.py                         build a synthetic repo in a temp dir and check every script
-       selftest.py --stress REPO BASE TIP  assign the real BASE..TIP ledger hunks round-robin to 3
-                                           groups, build, and require tree(top) == tree(TIP). New
-                                           objects go to a temporary object directory; REPO is not
-                                           modified.
-Exit 0 = all checks passed.
+usage: python -m pytest test_split_to_stack.py      build synthetic repos in temp dirs and check every
+                                                     script
+       test_split_to_stack.py --stress REPO BASE TIP  assign the real BASE..TIP ledger hunks
+                                                     round-robin to 3 groups, build, and require
+                                                     tree(top) == tree(TIP). New objects go to a
+                                                     temporary object directory; REPO is not modified.
+Each test runs all of its checks and fails if any of them failed.
 """
 import os
 import subprocess
 import sys
 import tempfile
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -31,6 +34,13 @@ def check(cond, msg):
     print(("ok   " if cond else "FAIL ") + msg)
     if not cond:
         FAILS.append(msg)
+
+
+@pytest.fixture(autouse=True)
+def _all_checks_pass():
+    FAILS.clear()
+    yield
+    assert not FAILS, "%d check(s) failed:\n  %s" % (len(FAILS), "\n  ".join(FAILS))
 
 
 def run(cmd, env=None, check_rc=True):
@@ -2045,7 +2055,7 @@ def test_generated_exceptions():
     tmp.cleanup()
 
 
-def test_stress(repo, base, tip):
+def stress(repo, base, tip):
     tmp = tempfile.TemporaryDirectory(prefix="split-stress-")
     objs = os.path.join(tmp.name, "objects")
     os.makedirs(objs)
@@ -2175,15 +2185,9 @@ def test_stress(repo, base, tip):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[1] == "--stress":
-        test_stress(sys.argv[2], sys.argv[3], sys.argv[4])
-    else:
-        test_synthetic()
-        test_regressions()
-        test_regressions_2()
-        test_regressions_3()
-        test_subtractive()
-        test_generated_exceptions()
+    if len(sys.argv) != 5 or sys.argv[1] != "--stress":
+        sys.exit(pytest.main([__file__, "-q"]))
+    stress(sys.argv[2], sys.argv[3], sys.argv[4])
     if FAILS:
         print("\n%d check(s) failed" % len(FAILS))
         sys.exit(1)

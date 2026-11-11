@@ -377,6 +377,14 @@ repos:
         files: ^projects/hipsparse/scripts/(test_)?(sync_group_docs|audit_doc_attachment)\.py$
         pass_filenames: false
 
+      - id: split-to-stack-tests
+        name: split-to-stack skill tests
+        entry: python -m pytest skills/split-to-stack/scripts/test_split_to_stack.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^skills/split-to-stack/scripts/
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
