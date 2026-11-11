@@ -305,6 +305,9 @@ RefillPlan planGroup(const std::vector<DsSite>& group, const BlockScan& s, const
             candidates.push_back({s.gapStart(sl), sl, false});
     }
     for (const Candidate& cand : candidates) {
+        // Every load of the group moves later; inserting at or before one of them would move
+        // it earlier, past nodes canMove never checked, or before itself.
+        if (cand.insertBefore <= members.back()) continue;
         if (cand.insertBefore > endPos) continue;
         if (loadsInGap(s, cand.slot, isMember) + static_cast<int>(group.size()) > in.gapCap)
             continue;
@@ -512,6 +515,9 @@ class DsRefillSinkPass : public StinkyInstPass {
                 if (was < 0 || scan.ds[static_cast<size_t>(was)].wait >= 0) continue;
                 DsSite site = scan.ds[static_cast<size_t>(was)];
                 if (site.pos <= group.front().pos || site.pos >= plan.insertBefore) continue;
+                if (std::any_of(group.begin(), group.end(),
+                                [&](const DsSite& m) { return m.inst == site.inst; }))
+                    continue;
                 site.wait = load.wait;
                 site.untilFree = load.untilFree;
                 uncovered.push_back(site);

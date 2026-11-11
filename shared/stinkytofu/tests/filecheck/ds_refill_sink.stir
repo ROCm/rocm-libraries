@@ -255,3 +255,32 @@ st.func @sink_sees_a_read_in_the_previous_block() {
 ^exit:
   "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
 }
+
+#===----------------------------------------------------------------------===#
+# The window is empty, so the refill may only take a weaker wait. Tried after v[204:207], which
+# rode on its wait, it makes that load wait too; the two then fit only at v[204:207] itself,
+# which would move a load earlier, so they stay.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_never_moves_before_its_own_load
+# CHECK: v[0:7] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: s_wait_alu
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[240:243] = "st.ds_load_b128"
+# CHECK-NEXT: v[8:15] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[204:207] = "st.ds_load_b128"
+
+st.func @sink_never_moves_before_its_own_load() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[240:243] = "st.ds_load_b128"(v301, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[204:207] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[244:247] = "st.ds_load_b128"(v302, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
