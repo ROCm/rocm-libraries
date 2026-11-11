@@ -448,7 +448,18 @@ RDNA16 = [
 # RDNA 1 x N rows (hifigan-like long 1-D maps), measured on gfx1201: a one-fragment-per-wave tile
 # for narrow channel counts and long filters, a tall one for 128+ channels.
 RDNA_1D = [(32, 32, 2, 2, 64), (128, 32, 4, 2, 64)]
-ONE_D = {"1x3", "1x3d5", "1x4", "1x7", "1x7d3", "1x7d5", "1x11", "1x11d3", "1x11d5"}
+ONE_D = {
+    "1x3",
+    "1x3d3",
+    "1x3d5",
+    "1x4",
+    "1x7",
+    "1x7d3",
+    "1x7d5",
+    "1x11",
+    "1x11d3",
+    "1x11d5",
+}
 # Tiles a family's list lacks for some rows, measured on gfx942 (atom prefix, row tags) -> tiles:
 # the 128 x 64 ring at 32 positions for large width dilations (64 overflows the window's LDS),
 # a 16-position tile for stride-8 1 x 16, the 32 x 32 16 x 16 fp32 tile for 3-D stride 2.
@@ -463,11 +474,13 @@ EXTRA_TILES = {
         "wmma",
         (
             "3x3d4",
+            "3x3d6",
             "3x3d12",
             "3x3d24",
             "3x3d36",
             "3x3r1",
             "3x3d4r1",
+            "3x3d6r1",
             "3x3d12r1",
             "3x3d24r1",
             "3x3d36r1",
@@ -516,6 +529,8 @@ FILTERS = [
     ("1x1", 1, 1, 1, 1, 1, [0, 1], [0, 1], None),
     ("1x3", 3, 1, 1, 1, 1, [0, -1], [0, 1], None),
     ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], [CF]),
+    # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
+    ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], [CF]),
     ("1x4", 4, 1, 1, 1, 1, [0, -1], [0], None),
     ("1x7", 7, 1, 1, 1, 1, [-1], [0], None),
     ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], [CF]),
@@ -524,6 +539,8 @@ FILTERS = [
     ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], [CF]),
     ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], [CF]),
     ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], [CF]),
+    # SSD300's dilation-6 3x3 (the d4 row's tiles).
+    ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], [CF]),
     ("3x3d12", 3, 1, 12, 3, 1, [0, -1], [0], None),
     ("3x3d24", 3, 1, 24, 3, 1, [0, -1], [0], [CF]),
     ("3x3d36", 3, 1, 36, 3, 1, [0, -1], [0], [CF]),
@@ -534,6 +551,7 @@ FILTERS = [
     # fastest there; gfx1100).
     ("3x3r1", 3, 1, 1, 1, 0, [0, 1], [0], None),
     ("3x3d4r1", 3, 1, 4, 1, 0, [0, 1], [0], [CF]),
+    ("3x3d6r1", 3, 1, 6, 1, 0, [0, 1], [0], [CF]),
     ("3x3d12r1", 3, 1, 12, 1, 0, [0, 1], [0], None),
     ("3x3d24r1", 3, 1, 24, 1, 0, [0, 1], [0], [CF]),
     ("3x3d36r1", 3, 1, 36, 1, 0, [0, 1], [0], [CF]),
