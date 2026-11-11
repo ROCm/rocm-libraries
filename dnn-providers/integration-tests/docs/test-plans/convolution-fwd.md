@@ -425,7 +425,7 @@ The sweep is a set of cases over three core axes plus feature axes.
 
 | Rule | Meaning |
 |---|---|
-| Core cover | Every level holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each core cell (RFC 0022 §8.1). **Today that holds for plain conv only.** In quick on gfx942, MIOpen executes 18 of 18 plain cells, 11 of 18 `act` cells and 4 of 18 `bias_act` cells, and none of the other four topologies, which are probes it declines; on gfx90a it declines every fused graph. The cells are generated; the missing execution is engine support (ALMIOPEN-3008 tracks the defects behind the declines that are workarounds). |
+| Core cover | Every level holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each core cell (RFC 0022 §8.1). **Today that holds for plain conv only.** In quick on gfx942, MIOpen executes 18 of 18 plain cells, 11 of 18 `act` cells and 11 of 18 `bias_act` cells, and none of the other four topologies, which are probes it declines; on gfx90a it declines every fused graph. The cells are generated; the missing execution is engine support (ALMIOPEN-3008 tracks the defects behind the declines that are workarounds). |
 | One feature at a time | Each S and L shape changes one feature from the defaults, so a failure points at that feature. |
 | Size grows with level | Each level has a size ceiling (§3). PR proves a feature works; nightly proves it still works at medium size. |
 | All-pairs | By the end of nightly, every S shape meets every layout × data type pair of its rank, and every feature value meets every core value (`conv_mode`, data types, values, mixed layouts and non-packed strides each cross rank × data type, or rank × layout). Full pairs each feature value with every S shape once. |
@@ -593,25 +593,26 @@ tanh; `bias_act` executed only in fp32; `scale_bias_act`, `bias_add_relu` and
 `act_add` never executed; and F13, F19 and F35 never executed. gfx90a declined
 every fused graph.
 
-**The current set.** All cases but the two `relu_slope0` regressions (4,398 of
-4,400), serial, with the MIOpen plugin:
+**The current set.** All 4,741 cases at `5d8b6d3cee` (the bundles of `db909050bf`
+plus the engine TOML entries below), serial, with the MIOpen plugin:
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx942 (MI325X) | 2,729 | 1,669 | 0 | 0 | 7.3 min |
-| gfx90a (MI250) | 2,121 | 2,184 | 90 | 3 | 16.7 min |
+| gfx942 (MI308X; 18 cases rechecked on MI325X) | 2,860 | 1,881 | 0 | 0 | 15.5 min |
+| gfx90a (MI250) | 2,119 | 2,622 | 0 | 0 | 13.6 min |
 
-No claim case fails on either architecture; every failure is a probe, in the
-defect classes the engine TOML skips on gfx942 (mixed data types, mixed layouts,
-non-packed strides; epic ALMIOPEN-3008). Two non-packed-stride 3D cases (S13b, S14) that turned wrong at N 2
-joined the gfx942 non-packed-stride skip list. MIOpen executes all 192 cases of
-S47–S62 and L47–L62 on both architectures and every one passes; the S59 fp32
-case needed the fp32 tolerance class of accumulation lengths up to 1,152 (one
-element off by 2.5e-5 at the default 1e-5 on gfx90a). The new fp32 shapes pass
-inside the tolerance class their accumulation length gives them. The two
-regression cases, run on their own afterwards, pass on gfx942 and are declined on
-gfx90a, like every fused graph there. Claims are harvested from these runs: 2,280
-on gfx942 and 1,693 on gfx90a.
+The engine TOML's skips apply on every architecture, so the gfx90a run no longer
+shows the known defect classes as failing probes. Typing the bias node by its
+bias tensor let MIOpen accept fp16 and bf16 `bias_act`: 118 of those cases are
+new gfx942 claims, and trim T10 is lifted (§4.3). It also exposed three fp16 F25
+bias variants as probes MIOpen accepts: full-size and scalar biases are read as
+per-channel (ALMIOPEN-3009 / 3014), and a bias as the add's first operand runs
+but no reference implements that order (ALMIOPEN-3227); the TOML skips all
+twelve. X4 fp16 (accumulation length 18,432) differed from the GPU reference by
+0.131 in one element of 12,544 at the default 0.1; it varies run to run by up to
+0.17, so it has an interim fp16 class at atol 0.2 until the dynamic tolerance of
+ALMIOPEN-3187. No claim case fails on either architecture. Claims are harvested
+from these runs: 2,398 on gfx942 and 1,693 on gfx90a.
 
 ---
 

@@ -3,7 +3,15 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
-          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_relu"
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cl_relu",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cf_relu",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cf_relu",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_relu",
+          "s14_2d_i15x15_n2c13k17_f3x3_bf16_cf_relu6",
+          "s15_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu_clamp",
+          "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu6",
+          "s16_1d_i32_n2c16k32_f3_fp16_cl_relu",
+          "s16_3d_i32x32x32_n2c16k32_f3x3x3_bf16_cf_relu_clamp"
         ],
         "support": {
           "gfx942": [
