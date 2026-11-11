@@ -147,6 +147,10 @@ bool haloFits(const IgemmProblem& problem, int64_t bm);
 /// XCD-contiguous block order changes anything (gfx942, gfx950).
 bool hasXcds(std::string_view gcnArchName);
 
+/// Whether a tile's block order serves the device: XCD order only where there are XCDs, and the
+/// 256 x 256 tile there only in XCD order (its plain-order copy is for single-die devices).
+bool blockOrderServes(int64_t bm, int64_t bn, int64_t xcd, std::string_view gcnArchName);
+
 /// Split-K for a config: how many contiguous ranges of the reduction run as separate blocks,
 /// and where their fp32 partials sit in the workspace (after the staged operands).
 struct SplitPlan

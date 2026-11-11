@@ -669,6 +669,12 @@ bool hasXcds(std::string_view gcnArchName)
     return arch == "gfx942" || arch == "gfx950";
 }
 
+bool blockOrderServes(int64_t bm, int64_t bn, int64_t xcd, std::string_view gcnArchName)
+{
+    const bool xcds = hasXcds(gcnArchName);
+    return xcd != 0 ? xcds : !(xcds && bm == 256 && bn == 256);
+}
+
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
 {
     const auto& a = problem.args;
@@ -964,7 +970,8 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->xcd != 0 && !conv_igemm::hasXcds(context.deviceProperties.gcnArchName))
+    if(!conv_igemm::blockOrderServes(
+           tile->bm, tile->bn, tile->xcd, context.deviceProperties.gcnArchName))
     {
         return false;
     }

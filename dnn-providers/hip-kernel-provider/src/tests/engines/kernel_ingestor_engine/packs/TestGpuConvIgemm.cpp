@@ -1108,6 +1108,12 @@ TEST(TestConvIgemmCatalog, XcdOrderServesOnlyMultiXcdDevices)
     EXPECT_TRUE(conv_igemm::hasXcds("gfx950"));
     EXPECT_FALSE(conv_igemm::hasXcds("gfx90a:sramecc+:xnack-"));
     EXPECT_FALSE(conv_igemm::hasXcds("gfx1201"));
+    // The 256 x 256 tile: XCD order on multi-XCD devices, plain order on single-die ones.
+    EXPECT_TRUE(conv_igemm::blockOrderServes(256, 256, 1, "gfx950"));
+    EXPECT_FALSE(conv_igemm::blockOrderServes(256, 256, 0, "gfx942:sramecc+:xnack-"));
+    EXPECT_TRUE(conv_igemm::blockOrderServes(256, 256, 0, "gfx90a:sramecc+:xnack-"));
+    EXPECT_FALSE(conv_igemm::blockOrderServes(256, 256, 1, "gfx908"));
+    EXPECT_TRUE(conv_igemm::blockOrderServes(128, 128, 0, "gfx950"));
 }
 
 /// A 2-D problem as the halo check reads it: n 2, square input, square filter.
