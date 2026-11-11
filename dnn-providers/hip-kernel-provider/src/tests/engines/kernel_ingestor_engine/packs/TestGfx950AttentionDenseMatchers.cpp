@@ -1904,6 +1904,17 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiWithAnyOtherMask)
     }
 }
 
+/// hipDNN also defines ALiBi with a left window, but no gfx950 variant carries a window, so
+/// a windowed ALiBi graph is declined for its mask, as without ALiBi.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiWithAWindowForTheWindow)
+{
+    auto spec = withAlibi();
+    spec.leftBound = 127;
+    spec.rightBound = 0;
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "mask") << decline.detail;
+}
+
 /// An ALiBi graph is served by ALiBi candidates only, and a plain graph by plain ones: their
 /// scores differ, and so do their argument lists. A record without the field is a plain
 /// candidate (the KMD default 0).

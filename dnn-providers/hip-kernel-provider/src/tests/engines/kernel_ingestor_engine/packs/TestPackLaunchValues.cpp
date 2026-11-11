@@ -363,8 +363,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
 
 // ALiBi binds no tensor (the kernel derives hipDNN's slopes from the query head count), so
 // the alibi contract stores v2's value set unchanged and only its name carries the flag.
-// hipDNN defines ALiBi only top-left causal, so the ALiBi plan has no window, and a saved
-// ALiBi plan with one is refused.
+// hipDNN defines ALiBi only on the top-left causal band, so a saved non-causal ALiBi plan
+// is refused; a window is checked as in any plan (gfx950's graph match declines windows).
 TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsAlibiFromTheContractNameAlone)
 {
     auto launch = gfx950AttentionDenseInputs();
@@ -384,9 +384,10 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsAlibiFromTheContractNameAlon
     EXPECT_EQ(fromAlibi.problem.numQueryHeads, launch.problem.numQueryHeads);
     EXPECT_EQ(fromAlibi.blockM, launch.blockM);
 
-    auto windowed = savedGfx950AttentionDense();
-    windowed.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
-    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, windowed, "in an ALiBi plan");
+    auto nonCausal = alibi;
+    nonCausal.values["causal"] = int64_t{0};
+    nonCausal.values["sliding_window"] = int64_t{0};
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, nonCausal, "in an ALiBi plan");
 
     auto v1 = savedGfx950AttentionDense();
     v1.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
@@ -790,8 +791,9 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
 }
 
 // As on gfx950, the alibi contract stores v1's value set unchanged, the grid and stats uid
-// included, and only its name carries the flag; a saved ALiBi plan with a window is
-// refused, since hipDNN defines ALiBi only top-left causal.
+// included, and only its name carries the flag. A saved ALiBi plan keeps its window (the
+// windowed ALiBi variants), and a non-causal one is refused, since hipDNN defines ALiBi
+// only on the top-left causal band.
 TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsAlibiFromTheContractNameAlone)
 {
     auto launch = gfx942AttentionDenseInputs();
@@ -822,7 +824,16 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsAlibiFromTheContractNameAlon
 
     auto windowed = savedGfx942AttentionDense();
     windowed.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, windowed, "in an ALiBi plan");
+    ASSERT_GT(std::get<int64_t>(windowed.values.at("sliding_window")), 0);
+    const auto fromWindowed = readGfx942AttentionDenseLaunchInputs(windowed);
+    EXPECT_TRUE(fromWindowed.binding.alibi);
+    EXPECT_EQ(fromWindowed.binding.slidingWindow,
+              std::get<int64_t>(windowed.values.at("sliding_window")));
+
+    auto nonCausal = windowed;
+    nonCausal.values["causal"] = int64_t{0};
+    nonCausal.values["sliding_window"] = int64_t{0};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, nonCausal, "in an ALiBi plan");
 
     EXPECT_FALSE(readGfx942AttentionDenseLaunchInputs(
                      {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1), values})

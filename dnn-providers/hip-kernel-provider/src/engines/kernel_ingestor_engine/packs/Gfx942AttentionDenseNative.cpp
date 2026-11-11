@@ -236,8 +236,8 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // Each candidate's grid: a block order of the one-CTA-per-block grid, or (D128) the
     // persistent grid with its fast-division kernargs.
     arch.candidateGrid = &candidateGrid;
-    // ALiBi with hipDNN's slopes, top-left causal only: the use_alibi variants serve it, on
-    // every grid and with or without LSE.
+    // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
+    // it, on every grid, with or without LSE, and (qb_minor grid) with every shipped window.
     arch.candidateUsesAlibi = &candidateUsesAlibi;
     arch.currentContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};

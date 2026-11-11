@@ -19,9 +19,9 @@
 #
 # use_alibi is a compile-time variant too: a use_alibi kernel adds hipDNN's ALiBi term
 # (alibi_mask, SdpaSemanticsRegister SEM-021) with slopes it computes from the query head
-# count, so its launch passes one null alibi_slopes_ptr. hipDNN defines ALiBi only with a
-# top-left causal mask, so only the causal cells without a window carry ALiBi kernels, at
-# the 128/64 tile (enumerate.also).
+# count, so its launch passes one null alibi_slopes_ptr. hipDNN defines ALiBi only on the
+# top-left causal band (any left window, no right bound), so only the causal cells carry
+# ALiBi kernels, at the 128/64 tile (enumerate.also).
 #
 # emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
 # log-sum-exp (the graph's stats output) through one trailing lse_ptr argument. It is a
@@ -339,12 +339,14 @@ enumerate:
   # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
   # bound is reduction.aot_budget_per_arch).
   max_kernels: 1600
-  # ALiBi (hipDNN's alibi_mask, SdpaSemanticsRegister SEM-021) is defined only with a
-  # top-left causal mask, so only the causal cells without a window get ALiBi kernels,
-  # outside the swept space: no swept graph binds ALiBi. One kernel per head size, dtype
-  # and emit_lse on the qb_minor grid, plus the D128 persistent grid that cold selection
-  # puts first at D128, each at its grid's default spec but the 128/64 tile: kernel_match
-  # needs Sq % block_m == 0, and every Sq a 256 tile serves a 128 tile serves too.
+  # ALiBi (hipDNN's alibi_mask, SdpaSemanticsRegister SEM-021) is defined only on the
+  # top-left causal band (any left window, no right bound), so only the causal cells get
+  # ALiBi kernels, outside the swept space: no swept graph binds ALiBi. One kernel per
+  # head size, dtype, window and emit_lse on the qb_minor grid, the only grid with window
+  # kernels, plus the D128 persistent grid that cold selection puts first at D128 (no
+  # window), each at its grid's default spec but the 128/64 tile: kernel_match needs
+  # Sq % block_m == 0, every Sq a 256 tile serves a 128 tile serves too, and every
+  # window is a multiple of block_n 64.
   also:
     - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
       fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
@@ -359,13 +361,17 @@ enumerate:
         - fields: [mask_type, sliding_window, use_alibi]
           values:
             - [TOP_LEFT_CAUSAL, 0, true]
+            - [TOP_LEFT_CAUSAL, 128, true]
+            - [TOP_LEFT_CAUSAL, 512, true]
+            - [TOP_LEFT_CAUSAL, 1024, true]
+            - [TOP_LEFT_CAUSAL, 2048, true]
         - fields: [emit_lse]
           values: [false, true]
       free_fields: [block_m, block_n]
       feature_fields:
         use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
       spec_fields: *spec_fields
-      max_kernels: 8
+      max_kernels: 40
     - pin: {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
       fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
       space: slice
@@ -525,9 +531,9 @@ launch_surface:
       candidateUsesAlibi() reads use_alibi as 0 or 1 (absent is 0, the KMD default) and
       answers nullopt for any other value, which kernelMatches() declines and prepare()
       refuses with BAD_PARAM. kernelMatches() admits a candidate only when use_alibi ==
-      (the graph sets alibi_mask), and graph_match binds alibi_mask only with a top-left
-      causal mask and no window; a use_alibi=1 candidate takes alibi_slopes_ptr after the
-      shape and any fast-division pairs, before lse_ptr.
+      (the graph sets alibi_mask), and graph_match binds alibi_mask only on the top-left
+      causal band, with or without a window; a use_alibi=1 candidate takes
+      alibi_slopes_ptr after the shape and any fast-division pairs, before lse_ptr.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   # The cold ranking reads the grid, the LDS/scheduling knobs, the persistent pipeline

@@ -338,13 +338,13 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  *
  * The dispatch name must be the arch's current, legacy or ALiBi contract; anything else,
  * including the unversioned name, is refused against the current one. A plan saved under
- * the ALiBi contract binds ALiBi and must be causal without a window: hipDNN defines ALiBi
- * only with a top-left causal mask (SdpaSemanticsRegister SEM-021). `batch`, `seqlen_q`,
- * `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX]; the kernel takes
- * the first three as 32-bit integers. `block_m` must be one the arch's geometry accepts;
- * block_n is not saved, so the arch's full tile rule is not re-run. `scale` must convert to
- * a float and back without change, within [2^-64, 2^4]. `data_type` must be a type the
- * kernel is built for, and `stride_layout` must be `bshd`.
+ * the ALiBi contract binds ALiBi and must be causal, with or without a window: hipDNN
+ * defines ALiBi only on the top-left causal band (SdpaSemanticsRegister SEM-021). `batch`,
+ * `seqlen_q`, `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX]; the
+ * kernel takes the first three as 32-bit integers. `block_m` must be one the arch's
+ * geometry accepts; block_n is not saved, so the arch's full tile rule is not re-run.
+ * `scale` must convert to a float and back without change, within [2^-64, 2^4]. `data_type`
+ * must be a type the kernel is built for, and `stride_layout` must be `bshd`.
  *
  * As both arches' graph and kernel match require, `causal` must be 0 or 1; `sliding_window`
  * non-negative, 0 unless `causal` is 1, and not so narrow that the last query rows see no

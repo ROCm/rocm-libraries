@@ -113,7 +113,8 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.windowReachesKeys = nullptr;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
-    // ALiBi with hipDNN's slopes, top-left causal only: the use_alibi variants serve it.
+    // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
+    // it without a window (no variant carries one, so maskFor declines windowed ALiBi).
     arch.candidateUsesAlibi = &candidateUsesAlibi;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};

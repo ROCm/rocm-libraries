@@ -126,6 +126,11 @@ constexpr const char* SAVE_LOAD_PERSISTENT_LSE_CASE = "Persist_Gqa40x8WNotAMulti
 // the ALiBi kernel one argument short and score without the bias.
 constexpr const char* ALIBI_SAVE_LOAD_CASE = "Alibi_D128_Bf16Hq40Kv8_Sq256Skv384";
 constexpr const char* ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE = "Alibi_Persist_D128_Fp16Hq40Kv8_Lse";
+// A windowed ALiBi plan, plain and with LSE: restored under the alibi contract, it must launch
+// the windowed ALiBi kernel with the slopes pointer and match the reference.
+constexpr const char* ALIBI_WINDOW_SAVE_LOAD_CASE = "Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024";
+constexpr const char* ALIBI_WINDOW_SAVE_LOAD_LSE_CASE
+    = "Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024_Lse";
 
 /// The suffix of an LSE row's name.
 constexpr const char* LSE_SUFFIX = "_Lse";
@@ -277,8 +282,9 @@ std::string camelName(std::string_view snake)
 }
 
 /// The graph a class row runs: hq_minor_swz needs Hq a multiple of 8 and, on the
-/// persistent grid, an even query-block count; a window cell runs Sq = Skv = max(512, 2W);
-/// the other rows rotate MHA, GQA and MQA heads.
+/// persistent grid, an even query-block count; a window cell runs Sq = Skv = max(512, 2W)
+/// with one head, or with ALiBi 3 query heads over 1, so the slopes differ per head and
+/// take hipDNN's second series; the other rows rotate MHA, GQA and MQA heads.
 KnobCase classCase(const KnobClass& knobClass, std::size_t row)
 {
     const std::array<std::pair<int64_t, int64_t>, 4> heads{{{8, 8}, {16, 2}, {8, 1}, {4, 4}}};
@@ -296,20 +302,20 @@ KnobCase classCase(const KnobClass& knobClass, std::size_t row)
     }
     if(knobClass.window != 0)
     {
-        hq = 1;
+        hq = knobClass.alibi ? 3 : 1;
         hkv = 1;
         seq = std::max<int64_t>(512, 2 * knobClass.window);
     }
     Mask mask = knobClass.causal ? Mask::BOUNDS_TOP_LEFT : Mask::NO_MASK;
     std::string cell = knobClass.causal ? "Causal" : "NoMask";
-    if(knobClass.alibi)
-    {
-        cell += "Alibi";
-    }
     if(knobClass.window != 0)
     {
         mask = Mask::WINDOW_TOP_LEFT;
         cell = "Window" + std::to_string(knobClass.window);
+    }
+    if(knobClass.alibi)
+    {
+        cell += "Alibi";
     }
     std::string name = std::string(knobClass.headSize == 64 ? "D64_" : "D128_")
                        + (dataType == DataType::BFLOAT16 ? "Bf16_" : "Fp16_") + cell + "_"
@@ -421,6 +427,22 @@ std::vector<KnobCase> knobCases()
               FORCED,
               Tile{128, 64},
               persistentGrid("bt_hkv_minor")});
+    // hipDNN defines ALiBi with a left window too: the windowed ALiBi kernels (qb_minor grid
+    // only) at GQA with Sq < Skv, and at Sq > Skv by less than W, so the last rows keep only
+    // part of their window.
+    addClass({"Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024",
+              withAlibi(makeShape(FP16, 64, 12, 4, Mask::WINDOW_TOP_LEFT, 512, 2, 640, 1024)),
+              FORCED,
+              Tile{128, 64}});
+    addClass({"Alibi_Window128_D128_Bf16Hq40Kv8_Sq640Skv576",
+              withAlibi(makeShape(BF16, 128, 40, 8, Mask::WINDOW_TOP_LEFT, 128, 1, 640, 576)),
+              FORCED,
+              Tile{128, 64}});
+    cases.push_back(
+        {"Cold_AlibiWindow1024D128",
+         withAlibi(makeShape(BF16, 128, 8, 2, Mask::WINDOW_TOP_LEFT, 1024, 1, 2048, 2048)),
+         COLD,
+         Tile{128, 64}});
     cases.push_back(
         {"Cold_AlibiD128",
          withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024)),
@@ -714,12 +736,12 @@ int deviceMultiProcessorCount()
 /// The grid a cold case selects: the persistent arm at the decode the registry pins for the
 /// mask where the engine's score prefers it -- D128, no window or one wider than
 /// NARROW_WINDOW keys, and NUM_PERSISTENT a multiple of this device's CU count -- and the
-/// qb_minor grid otherwise.
+/// qb_minor grid otherwise, as for a windowed ALiBi graph, whose kernels ship on it only.
 Grid coldGrid(const GraphShape& shape)
 {
     const int cus = deviceMultiProcessorCount();
     if(shape.headSize != 128 || (shape.window != 0 && shape.window <= NARROW_WINDOW) || cus <= 0
-       || NUM_PERSISTENT % cus != 0)
+       || NUM_PERSISTENT % cus != 0 || (shape.alibi && shape.window != 0))
     {
         return Grid{};
     }
@@ -1226,6 +1248,16 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentLseAlibiPl
 {
     roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE);
     roundTripInAFreshHandle(SaveForm::PLAN_ONLY, ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAWindowedAlibiPlanInAFreshHandle)
+{
+    for(const auto* name : {ALIBI_WINDOW_SAVE_LOAD_CASE, ALIBI_WINDOW_SAVE_LOAD_LSE_CASE})
+    {
+        SCOPED_TRACE(name);
+        roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, name);
+        roundTripInAFreshHandle(SaveForm::PLAN_ONLY, name);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,

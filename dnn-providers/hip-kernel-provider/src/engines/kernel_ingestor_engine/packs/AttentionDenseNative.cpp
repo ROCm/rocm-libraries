@@ -270,8 +270,9 @@ struct AttentionDenseMask
 {
     int64_t causal = 0;
     int64_t slidingWindow = 0;
-    /// A bottom-right causal band the kernel serves as top-left (seqlen_q == seqlen_kv).
-    /// Only the ALiBi rule reads it: hipDNN defines ALiBi with a top-left mask only.
+    /// A bottom-right causal band or window the kernel serves as top-left
+    /// (seqlen_q == seqlen_kv). Only the ALiBi rule reads it: hipDNN defines ALiBi on the
+    /// top-left causal band only.
     bool bottomRight = false;
 };
 
@@ -384,7 +385,7 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                       "rows)");
             return std::nullopt;
         }
-        return AttentionDenseMask{1, window};
+        return AttentionDenseMask{1, window, bottomRight};
     }
     default:
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask") << "mask type " << static_cast<int>(planMask)
@@ -735,20 +736,21 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
         return std::nullopt;
     }
     // ALiBi: served by an arch's use_alibi variants, which compute hipDNN's slopes from the
-    // query head count (SdpaSemanticsRegister SEM-021). hipDNN defines ALiBi only with a
-    // top-left causal mask and no right bound, so every other mask is declined, even
-    // bottom-right at seqlen_q == seqlen_kv, and so is every window.
+    // query head count (SdpaSemanticsRegister SEM-021). hipDNN defines ALiBi only on the
+    // top-left causal band (any left window, no right bound), so every other mask is
+    // declined, even bottom-right at seqlen_q == seqlen_kv. A window needs no check here:
+    // maskFor declines it on an arch without window variants.
     const bool alibi = attributes.alibi_mask();
     if(alibi && !arch.servesAlibi())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "alibi_mask") << "alibi_mask is not supported");
         return std::nullopt;
     }
-    if(alibi && (mask->causal != 1 || mask->slidingWindow != 0 || mask->bottomRight))
+    if(alibi && (mask->causal != 1 || mask->bottomRight))
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "alibi_mask")
                                << "alibi_mask needs a top-left causal mask; hipDNN defines ALiBi "
-                                  "with no other mask");
+                                  "on the top-left causal band only");
         return std::nullopt;
     }
     // Padding masks.
@@ -1622,12 +1624,12 @@ void requireServedSavedMask(const SavedLaunchInputs& inputs,
                                             + "; not yet supported by this pack (only the "
                                               "kernel's LSE path zeroes such rows)");
     }
-    if(binding.alibi && (binding.causal != 1 || binding.slidingWindow != 0))
+    if(binding.alibi && binding.causal != 1)
     {
         refuseAttentionDenseLaunchValue(inputs,
-                                        binding.causal != 1 ? CAUSAL_VALUE : SLIDING_WINDOW_VALUE,
-                                        "must be causal without a window in an ALiBi plan; "
-                                        "hipDNN defines ALiBi with no other mask");
+                                        CAUSAL_VALUE,
+                                        "must be 1 in an ALiBi plan; hipDNN defines ALiBi on the "
+                                        "top-left causal band only");
     }
 }
 
