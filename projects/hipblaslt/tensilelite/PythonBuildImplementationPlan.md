@@ -4,7 +4,8 @@
 # TensileLite Python Build Implementation Plan: rocm-libraries
 
 Status: Current implementation plan
-Decision record: `PythonBuildGrillingDecisions.md` Q115–Q129
+Decision record: `PythonBuildGrillingDecisions.md` Q095–Q120, revised by Q121–Q134
+(2026-11-11)
 
 ## Final contract
 
@@ -25,19 +26,21 @@ benchmark/validation executable used only by explicit client workflows.
 
 - Default `TENSILELITE_ENABLE_CLIENT` from `TENSILELITE_BUILD_TESTING`; device
   generation permits both TensileLite host and client to be disabled.
-- Build and force-install the canonical wheel with `--no-deps` for every device
-  generation path. Expose only build-tree rocisa through command-scoped
-  `PYTHONPATH`; run package commands directly from the installed wheel.
-- Build the compatibility wheel only for release/artifact-test workflows. Keep
-  one release identity from `VERSION` plus `release_metadata.py`; generate the
-  native client version header only when the client target is enabled.
+- Build the wheel and unpack it into the build tree for every device generation
+  path; put it and build-tree rocisa on a command-scoped `PYTHONPATH`. Nothing is
+  installed into the build Python (Q129).
+- There is no compatibility wheel (Q133). The wheel's version comes from
+  `VERSION` plus `release_metadata.py`: `+g<sha>[.dirty]`, or `+rocm`/`+devrocm`
+  when TheRock passes its package version (Q121). The same configure records the
+  commit for the native client header, generated only when the client target is
+  enabled (Q123).
 - Validate the selected ROCm installation at package import. Import rocisa only
   when generator code needs it, and resolve and validate the configured or
   standard client only when a caller explicitly asks for its path.
 - Preserve `invoke install` as the full editable-development workflow, including
   client build and binding.
 - Install the client only through the non-Windows TensileLite test-artifact
-  workflow and CMake `tests` component. Q129 records the eventual promotion to
+  workflow and CMake `tests` component. Q109 records the eventual promotion to
   `rocm[libraries]`; it is not current implementation work.
 
 ## Validation
@@ -47,6 +50,5 @@ benchmark/validation executable used only by explicit client workflows.
 - Configure the restored device presets with TensileLite host/client disabled;
   build a filtered device-library target through the canonical wheel and
   build-tree rocisa.
-- Verify canonical-wheel generation for device builds, compatibility-wheel
-  generation for artifact tests, and client-header generation only for client
-  builds.
+- Verify wheel generation and build-tree unpacking for device builds, the
+  wheel's stamped commit, and client-header generation only for client builds.

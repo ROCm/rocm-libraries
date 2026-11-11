@@ -35,6 +35,9 @@ pip-installable distribution.
 
 ## Current high-level direction
 
+The current decisions are Q121–Q134 below (2026-11-10/11 review); where they
+differ from earlier entries, they win.
+
 The current source-build flow is:
 
 ```text
@@ -49,7 +52,7 @@ CI/workflow installs tensilelite/requirements.txt into the selected Python
        expose only build-tree rocisa through PYTHONPATH
                               │
                               ▼
-       force-reinstall canonical wheel into the found Python
+   unpack the wheel into the build tree (command-scoped PYTHONPATH)
                               │
                               ▼
              run real logic/create-library commands
@@ -61,18 +64,16 @@ CI/workflow installs tensilelite/requirements.txt into the selected Python
 The release/test-artifact flow is separate:
 
 ```text
-build canonical and compatibility release wheels
+build the tensilelite release wheel (stamped with the source commit)
 package raw rocisa + _rocisa and copied installed-wheel tests
 upload artifacts
                               │
                               ▼
 fresh test job and fresh Python venv
 download/flatten artifacts into ./build
-install canonical wheel
+install the wheel
 inject raw rocisa through PYTHONPATH
-run canonical tests
-install compatibility wheel
-run compatibility-only tests with explicit flag
+run the installed tests against the installed wheel
 ```
 
 The optional client is packaged separately for benchmark/retune use. It is not
@@ -182,6 +183,8 @@ Let the authoritative pip operation fail if the environment is not writable.
 Do not add a separate imperfect writability probe.
 
 ### Q012 — How should TensileLite be installed for source code generation?
+
+> **Superseded (2026-11-11)** by Q129 (decision 9): device generation unpacks the wheel into the build tree instead of installing it into the found Python.
 
 **Decision: Accepted — TheRock installs the canonical wheel; editable installs
 remain a local-development workflow.**
@@ -409,11 +412,15 @@ delegates ordinary pytest execution to TheRock's generic runner.
 
 ### Q031 — Should the compatibility wheel be installed by the main tests?
 
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
+
 **Decision: Accepted — install and test it while it remains supported.**
 
 The file and test flow must explicitly note its near-term removal.
 
 ### Q032 — How do canonical and compatibility tests avoid masking each other?
+
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
 
 **Decision: Accepted — two-phase testing.**
 
@@ -431,12 +438,16 @@ When compatibility is removed, delete phase 2 and its wheel/test inputs.
 
 ### Q033 — Where do compatibility tests live?
 
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
+
 **Decision: Accepted.**
 
 All compatibility tests live under `compat/tests/`, separate from the canonical
 TensileLite test tree.
 
 ### Q034 — How are compatibility tests selected?
+
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
 
 **Decision: Accepted.**
 
@@ -447,6 +458,8 @@ TensileLite test tree.
   skipping.
 
 ### Q035 — What compatibility coverage is required?
+
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
 
 **Decision: Accepted — cover every legacy entry point.**
 
@@ -510,6 +523,8 @@ tensilelite-release-wheels/
 ```
 
 ### Q039 — Does the compatibility wheel remain in the release-wheel target?
+
+> **Superseded (2026-11-11)** by Q133 (decision 13): the release-wheel target builds one wheel.
 
 **Decision: Accepted — yes.**
 
@@ -731,6 +746,8 @@ installation's binding.
 
 ### Q053 — Does build-time code generation depend on the compatibility wheel?
 
+> **Superseded (2026-11-11)** by Q133 (decision 13): the compatibility package is removed.
+
 **Decision: Accepted — no.**
 
 Use separate CMake outputs/targets:
@@ -810,6 +827,8 @@ rather than splitting the raw string on multiple plus signs.
 
 ### Q058 — Is source-SHA/channel versioning in the current implementation scope?
 
+> **Superseded (2026-11-11)** by Q122 and Q123 (decisions 2 and 3): the package and client carry the whole rocm-libraries commit.
+
 **Decision: Accepted — defer only source-revision identity.**
 
 TheRock package channels are already propagated through
@@ -818,6 +837,8 @@ an independent TensileLite source revision, but it must retain a PEP 440-valid
 single local-version segment.
 
 ### Q059 — Is native client identity validation in scope now?
+
+> **Superseded (2026-11-11)** by Q122 and Q123 (decisions 2 and 3): the client is validated by `--source-revision`.
 
 **Decision: Accepted — yes.**
 
@@ -831,12 +852,16 @@ version `5.0.0`.
 
 ### Q060 — Is exact source build identity required outside the package version?
 
+> **Superseded (2026-11-11)** by Q123 (decision 3): the exact source commit is recorded in `_build_info.py` and the client.
+
 **Decision: Accepted — semantic version only for current scope.**
 
 Validate only the existing semantic TensileLite/generator version. Exact source
 commit identity and same-version stale-build detection are deferred future work.
 
 ### Q061 — Should the native client also report its build-time ROCm version?
+
+> **Superseded (2026-11-11)** by Q134 (decision 14): the client reports its build ROCm with `--build-rocm`.
 
 **Decision: Accepted — report the canonical combined distribution version.**
 
@@ -848,6 +873,8 @@ ROCm publication suffix; standalone conventional-prefix builds use the base
 compatibility value.
 
 ### Q062 — Does client version output need JSON?
+
+> **Superseded (2026-11-11)** by Q122 (decision 2): pairing is by source commit, not semantic version.
 
 **Decision: Accepted — no.**
 
@@ -872,6 +899,8 @@ client must report additional independent fields.
 
 ### Q063 — When is a custom client's version validated?
 
+> **Superseded (2026-11-11)** by Q123 (decision 3): clients are validated by `--source-revision`, not `--version`.
+
 **Decision: Accepted — twice.**
 
 1. `tensilelite-configure-client` validates before writing the binding.
@@ -883,6 +912,8 @@ configured file at the same path without paying the subprocess cost on every
 client access.
 
 ### Q064 — Is the standard ROCm-relative client version also validated?
+
+> **Superseded (2026-11-11)** by Q123 (decision 3): clients are validated by `--source-revision`, not `--version`.
 
 **Decision: Accepted — yes.**
 
@@ -1243,6 +1274,8 @@ preparation or ordering logic.
 
 ### Q081 — Where does CMake install the canonical wheel for device generation?
 
+> **Superseded (2026-11-11)** by Q129 (decision 9): device generation unpacks the wheel into the build tree; nothing is installed into the build Python.
+
 **Decision: Accepted — install it into the found Python environment.**
 
 Use `--force-reinstall --no-deps`. One active hipBLASLt build owns the selected
@@ -1253,6 +1286,8 @@ This matches the current disposable, single-build CI model while ensuring that
 same-version source changes reinstall the current wheel.
 
 ### Q082 — How do artifact tests run against the installed canonical wheel?
+
+> **Superseded (2026-11-11)** by Q129 (decision 9). The test-import rewrite now lives in #11016 and covers 13 files, not 11.
 
 **Decision: Accepted — run the separately copied raw tests with pytest's
 default `prepend` import mode.**
@@ -1320,6 +1355,8 @@ packaging is a follow-up that will remove the raw-package `PYTHONPATH`
 workaround and make ordinary dependency checks pass.
 
 ### Q084 — Which runner owns TensileLite's canonical and compatibility test phases?
+
+> **Superseded (2026-11-11)** by Q133 (decision 13): there is no compatibility phase.
 
 **Decision: Accepted — use a thin TensileLite-specific phase runner which
 delegates pytest execution to TheRock's generic runner.**
@@ -1789,6 +1826,8 @@ not require the executable.
 
 ### Q103 — Does TheRock continue testing its release wheels?
 
+> **Partly superseded (2026-11-11) by Q133 (decision 13): only the compatibility parts; TheRock tests one release wheel.**
+
 **Question:** Since CMake device generation uses the canonical wheel, should
 TheRock continue constructing and testing its canonical and compatibility
 wheels from reconstructed artifacts?
@@ -1826,6 +1865,8 @@ capability-specific test behavior while retaining the branch's wheel artifact
 coverage.
 
 ### Q105 — How does the artifact runner select release wheels without a client?
+
+> **Partly superseded (2026-11-11) by Q133 (decision 13): only the compatibility parts; there is exactly one tensilelite wheel to select.**
 
 **Question:** After removing the client-version gate, what client-free rule
 selects the canonical and compatibility wheels from a reconstructed artifact?
@@ -1979,6 +2020,8 @@ client only when they actually launch it.
 
 ### Q110 — How do Python SDK packages and conventional ROCm prefixes coexist?
 
+> **Superseded (2026-11-11)** by Q124 (decision 4): TheRock-built prefixes provide their full identity through the manifest; only pre-TheRock prefixes are base-only.
+
 **Decision: Accepted — use two installation adapters with no path borrowing.**
 
 The Python SDK package adapter and the conventional-prefix adapter are distinct
@@ -2009,6 +2052,8 @@ different toolchain model and has no compatibility guarantee.
 
 ### Q111 — What is the final ROCm-identity source for each installation model?
 
+> **Superseded (2026-11-11)** by Q124 (decision 4): TheRock-built prefixes provide their full identity through the manifest; only pre-TheRock prefixes are base-only.
+
 **Decision: Accepted — keep three explicit identity contracts.**
 
 - A TheRock source or CI build uses the exact forwarded
@@ -2026,6 +2071,8 @@ exact validation is enabled.
 
 ### Q112 — How does the TheRock build model enter TensileLite?
 
+> **Superseded (2026-11-11)** by Q127 (decision 7): only `TENSILELITE_ROCM_ADAPTER=therock-ci` selects `TheRockCIRocm`.
+
 **Decision: Accepted — add a distinct `TheRockCIRocm` adapter.**
 
 `TheRockCIRocm` is the build-graph adapter beside `PythonRocm` and
@@ -2038,6 +2085,8 @@ It does not read `.info/version`, `ROCM_PATH`, `/opt/rocm`, or
 `hipconfig --rocmpath`.
 
 ### Q113 — How does `TheRockCIRocm` find tools without `ROCM_PATH`?
+
+> **Superseded (2026-11-11)** by Q127 (decision 7): only `TENSILELITE_ROCM_ADAPTER=therock-ci` selects `TheRockCIRocm`; tools still come from the graph-prepared `PATH`.
 
 **Decision: Accepted — preserve develop's graph-prepared `PATH` and explicit
 compiler arguments.**
@@ -2077,6 +2126,8 @@ later only if a concrete workflow requires it.
 ### Q115 — How does the stack transition before TheRock forwards its package
 version?
 
+> **Superseded (2026-11-11)** by Q126 (decision 6): there is no `0.0.0` identity; below #11030 a missing or `"git"` version is a development build, and from #11030 a missing version is a configure error while `"git"` stays a development build.
+
 **Decision: Accepted — keep the PR 17 compatibility fallback only while
 validation is disabled, then require the forwarded identity.**
 
@@ -2111,6 +2162,8 @@ correction itself.
 
 ### Q117 — Which PR owns each part of the correction?
 
+> **Partly superseded (2026-11-11): the rows for PR 9, 18 and 20 are replaced by Q121, Q126 and Q124/Q125 (decisions 1, 4–6).**
+
 **Decision: Accepted — assign changes to the earliest coherent contract owner,
 then restack manually.**
 
@@ -2136,6 +2189,8 @@ behavior they protect rather than being accumulated in PR 17.
 
 ### Q118 — Should this work strengthen cross-adapter compatibility validation?
 
+> **Superseded (2026-11-11)** by Q124 and Q125 (decisions 4 and 5): `SystemRocm` compares full identities on TheRock-built roots.
+
 **Decision: Rejected — retain the existing simplified validation rules.**
 
 `TheRockCIRocm` validates the exact `THEROCK_PACKAGE_VERSION`, `PythonRocm`
@@ -2145,6 +2200,8 @@ adapter provenance to wheel metadata or attempt to normalize every possible
 Python-SDK/system-prefix transition.
 
 ### Q119 — How does a local build select ROCm when its Python is a ROCm venv?
+
+> **Superseded (2026-11-11) by Q121, Q125 and Q134 (decisions 1, 5 and 14): local and invoke builds stamp no ROCm identity; the client records its build ROCm.**
 
 **Decision: Accepted — the active build interpreter's Python SDK wins.**
 
@@ -2161,6 +2218,8 @@ incomplete Python ROCm build environment fails clearly rather than silently
 falling back to system ROCm.
 
 ### Q120 — What validation closes the TheRock and local-build correction?
+
+> **Partly superseded (2026-11-11): items 3–4 (local and invoke builds stamping a ROCm identity) are replaced by Q121, Q125 and Q134 (decisions 1, 5 and 14).**
 
 **Decision: Accepted — prove all four supported build/runtime environments.**
 
@@ -2180,6 +2239,194 @@ Each implementation commit carries the focused tests for its own PR boundary
 before the cross-repository builds are run. The independent Windows `<version>`
 header collision remains a separate defect and must not be confused with the
 version/installation-adapter validation described here.
+
+## 2026-11-10/11 packaging identity review
+
+Decided in the review of archana-ramalingam's comment on #11016 (tox's
+packaging environment never sees `ROCM_PATH`, so `setup.py` fell back to
+`/opt/rocm` and failed). Q121–Q134 are that review's decisions 1–14. They
+replace the entries marked **Superseded** above; each superseded entry names its
+replacement. They also supersede D3's rule that package builds fail without a
+ROCm version, D15 and D9 in [packaging decisions](docs/PackagingDecisions.md).
+
+### Q121 — Does the build backend discover a ROCm installation?
+
+**Decision: Accepted — no (decision 1).**
+
+`setup.py` stamps a ROCm identity only when one is passed explicitly, and only
+TheRock's CMake build passes one (`THEROCK_PACKAGE_VERSION`, forwarded as
+`TENSILELITE_ROCM_VERSION`). Standalone CMake, `invoke install`, tox and
+`pip install <path>` produce `5.0.0+g<sha>[.dirty]`. Nothing reads `ROCM_VERSION`,
+`ROCM_PATH`, `/opt/rocm` or `TOX_ENV_NAME` to version the wheel. The ROCm a native
+artifact is compiled against is recorded on that artifact instead (Q134).
+
+Rationale:
+
+- PEP 517 frontends isolate the backend: tox's `.pkg` drops `[testenv]`
+  `setenv`/`passenv` (seen in CI on #11016), pip's build isolation hides
+  `rocm_sdk_core`, and pip-SDK users rarely set `ROCM_PATH`.
+- Environment stamping produced inconsistent artifacts: one tox build made an
+  sdist `+rocm7.2.4` and a wheel `+rocm9.9.9`.
+- `pip install path/to/project` must work against an installed SDK.
+- `ROCM_VERSION` already means the HIP build version (`Toolchain/Component.py`).
+
+### Q122 — How are `tensilelite` and `tensilelite-client` paired?
+
+**Decision: Accepted — by the whole rocm-libraries commit (decision 2).**
+
+Both carry the full `git rev-parse HEAD`. At first client use they must match
+exactly; editable installs compare the commit only and warn about uncommitted
+changes (Q123).
+
+Rationale: the contract between them is source-level (`ClientWriter` writes
+files the client parses, with no format version), and the `+rocm` tag only stood
+in for "same source", failing both ways. Releases pair automatically because the
+wheel and client come from one pinned checkout. A whole-repo SHA was chosen over
+a subtree hash or interface version for simplicity; unrelated monorepo commits
+then break pairing for source-built clients, which fails clearly.
+
+### Q123 — How is the commit obtained, stamped and compared?
+
+**Decision: Accepted (decision 3).**
+
+- Lookup (`tensilelite/_source_revision.py`, used by `setup.py`, the runtime and
+  CMake): an unpacked sdist uses only its saved `_build_info.py`; otherwise git,
+  only if `setup.py` is tracked by the containing repository; otherwise
+  `TENSILELITE_SOURCE_REVISION` (`-DTENSILELITE_SOURCE_REVISION` for CMake), which
+  never overrides a value found above and fails if it names another commit;
+  otherwise none, which never pairs. CMake warns at configure time; the client
+  prints `none`.
+- A tree with uncommitted changes anywhere in the repository gets
+  `<sha>.dirty.<12-hex sha256 of the diff and untracked files>`; the version label
+  keeps only `.dirty`.
+- `_build_info.py` is written only into `build_lib` and the sdist release tree,
+  never the source tree; editable installs compute the value from git when the
+  client is first requested.
+- Installed packages need an exact match; editable installs compare commits and
+  warn on uncommitted changes. There is no override variable.
+- The client gets the value from the same CMake configure
+  (`tensilelite-client --source-revision`); HEAD, the current ref and
+  `packed-refs` are configure dependencies.
+
+Rationale: reading a saved value before git gave stale commits; a random dirty ID
+made pip's three `setup.py` runs disagree; stamped editable installs go stale;
+`safe.directory=*` is needed because the backend runs in other users' trees; a
+tree copied inside another checkout would inherit that HEAD, hence the
+`ls-files` guard. See the findings at the end of this section.
+
+### Q124 — Which ROCm identity does each installation form provide?
+
+**Decision: Accepted (decision 4).**
+
+| Installation | Adapter | Identity |
+| --- | --- | --- |
+| TheRock pip SDK | `PythonRocm` | `rocm_sdk_core.__version__` (full) |
+| TheRock native prefix | `SystemRocm` | `share/therock/therock_manifest.json` `rocm_package_version` (full); `.info/version` if the manifest is missing or invalid |
+| Pre-TheRock prefix | `SystemRocm` | `.info/version` (base) |
+| TheRock CI build | `TheRockCIRocm` | Forwarded `THEROCK_PACKAGE_VERSION`, else unknown (dev) |
+
+The manifest is read defensively: one field, release identities only (not
+`"git"`), and an "inconsistent installation" error if its base version and
+`.info/version` disagree. Full identities keep releases, nightlies and dev
+builds apart, and the pip and native forms of one TheRock build behave the same.
+
+### Q125 — Which wheels are checked strictly against the selected ROCm?
+
+**Decision: Accepted (decision 5).**
+
+`+rocm…` and `+devrocm…` wheels fail on any mismatch with the full identity
+(base to base on pre-TheRock prefixes). TheRock development identities
+(`X.Y.Z.devN+<commit>[.<variant>…]`) ignore their commit token, because stage
+reuse from a baseline run brings that run's manifest; variant tokens still
+count. `+g<sha>` wheels make no ROCm claim and warn once per process.
+
+### Q126 — When does the stack need TheRock changes?
+
+**Decision: Accepted (decision 6).** #11016–#11028 land without TheRock changes:
+a missing or `"git"` `THEROCK_PACKAGE_VERSION` is a development build. #11030 and
+later are conditional slices: from #11030 a missing version is a configure error
+and `"git"` stays the local development identity. #11032 waits for T2 in a
+published nightly `rocm-sdk-core`; the new R1 waits for TheRock T8–T10.
+
+### Q127 — How is the TheRock build-time adapter selected?
+
+**Decision: Accepted (decision 7).** Only the internal marker
+`TENSILELITE_ROCM_ADAPTER=therock-ci`, set by hipBLASLt's CMake in its own
+code-generation commands, selects `TheRockCIRocm`; any other value is an error.
+`THEROCK_PACKAGE_VERSION` only carries the version, when known. An installed
+wheel must never enter build-time mode, and a common TheRock variable leaking
+into a shell would otherwise skip its validation. `check_release_wheel_contents.py`
+receives the expected version.
+
+### Q128 — Who owns the version label format?
+
+**Decision: Accepted (decision 8).** rocm-libraries. TheRock passes inputs, finds
+the wheel by name, installs, tests and publishes it, records the version
+verbatim, and calls rocm-libraries' scripts for checks; it never parses the
+label or builds fake ROCm roots from it.
+
+### Q129 — How do builds and tests use the wheel?
+
+**Decision: Accepted (decision 9).** Tests import the installed wheel (TheRock T8
+exposes only rocisa, its adaptor and stinkytofu, and R1 stops unpacking the wheel
+into the artifact root). Kernel generation unpacks the built wheel into the
+build tree and puts it on a command-scoped `PYTHONPATH`, as develop does with the
+source tree; nothing is installed into the build Python. The reusable recipe
+module and `TENSILELITE_WHEEL_DIR` are follow-up F1.
+
+### Q130 — How are pre-TheRock native installs supported?
+
+**Decision: Accepted (decision 10).** Best effort, no CI: generation works;
+benchmarking needs a self-built client bound with `tensilelite-configure-client`.
+
+### Q131 — Does client artifact ownership change?
+
+**Decision: Accepted (decision 11).** No; Q097 stands and Q109 remains the final
+state (follow-up F5).
+
+### Q132 — What is deferred?
+
+**Decision: Accepted (decision 12).** F1 the TheRock release-artifact wheel stage;
+F2 validation phases for the pip SDK and native packages (the CPU-only pip-SDK
+smoke check is its first slice); F3 moving `rocisa_stinkytofu_adaptor` out of
+the source tree; F4 rocisa packaging (D6); F5 the client in the runtime artifact;
+F6 kernel-library compatibility with hipBLASLt (parked).
+
+### Q133 — Is the compatibility package kept?
+
+**Decision: Accepted — removed (decision 13).** `tensilelite_tensile_compat` was an
+internal, commands-only wheel; nothing in the stack calls the legacy names. The
+`Tensile*` console scripts are removed with no replacement; use the
+`tensilelite` command family. One wheel simplifies building, checking, unpacking
+and publishing.
+
+### Q134 — How is the ROCm a native artifact was built against recorded?
+
+**Decision: Accepted (decision 14).** `tensilelite-client --build-rocm` prints
+`<identity> <full|base|unknown>` for the ROCm it was compiled against
+(`rocm_sdk_core.__version__` for the build Python's SDK root, the TheRock
+manifest, `.info/version`, or unknown). The runtime compares it with the
+selected ROCm: a different major version is an error; another mismatch is an
+error for `+rocm`/`+devrocm` packages and warns for `+g` packages; unknown warns.
+Only the client and, later, rocisa compile against ROCm; the wheel is pure
+Python, so a build-machine label on it would check the wrong artifact.
+
+### Findings recorded in this review
+
+- **SHA design experiments (2026-11-10;** pip 26.2.1, setuptools 82, tox 4.56.1,
+  git 2.43**):** a saved value read before git reported the previous commit after
+  a new commit; a random dirty ID made pip reject the wheel ("unexpected file
+  name"); `safe.directory` must be the repository root or `*`; a tree without
+  `.git` inside another checkout inherits that HEAD; porcelain `git diff` ignores
+  a bare `touch`; PEP 440 strips leading zeros from all-digit local segments;
+  `config_settings` does not reach `setup.py` through `setuptools.build_meta`;
+  wheels are byte-identical only with `SOURCE_DATE_EPOCH`.
+- **Git in TheRock builds:** `HIPBLASLT_VERSION_TWEAK` is set in every public
+  TheRock build checked (CI run 42757568973, nightlies 27392289755 and rockrel
+  29378454574, release 40359466840), and the build image sets
+  `safe.directory '*'`. The only empty value came from an internal simulator SDK
+  whose checkout had no working tree, so builds use `rev-parse`, not
+  `describe --dirty`.
 
 ## Confirmed TheRock build/test facts
 
@@ -2233,8 +2480,9 @@ and omit `rocm[devel]`.
 - The canonical wheel is a controlled ROCm artifact until that rocisa packaging
   exists; its temporary `pip check` missing-distribution diagnostic is accepted.
 - The checked-in `VERSION` file is the component-version authority;
-  `release_metadata.py` combines it with the selected build ROCm identity for
-  wheel metadata and the generated native-client header.
+  `release_metadata.py` combines it with the source commit (`+g<sha>[.dirty]`),
+  or with TheRock's package version when one is passed (`+rocm`/`+devrocm`), for
+  wheel metadata and the generated native-client header (Q121, Q123).
 - `tensilelite-client` is currently a non-Windows `blas_test` artifact for
   benchmark/validation use, installed at the standard
   `libexec/hipblaslt/tensilelite` location. Its `blas_lib` promotion is a
@@ -2260,11 +2508,12 @@ and omit `rocm[devel]`.
   mode for separately copied tests, and classify only reproduced checkout-only
   assumptions as source-CI-only.
 - The thin TensileLite runner owns wheel installation and phase ordering; the
-  generic runner owns pytest execution and JUnit. Canonical tests must pass
-  before compatibility is installed or run.
+  generic runner owns pytest execution and JUnit. There is one wheel and no
+  compatibility phase (Q133).
 
 ## Deferred decisions
 
-1. Exact TensileLite source-build identity beyond the distribution version.
+1. ~~Exact TensileLite source-build identity beyond the distribution version.~~
+   Decided: the source commit (Q122, Q123).
 2. Proper rocisa distribution/wheel packaging, replacing raw-package
    `PYTHONPATH` injection and making canonical-wheel dependency checks clean.
