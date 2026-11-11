@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -902,6 +903,47 @@ Metadata twoStageMetadata()
     m.fields["epilogue"] = std::string("default");
     m.fields["vector_size_c"] = int64_t{1};
     return m;
+}
+
+TEST(TestGfx950ConvWgradGeometry, TiledQGroupsDoubleTheBlockAndHalveTheSegmentSplits)
+{
+    // DirectWgradTiledSpec(...).launch_geometry() and is_valid_wgrad_tiled_spec on a bf16
+    // f3x3p1 problem: a second wave group per block doubles the threads, and the two
+    // groups share one block's segments, so a segment-bound grid halves. pingpong only
+    // staggers the groups and launches like q_groups 2.
+    DirectKnobs knobs{};
+    knobs.waveK16 = knobs.waveC16 = 2;
+    knobs.wavesK = knobs.wavesC = 2;
+    knobs.rowsPerSeg = 30;
+    knobs.prefetch = 2;
+    knobs.targetBlocks = 256;
+    knobs.unfoldN = 1;
+    const wgrad::DirectProblem small{2, 28, 28, 1, 64, 64, 3, 3, 1, 1, 28, 28};
+    const wgrad::DirectProblem big{32, 56, 56, 1, 256, 256, 3, 3, 1, 1, 56, 56};
+    const auto launch = [&](const wgrad::DirectProblem& p, int64_t qGroups, int64_t pingpong) {
+        auto k = knobs;
+        k.qGroups = qGroups;
+        k.pingpong = pingpong;
+        return wgrad::tiledLaunch(p, k);
+    };
+    for(const auto& [p, qGroups, pingpong, grid, block] :
+        std::vector<std::tuple<wgrad::DirectProblem, int64_t, int64_t, int64_t, int64_t>>{
+            {small, 0, 0, 2, 256},
+            {small, 1, 0, 2, 256},
+            {small, 2, 0, 1, 512},
+            {small, 2, 1, 1, 512},
+            {big, 1, 0, 256, 256},
+            {big, 2, 1, 256, 512}})
+    {
+        const auto l = launch(p, qGroups, pingpong);
+        ASSERT_TRUE(l) << qGroups << " " << pingpong;
+        EXPECT_EQ(l->grid, (std::array<int64_t, 3>{grid, 1, 1})) << qGroups << " " << pingpong;
+        EXPECT_EQ(l->block, block) << qGroups << " " << pingpong;
+    }
+    // q_groups is 1 or 2, and pingpong needs the second group.
+    EXPECT_FALSE(launch(small, 3, 0));
+    EXPECT_FALSE(launch(small, 1, 1));
+    EXPECT_FALSE(launch(small, 2, 2));
 }
 
 TEST(TestGfx950ConvWgradGeometry, ParsesEachFamilyFromItsMetadata)

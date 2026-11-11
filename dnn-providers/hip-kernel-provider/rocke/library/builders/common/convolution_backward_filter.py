@@ -206,7 +206,9 @@ AOT_WGRAD_DIRECT_KNOBS = {
         "waves_q": "waves_q",
     },
     DIRECT_VARIANT_WGRAD_TILED: {
+        "pingpong": "pingpong",
         "prefetch": "prefetch",
+        "q_groups": "q_groups",
         "row_unroll": "row_unroll",
         "rows_per_seg": "rows_per_seg",
         "target_blocks": "target_blocks",
@@ -256,8 +258,12 @@ AOT_WGRAD_DIRECT_KNOBS = {
 #: Knobs carried in an implicit-GEMM field rather than a knob field of their
 #: own: the Stage 2 fold's slab count is the instance's ``ws_replicas``.
 _KNOBS_IN_IMPLICIT_FIELDS = ("ws_replicas",)
+#: Knobs rocKE spells as a bool; the descriptor holds 0/1 (mirrors dgrad's
+#: ``_BOOL_KNOBS``). ``direct_wgrad_tiled``'s pingpong second-group dispatch
+#: is the only one so far.
+_BOOL_KNOBS = ("pingpong",)
 #: Every knob field name across every variant, each defaulting to 0 (no wgrad
-#: direct knob is a bool or has a nonzero "unset" meaning, unlike dgrad's
+#: direct knob has a nonzero "unset" meaning, unlike dgrad's
 #: ``lds_pad``/``waves_per_eu``).
 _KNOB_DEFAULTS = {
     name: 0
@@ -440,9 +446,10 @@ def _problem_error(problem: Gfx950ConvWgradProblem) -> str:
 def aot_wgrad_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
     """The instance fields a direct or helper identity's ``knobs`` set.
 
-    Raises ``ValueError`` for a knob the variant does not take, or a
-    non-integer value. An omitted knob keeps its :data:`_KNOB_DEFAULTS` value
-    (0), which for every wgrad direct knob is also "not used".
+    Raises ``ValueError`` for a knob the variant does not take, a non-integer
+    value, or a bool knob (:data:`_BOOL_KNOBS`) that is not a bool. An omitted
+    knob keeps its :data:`_KNOB_DEFAULTS` value (0), which for every wgrad
+    direct knob is also "not used".
     """
     mapping = AOT_WGRAD_DIRECT_KNOBS[variant]
     unknown = sorted(set(knobs) - set(mapping))
@@ -455,7 +462,11 @@ def aot_wgrad_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
         if key not in knobs:
             continue
         value = knobs[key]
-        if type(value) is not int:
+        if field_name in _BOOL_KNOBS:
+            if type(value) is not bool:
+                raise ValueError(f"knob {key} must be a bool, got {value!r}")
+            value = int(value)
+        elif type(value) is not int:
             raise ValueError(f"knob {key} must be an integer, got {value!r}")
         values[field_name] = value
     return values
@@ -586,6 +597,9 @@ class Gfx950ConvWgradAotSpec:
     row_unroll: int = 0
     wave_c16: int = 0
     wave_k16: int = 0
+    # direct_wgrad_tiled
+    q_groups: int = 0
+    pingpong: int = 0
     # direct_wgrad_dw_cols
     channels: int = 0
     strip: int = 0
@@ -633,7 +647,10 @@ class Gfx950ConvWgradAotSpec:
         knobs = {}
         for key, field_name in AOT_WGRAD_DIRECT_KNOBS[self.direct_variant].items():
             value = getattr(self, field_name)
-            if value:
+            if field_name in _BOOL_KNOBS:
+                if value:
+                    knobs[key] = bool(value)
+            elif value:
                 knobs[key] = value
             # Otherwise the instance did not state it; every wgrad direct
             # knob's 0 is "not used", so leaving it out is exact.
@@ -1011,6 +1028,9 @@ def _direct_error(spec: Gfx950ConvWgradAotSpec) -> str:
                     f"the {spec.direct_variant} variant does not use {name}; it must "
                     f"be {default!r}, got {value!r}"
                 )
+        elif name in _BOOL_KNOBS:
+            if value not in (0, 1):
+                return f"{name} must be 0 or 1"
         elif not 0 <= value <= _INT32_MAX:
             return f"{name} must be a nonnegative signed 32-bit integer"
     return ""

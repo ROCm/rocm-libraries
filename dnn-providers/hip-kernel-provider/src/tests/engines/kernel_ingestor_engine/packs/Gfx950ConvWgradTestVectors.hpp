@@ -32,7 +32,7 @@ struct CatalogInstance
 inline constexpr std::array<const char*, 7> STRING_FIELDS{"dtype", "pipeline", "epilogue", "instance_id", "layout", "direct_variant", "lds_layout"};
 
 /// The KMD fields with a default_value, as name=value;...
-inline constexpr const char* DEFAULT_FIELDS = "kernel_family=0;direct_variant=none;filter_h=0;filter_w=0;stride_h=0;stride_w=0;pad_h=0;pad_w=0;dilation_h=0;dilation_w=0;cpg=0;kpg=0;ho_per_block=0;mfma_k=0;waves_c=0;waves_k=0;waves_q=0;prefetch=0;row_unroll=0;rows_per_seg=0;target_blocks=0;unfold_n=0;wave_c16=0;wave_k16=0;lanes_c=0;lanes_w=0;channels=0;strip=0;threads=0;q_tiles=0;rows_per_chunk=0;wave_q4=0;taps=0";
+inline constexpr const char* DEFAULT_FIELDS = "kernel_family=0;direct_variant=none;filter_h=0;filter_w=0;stride_h=0;stride_w=0;pad_h=0;pad_w=0;dilation_h=0;dilation_w=0;cpg=0;kpg=0;ho_per_block=0;mfma_k=0;waves_c=0;waves_k=0;waves_q=0;pingpong=0;prefetch=0;q_groups=0;row_unroll=0;rows_per_seg=0;target_blocks=0;unfold_n=0;wave_c16=0;wave_k16=0;lanes_c=0;lanes_w=0;channels=0;strip=0;threads=0;q_tiles=0;rows_per_chunk=0;wave_q4=0;taps=0";
 
 inline const std::vector<CatalogInstance>& catalogInstances()
 {

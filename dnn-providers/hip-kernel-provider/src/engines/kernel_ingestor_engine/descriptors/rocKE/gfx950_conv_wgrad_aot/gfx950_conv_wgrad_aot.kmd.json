@@ -205,7 +205,17 @@
       "default_value": 0
     },
     {
+      "name": "pingpong",
+      "type": "int",
+      "default_value": 0
+    },
+    {
       "name": "prefetch",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "q_groups",
       "type": "int",
       "default_value": 0
     },

@@ -572,16 +572,20 @@ struct DirectKnobs
     int64_t rowsPerChunk = 0;
     int64_t waveQ4 = 0;
     int64_t taps = 0;
+    int64_t pingpong = 0;
+    int64_t qGroups = 0;
 };
 
 /// The knob fields in KMD order (_KNOB_DEFAULTS in convolution_backward_filter.py).
-constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 21> DIRECT_KNOB_FIELDS{{
+constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 23> DIRECT_KNOB_FIELDS{{
     {"ho_per_block", &DirectKnobs::hoPerBlock},
     {"mfma_k", &DirectKnobs::mfmaK},
     {"waves_c", &DirectKnobs::wavesC},
     {"waves_k", &DirectKnobs::wavesK},
     {"waves_q", &DirectKnobs::wavesQ},
+    {"pingpong", &DirectKnobs::pingpong},
     {"prefetch", &DirectKnobs::prefetch},
+    {"q_groups", &DirectKnobs::qGroups},
     {"row_unroll", &DirectKnobs::rowUnroll},
     {"rows_per_seg", &DirectKnobs::rowsPerSeg},
     {"target_blocks", &DirectKnobs::targetBlocks},
@@ -610,7 +614,9 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
     case DirectVariant::WGRAD:
         return among({"ho_per_block", "mfma_k", "waves_c", "waves_k", "waves_q"});
     case DirectVariant::TILED:
-        return among({"prefetch",
+        return among({"pingpong",
+                      "prefetch",
+                      "q_groups",
                       "row_unroll",
                       "rows_per_seg",
                       "target_blocks",
@@ -1540,8 +1546,9 @@ inline std::optional<DirectLaunch> directWgradLaunch(const DirectProblem& p, con
                         threads};
 }
 
-/// DirectWgradTiledSpec (q_groups 1, no ping-pong): is_valid_wgrad_tiled_spec, then
-/// launch_geometry -- the channel tiles times ceil(target_blocks / tiles) segment splits.
+/// DirectWgradTiledSpec: is_valid_wgrad_tiled_spec, then launch_geometry -- the channel
+/// tiles times min(ceil(segments / q_groups), ceil(target_blocks / tiles)) segment splits,
+/// each block q_groups wave groups of waves_k * waves_c waves.
 inline std::optional<DirectLaunch> tiledLaunch(const DirectProblem& p, const DirectKnobs& k)
 {
     const auto waveK16 = knobOr(k.waveK16, 2);
@@ -1553,13 +1560,16 @@ inline std::optional<DirectLaunch> tiledLaunch(const DirectProblem& p, const Dir
     const auto targetBlocks = knobOr(k.targetBlocks, 256);
     const auto rowUnroll = k.rowUnroll;
     const auto unfoldN = knobOr(k.unfoldN, 1);
+    const auto qGroups = knobOr(k.qGroups, 1);
     const auto oneTwoFour = [](int64_t v) { return v == 1 || v == 2 || v == 4; };
     const auto nWaves = satMul(wavesK, wavesC);
-    const auto threads = satMul(nWaves, WAVE_SIZE);
+    const auto threads = satMul({nWaves, qGroups, WAVE_SIZE});
     if(p.stride != 1 || !oneTwoFour(waveK16) || !oneTwoFour(waveC16) || !isPowerOfTwo(wavesK)
-       || !isPowerOfTwo(wavesC) || !oneTwoFour(unfoldN) || threads > MAX_BLOCK_THREADS
-       || p.cpg % 8 != 0 || p.kpg % 8 != 0 || p.kpg < 16 * waveK16 || p.cpg < 16 * waveC16
-       || satMul({p.kh, p.kw, waveK16, waveC16, 4}) > 192 || targetBlocks < 1)
+       || !isPowerOfTwo(wavesC) || !oneTwoFour(unfoldN) || (qGroups != 1 && qGroups != 2)
+       || (k.pingpong != 0 && qGroups != 2) || k.pingpong < 0 || k.pingpong > 1
+       || threads > MAX_BLOCK_THREADS || p.cpg % 8 != 0 || p.kpg % 8 != 0 || p.kpg < 16 * waveK16
+       || p.cpg < 16 * waveC16 || satMul({p.kh, p.kw, waveK16, waveC16, 4}) > 192
+       || targetBlocks < 1)
     {
         return std::nullopt;
     }
@@ -1579,14 +1589,16 @@ inline std::optional<DirectLaunch> tiledLaunch(const DirectProblem& p, const Dir
     const auto seg = stripW + p.kw - 1;
     const auto ik = ceilDiv(ceilDiv(32 * blockK / 8, WAVE_SIZE), nWaves);
     const auto ic = ceilDiv(ceilDiv(unfoldN * seg * blockC / 8, WAVE_SIZE), nWaves);
-    const auto slot = nWaves * (ik + ic) * WAVE_SIZE * 8 * 2;
-    if(buffers * slot > DIRECT_LDS_BUDGET_BYTES)
+    const auto slot = qGroups * nWaves * (ik + ic) * WAVE_SIZE * 8 * 2;
+    // The q-group reduction buffers: the second group's partial gradients, in fp32.
+    const auto reduction = qGroups > 1 ? 2 * nWaves * waveK16 * waveC16 * WAVE_SIZE * 4 * 4 : 0;
+    if(buffers * slot + reduction > DIRECT_LDS_BUDGET_BYTES)
     {
         return std::nullopt;
     }
     const auto channelTiles = p.groups * ceilDiv(p.kpg, blockK) * ceilDiv(p.cpg, blockC);
     const auto segments = ceilDiv(p.n, unfoldN) * ceilDiv(p.wo, stripW) * ceilDiv(p.h, rowsPerSeg);
-    const auto splits = std::min(segments, ceilDiv(targetBlocks, channelTiles));
+    const auto splits = std::min(ceilDiv(segments, qGroups), ceilDiv(targetBlocks, channelTiles));
     return DirectLaunch{{channelTiles * splits, 1, 1}, threads};
 }
 
