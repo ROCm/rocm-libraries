@@ -482,6 +482,9 @@ EXTRA_TILES = {
     ("mfma32x16", ("3x3pk",)): [(128, 64, 4, 2, 64), (64, 128, 2, 4, 64)],
     ("mfma32x16", ("3x3s2pk",)): [(128, 64, 4, 2, 64), (128, 64, 4, 2, 32)],
     ("wmma12", ("3x3pk",)): [(64, 64, 4, 2, 64), (128, 32, 4, 2, 32)],
+    # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
+    ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
+    ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
     ("wmma12", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
 }
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
@@ -1034,9 +1037,12 @@ def dws_of(c):
 
 def family_of(c):
     """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA, or the FMA loops."""
+    MFMA atoms, RDNA's WMMA, or the FMA loops. The 32 x 32 atom's packed rows ship in a pack
+    without gfx950, which has its own measured packed-rows tiles."""
     if c["loop"] == 5:
         return "direct"
+    if c["loop"] == 7 and c["atom"].startswith("mfma32_"):
+        return "cdnapk"
     if c["atom"] == "fma":
         return "fma"
     if c["atom"].startswith("wmma"):
@@ -1142,9 +1148,11 @@ def emit():
                     "version": "1.0",
                     "id": U(f"kdp.{dt}.{fam}"),
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
-                    "arch": {"fma906": FMA906_ARCHS, "fmardna": FMARDNA_ARCHS}.get(
-                        fam, []
-                    ),
+                    "arch": {
+                        "fma906": FMA906_ARCHS,
+                        "fmardna": FMARDNA_ARCHS,
+                        "cdnapk": CDNA[:3],
+                    }.get(fam, []),
                     "matchers": [umd],
                     "engine": ued,
                     "dispatch": udd,
