@@ -71,6 +71,7 @@ EXCLUDES = str(DEFAULT_OUTPUT_DIR / "{arch}_conv_dgrad_aot.excludes.json")
 FAMILIES = ("implicit", "direct", "helper")
 
 _bind_rocke = _common.bind_rocke
+read_rocke_catalog = _common.read_rocke_catalog
 #: The in-repo rocKE tree, the default ``--rocke-root`` (the converter's).
 DEFAULT_ROCKE_ROOT = _cfg.DEFAULT_ROCKE_ROOT
 read_excludes = _common.read_excludes
@@ -115,19 +116,6 @@ def check_flavor(identities: list) -> int:
         )
         return 1
     return 0
-
-
-def read_rocke_catalog(arch: str = ARCH) -> list:
-    """rocKE's own registered dgrad instances of ``arch``, as dicts. rocKE must
-    already be bound (:func:`_bind_rocke`)."""
-    from dispatch.grouped_convolution import (
-        _INSTANCE_DIR,
-        _INSTANCE_LISTS,
-        load_instance_list,
-    )
-
-    path = _INSTANCE_DIR / _INSTANCE_LISTS[(arch, "dgrad")]
-    return [i.to_dict() for i in load_instance_list(path).identities]
 
 
 def sweep_hashes(dtype: str, jobs: int, arch: str = ARCH) -> set:
@@ -265,7 +253,7 @@ def main(argv=None) -> int:
     _bind_rocke(args.rocke_root)
     _cfg.check_arch(parser, arch)
 
-    rocke_catalog = read_rocke_catalog(arch)
+    rocke_catalog = read_rocke_catalog("dgrad", arch)
     excludes = read_excludes(args.excludes)
     rocke_labels = {identity_label(i) for i in rocke_catalog}
     stale = set(excludes) - rocke_labels

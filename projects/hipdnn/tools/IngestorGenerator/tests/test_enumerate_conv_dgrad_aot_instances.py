@@ -38,7 +38,7 @@ def _rocke_on_path():
 @pytest.fixture(scope="module")
 def catalog():
     """rocKE's own registered gfx950 dgrad catalog, in rocKE's on-disk order."""
-    return tool.read_rocke_catalog("gfx950")
+    return tool.read_rocke_catalog("dgrad", "gfx950")
 
 
 @pytest.fixture(scope="module")
@@ -152,7 +152,7 @@ def test_the_lists_are_ordered_by_family_then_hash(committed):
 def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
     helper = next(e for e in committed["fp16"] if tool.family(e) == "helper")
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", helper["llvm_flavor"])
-    monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [helper])
+    monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction, arch: [helper])
     argv = ["--rocke-root", str(_ROCKE)]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
     assert "derived, not registered" in capsys.readouterr().err
@@ -166,7 +166,7 @@ def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
         if i["algorithm"] == "implicit_gemm"
     )
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
-    monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [forward])
+    monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction, arch: [forward])
     argv = ["--rocke-root", str(_ROCKE), "--jobs", "4"]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
     err = capsys.readouterr().err
@@ -216,7 +216,7 @@ def test_the_gfx1250_lists_are_rockes_gfx1250_catalog(committed_gfx1250):
         assert {e["arch"] for e in entries} == {"gfx1250"}
         assert not [e for e in entries if tool.family(e) == "helper"]
         listed |= {tool.stable_hash(e) for e in entries}
-    catalog = tool.read_rocke_catalog("gfx1250")
+    catalog = tool.read_rocke_catalog("dgrad", "gfx1250")
     assert listed == {tool.stable_hash(i) for i in catalog}
 
 
