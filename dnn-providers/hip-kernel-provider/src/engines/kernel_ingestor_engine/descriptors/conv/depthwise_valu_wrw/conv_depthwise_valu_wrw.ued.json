@@ -7,7 +7,11 @@
   },
   "metadata": "6f051569-85ed-51fe-9f62-f7aa8406ab2f",
   "knobs": [
-    "variant"
+    "variant",
+    "q",
+    "g",
+    "nwg",
+    "bpc"
   ],
   "behavior_notes": [
     "runtime_compilation"
