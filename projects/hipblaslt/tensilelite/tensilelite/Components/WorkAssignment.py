@@ -759,10 +759,6 @@ class StaticGrid(WorkAssignment):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # defineAndResources already decoded the hardware/cluster workgroup IDs.
-        # Keep its WGMXCC remap and the PersistentXCCMapping result above when
-        # saving the rank that owns this worker's static partition.
-
         # No USO prologue: bit 29 is tested in place at each divergence site.
 
         # Cluster multicast: the host launches (Cs * clusters, Ck, 1), so after the
