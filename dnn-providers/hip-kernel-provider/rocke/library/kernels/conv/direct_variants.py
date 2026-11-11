@@ -181,8 +181,12 @@ def per_axis_pad_variants(
         DIRECT_DEPTHWISE_TILED_DGRAD: direction == "dgrad" and depthwise_s1,
         # The Toeplitz WMMA depthwise wgrad.
         "direct_depthwise_wgrad_wmma": direction == "wgrad" and depthwise_s1,
-        # An ungrouped stride-1 forward.
+        # An ungrouped stride-1 forward; the MFMA small-K form validates its
+        # shape through the same rule as the WMMA one (_common_shape_reason).
         DIRECT_FWD_SMALLK_WMMA: (
+            direction == "fwd" and dense and stride == 1 and not dilated
+        ),
+        DIRECT_FWD_SMALLK_MFMA: (
             direction == "fwd" and dense and stride == 1 and not dilated
         ),
         # An ungrouped 1-D strided forward (poly_view), and an ungrouped
@@ -196,6 +200,9 @@ def per_axis_pad_variants(
             )
         ),
     }
+    missing = [v for v in PER_AXIS_PAD_VARIANTS if v not in shapes]
+    if missing:
+        raise KeyError(f"per_axis_pad_variants states no shape for {missing}")
     return tuple(v for v in PER_AXIS_PAD_VARIANTS if shapes[v])
 
 

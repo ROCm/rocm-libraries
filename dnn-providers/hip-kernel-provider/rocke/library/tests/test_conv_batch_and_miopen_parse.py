@@ -178,6 +178,7 @@ def test_per_axis_pad_variants_name_every_per_axis_variant():
     assert variants("wgrad", stride=2, **dw) == ()
     assert variants("fwd", KH=1, PAD=0) == (
         "direct_fwd_smallk_wmma",
+        "direct_fwd_smallk_mfma",
         "direct_fwd_wmma",
     )
     assert variants("fwd", stride=2, KH=1, PAD=0, one_d=True) == ("direct_fwd_wmma",)
