@@ -39,23 +39,6 @@ import numpy as np
 import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
-from ._p4_shared_analytical import (
-    UNIFORM_CALIBRATION,
-    UNIFORM_QUICK_CASES,
-    UniformCase,
-    UniformObservation,
-    encode_bits,
-    legal_interval,
-    target_bits,
-    uniform_expected_bits,
-)
-from ._p4_shared_subject import (
-    _resolve_tuning_spec,
-    _shape,
-    _validate_supported_case,
-    resolve_dense_subject,
-    run_dense_case,
-)
 from ._p4_analytical import (
     EPILOGUE_ASSUMPTION,
     F32_SMALLEST_SUBNORMAL,
@@ -125,6 +108,23 @@ from ._p4_analytical import (
     visited_tiles,
 )
 from ._p4_capture_audit import audit_captures, format_audit
+from ._p4_shared_analytical import (
+    UNIFORM_CALIBRATION,
+    UNIFORM_QUICK_CASES,
+    UniformCase,
+    UniformObservation,
+    encode_bits,
+    legal_interval,
+    target_bits,
+    uniform_expected_bits,
+)
+from ._p4_shared_subject import (
+    _resolve_tuning_spec,
+    _shape,
+    _validate_supported_case,
+    resolve_dense_subject,
+    run_dense_case,
+)
 
 _REDERIVE = "re-derive the P4 path model"
 
@@ -671,14 +671,18 @@ class EpilogueIsa:
         if len(patterns) != 1 or "unknown" in next(iter(patterns)):
             return None
         (pattern,) = patterns
-        return frozenset(index for index, kind in enumerate(pattern) if kind == "single")
+        return frozenset(
+            index for index, kind in enumerate(pattern) if kind == "single"
+        )
 
 
 def classify_epilogue_isa(text: str) -> EpilogueIsa:
     """Classify the FP16 output epilogue and every FP32 FMA of one kernel."""
     instructions = _isa_instructions(text)
     model = EpilogueIsa()
-    starts = [i for i, (name, _) in enumerate(instructions) if name == "v_div_scale_f32"]
+    starts = [
+        i for i, (name, _) in enumerate(instructions) if name == "v_div_scale_f32"
+    ]
     ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
     model.divisions = len(ends)
     if len(ends) != 1 or not starts:
@@ -701,7 +705,11 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
         if name.startswith("global_store"):
             data = _isa_registers(operands[1]) or []
             model.stores.append(
-                tuple(halves.get((reg, half), "unknown") for reg in data for half in (0, 1))
+                tuple(
+                    halves.get((reg, half), "unknown")
+                    for reg in data
+                    for half in (0, 1)
+                )
             )
             continue
         if not name.startswith("v_") or not operands:
@@ -739,11 +747,17 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
             update[(destination[0], 1)] = halves.get((sources[0][0], 0), "unknown")
         elif name.startswith("v_mov_b32") and sources[0]:
             for half in (0, 1):
-                update[(destination[0], half)] = halves.get((sources[0][0], half), "unknown")
+                update[(destination[0], half)] = halves.get(
+                    (sources[0][0], half), "unknown"
+                )
             if sources[0][0] in products:
                 products.add(destination[0])
         else:
-            update = {(register, half): "unknown" for register in destination for half in (0, 1)}
+            update = {
+                (register, half): "unknown"
+                for register in destination
+                for half in (0, 1)
+            }
         for register in destination:
             if not (name.startswith("v_mov_b32") and register in products):
                 products.discard(register)
@@ -918,9 +932,7 @@ def _f32_from_bits(bits: np.ndarray) -> np.ndarray:
     return np.asarray(bits, dtype=np.uint32).view(np.float32)
 
 
-def _members(
-    interval: F32Interval, rng: np.random.Generator, count: int
-) -> np.ndarray:
+def _members(interval: F32Interval, rng: np.random.Generator, count: int) -> np.ndarray:
     """Random FP32 members of a nonnegative interval, endpoints included."""
     low, high = _f32_bits(interval.lo), _f32_bits(interval.hi)
     drawn = rng.integers(low, high, size=count, endpoint=True, dtype=np.uint32)
@@ -1113,7 +1125,9 @@ def test_epilogue_hull_holds_both_roundings_of_the_captured_counterexample() -> 
     r = _f32_from_bit(_COUNTEREXAMPLE["r"])
     assert _single_rounded_fp16(o, r) == _COUNTEREXAMPLE["single"]
     assert _double_rounded(o, r, "fp16") == _COUNTEREXAMPLE["double"]
-    points = F32Interval.point(Fraction(float(o))), F32Interval.point(Fraction(float(r)))
+    points = F32Interval.point(Fraction(float(o))), F32Interval.point(
+        Fraction(float(r))
+    )
     assert cast_single_or_double_hull(*points, "fp16") == (
         _COUNTEREXAMPLE["single"],
         _COUNTEREXAMPLE["double"],
@@ -1134,9 +1148,7 @@ def _epilogue_probes(dtype: str) -> list[tuple[np.float32, np.float32]]:
         anchors += [0x0C0D, 0x0C0E, 0x2BFF, 0x3BFF, 0x3C00, 0x3C01, 0x5BFF]
     else:
         anchors = [0x0000, 0x0001, 0x007F, 0x0080, 0x3F7F, 0x3F80, 0x3F81, 0x4B7F]
-    factors = [
-        np.float32(1.0) + np.float32(2.0**-23) * step for step in (1, 3, 5, 11)
-    ]
+    factors = [np.float32(1.0) + np.float32(2.0**-23) * step for step in (1, 3, 5, 11)]
     factors += [np.float32(1.0) - np.float32(2.0**-24) * step for step in (1, 3, 7)]
     probes = []
     for bits in anchors:
@@ -1160,13 +1172,18 @@ def test_epilogue_hull_at_midpoints_binade_edges_and_subnormals(dtype: str) -> N
     would not tell them apart."""
     differing = 0
     for o, r in _epilogue_probes(dtype):
-        points = F32Interval.point(Fraction(float(o))), F32Interval.point(Fraction(float(r)))
+        points = F32Interval.point(Fraction(float(o))), F32Interval.point(
+            Fraction(float(r))
+        )
         double = _double_rounded(o, r, dtype)
         allowed = {double}
         if dtype == "fp16":
             allowed.add(_single_rounded_fp16(o, r))
             differing += len(allowed) == 2
-        assert cast_single_or_double_hull(*points, dtype) == (min(allowed), max(allowed))
+        assert cast_single_or_double_hull(*points, dtype) == (
+            min(allowed),
+            max(allowed),
+        )
     if dtype == "fp16":
         assert differing > 10, differing
 
@@ -1175,8 +1192,14 @@ def test_epilogue_hull_at_midpoints_binade_edges_and_subnormals(dtype: str) -> N
 def test_epilogue_hull_encloses_every_member_of_its_intervals(dtype: str) -> None:
     rng = np.random.default_rng(_RNG_SEED)
     for _ in range(200):
-        o = round_f32(Fraction(float(rng.uniform(1.0, 2.0))) * Fraction(2) ** int(rng.integers(-28, 4)))
-        r = round_f32(Fraction(float(rng.uniform(1.0, 2.0))) * Fraction(2) ** int(rng.integers(-9, 0)))
+        o = round_f32(
+            Fraction(float(rng.uniform(1.0, 2.0)))
+            * Fraction(2) ** int(rng.integers(-28, 4))
+        )
+        r = round_f32(
+            Fraction(float(rng.uniform(1.0, 2.0)))
+            * Fraction(2) ** int(rng.integers(-9, 0))
+        )
         accumulator = F32Interval(o, round_f32(o * Fraction(1025, 1024), "rn"))
         reciprocal = F32Interval(r, round_f32(r * Fraction(129, 128), "rn"))
         low, high = cast_single_or_double_hull(accumulator, reciprocal, dtype)
@@ -1434,7 +1457,8 @@ def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
                 double, single = epilogue_alternatives(case, exposure, row, head)
                 realizations = [double, single]
                 realizations += [
-                    _artifact_bits(name, double, single) for name in P4_EPILOGUE_ARTIFACTS
+                    _artifact_bits(name, double, single)
+                    for name in P4_EPILOGUE_ARTIFACTS
                 ]
                 realizations.append(
                     emulate_row(
@@ -1456,7 +1480,9 @@ def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
     captured counterexample the two FP16 roundings differ, so the artifact
     rule is observable there."""
     fp16 = next(
-        c for c in P4_QUICK_CASES if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+        c
+        for c in P4_QUICK_CASES
+        if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
     )
     double, single = epilogue_alternatives(fp16, "folded", 207, 0)
     assert int(double[16]) == _COUNTEREXAMPLE["double"]
@@ -1537,7 +1563,9 @@ def test_fp16_head_scale_does_not_commute_with_the_cast() -> None:
     quick-matrix coordinate, so head predictions must not be shifted copies
     of head 0. One counterexample is kept here."""
     case = next(
-        c for c in P4_QUICK_CASES if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+        c
+        for c in P4_QUICK_CASES
+        if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
     )
     found = []
     for row in range(256):
@@ -1588,7 +1616,9 @@ def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
         _, radius, _ = tier_a_exposure(case, exposure)
         nonstructural = radius > 0
         assert np.all(low[nonstructural] > 0)
-        smallest = min(target_value(int(bits), case.dtype) for bits in low[nonstructural])
+        smallest = min(
+            target_value(int(bits), case.dtype) for bits in low[nonstructural]
+        )
         assert smallest >= Fraction(1, 1 << 20)
         if case.dtype != "fp16":
             continue
@@ -1621,9 +1651,7 @@ def test_mutation_applicability_follows_fixture_and_mask() -> None:
         assert (P4Mutation.INVERSE_SHIFT in mutations) == (
             case.fixture is P4Fixture.CYCLIC
         )
-        assert (P4Mutation.WALSH_SIGN in mutations) == (
-            case.fixture is P4Fixture.WALSH
-        )
+        assert (P4Mutation.WALSH_SIGN in mutations) == (case.fixture is P4Fixture.WALSH)
         assert (P4Mutation.EXCLUDE_LAST_KEY in mutations) == (case.mask == "causal")
         assert (P4Mutation.INCLUDE_OLD_WINDOW_KEY in mutations) == (
             case.mask == "window"
@@ -1684,9 +1712,9 @@ def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
     the contraction skipped). Scale mutations change only the score scale."""
     for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
         q, k, keys = _mutated_query_key(case, mutation)
-        dots = np.einsum(
-            "bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64)
-        )[0]
+        dots = np.einsum("bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64))[
+            0
+        ]
         for head in range(case.base.nhead_q):
             expected = np.array(
                 [
@@ -1748,7 +1776,9 @@ def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
         assert round_f32(product) == product, float(product)
     for product in products:
         for row_max in (MASKED_SCORE, *products):
-            assert round_f32(product - row_max) == round_f32(round_f32(product) - row_max)
+            assert round_f32(product - row_max) == round_f32(
+                round_f32(product) - row_max
+            )
     assert rounded == {
         P4Mutation.OMIT_WALSH_BLOCK_0,
         P4Mutation.OMIT_WALSH_BLOCK_1,
@@ -1969,8 +1999,10 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
         where, low, _, _, _ = _find("basis@0", range(128, 160), widened)
         relaxed_low, relaxed_high = _relaxed("basis@0", where[1], where[2])
         dim = where[3]
-        return "basis@0", where, int(
-            relaxed_low[dim] if relaxed_low[dim] < low else relaxed_high[dim]
+        return (
+            "basis@0",
+            where,
+            int(relaxed_low[dim] if relaxed_low[dim] < low else relaxed_high[dim]),
         )
 
     def outside(step: int):
