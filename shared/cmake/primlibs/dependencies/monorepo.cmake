@@ -25,28 +25,42 @@ include_guard(DIRECTORY)
 include(${CMAKE_CURRENT_LIST_DIR}/rocm-cmake.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/utils.cmake)
 
-# Fetches and configures rocPRIM for a given source directory.
-macro(configure_rocprim _source_dir)
-  # rocPRIM is a header-only library. 'BUILD_SHARED_LIBS' has no effect on it.
-  # We do not need to use fetch content if the target is already available.
-  if(TARGET roc::rocprim OR TARGET rocprim)
-    message(STATUS "The 'rocprim' target already available.")
-  else()
-    FetchContent_Declare(
-      prim
-      SOURCE_DIR    ${_source_dir}
-      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      EXCLUDE_FROM_ALL
-      OVERRIDE_FIND_PACKAGE
-    )
-    FetchContent_MakeAvailable(prim)
-  endif()
-  if(NOT TARGET roc::rocprim)
+# Adds the 'roc::' target names that hipCUB and rocThrust link against. This
+# is called whether rocPRIM was fetched or was already part of the build, so
+# this must be idempotent.
+#
+# This family of macros is called by fetch_monorepo_dep.
+macro(provide_rocprim_targets)
+  if(TARGET rocprim AND NOT TARGET roc::rocprim)
     add_library(roc::rocprim ALIAS rocprim)
   endif()
-  if(NOT TARGET roc::rocprim_hip)
+  if(TARGET rocprim_hip AND NOT TARGET roc::rocprim_hip)
     add_library(roc::rocprim_hip ALIAS rocprim_hip)
   endif()
+endmacro()
+
+# Adds the 'roc::rocrand' target name that rocPRIM tests and rocThrust
+# benchmarks link against, with the same idempotency requirement as
+# provide_rocprim_targets().
+macro(provide_rocrand_targets)
+  if(TARGET rocrand AND NOT TARGET roc::rocrand)
+    add_library(roc::rocrand ALIAS rocrand)
+  endif()
+endmacro()
+
+# Fetches and configures rocPRIM for a given source directory.
+#
+# This family of macros is called by fetch_monorepo_dep.
+macro(configure_rocprim _source_dir)
+  # rocPRIM is a header-only library. 'BUILD_SHARED_LIBS' has no effect on it.
+  FetchContent_Declare(
+    prim
+    SOURCE_DIR    ${_source_dir}
+    INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+    EXCLUDE_FROM_ALL
+    OVERRIDE_FIND_PACKAGE
+  )
+  FetchContent_MakeAvailable(prim)
 endmacro()
 
 # Fetches and configures rocRAND for a given source directory.
@@ -60,15 +74,52 @@ macro(configure_rocrand _source_dir)
     OVERRIDE_FIND_PACKAGE
   )
   FetchContent_MakeAvailable(rocrand)
-  if(NOT TARGET roc::rocrand)
-    add_library(roc::rocrand ALIAS rocrand)
+endmacro()
+
+# Fetches <package> unless this build already provides it.
+#
+# Fetching is skipped if the depedency is already part of the build. This is
+# specifically for hipCCL and TheRock-based builds. The guard is here since
+# the target should be reused regardless of fetch method.
+# * MONOREPO would include the previously added source tree again.
+# * PACKAGE can silently bind the consumer to an installed copy instead of
+#   the intended target provided by TheRock.
+macro(fetch_monorepo_dep)
+  set(args PACKAGE VERSION)
+  cmake_parse_arguments(arg_fetch "" "${args}" "" ${ARGN})
+
+  # Already part of the build under one of the usual target spellings?
+  set(_dep_target_names
+    ${arg_fetch_PACKAGE}
+    roc::${arg_fetch_PACKAGE}
+    ${arg_fetch_PACKAGE}::${arg_fetch_PACKAGE}
+  )
+  set(_dep_target_found FALSE)
+  foreach(_dep_target_name ${_dep_target_names})
+    if(TARGET ${_dep_target_name})
+      set(_dep_target_found TRUE)
+    endif()
+  endforeach()
+
+  # Skip if target already available, otherwise fetch it.
+  if(_dep_target_found)
+    message(STATUS "The '${arg_fetch_PACKAGE}' target already available.")
+  else()
+    fetch_monorepo_dep_impl(${ARGN})
+  endif()
+
+  # Whatever the outcome, the consumers need the same target names.
+  if(COMMAND "provide_${arg_fetch_PACKAGE}_targets")
+    cmake_language(CALL "provide_${arg_fetch_PACKAGE}_targets")
   endif()
 endmacro()
 
+# The actual fetching for fetch_monorepo_dep().
+#
 # TODO: once we hit CMake >= 3.24 change macro to function. This is because
 # CMake < 3.24 lacks CMAKE_FIND_PACKAGE_TARGETS_GLOBAL to promote imported
 # targets of find_package to the global scope.
-macro(fetch_monorepo_dep)
+macro(fetch_monorepo_dep_impl)
   set(args PACKAGE VERSION)
   cmake_parse_arguments(arg_fetch "" "${args}" "" ${ARGN})
 
@@ -111,7 +162,7 @@ macro(fetch_monorepo_dep)
       set(is_currently_in_hipccl TRUE)
     endif()
 
-    # Check if the required sub project is in hipccl
+    # Check if the required sub project is in hipccl.
     set(is_hipccl_subproject FALSE)
     if(
       ${arg_fetch_PACKAGE} STREQUAL "rocprim" OR
