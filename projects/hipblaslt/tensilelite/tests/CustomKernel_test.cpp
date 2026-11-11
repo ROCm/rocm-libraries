@@ -87,6 +87,30 @@ TEST(CustomKernelTest, UniformSummationOrderDeserializes)
     }
 }
 
+// hipBLASLt's rocRoller-off selector matches a rocRoller kernel on its declared
+// unroll. A kernel that declares none reads back as 0, which it never picks.
+TEST(CustomKernelTest, UnrollDeserializes)
+{
+    for(const int declared : {0, 2, 4})
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> fields{
+            {"name", msgpack::object(std::string("probe"), zone)}};
+        if(declared != 0)
+            fields["unroll"] = msgpack::object(declared, zone);
+
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, fields);
+        auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        CustomKernel                    kernel;
+        Serialization::MessagePackInput reader(unpacked.get());
+        reader.input(kernel);
+        ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+        EXPECT_EQ(kernel.unroll, declared);
+    }
+}
+
 namespace
 {
     // Reads one {type: uint32, semantic: <name>} argument the way a logic file carries it.

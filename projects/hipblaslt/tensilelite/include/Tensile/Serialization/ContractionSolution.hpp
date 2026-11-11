@@ -99,6 +99,7 @@ namespace TensileLite
                 iot::mapOptional(io, "generated", s.generated);
                 iot::mapOptional(io, "occupancy", s.occupancy);
                 iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
+                iot::mapOptional(io, "unroll", s.unroll);
             }
 
             const static bool flow = false;

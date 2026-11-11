@@ -139,6 +139,112 @@ def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
         assert "CustomKernel.uniformSummationOrder" in msg
 
 
+def _rocroller_mx_kernel(unroll_line="unroll: 2", workspace_lines=""):
+    return f"""\
+          Source:
+            Origin: rocroller
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType:
+            MXBlockA: 32
+            MXBlockB: 32
+          MatrixInstruction: [16, 16, 128, 1]
+          CustomKernel:
+            args: []
+            macrotile: [16, 16, 128]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, Batch]
+            {unroll_line}
+            {workspace_lines}
+        """
+
+
+@pytest.mark.parametrize("unroll_line,ok", [
+    ("unroll: 2", True),
+    ("unroll: 4", True),
+    ("", False),
+    ("unroll: 0", False),
+    ("unroll: true", False),
+    ("unroll: two", False),
+])
+def test_validate_rocroller_mx_kernel_declares_its_unroll(tmp_path, unroll_line, ok):
+    """hipBLASLt's rocRoller-off selector matches a rocRoller MX kernel to
+    rocRoller's pick on CustomKernel.unroll and never picks one without it."""
+    write_kernel(tmp_path / "rr.s", _rocroller_mx_kernel(unroll_line))
+
+    valid, msg = validateCustomKernelMetadata("rr", str(tmp_path))
+
+    assert valid is ok, msg
+    if not ok:
+        assert "CustomKernel.unroll" in msg
+
+
+@pytest.mark.parametrize("occupancy_line,ok", [("occupancy: 2", True), ("", False), ("occupancy: 0", False)])
+def test_validate_rocroller_streamk_kernel_declares_its_occupancy(tmp_path, occupancy_line, ok):
+    """A rocRoller Stream-K launch reproduces rocRoller's grid only from the
+    kernel's declared occupancy."""
+    write_kernel(tmp_path / "rr.s", _rocroller_mx_kernel(
+        workspace_lines=f"workspaceType: RocRollerStreamK\n            {occupancy_line}"))
+
+    valid, msg = validateCustomKernelMetadata("rr", str(tmp_path))
+
+    assert valid is ok, msg
+    if not ok:
+        assert "CustomKernel.occupancy" in msg
+
+
+def test_validate_only_rocroller_mx_kernels_need_an_unroll(tmp_path):
+    """Other external kernels, and a rocRoller kernel without MX scales, are
+    not served by the rocRoller-off selector."""
+    write_kernel(tmp_path / "other.s", _rocroller_mx_kernel("").replace("Origin: rocroller", "Origin: test"))
+    write_kernel(tmp_path / "plain.s", _rocroller_mx_kernel("").replace(
+        "MXBlockA: 32\n            MXBlockB: 32", "MXBlockA: 0"))
+
+    for name in ("other", "plain"):
+        valid, msg = validateCustomKernelMetadata(name, str(tmp_path))
+        assert valid, msg
+
+
+def _kernel_declaring_unroll(origin_line):
+    return f"""\
+          {origin_line}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          MXScaleFormat: NoSwizzle
+          ProblemType: {{MXBlockA: 32, MXBlockB: 32}}
+          MatrixInstruction: [16, 16, 128, 1]
+          CustomKernel:
+            args: []
+            macrotile: [16, 16, 128]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, Batch]
+            unroll: 2
+        """
+
+
+@pytest.mark.parametrize("origin_line", ["Source: {Origin: aiter}", "Source: {Origin: RocRoller}", ""])
+def test_only_a_rocroller_kernel_may_declare_an_unroll(tmp_path, origin_line):
+    """hipBLASLt's rocRoller-off selector serves any custom kernel that declares
+    an unroll as a rocRoller kernel, so no other origin may declare one."""
+    write_kernel(tmp_path / "k.s", _kernel_declaring_unroll(origin_line))
+
+    with pytest.raises(RuntimeError, match="CustomKernel.unroll"):
+        getCustomKernelConfig("k", {}, str(tmp_path))
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+    assert not valid
+    assert "CustomKernel.unroll (rocRoller kernels only" in msg
+
+
+def test_a_rocroller_kernel_keeps_its_unroll(tmp_path):
+    write_kernel(tmp_path / "k.s", _kernel_declaring_unroll("Source: {Origin: rocroller}"))
+
+    assert getCustomKernelConfig("k", {}, str(tmp_path))["CustomKernel"]["unroll"] == 2
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+    assert "CustomKernel.unroll (rocRoller" not in msg
+
+
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
     """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""

@@ -310,6 +310,10 @@ namespace TensileLite
         // same order, so identical rows of A give bitwise-identical rows of D.
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
+        // Declared by a rocRoller kernel: the K-loop unroll it was generated
+        // with (rocRoller's prefetchInFlight). 0 means not declared, and
+        // hipBLASLt's rocRoller-off selector never picks such a kernel.
+        int unroll = 0;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is

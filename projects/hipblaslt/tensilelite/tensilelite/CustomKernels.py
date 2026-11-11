@@ -802,6 +802,11 @@ def getCustomKernelConfig(
             "the scale layout it reads: NoSwizzle, HostPreSwizzle, InMemorySwizzle or "
             "HostPreSwizzle128x4")
 
+    if _declaresUnrollOutsideRocRoller(kernelConfig):
+        raise RuntimeError(
+            f"Custom kernel {kernelName} declares CustomKernel.unroll, which only a rocRoller "
+            "kernel (Source.Origin: rocroller) may declare")
+
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
     # consuming solution was regenerated with DataParallel argument layout v1.
@@ -892,6 +897,40 @@ def _missingMetadataMessage(kind, name, filepath, missing):
         f"{hint}"
     )
 
+def _isPositiveInt(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+def _declaresUnrollOutsideRocRoller(config):
+    """CustomKernel.unroll is how hipBLASLt's rocRoller-off selector tells a
+    rocRoller kernel it may serve from any other custom kernel, so no other
+    origin may declare it."""
+    custom_kernel = config.get("CustomKernel")
+    if not isinstance(custom_kernel, dict) or "unroll" not in custom_kernel:
+        return False
+    source = config.get("Source")
+    return not isinstance(source, dict) or source.get("Origin") != "rocroller"
+
+def _rocRollerFieldsMissing(config, custom_kernel):
+    """The fields hipBLASLt's rocRoller-off selector reads off a rocRoller MX
+    kernel. It matches a kernel to rocRoller's pick on CustomKernel.unroll, and
+    a Stream-K kernel's grid needs CustomKernel.occupancy."""
+    source = config.get("Source")
+    problem_type = config.get("ProblemType")
+    if not isinstance(source, dict) or source.get("Origin") != "rocroller":
+        return []
+    if not isinstance(problem_type, dict) or not (
+        problem_type.get("MXBlockA") or problem_type.get("MXBlockB")
+    ):
+        return []
+    missing = []
+    if not _isPositiveInt(custom_kernel.get("unroll")):
+        missing.append("CustomKernel.unroll (a positive integer)")
+    if custom_kernel.get("workspaceType") == "RocRollerStreamK" and not _isPositiveInt(
+        custom_kernel.get("occupancy")
+    ):
+        missing.append("CustomKernel.occupancy (a positive integer)")
+    return missing
+
 def validateCustomKernelMetadata(name, directory=None):
     """Validates that a kernel has an embedded custom.config with required fields.
 
@@ -904,7 +943,9 @@ def validateCustomKernelMetadata(name, directory=None):
     External kernels (Source.Origin present) carry their full TensileLite-side
     interface and provenance in custom.config: Source, Features, Version,
     InternalSupportParams.KernArgsVersion, ProblemType, MatrixInstruction, and
-    a CustomKernel block with args/macrotile/threads/grid.
+    a CustomKernel block with args/macrotile/threads/grid. A rocRoller MX
+    kernel also declares CustomKernel.unroll, and a rocRoller Stream-K kernel
+    CustomKernel.occupancy. No other kernel may declare CustomKernel.unroll.
 
     Whether failures are reported as errors or warnings is the caller's
     decision (see ValidateMetadata.validate_all and
@@ -955,6 +996,9 @@ def validateCustomKernelMetadata(name, directory=None):
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
             if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
                 missing.append("CustomKernel.uniformSummationOrder (true or false)")
+            missing.extend(_rocRollerFieldsMissing(config, custom_kernel))
+            if _declaresUnrollOutsideRocRoller(config):
+                missing.append("CustomKernel.unroll (rocRoller kernels only; remove it)")
 
     if missing:
         kind = "External" if is_external else "TensileLite"
