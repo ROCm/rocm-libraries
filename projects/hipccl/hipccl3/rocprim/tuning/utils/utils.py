@@ -91,6 +91,13 @@ class Parser:
             default=-1,
             help=f"The initial seed to generate the input data with",
         )
+        parser.add_argument(
+            "--param-overrides",
+            type=str,
+            default=None,
+            help='JSON object replacing tune parameter values, e.g. \'{"radix_bits": 8, "ipt": [4, 8]}\'. '
+            'Use "best" to pin a parameter to the best cached result for each type (default: none)',
+        )
         return parser
 
 

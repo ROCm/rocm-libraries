@@ -97,6 +97,8 @@ def run_tuning(
     simulation_mode: bool | None = False,
     arch_name: str | None = None,
     seed: int | None = None,
+    save_metadata: bool | None = None,
+    param_overrides: str | None = None,
 ) -> None:
     """Run tuning for specified algorithms."""
     current_dir = Path(__file__).parent
@@ -132,6 +134,8 @@ def run_tuning(
                         simulation_mode=simulation_mode,
                         arch_name=arch_name,
                         seed=seed,
+                        save_metadata=save_metadata,
+                        param_overrides=param_overrides,
                     )
                     tuner = tuning_module.Tuner(args)
                     tuner.tune_all()
@@ -204,6 +208,8 @@ def main():
         args.simulation_mode,
         args.arch_name,
         args.seed,
+        args.save_metadata,
+        args.param_overrides,
     )
 
 
