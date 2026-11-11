@@ -54,9 +54,9 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
     h.update(f"{v.major}.{v.minor}.{v.patch}".encode())
     rv = compiler.rocm_version
     h.update(f"{rv.major}.{rv.minor}.{rv.patch}".encode())
-    # Compiler flags such as -std and -fsanitize change the code objects. The
-    # launcher and compiler path do not start with '-' and stay out of the key.
-    h.update("\0".join(str(a) for a in compiler.default_args if str(a).startswith("-")).encode())
+    # Include option values, but exclude the launcher and compiler executable.
+    compilerArgs = compiler.default_args[compiler.default_args.index(compiler.path) + 1:]
+    h.update("\0".join(str(a) for a in compilerArgs).encode())
     return h.hexdigest()
 
 
