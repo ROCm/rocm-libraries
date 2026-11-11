@@ -69,8 +69,9 @@ for g in [(1, 3, 3, 1, 1, 1), (3, 3, 3, 1, 1, 1), (3, 3, 3, 2, 2, 2)]:
 # Tiles: (fm, fn, wm, wq, wn).
 TILES = [(4, 2, 2, 2, 2), (4, 2, 4, 2, 1), (2, 4, 4, 1, 1), (2, 2, 4, 1, 1)]
 # Per-arch extras by filter height: gfx90a's 16x16x16 MFMA prefers the 4 x 4 fragment tile (fm 4,
-# fn 4, 2 x 2 waves) on 7x7 stems: s2 c3 5-11% (deeplab n16 1024²: 4.53 -> 4.02 ms).
-ARCH_TILES = {"gfx90a": {7: [(4, 4, 2, 2, 1)]}}
+# fn 4, 2 x 2 waves) on 7x7 stems: s2 c3 5-11% (deeplab n16 1024²: 4.53 -> 4.02 ms); and the
+# 8-wave 2 x 2 fragment tile on the widest ones (deeplab 4.08 -> 3.81 ms).
+ARCH_TILES = {"gfx90a": {7: [(4, 4, 2, 2, 1), (2, 2, 4, 2, 1)]}}
 
 
 def pow2(v):
