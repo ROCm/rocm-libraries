@@ -146,7 +146,7 @@ namespace
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
-            const int64_t extra_before = hipblaslt_bench_options::extra_check_failures();
+            const int64_t extra_before        = hipblaslt_bench_options::extra_check_failures();
             check(nullptr,
                   arg,
                   gemm_count,
@@ -344,7 +344,7 @@ namespace
             BenchVerifyD d(1, 1, 8, HIPBLASLT_BATCH_MODE_STRIDED);
             d.at(d.gold, 7, 0)   = 1.0f;
             d.at(d.result, 7, 0) = 1.00004f;
-            CaptureErrorStream            capture;
+            CaptureErrorStream             capture;
             ::testing::TestPartResultArray failures;
             {
                 ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -355,8 +355,8 @@ namespace
             ASSERT_EQ(failures.size(), 1);
             EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
             // The failure is printed before the assertion stops the run.
-            const std::string line = std::string("norm check failed for ")
-                                     + (auxiliary ? "E" : "D") + " of gemm 0: batch 7 has";
+            const std::string line = std::string("norm check failed for ") + (auxiliary ? "E" : "D")
+                                     + " of gemm 0: batch 7 has";
             EXPECT_NE(hipblaslt_cerr.str().find(line), std::string::npos) << hipblaslt_cerr.str();
             EXPECT_GT(d.norm_error, 1e-5);
             EXPECT_LT(d.norm_error / d.batches, 1e-5);
