@@ -534,7 +534,7 @@ device configurations are not ASAN-covered.
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
-| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `merge_coverage_info.py` unions per-arch lcov reports onto repo-relative paths; the second arch is selected in the Jenkins job config |
+| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | host-only profiles; kernel bodies are not instrumented. `merge_coverage_info.py` can union per-arch lcov reports, and the uploaded report stays one wavefront until the Jenkins job config adds a second arch |
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
