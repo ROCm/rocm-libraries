@@ -368,10 +368,10 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
 }
 
 //
-// CSC is the transpose of the CSR this builds, and GEBSC is the transpose of
-// the GEBSR this builds. The stored triangle is therefore the opposite of the
-// requested fill mode. General generators ignore uplo, so this flip leaves a
-// general matrix unchanged.
+// CSC is the transpose of the CSR this builds, so the stored triangle is the
+// opposite of the requested fill mode. GEBSC has the same relation at block
+// level only: the blocks themselves are not transposed. General generators
+// ignore uplo, so this flip leaves a general matrix unchanged.
 //
 static rocsparse_fill_mode transposed_fill_mode(rocsparse_fill_mode uplo)
 {
