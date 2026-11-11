@@ -4,7 +4,7 @@
 
 ## Survey (read-only except for remote-tracking fetches; writes `survey.md` and `pr.md`)
 
-`survey.md` sections: `Scope`, `Target candidates`, `Merges` (table), `Unlanded refs and aliases of S`, `PRs` (also in `pr.md`), `Tools`, `Sync` (table, see Setup sync), `Questions for the user`, then `Guesses`, `Blocked`. "Hand-written size" is the `B..S` shortstat without the paths that are obviously generated (the Inventory decides the exact sets later).
+`survey.md` sections: `Scope`, `Target candidates`, `Merges` (table), `Unlanded refs and aliases of S`, `PRs` (also in `pr.md`), `Tools`, `Checkout` (see Clean checkout), `Sync` (table, see Setup sync), `Questions for the user`, then `Guesses`, `Blocked`. "Hand-written size" is the `B..S` shortstat without the paths that are obviously generated (the Inventory decides the exact sets later).
 
 ### 0a. Scope discovery
 
@@ -56,6 +56,14 @@ Style: target-sync merges present = **merge style**; linear history over a recen
   - **auto-merge**: `autoMergeRequest` (with `enabledBy`) from `gh pr view --json`;
   - **merge queue** state: not available from `gh pr view --json`; use GraphQL `pullRequest(number: N) { isInMergeQueue mergeQueueEntry { state } }` via `gh api graphql`.
   A PR that is **queued for merge** and is kept defaults to *kept*: let it land, then base the plan on it; dequeuing is an explicit opt-in the orchestrator asks about, stating the trade-off. A queued PR **inside the scope** (including S itself) is a stop: ask whether to dequeue it or abort. Under `--implement` any queued PR is a stop.
+
+### Clean checkout (the Survey lists; the orchestrator asks and acts)
+
+The skill works on committed history, and later steps move and switch branches in `$CO`, so `$CO` must be clean before the Setup sync. The Survey lists `git -C "$CO" status --porcelain` (tracked changes and untracked files) under `## Checkout` in `survey.md`. If anything is listed, the orchestrator shows the list and asks:
+- **include**: commit everything onto the branch checked out in `$CO` (`git -C "$CO" add -A`, then `git -C "$CO" commit --no-verify -m "chore: uncommitted changes included by split-to-stack"`; the hooks run later in `$WT`). Offered only when that branch is in the stack; the commit becomes part of the split, and the Setup sync then sees the branch as local ahead.
+- **stash**: `git -C "$CO" stash push --include-untracked -m "split-to-stack <key>"`. Record the stash SHA and the branch in `run.md`; the final report tells the user to switch back to that branch and run `git stash apply <sha>`.
+- **abort**.
+Uncommitted changes are never left in place.
 
 ### Setup sync (the Survey classifies; the orchestrator asks and acts)
 

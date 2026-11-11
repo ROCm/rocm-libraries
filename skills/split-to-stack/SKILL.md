@@ -11,7 +11,7 @@ description: Decompose an oversized branch, a "from this branch up" range, or a 
 
 Decompose a branch, a range of stacked branches, or a whole stack into one linear stack of smaller branches, each with a single purpose. Dependencies decide which orders are valid; among valid orders, independent low-risk changes (fixes, cleanup) go at the bottom so they land first and features go last. The top of the stack has the same tree as the source after the pre-commit hooks have been applied to it, which proves nothing was lost.
 
-The product is a **restructure plan and a stack of branches**, delivered quickly. It is not a code review. The default run stops after the plan for approval. The only repository-configured code a plan-only run executes is the pre-commit hooks (Phase 0e).
+The product is a **restructure plan and a stack of branches**, delivered quickly. It is not a code review. It works on committed history only: at start, uncommitted changes in the checkout are either committed (and become part of the split) or stashed, as the user chooses. The default run stops after the plan for approval. The only repository-configured code a plan-only run executes is the pre-commit hooks (Phase 0e).
 
     S  (source branch(es), never modified)
     │  Phase 0: scope, target, survey; copy S, run hooks, bring the copy up to date,
@@ -89,7 +89,7 @@ Wherever a phase text says "ask the user" or "stop and ask", a subagent writes i
 1. Resolve the argument to its head branch and compute `<key>`; check whether `$RUN` already exists: if so, handle **Resume** (below) before creating anything.
 2. Resolve `$BASE_REMOTE` and `$PUSH_REMOTE` (`common.md`, Remotes), then `<you>` (`common.md`, Naming), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO` = `git rev-parse --show-toplevel` of the invoking directory). Settle the stack kind if the user said "stack".
 3. With `--implement`: ask the Tests question now.
-4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date. Then run the Setup sync (`survey-and-update.md`): every branch of the stack equals its remote copy before anything else happens.
+4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date. Then make `$CO` clean and run the Setup sync (`survey-and-update.md`, Clean checkout and Setup sync): every branch of the stack equals its remote copy before anything else happens.
 5. Now that S is confirmed, check `$SPLIT` and `$SPLIT/*`: if helper refs exist without a `run.md`, show them with their SHAs and let the user choose another name or delete them (the Restart procedure).
 6. Create an **empty** `$WT` directory (`mktemp -d`), record it in `run.md`, and start the Updater, which runs `git worktree add --detach` in it.
 
@@ -102,7 +102,7 @@ Wherever a phase text says "ask the user" or "stop and ask", a subagent writes i
 5. Phase 8.1: the orchestrator runs `verify_stack.py` itself (independent of the Builder).
 6. If tests were chosen: the base must pass before anything is built (`build-and-test.md`).
 
-**`--implement` stops** (it never skips these): the current user cannot be determined; the Setup sync has any action or conflict; dependents are ready to be moved; a conflict is ambiguous (in the update, the Phase 1 replay or a dependent restack); Phase 1 finds an octopus merge or cannot reach `tree(L) == tree(S')` in 3 passes; the plan contains a hand-written `stored:` state (note `synthesized`) or any transition code, or a Phase 8 failure leads to a transition proposal (all are hand-written code nobody has reviewed; a `subtractive:` state that passes `check_plan.py` is not a stop, because it is proven to add no text); the base tests fail and the user has not opted out; a PR in scope or kept is queued for merge; the ledger is empty (everything already landed).
+**`--implement` stops** (it never skips these): the current user cannot be determined; the checkout has uncommitted changes; the Setup sync has any action or conflict; dependents are ready to be moved; a conflict is ambiguous (in the update, the Phase 1 replay or a dependent restack); Phase 1 finds an octopus merge or cannot reach `tree(L) == tree(S')` in 3 passes; the plan contains a hand-written `stored:` state (note `synthesized`) or any transition code, or a Phase 8 failure leads to a transition proposal (all are hand-written code nobody has reviewed; a `subtractive:` state that passes `check_plan.py` is not a stop, because it is proven to add no text); the base tests fail and the user has not opted out; a PR in scope or kept is queued for merge; the ledger is empty (everything already landed).
 
 **Validation between phases:** every SHA in an output file exists, and the `$SPLIT/*` refs and `$BR(NN)` branches match `update.md`, `linear.md`, `stack.tsv` and `refs.tsv`.
 

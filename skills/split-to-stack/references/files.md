@@ -6,7 +6,7 @@
 
 | File | Written by | Content |
 |---|---|---|
-| `run.md` | orchestrator (it copies what other agents report: generated sets from `inventory.md`, `$L` from `linear.md`, B and S' from `update.md`) | scope and flags, stack kind, current user, the SHAs of S, T, P, B, S' and L, the `$WT` path, decisions (target, kept and re-cut PRs and their owners, Setup sync actions and resulting SHAs, the dependents' original SHAs, update answer, test answer and any opt-out), generated sets, `approval:` (`user` or `auto (--implement)`) and the approved plan verbatim, last completed phase |
+| `run.md` | orchestrator (it copies what other agents report: generated sets from `inventory.md`, `$L` from `linear.md`, B and S' from `update.md`) | scope and flags, stack kind, current user, the SHAs of S, T, P, B, S' and L, the `$WT` path, decisions (target, kept and re-cut PRs and their owners, uncommitted changes included or stashed (stash SHA and branch), Setup sync actions and resulting SHAs, the dependents' original SHAs, update answer, test answer and any opt-out), generated sets, `approval:` (`user` or `auto (--implement)`) and the approved plan verbatim, last completed phase |
 | `survey.md`, `pr.md` | Survey | scope discovery, target status, merges, tools, PR state (size, review state, CI, open threads, auto-merge, merge queue) |
 | `update.md` | Updater | S' SHA, B, hook commits (SHAs) and findings, a merge-residue and duplicate-patch scan, conflicts and their resolution |
 | `linear.md` | Linearizer | L SHA, replay list, dropped commits, rewrite pairs, folded residue, tree-equality proof |

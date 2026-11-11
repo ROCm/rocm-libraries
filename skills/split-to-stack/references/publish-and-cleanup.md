@@ -4,7 +4,7 @@ By default the skill creates local refs and registers a local `gh stack` only. N
 
 ## 9.1 Report
 
-List every ref created with its SHA: each `$BR(NN)` (the deliverable), `$SPLIT/00-updated` and `$SPLIT/00-linear` if they exist. Say which branches were fully tested, which were *not run*, any opt-outs, source problems found, the hook delta and unfixed hook findings, every deviation from the approved plan, and (single-branch scope) each restacked dependent with its original and new SHA. `$L` is the zero-diff linear version of S', useful for review and for any re-split.
+If changes were stashed at start, first remind the user: switch back to the recorded branch, then `git stash apply <sha>`. List every ref created with its SHA: each `$BR(NN)` (the deliverable), `$SPLIT/00-updated` and `$SPLIT/00-linear` if they exist. Say which branches were fully tested, which were *not run*, any opt-outs, source problems found, the hook delta and unfixed hook findings, every deviation from the approved plan, and (single-branch scope) each restacked dependent with its original and new SHA. `$L` is the zero-diff linear version of S', useful for review and for any re-split.
 
 ## 9.2 Local gh stack (if `gh stack` is available)
 
