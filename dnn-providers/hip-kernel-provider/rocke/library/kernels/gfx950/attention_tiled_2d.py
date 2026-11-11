@@ -1002,12 +1002,12 @@ class UnifiedAttention2DTiledSpec:
         if self.kq_lds_pad_halves == 0:
             return "the KQ LDS pad width is 0"
         slab_rows = self._kq_pad_whole_slab_rows
-        if (
-            not slab_rows
-            or self.tile_size_eff % slab_rows
-            or self.kq_lds_pad_halves % 8
-        ):
-            return "the KQ LDS pad needs an aligned slab layout"
+        if not slab_rows:
+            return "the KQ LDS pad needs a K row that divides the async-DMA slab"
+        if self.tile_size_eff % slab_rows:
+            return "the KQ LDS pad needs whole async-DMA slabs to tile the KV tile"
+        if self.kq_lds_pad_halves % 8:
+            return "the KQ LDS pad width needs to be a multiple of 8 halves (16 bytes)"
         if not self.use_k_single_buffer:
             return "the KQ LDS pad is only laid out for a single-K schedule"
         return None
