@@ -42,6 +42,12 @@
 #   but it keeps them selected by test/therock/test_hipblaslt.py, which execs the
 #   binary directly with `--gtest_filter=*smoke*` on its quick tier.
 #
+#   "*FixedPointEmulation*" selects the FP64/FP32 emulation suite
+#   (clients/tests/src/fp_emulation_gtest.cpp), plain gtest suites named
+#   FixedPointEmulation*.  It takes about a minute and skips itself on devices
+#   without emulation support. It runs in the comprehensive and full tiers
+#   (nightly and weekly), not in the PR tiers.
+#
 #   "*TuningStore.*" works the same way: the tuning-store cases are a plain
 #   gtest suite, host-only and well under a second, so every tier runs all of
 #   them. They are compiled into hipblaslt-test, rather than run through the
@@ -94,6 +100,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HostUnit*"
+      - "*FixedPointEmulation*"
       - "*TuningStore.*"
     exclude:
       - "*known_bug*"
@@ -111,6 +118,7 @@ test_categories:
       - "*nightly*"
       - "*HMM*"
       - "*HostUnit*"
+      - "*FixedPointEmulation*"
       - "*TuningStore.*"
     exclude:
       - "*known_bug*"

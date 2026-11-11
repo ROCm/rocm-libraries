@@ -2,7 +2,7 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
-## hipBLASLt 1.5.0 for ROCm 10.3.0
+## hipBLASLt 1.5.1
 
 ### Added
 
@@ -12,6 +12,11 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `hipblaslt-bench --device_scalar_alpha`. Alpha points to one FP32 value in
   device memory and beta remains on the host. The descriptor mode requires
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
+* FP64 and FP32 GEMM emulation with INT8 fixed-point arithmetic (Ozaki Scheme II) on supported devices. Request it with the `HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT` or `HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT` compute type, or set `HIPBLAS_EMULATE_DOUBLE_PRECISION=1` or `HIPBLAS_EMULATE_SINGLE_PRECISION=1` for the plain `HIPBLAS_COMPUTE_64F`/`HIPBLAS_COMPUTE_32F` compute types. New API: the `hipblasLtEmulationDesc_t` descriptor with `hipblasLtEmulationDescCreate`, `hipblasLtEmulationDescDestroy`, `hipblasLtEmulationDescSetAttribute` and `hipblasLtEmulationDescGetAttribute`; the `HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR` matmul attribute; and `hipblasLtEmulationWorkspaceSize`, which returns the workspace that emulation needs. The emulated compute types and `hipblasEmulationStrategy_t` require hipblas-common 1.5.0 or later; `HIPBLASLT_HAS_HIPBLAS_EMULATION_TYPES` is 1 when they are available. Against an older hipblas-common, emulation is still available through the environment variables, and the strategy attribute takes a plain `int32_t`.
+
+### Changed
+
+* `HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` and the `hipblasLtMatmul` workspace size are no longer clamped to `UINT32_MAX` (4 GiB - 1), because FP64/FP32 emulation can need a larger workspace. The preference now reads back the value that was set, and `hipblasLtMatmulAlgoGetHeuristic` can report a `workspaceSize` above 4 GiB for an emulated matmul. Native kernels, which address the workspace with 32-bit offsets, still use at most `UINT32_MAX` bytes of it. Grouped GEMM and the extension API (`setMaxWorkspaceBytes`) still clamp to `UINT32_MAX`. This partly reverts the clamping introduced in 1.5.0.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 

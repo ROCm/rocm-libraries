@@ -243,6 +243,24 @@ even if its value is invalid; it does not fall back to the legacy value.
         | 1: Force dynamic work-queue assignment
         | Malformed or out-of-range values are ignored.
 
+.. _env-fp-emulation:
+
+FP32/FP64 fixed-point emulation
+
+
+These variables control whether hipBLASLt emulates FP64 and FP32 matmuls on
+INT8 matrix cores, and with what precision. hipBLASLt reads them once, at first
+use, and applies them to all GEMMs in the process. Changing a variable after
+that has no effect. For a single matmul, an attribute set on an attached
+emulation descriptor overrides the strategy, precision target, or Inf and NaN
+detection setting. An attribute left at its default uses the variable.
+
+These variables don't allocate the workspace buffer that emulation requires.
+You allocate it and pass it to ``hipblasLtMatmul``. For more information, see
+:doc:`FP32/FP64 fixed-point emulation <../how-to/fp-emulation>`.
+
+.. include:: ../shared/fp-emulation-env-vars.inc
+=======
 Adaptive compute-unit target
 ============================
 
