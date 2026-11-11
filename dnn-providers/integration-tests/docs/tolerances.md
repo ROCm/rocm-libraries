@@ -421,32 +421,71 @@ are half (`F25first`, `F25full`, `F25scalar`), which also fail the fixed
 
 ### Float outputs
 
-A float output is not graded with the dynamic tolerance (ALMIOPEN-3249): it
-keeps the per-op default. The model's form would apply, with the rounding of
-the output and the order of the float summation, `sqrt(K) * u32 * sigma`, as
-its terms, but how large the summation-order difference is depends on the
-solver MIOpen picks, and the tolerance is computed before the engine runs.
+A float output is graded with the same model (ALMIOPEN-3249), under the same
+conditions as half and bfloat16. The output has no `lambda` term, and the order
+of the float summation sets both bands: summation error grows as
+`c * sqrt(K) * u32` times the size of the partial sums, which are about
+`sigma` for an output near zero and about `|ref|` or more for a large one, so
 
-The calibration data (the float `ConvolutionFwd` and `ConvolutionFwdPointwise`
-cases of develop's and the test-plan bundles, gfx942 with 3 input seed sets
-and gfx90a with 2, outputs that fail even the fixed 0.1 left out) has the
-solver in MIOpen's log. The largest error left after a relative term of
-`2 * eps + 2 * sqrt(K) * u32` (`eps` = 2^-23), in units of
-`sqrt(K) * u32 * sigma`, for the zero-mean fills, over the outputs whose test
-ran one solver family:
+```text
+|impl_i - ref_i| <= (2 * eps + c * sqrt(K) * u32) * |ref_i|     rtol
+                  + c * sqrt(K) * u32 * sigma                   atol
+                  + the rounding points + minNormal
+```
 
-| Solver family | Outputs | Median | 99th percentile | Largest |
-|---|---|---|---|---|
-| Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 569 | 1.04 | 4.60 | 6.03 |
-| CK fused (`ConvCKIgemmGrpFwd*Fused`) | 1,437 | 0.66 | 1.80 | 2.54 |
-| Implicit GEMM, xdlops | 1,718 | 1.30 | 2.04 | 2.32 |
-| rocBLAS GEMM | 217 | 0.92 | 1.92 | 2.13 |
-| Naive direct | 868 | 0 | 1.14 | 1.41 |
+with `eps` = 2^-23. The half and bfloat16 bands are unchanged: their `c` is 1,
+and the relative summation term, under 1 % of their `rtol`, is left out.
 
-With the summation-order term alone (coefficient 1) the model fails 11 to 592
-correct outputs per data set. A coefficient that covers Winograd is 6 to 8,
-which is 2.5 to 4 times what any other family needs, so a tolerance that does
-not know the solver is either wrong for Winograd or loose for the rest.
+`c` is not a constant of the model: how large the summation-order error is
+depends on the solver MIOpen picks, and the tolerance is computed before the
+engine runs. In the calibration data (the float `ConvolutionFwd` and
+`ConvolutionFwdPointwise` cases of develop's and the test-plan bundles, on gfx942
+and gfx90a, 3 to 5 input seed sets each; outputs that fail even the fixed 0.1,
+the denormal cases and the non-zero-mean 3D cases left out) the solver is in MIOpen's
+log. Per output, the `c` it needs is the largest error left after
+`2 * eps * |ref|`, over `sqrt(K) * u32 * (sigma + |ref|)`. The largest, per
+solver family, over the outputs whose test ran that one family:
+
+| Solver family | Outputs | Largest `c` needed |
+|---|---|---|
+| Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 1,091 | gfx942 5.68, gfx90a 4.95 |
+| CK fused (`ConvCKIgemmGrpFwd*Fused`) | 2,874 | gfx942 2.46 |
+| rocBLAS GEMM | 386 | gfx942 2.35, gfx90a 2.11 |
+| Implicit GEMM, xdlops | 3,450 | gfx942 2.31, gfx90a 2.31 |
+| Naive direct | 1,828 | gfx942 1.77, gfx90a 1.36 |
+
+### The base coefficient and the engine's
+
+The base coefficient, which the SDK uses for an engine that sets nothing, is 4:
+the smallest whole number that leaves a headroom of at least 1.5 (the floor used
+for MIOpen's value below) over the largest need of any solver family but
+Winograd, 2.46 on CK fused solvers on gfx942. At 4 that headroom is 1.63. 3
+would be enough to pass the data (1.22) but is too thin for hardware nobody has
+measured. For Winograd the same constant fails 11 to 592 correct outputs per
+data set; no theory term tells the two apart, and the harness does not know the
+solver.
+
+An engine whose solvers err more sets its own in its TOML, next to
+`[[tolerance_overrides]]`:
+
+```toml
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+```
+
+`summation_order` is `c`. It must be a finite positive number: a file with
+another value, with another output type (the table is per output type, so that
+the half `lambda` can take the same shape later) or with another key does not
+load. It replaces the base coefficient for that engine's float outputs and
+changes nothing for half and bfloat16. A `[[tolerance_overrides]]` entry that
+matches a test still replaces the dynamic tolerance whole, as for half and
+bfloat16.
+
+MIOpen's file sets 9. Its worst solver family, Winograd, needs 5.68 on gfx942
+and 4.95 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.82: at least 1.5,
+a little above the 1.44 of half and bfloat16. The same 9 makes the other
+families' bands wider than they need: their headroom is 3.7 or more.
+
 
 ### When an engine needs more
 

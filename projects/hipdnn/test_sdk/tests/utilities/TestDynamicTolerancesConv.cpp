@@ -1642,9 +1642,9 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidSummationOrderCoefficientIsRe
 //
 // For a float output the one rounding is of the float result itself: rtol is 2 eps of float plus
 // the summation-order term, which atol carries on sigma: c * sqrt(K) * u32 on |ref| and on
-// sigma, with c = DEFAULT_FLOAT_SUMMATION_ORDER (3) unless the engine sets it.
+// sigma, with c = DEFAULT_FLOAT_SUMMATION_ORDER (4) unless the engine sets it.
 
-// K = 144, sigma = 4, c = 3: written out here, not taken from the library.
+// K = 144, sigma = 4, c = 4: written out here, not taken from the library.
 TEST(TestConvFpropOutputToleranceFloat, ConstantsAtAFixedScale)
 {
     ConvFpropErrorScale s;
@@ -1652,12 +1652,12 @@ TEST(TestConvFpropOutputToleranceFloat, ConstantsAtAFixedScale)
     s.inputMeanSquare = 1.0 / 3.0;
     s.weightMeanSquare = 1.0 / 3.0;
     const auto tol = calculateConvFpropOutputTolerance<float>(s);
-    const double sumTerm = 3.0 * 12.0 * std::ldexp(1.0, -24);
+    const double sumTerm = 4.0 * 12.0 * std::ldexp(1.0, -24);
     EXPECT_NEAR(tol.rtol, std::ldexp(1.0, -22) + sumTerm, 1e-15);
     EXPECT_NEAR(tol.atol, sumTerm * 4.0 + std::ldexp(1.0, -126), 1e-15);
 }
 
-// With no coefficient set the default is used, and the default is 3.
+// With no coefficient set the default is used, and the default is 4.
 TEST(TestConvFpropOutputToleranceFloat, BaseCoefficientIsUsedWhenTheEngineSetsNone)
 {
     ConvFpropErrorScale s;
@@ -1665,12 +1665,12 @@ TEST(TestConvFpropOutputToleranceFloat, BaseCoefficientIsUsedWhenTheEngineSetsNo
     s.inputMeanSquare = 1.0 / 3.0;
     s.weightMeanSquare = 1.0 / 3.0;
     ConvFpropCoefficients base;
-    base.summationOrder = 3.0;
+    base.summationOrder = 4.0;
     const auto unset = calculateConvFpropOutputTolerance<float>(s);
-    const auto three = calculateConvFpropOutputTolerance<float>(s, base);
-    EXPECT_DOUBLE_EQ(unset.atol, three.atol);
-    EXPECT_DOUBLE_EQ(unset.rtol, three.rtol);
-    EXPECT_DOUBLE_EQ(DEFAULT_FLOAT_SUMMATION_ORDER, 3.0);
+    const auto four = calculateConvFpropOutputTolerance<float>(s, base);
+    EXPECT_DOUBLE_EQ(unset.atol, four.atol);
+    EXPECT_DOUBLE_EQ(unset.rtol, four.rtol);
+    EXPECT_DOUBLE_EQ(DEFAULT_FLOAT_SUMMATION_ORDER, 4.0);
 }
 
 // An engine's coefficient replaces the default in atol and in rtol.
@@ -1685,8 +1685,8 @@ TEST(TestConvFpropOutputToleranceFloat, EngineCoefficientReplacesTheBaseOne)
     const auto base = calculateConvFpropOutputTolerance<float>(s);
     const auto wider = calculateConvFpropOutputTolerance<float>(s, engine);
     const double perUnit = 12.0 * std::ldexp(1.0, -24);
-    EXPECT_NEAR(wider.rtol - base.rtol, 6.0 * perUnit, 1e-15);
-    EXPECT_NEAR(wider.atol - base.atol, 6.0 * perUnit * 4.0, 1e-15);
+    EXPECT_NEAR(wider.rtol - base.rtol, 5.0 * perUnit, 1e-15);
+    EXPECT_NEAR(wider.atol - base.atol, 5.0 * perUnit * 4.0, 1e-15);
 }
 
 // A float output has no lambda term: atol is the summation-order term and nothing else.
@@ -1699,7 +1699,7 @@ TEST(TestConvFpropOutputToleranceFloat, HasNoPartialResultTerm)
     const auto tol = calculateConvFpropOutputTolerance<float>(s);
     const double sigma = std::sqrt(65536.0) / 3.0;
     EXPECT_LT(tol.atol,
-              1.001 * (3.0 * 256.0 * std::ldexp(1.0, -24) * sigma + std::ldexp(1.0, -126)));
+              1.001 * (4.0 * 256.0 * std::ldexp(1.0, -24) * sigma + std::ldexp(1.0, -126)));
 }
 
 // A tree-ordered sum and the exact sum stay within the tolerance of the reference's sequential

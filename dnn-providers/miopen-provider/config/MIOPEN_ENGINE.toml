@@ -7,9 +7,9 @@ version = 1
 
 # -- Convolution-forward dynamic tolerance --
 # Coefficient of the summation-order term (c * sqrt(K) * u32, on sigma and on |ref|) for
-# float outputs. The base value of the harness (3) covers every solver MIOpen runs except
-# Winograd, whose float error is 2 to 3 times larger (up to 5.6 in units of sqrt(K) * u32 * sigma
-# on the calibration data, gfx942 and gfx90a). 9 leaves Winograd a headroom of at least 1.6.
+# float outputs. The base value of the harness (4) covers every solver MIOpen runs except
+# Winograd, whose float error is 2 to 3 times larger (up to 5.68 in units of sqrt(K) * u32 * sigma
+# on the calibration data, gfx942 and gfx90a). 9 leaves Winograd a headroom of at least 1.5.
 # See dnn-providers/integration-tests/docs/tolerances.md, "Float outputs".
 [conv_fwd_tolerance.float]
 summation_order = 9.0

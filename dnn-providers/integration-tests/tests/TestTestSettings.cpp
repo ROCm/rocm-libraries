@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
@@ -1142,7 +1143,7 @@ summation_order = )") + bad + "\n");
 
 TEST(TestSettingsParser, RejectsAnUnknownConvFwdToleranceTypeOrKey)
 {
-    const char* const bad[] = {
+    const std::vector<std::string> bad = {
         // an output type the harness does not read
         "[conv_fwd_tolerance.half]\nsummation_order = 2.0\n",
         "[conv_fwd_tolerance.bfloat16]\nsummation_order = 2.0\n",
@@ -1152,9 +1153,9 @@ TEST(TestSettingsParser, RejectsAnUnknownConvFwdToleranceTypeOrKey)
         // not tables
         "[conv_fwd_tolerance]\nfloat = 9.0\n",
     };
-    for(const char* text : bad)
+    for(const auto& text : bad)
     {
-        const TempTomlFile file(std::string("[meta]\nversion = 1\n\n") + text);
+        const TempTomlFile file("[meta]\nversion = 1\n\n" + text);
         EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << text;
     }
 }
