@@ -448,6 +448,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         CarriesExactlyOneSharedKernelScopedMatcher
     )
 
+    # A suite whose engine config declares behavior_notes renders one more case. The list
+    # names those suites; keep it in step with the configs' engine.behavior_notes.
+    set(_hkp_behavior_notes_suites
+        TestGfx950AttentionDensePacks
+        TestGfx1151WmmaAttentionPacks
+        TestGfx1151WmmaAttentionDecodePacks
+    )
+    # _hkp_generated_packs_cases_for(<out> <suite>): the cases <suite> registers.
+    function(_hkp_generated_packs_cases_for out_var suite)
+        set(_cases ${_hkp_generated_packs_cases})
+        if(suite IN_LIST _hkp_behavior_notes_suites)
+            list(APPEND _cases DeclaresItsConfiguredBehaviorNotes)
+        endif()
+        set(${out_var} ${_cases} PARENT_SCOPE)
+    endfunction()
+
     # Census for each HKP_PINNED_ATTENTION_ENGINES engine's production pack (the table is in
     # ../CMakeLists.txt). Each reads only the product shard, so it is eligible for census
     # registration.
@@ -493,12 +509,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
                                           "hipkernel:${_local}" ${_arch})
         if(_hkp_${_arch}_attention_${_snake})
+            _hkp_generated_packs_cases_for(_hkp_cases Test${_local}Packs)
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_arch}
                 SUITES Test${_local}Packs
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
@@ -570,12 +587,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             endif()
         endforeach()
         if(_hkp_rdna_wmma_attention_arches)
+            _hkp_generated_packs_cases_for(_hkp_cases ${_hkp_suite})
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_hkp_rdna_wmma_attention_arches}
                 SUITES ${_hkp_suite}
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
