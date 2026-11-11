@@ -13,8 +13,9 @@ the element type of the buffer it reads, and that every fp8 K read reaches the
 QK MFMA only through a multiply by the ``k_scale`` kernel argument. It also
 pins the K slab pad: a laid-out pad is refused when Q would be staged in the
 single K slot, and otherwise every K read goes through the padded slab layout;
-a zero-width pad is not laid out. And it pins where the kernel stages Q to the
-spec's rule, and that every fp8 LDS load claims only its byte width.
+a pad the kernel cannot lay out, for each reason the spec gives, is no pad.
+And it pins where the kernel stages Q to the spec's rule, and that every fp8
+LDS load claims only its byte width.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
@@ -188,6 +189,7 @@ def test_fp8_k_is_scaled_by_k_scale_before_the_mfma(path):
         ), f"{path}: scaled K does not reach an MFMA"
 
 
+_TRANSPOSED = QK_PATHS["32x32 transposed"]
 _LAID_OUT_K_PAD = dict(
     use_k_single_buffer=True, use_kq_lds_pad=True, kq_lds_pad_halves=8
 )
@@ -225,7 +227,7 @@ def test_laid_out_k_pad_reads_k_through_the_padded_slabs(q_source):
     head, tile, pad = _BASE["head_size"], _BASE["tile_size"], 8
     slab_rows = 64 * 16 // 2 // head  # one wave's 1024-B async-DMA slab of bf16
     spec = UnifiedAttention2DTiledSpec(
-        **_BASE, **QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, **{q_source: True}
+        **_BASE, **_TRANSPOSED, **_LAID_OUT_K_PAD, **{q_source: True}
     )
     assert spec.kq_lds_pad_slab_rows == slab_rows
     kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
@@ -257,15 +259,57 @@ def test_laid_out_k_pad_reads_k_through_the_padded_slabs(q_source):
         assert _constant(row_offset.operands[1]) == head
 
 
-def test_k_pad_the_kernel_cannot_lay_out_is_inert():
-    # Without a single K slot the pad is not laid out, so Q may alias K.
-    spec = UnifiedAttention2DTiledSpec(
-        **_BASE, use_kq_lds_pad=True, kq_lds_pad_halves=8
-    )
+# A single-K transposed 32x32 spec that lays the pad out. Each case below
+# changes it to break one condition of the layout, except where that
+# condition cannot be broken alone on a spec that lays the pad out (the
+# comment on the case says what else changes).
+_PAD_LAID_OUT = dict(_LAID_OUT_K_PAD, **_TRANSPOSED, use_q_reread=True)
+
+# (knobs over _BASE with a set pad, the reason the pad is not laid out)
+_K_PAD_OFF = {
+    # The single K slot and Q re-read do not take fp8 K, so this case has two
+    # K slots and Q in its own slab.
+    "fp8 K in LDS": (
+        dict(FP8_K_IN_LDS, use_kq_lds_pad=True, kq_lds_pad_halves=8),
+        "the KQ LDS pad is off under native-FP8 K LDS",
+    ),
+    "zero width": (
+        dict(_PAD_LAID_OUT, kq_lds_pad_halves=0),
+        "the KQ LDS pad width is 0",
+    ),
+    "a K row does not divide the slab": (
+        dict(_PAD_LAID_OUT, head_size=96),
+        "the KQ LDS pad needs a K row that divides the async-DMA slab",
+    ),
+    # A 16-wide K row makes 32-row slabs, longer than the 16-row tile. The
+    # 32x32 paths need tiles of 32 rows, so this case is the 16x16 path, with
+    # Q staged in the single K slot.
+    "the slabs do not tile the KV tile": (
+        dict(_LAID_OUT_K_PAD, head_size=16, block_size=16, tile_size=16),
+        "the KQ LDS pad needs whole async-DMA slabs to tile the KV tile",
+    ),
+    "the width breaks 16-byte alignment": (
+        dict(_PAD_LAID_OUT, kq_lds_pad_halves=4),
+        "the KQ LDS pad width needs to be a multiple of 8 halves (16 bytes)",
+    ),
+    "no single K slot": (
+        dict(_PAD_LAID_OUT, use_k_single_buffer=False),
+        "the KQ LDS pad is only laid out for a single-K schedule",
+    ),
+}
+
+
+def test_the_k_pad_off_cases_start_from_a_laid_out_pad():
+    assert UnifiedAttention2DTiledSpec(**_BASE, **_PAD_LAID_OUT).kq_lds_pad_slab_rows
+
+
+@pytest.mark.parametrize("case", sorted(_K_PAD_OFF))
+def test_k_pad_the_kernel_cannot_lay_out_is_inert(case):
+    # A pad the kernel cannot lay out is no pad, so Q may still alias K.
+    knobs, reason = _K_PAD_OFF[case]
+    spec = UnifiedAttention2DTiledSpec(**dict(_BASE, **knobs))
     assert spec.kq_lds_pad_slab_rows == 0
-    assert spec.kq_lds_pad_off_reason == (
-        "the KQ LDS pad is only laid out for a single-K schedule"
-    )
+    assert spec.kq_lds_pad_off_reason == reason
 
 
 def test_zero_width_k_pad_builds_the_unpadded_kernel():
@@ -296,8 +340,6 @@ def test_negative_k_pad_width_is_refused():
     ):
         UnifiedAttention2DTiledSpec(**_BASE, use_kq_lds_pad=True, kq_lds_pad_halves=-8)
 
-
-_TRANSPOSED = QK_PATHS["32x32 transposed"]
 
 # (knobs, whether the spec stages Q in K_lds)
 _Q_STAGING = {
