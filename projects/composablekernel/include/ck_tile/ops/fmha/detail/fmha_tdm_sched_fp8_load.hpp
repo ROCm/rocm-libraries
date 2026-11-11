@@ -229,4 +229,25 @@ struct FmhaTdmSchedFp8TransposeLoad
     }
 };
 
+// Compiler-only fence and VGPR pins shared by the FP8 sched pipeline pieces.
+struct FmhaTdmSchedFp8Pins
+{
+    // Compiler-only memory fence: keeps LDS reads below a barrier that publishes async writes.
+    CK_TILE_DEVICE static void CompilerMemoryFence() { asm volatile("" ::: "memory"); }
+
+    // From an SGPR the hardware reads only byte 0 of the scale operand and broadcasts it.
+    CK_TILE_DEVICE static int32_t PinToVgpr(int32_t v)
+    {
+        asm volatile("" : "+v"(v));
+        return v;
+    }
+
+    // Pin after all loads are issued; a pin per load serializes the round trips.
+    template <index_t N>
+    CK_TILE_DEVICE static void PinEachToVgpr(array<int32_t, N>& v)
+    {
+        static_for<0, N, 1>{}([&](auto i) { v(i) = PinToVgpr(v[i]); });
+    }
+};
+
 } // namespace ck_tile
