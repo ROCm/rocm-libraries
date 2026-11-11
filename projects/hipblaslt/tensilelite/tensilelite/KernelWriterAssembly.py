@@ -9775,7 +9775,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Accumulator M-order shuffle for enableLDSTr with VectorWidth > 1
   ##############################################################################
-  def accumShuffleForLDSTrVW(self, kernel):
+  def storeShuffleForLDSTrVW(self, kernel):
     """Re-order the accumulators' M direction from the local read's layout to the store's.
 
     ds_read_tr hands lane L the tile row (m_base + L): a transpose group reads
@@ -9817,23 +9817,23 @@ class KernelWriterAssembly(KernelWriter):
 
     Triggered by, in yaml terms:
         LDSTrInst: True            -> enableLDSTrA
-        AccumShuffle: 1 | 2        -> 0 clamps VectorWidthA to 1, nothing left to bridge
+        LDSTrStoreShuffle: 1 | 2        -> 0 clamps VectorWidthA to 1, nothing left to bridge
         VectorWidthA: 2 | 4 | 8    -> the shuffle is a no-op at 1
         SourceSwap: 1              -> implied by Sparse: 2
         StoreRemapVectorWidth: 0   -> storeRemap is the alternative bridge, not a companion
     plus WavefrontSize 32, MatrixInstBM 1, LocalSplitU 1, and MIWaveTile[0] % VectorWidthA == 0.
     Each of these is rejected with a specific reason in SolutionStructs/Solution.py, so a yaml
-    that asks for the shuffle and does not get it reports why. AccumShuffle is the
+    that asks for the shuffle and does not get it reports why. LDSTrStoreShuffle is the
     exception: 0 clamps VectorWidthA silently, because that is what enableLDSTrA did before
     this feature existed.
 
-    The walk is numNTiles*numGroups*accPerTile mutually independent passes. AccumShuffle
+    The walk is numNTiles*numGroups*accPerTile mutually independent passes. LDSTrStoreShuffle
     also picks how they are scheduled against each other: 1 drains LDS between every pass, 2
     issues the next pass's gather first and waits on a staggered dscnt so the LDS latency hides
     behind the previous pass's cndmask tree. Both emit the same instruction multiset; which one
     is faster depends on the configuration, so it is a tuning knob rather than a derived value.
     """
-    module = Module("accumShuffleForLDSTrVW")
+    module = Module("storeShuffleForLDSTrVW")
     VW = kernel["VectorWidthA"]
     # storeRemap is the other way of bridging the two M orders: it stages the accumulators
     # through LDS and reads them back in store order, which subsumes this shuffle. Running
@@ -9889,8 +9889,8 @@ class KernelWriterAssembly(KernelWriter):
       # LDS round trips are in flight per s_waitcnt.
       #
       # The batch size is the only real knob here, and it was measured on gfx1250 rather than
-      # guessed. slotBatch == 1 is clearly bad -- at VW=4 it costs 14% (AccumShuffle=1) to 28%
-      # (AccumShuffle=2) against slotBatch 3, and at VW=8 the same ordering holds. Above that
+      # guessed. slotBatch == 1 is clearly bad -- at VW=4 it costs 14% (LDSTrStoreShuffle=1) to 28%
+      # (LDSTrStoreShuffle=2) against slotBatch 3, and at VW=8 the same ordering holds. Above that
       # the curve flattens: 4 vs 8 at VW=8 measured -0.2% and -2.9%, both inside the run-to-run
       # noise of this benchmark (~10%), so there is nothing to gain from a larger batch.
       #
@@ -9901,7 +9901,7 @@ class KernelWriterAssembly(KernelWriter):
       # 3*VW to keep slotBatch >= 2, so one constant cannot serve every VW -- raising it enough
       # for VW=16 (48) would push VW=8 to 5, paying registers for a batch size already measured
       # to be worthless. The explicit floor scales to new VW values for free.
-      pipelined = kernel.get("AccumShuffle", 0) > 1
+      pipelined = kernel.get("LDSTrStoreShuffle", 0) > 1
       buffers   = 2 if pipelined else 1
       want      = min(VW, max(2, (TMP_BUDGET - VW) // VW))
       # Clamp to what the pool already has free. checkOut() past that grows the pool, which
@@ -9919,7 +9919,7 @@ class KernelWriterAssembly(KernelWriter):
       slotBatch = max(1, min(want, fits))
       res  = [self.vgprPool.checkOut(1, "accShuffleRes%u"%t)  for t in range(VW)]
       gat  = [self.vgprPool.checkOut(1, "accShuffleGat%u"%t)  for t in range(VW * slotBatch)]
-      # AccumShuffle=2 needs a second gather buffer so pass p+1's ds_bpermute can be in flight
+      # LDSTrStoreShuffle=2 needs a second gather buffer so pass p+1's ds_bpermute can be in flight
       # while pass p's cndmask tree still reads pass p's results.
       gatB = [self.vgprPool.checkOut(1, "accShuffleGatB%u"%t) for t in range(VW * slotBatch)] \
              if pipelined else []
@@ -10072,7 +10072,7 @@ class KernelWriterAssembly(KernelWriter):
     # Bridge the LDSTr local read's VW=1 M order to the store's VW-interleaved M order.
     # Must run before any consumer of ValuC -- ShiftVectorComponents, computeStoreVgprs and
     # the global write all follow this call -- and while the sgpr pool is still intact.
-    module.add(self.accumShuffleForLDSTrVW(kernel))
+    module.add(self.storeShuffleForLDSTrVW(kernel))
 
     keptSgprs = []
     # FP32 to FP8 SR without v_prng_b32 needs RNDSeed sgpr preserved
@@ -19047,11 +19047,11 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         # SRVW epilogue can also exceed simm16, so use longBranch like MBSK.
-        # The accumulator shuffle grows the epilogue the same way: at MT256x256 the
+        # The store shuffle grows the epilogue the same way: at MT256x256 the
         # VectorWidthA=2 kernel overflows simm16 where VectorWidthA=1 does not. The narrow
         # VectorWidthA is the worst case -- StoreVectorWidth follows it, so the store side
         # costs more instructions than the shuffle itself saves. Condition mirrors the
-        # shuffle's own trigger (accumShuffleForLDSTrVW).
+        # shuffle's own trigger (storeShuffleForLDSTrVW).
         if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1 or kernel["StoreRemapVectorWidth"] \
             or (kernel["SourceSwap"] and kernel.get("enableLDSTrA", False) and kernel["VectorWidthA"] > 1)):
           module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))

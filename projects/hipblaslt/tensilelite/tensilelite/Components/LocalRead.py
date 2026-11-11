@@ -978,7 +978,7 @@ class LocalReadMFMA(LocalRead):
             # definition above, so divide it back out to get that spacing.
             #
             # When VW > 1 the store still wants the VW-interleaved row order; that is
-            # restored once in the epilogue by accumShuffleForLDSTrVW (KernelWriterAssembly),
+            # restored once in the epilogue by storeShuffleForLDSTrVW (KernelWriterAssembly),
             # not here.
             #
             # A group of VW consecutive wave tiles covers one MIWaveGroupShape-wide block of

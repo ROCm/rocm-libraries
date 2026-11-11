@@ -1359,7 +1359,6 @@
 # name: test_valid_parameters_key_roster
   list([
     '1LDSBuffer',
-    'AccumShuffle',
     'ActivationAlt',
     'ActivationFuncCall',
     'ActivationFused',
@@ -1418,6 +1417,7 @@
     'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrStoreShuffle',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -1561,15 +1561,6 @@
         -1,
         0,
         1,
-      ]),
-      'len': 3,
-      'type': 'list',
-    }),
-    'AccumShuffle': dict({
-      'head': list([
-        0,
-        1,
-        2,
       ]),
       'len': 3,
       'type': 'list',
@@ -2036,6 +2027,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'LDSTrStoreShuffle': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LdsBlockSizePerPadA': dict({

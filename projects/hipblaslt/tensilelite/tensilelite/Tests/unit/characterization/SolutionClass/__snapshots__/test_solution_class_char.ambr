@@ -62,7 +62,6 @@
   dict({
     'keys': list([
       '1LDSBuffer',
-      'AccumShuffle',
       'ActivationAlt',
       'ActivationFuncCall',
       'ActivationFused',
@@ -141,6 +140,7 @@
       'LDSSegmentBRotate',
       'LDSSegmentInterleave',
       'LDSTrInst',
+      'LDSTrStoreShuffle',
       'LSCA',
       'LSCB',
       'LSPA',

@@ -3465,53 +3465,53 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["Sparse"]:
       # ON/OFF the sourceswap according to the sparse type automatically
       state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
-    # Normalise AccumShuffle to 0 where the shuffle could not run regardless of what the
+    # Normalise LDSTrStoreShuffle to 0 where the shuffle could not run regardless of what the
     # yaml asked for: without enableLDSTrA there is no layout to bridge, and storeRemap is the
     # alternative bridge rather than a companion. 1 and 2 would emit the same assembly as 0 in
     # those cases, so collapsing them keeps one kernel name instead of three.
     # VectorWidthA == 1 lands here too: the shuffle is a no-op at 1, so an explicit
-    # VectorWidthA: 1 with AccumShuffle 1 or 2 must not get its own kernel name.
+    # VectorWidthA: 1 with LDSTrStoreShuffle 1 or 2 must not get its own kernel name.
     # Checked here rather than with the other VectorWidthA preconditions because
     # StoreRemapVectorWidth is not final until the block just above.
     if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"] \
       and not state["ProblemType"]["MXBlockA"]) or state["StoreRemapVectorWidth"] > 0:
       # Say why, but only when the yaml actually asked for the shuffle. The default is 0, so
       # warning unconditionally would fire for every kernel that never wanted it.
-      if state["AccumShuffle"]:
+      if state["LDSTrStoreShuffle"]:
         if not state["enableLDSTrA"]:
-          _asWhy = "enableLDSTrA is off (needs LDSTrInst, a 1- or 2-byte MacDataTypeA, " \
+          _ssWhy = "enableLDSTrA is off (needs LDSTrInst, a 1- or 2-byte MacDataTypeA, " \
                    "UnrollMajorLDSA off and DirectToVgprA off)"
         elif state["VectorWidthA"] <= 1:
-          _asWhy = "VectorWidthA is %u -- the shuffle is a no-op at 1" % state["VectorWidthA"]
+          _ssWhy = "VectorWidthA is %u -- the shuffle is a no-op at 1" % state["VectorWidthA"]
         elif not state["SourceSwap"]:
-          _asWhy = "SourceSwap is off (the store takes vectorWidth0 = VectorWidthA only in " \
+          _ssWhy = "SourceSwap is off (the store takes vectorWidth0 = VectorWidthA only in " \
                    "SourceSwap mode)"
         elif state["ProblemType"]["MXBlockA"]:
-          _asWhy = "MXBlockA is set: A would be read in the ds_read_tr VW=1 row order while " \
+          _ssWhy = "MXBlockA is set: A would be read in the ds_read_tr VW=1 row order while " \
                    "VectorWidthMXSA inherits VectorWidthA and the scale reads stay " \
                    "VW-interleaved (enableLDSTrMXSA is always False), so rows would be " \
                    "scaled wrongly and the epilogue shuffle cannot undo it"
         elif state["StoreRemapVectorWidth"] > 0:
-          _asWhy = "StoreRemapVectorWidth is %u -- storeRemap is the alternative bridge, " \
+          _ssWhy = "StoreRemapVectorWidth is %u -- storeRemap is the alternative bridge, " \
                    "not a companion" % state["StoreRemapVectorWidth"]
         else:
-          _asWhy = "UnKnown"
+          _ssWhy = "UnKnown"
         # The clamp below only moves VectorWidthA when it is currently > 1; saying so when the
         # reason IS that it is already 1 would be nonsense.
-        _asClamp = " VectorWidthA %u will be clamped to 1." % state["VectorWidthA"] \
+        _ssClamp = " VectorWidthA %u will be clamped to 1." % state["VectorWidthA"] \
                    if (state["enableLDSTrA"] and state["VectorWidthA"] > 1) else ""
-        printWarning("AccumShuffle %u requested but disabled: %s.%s"
-                     % (state["AccumShuffle"], _asWhy, _asClamp))
-      state["AccumShuffle"] = 0
+        printWarning("LDSTrStoreShuffle %u requested but disabled: %s.%s"
+                     % (state["LDSTrStoreShuffle"], _ssWhy, _ssClamp))
+      state["LDSTrStoreShuffle"] = 0
 
     # enableLDSTrA used to clamp VectorWidthA unconditionally: ds_read_tr fixes the lane->row
-    # stride at 1, so a wider store had nothing to read. accumShuffleForLDSTrVW lifts that by
-    # re-ordering the accumulators in the epilogue, but only when asked -- AccumShuffle 0
+    # stride at 1, so a wider store had nothing to read. storeShuffleForLDSTrVW lifts that by
+    # re-ordering the accumulators in the epilogue, but only when asked -- LDSTrStoreShuffle 0
     # keeps the old clamp so kernels that predate the shuffle are unaffected, including the
     # ones that leave VectorWidthA at -1 and would otherwise be auto-promoted to 2/4/8 (which
     # changes both their performance and, at VectorWidthA > 8, whether they build at all).
     # The clamp is silent rather than a rejection because that is what it did before.
-    if state["enableGLTrA"] or (state["enableLDSTrA"] and state["AccumShuffle"] == 0):
+    if state["enableGLTrA"] or (state["enableLDSTrA"] and state["LDSTrStoreShuffle"] == 0):
       state["VectorWidthA"] = 1
 
     if state["enableLDSTrB"] or state["enableGLTrB"]:
@@ -3527,7 +3527,7 @@ class Solution(collections.abc.Mapping):
       # VectorWidth, which forced VectorWidthA=1 for Sparse==1 and VectorWidthB=1 for
       # Sparse==2. That coupling is gone on the A side: ds_read_tr fixes the metadata read at
       # VW=1 in the tile direction regardless (lrvwTileMetadata, KernelWriter.py), and A's
-      # VW>1 is now expressed in the epilogue by accumShuffleForLDSTrVW rather than in the
+      # VW>1 is now expressed in the epilogue by storeShuffleForLDSTrVW rather than in the
       # read geometry, so the two no longer have to agree. Sparse==2 still clamps B, but for
       # an unrelated reason -- see the enableLDSTrB clamp: N is the strided direction of C/D.
       if state["ProblemType"]["Sparse"] == 1:
@@ -3644,12 +3644,12 @@ class Solution(collections.abc.Mapping):
     # the tile direction whatever VectorWidthA is (see mTileOffset in Components/LocalRead.py).
     # VectorWidthA runs along M, which is contiguous in C/D, so VWA > 1 still pays for itself:
     # the accumulators are shuffled from the read's VW=1 row order into the store's
-    # VW-interleaved order once in the epilogue (accumShuffleForLDSTrVW in KernelWriterAssembly).
+    # VW-interleaved order once in the epilogue (storeShuffleForLDSTrVW in KernelWriterAssembly).
     # The shuffle handles VectorWidthA 2, 4 and 8 and any MIWaveTile[0] that is a multiple of
     # it; its cost grows as VW*VW per group of VW tiles, so the wider settings want a
     # benchmark before use. Placed after the sparse block above because SourceSwap is not
     # final until then.
-    if state["AccumShuffle"]:
+    if state["LDSTrStoreShuffle"]:
       vwA = state["VectorWidthA"]
       if vwA not in (2, 4, 8):
         reject(state, printRejectionReason, \
