@@ -21,6 +21,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_config.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_config.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_features.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_load.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_merged_rows.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_output_store.hpp"

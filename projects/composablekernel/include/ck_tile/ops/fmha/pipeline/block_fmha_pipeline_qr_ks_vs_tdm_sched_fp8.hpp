@@ -12,6 +12,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_schedule.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_features.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_merged_rows.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_output_store.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_quant_scale.hpp"
@@ -101,19 +102,18 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                   "qr_tdm_fp8_sched: unsupported quantization granularity");
     static_assert(!kMergeHeads || (!kIsGroupMode && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
                   "merged GQA rows need batch mode and no bias");
-    static constexpr bool kQuantized  = QScaleEnum != BlockAttentionQuantScaleEnum::NO_SCALE;
-    static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
-    static constexpr bool kMx         = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
-    // Merged PERHEAD/BLOCKSCALE rows fold their own head's q descale into the softmax scale.
-    static constexpr bool kRowScale =
-        kMergeHeads && (QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD || kBlockScale);
-    // Quantized modes cast P to fp8 against this fixed scale and undo it in the epilogue.
-    static constexpr float kPScale = 256.0f;
-    // Normalize O by the row sum of the fp8 P gemm_1 consumed, so a common rounding gain cancels.
-    static constexpr bool kNormalizeQuantizedP = kQuantized && !kMx;
-    // Without LSE or sink nothing needs the unquantized row sum, so l sums q(P) directly.
-    static constexpr bool kQuantizedRowSum =
-        kNormalizeQuantizedP && !kStoreLSE && !kHasSink && !kEnableVirtualSink;
+    // Derived switches, each described in the features table.
+    using Features                   = FmhaTdmSchedFp8Features<Problem, Policy, kEnableVirtualSink>;
+    static constexpr bool kQuantized = Features::kQuantized;
+    static constexpr bool kBlockScale          = Features::kBlockScale;
+    static constexpr bool kMx                  = Features::kMx;
+    static constexpr bool kD256                = Features::kD256;
+    static constexpr bool kRowScale            = Features::kRowScale;
+    static constexpr float kPScale             = Features::kPScale;
+    static constexpr bool kNormalizeQuantizedP = Features::kNormalizeQuantizedP;
+    static constexpr bool kQuantizedRowSum     = Features::kQuantizedRowSum;
+    static constexpr bool kLdsSegSplit         = Features::kLdsSegSplit;
+    static constexpr bool kUnpinnedMaskWidth   = Features::kUnpinnedMaskWidth;
 
     static constexpr index_t kAlignmentQ    = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK    = Policy::template GetAlignmentK<Problem>();
@@ -131,19 +131,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // IsSupportedProblem above pins Geometry == FmhaTdmSchedGeometryFor<Problem>.
     using Geometry = typename Policy::Geometry;
     static_assert(Geometry::kM == kM0 && Geometry::kN == kN0 && Geometry::kDv == kN1);
-    // D128/D256 blockscale folds the fp32 K descale into the scale of each QK stage's scores.
-    static constexpr bool kKDescaleInSoftmax =
-        kBlockScale && Geometry::kQkWmmaK == 128 && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
-    static constexpr bool kKDescaleWithScaleS =
-        kBlockScale && Geometry::kQkWmmaK == 128 && BiasEnum != BlockAttentionBiasEnum::NO_BIAS;
-    // D256 streams V inside PV and pairs PV rows with V chunks (PvOrdinal).
-    static constexpr bool kD256 = Geometry::kHeadDimQK == 256;
-    // Segmented LDS layout: odd wavefronts read the K/V halves placed in another LDS segment.
-    static constexpr bool kLdsSegSplit = Policy::kLdsSegLayout;
     static_assert(!kLdsSegSplit || kFmhaTdmSchedFp8LdsSegLayout<Problem>,
                   "the segmented LDS layout supports dense D256 problems only");
 
-    // D256 PV row r pairs V chunk r / 2 with P block r % 2; others run fragment r.
+    // D256 streams V inside PV: row r pairs V chunk r / 2 with P block r % 2; others run fragment
+    // r.
     CK_TILE_HOST_DEVICE static constexpr index_t PvOrdinal(index_t row)
     {
         if constexpr(!kD256)
@@ -160,9 +152,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr bool kUsesGlobalCausalOrder       = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
-    // Merged D192 at two workgroups per CU cannot afford IsOutOfBoundUnsigned's per-row VGPRs.
-    static constexpr bool kUnpinnedMaskWidth =
-        kMergeHeads && Geometry::kHeadDimQK == 192 && kBlockPerCu > 1;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -360,12 +349,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
 
-        using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
-        auto s_acc              = SaccBlockTileType{};
-        // Band masks need lane-linear rows; masked merged tiles are not, so they check per element.
-        constexpr bool kBandMask =
-            std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
-            !Policy::template UseCountdownLoop<Problem>() && !(kMergeHeads && FmhaMask::IsMasking);
+        using SaccBlockTileType                   = decltype(gemm_0.MakeCBlockTile());
+        auto s_acc                                = SaccBlockTileType{};
+        constexpr bool kBandMask                  = Features::kBandMask;
         [[maybe_unused]] const auto s_lane_origin = [] {
             if constexpr(kBandMask)
                 return TileIndex::TileLaneOrigin<SaccBlockTileType>();
@@ -590,14 +576,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         // The tile range rounds its end up to kN0, so bound the scale index by seqlen_k.
         [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
-        constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
+        constexpr bool kUseCountdownLoop = Features::kUseCountdownLoop;
         bool even_buffer                 = true;
         index_t i_total_loops            = 0;
         index_t remaining_loops          = num_total_loop;
         constexpr index_t k1_loops       = kN0 / kK1;
 
-        // Only D256 MX folds each QK stage into a lane row max as it lands; others use one tree.
-        constexpr bool kProgressiveMax = kD256 && kUseCountdownLoop && kMx;
+        constexpr bool kProgressiveMax = Features::kProgressiveMax;
 
         static_assert(1 <= k1_loops);
         constexpr index_t kKHalfBytes = Geometry::kN / 2 * Policy::kKPhysicalStride;
@@ -1022,8 +1007,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 auto s_acc_su  = gemm_0_su.MakeCBlockTile();
                 auto k_su_tile = k_su0_tile;
                 decltype(k_su_tile) k_su_tile_next;
-                // Blockscale keeps the per-stage K read order; other modes issue group 1 early.
-                constexpr bool kQkLead = !kBlockScale;
+                constexpr bool kQkLead = Features::kQkLead;
                 // Group 1's first half goes out before the first WMMA, a full stage ahead of use.
                 if constexpr(kQkLead)
                 {
@@ -1126,10 +1110,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     {
                         run_qk_stage(i_su, v_tile, pinned_v());
                     }
-                    if constexpr(kKDescaleWithScaleS)
+                    if constexpr(Features::kKDescale == FmhaTdmSchedFp8KDescale::WithScaleS)
                         tile_elementwise_inout(
                             [kd = k_descales[i_su] * scale_s](auto& x) { x *= kd; }, s_acc_su);
-                    else if constexpr(kBlockScale && !kKDescaleInSoftmax)
+                    else if constexpr(Features::kKDescale == FmhaTdmSchedFp8KDescale::PerStage)
                         tile_elementwise_inout([kd = k_descales[i_su]](auto& x) { x *= kd; },
                                                s_acc_su);
                     set_slice_tile(
@@ -1148,7 +1132,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 // QK scores are ready for bias, masking, and softmax.
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                 {
-                    if constexpr(!kKDescaleWithScaleS)
+                    if constexpr(Features::kKDescale != FmhaTdmSchedFp8KDescale::WithScaleS)
                         tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
                     const auto bias_tile = bias_next;
                     tile_elementwise_inout(
@@ -1184,10 +1168,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     else
                         return mask.IsOutOfBound(row, col);
                 };
-                // One predicate pass keeps D64 sink edge tiles from holding tail and pad indices.
-                constexpr bool kFusedEdgePredicate = Geometry::kHeadDimQK == 64 &&
-                                                     !FmhaMask::IsMasking &&
-                                                     BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+                constexpr bool kFusedEdgePredicate = Features::kFusedEdgePredicate;
 
                 // Sink-aware k_origin
                 const auto k_origin = [&]() {
@@ -1415,7 +1396,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             return 1.0f;
                     }();
                     const auto col_scale = [&]() {
-                        if constexpr(kKDescaleInSoftmax)
+                        if constexpr(Features::kKDescale == FmhaTdmSchedFp8KDescale::InSoftmax)
                         {
                             // Floor: out-of-range blocks read 0, and -inf * 0 is NaN.
                             KVDescales scales;
