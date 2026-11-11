@@ -2,6 +2,7 @@
   "version": "1.0",
   "id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
   "name": "hipkernel:hip_conv_fwd_rdna",
+  "sdk_version": "1.0.0",
   "graph_match": {
     "native": "hipkernel.hip_conv_fwd_rdna.graph_match"
   },

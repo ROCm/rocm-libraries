@@ -36,8 +36,9 @@ kernel is refused. The tile size (`block_m`) is not a knob.
 
 `hip/conv_rdna/` holds HIP-source kernels (`kind: "hip"`) under `kernels/`, compiled when the
 bundle is packed, for every build whose GPU targets include one of the gfx11 and gfx12 RDNA
-targets its KDP declares. It needs neither rocKE nor DVC. `generate_descriptors.py` writes its
-descriptors; edit the script and rerun it rather than editing the JSON.
+targets its KDP declares. It needs neither rocKE nor DVC. Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_rdna.yaml`; edit the config and
+regenerate rather than editing the JSON.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

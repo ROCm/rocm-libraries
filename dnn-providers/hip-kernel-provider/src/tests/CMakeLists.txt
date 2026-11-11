@@ -667,12 +667,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             ARCHES ${_hkp_hip_conv_fwd_rdna_arches}
             SUITES TestHipConvFwdRdnaPacks
             EXPECTED_CASES
-                LoadsOnePackShippingEveryVariantOnce
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
                 EveryLoadedDescriptorCoversTheRequestedArch
-                EveryKernelIsAPackedConvFwdFmaIgemmObject
-                ExposesNoKnobs
-                RanksAndDispatchesThroughRegisteredSymbols
-                CarriesOnlyOneKernelScopedMatcher
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
         )
     else()
         message(STATUS
