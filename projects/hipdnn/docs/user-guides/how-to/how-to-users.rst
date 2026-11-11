@@ -20,4 +20,5 @@ Topics
 - :ref:`set-engine-knobs`
 - :ref:`migrate-cudnn`
 - :ref:`pass-by-value-tensors`
+- :ref:`capture-hipgraph`
 - :ref:`inject-hipdnn-pytorch`
