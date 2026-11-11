@@ -657,6 +657,15 @@ TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixtee
     EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", baseShape(), "BFLOAT16"));
     // F(2,3): stride 1 only.
     EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
+    // F(3,2) on RDNA: stride 2 (by phases) only.
+    auto f32 = coop("gfx11", 1);
+    f32.m = 3;
+    EXPECT_TRUE(admits(f32, "gfx1100", strideTwo(), "HALF"));
+    EXPECT_FALSE(admits(f32, "gfx1100", baseShape(), "HALF"));
+    auto f32Bf16 = coop("gfx12", 0);
+    f32Bf16.m = 3;
+    EXPECT_TRUE(admits(f32Bf16, "gfx1201", strideTwo(), "BFLOAT16"));
+    EXPECT_FALSE(admits(f32Bf16, "gfx1100", strideTwo(), "BFLOAT16"));
 }
 
 TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
@@ -824,6 +833,12 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
          [] {
              auto f = coop("gfx11", 1);
              f.m = 4;
+             return f;
+         }},
+        {"CoopCdnaTileF32",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.m = 3;
              return f;
          }},
         {"CoopLlc",

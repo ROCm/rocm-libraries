@@ -3,7 +3,9 @@
 
 // Fused Winograd F(2,3) on matrix cores, fp16 and bf16, fp32 accumulate, NCHW, forward form
 // (backward data runs it on the rotated filter): RDNA WMMA (gfx11 / gfx12, wave32) and CDNA MFMA
-// (gfx908+, wave64), one body over the atom traits below. The cooperative variant: the whole
+// (gfx908+, wave64), one body over the atom traits below. F(3,2) (M = 3) runs stride 2 by phases
+// on the same 16 bins: B^T is F(2,3)'s, only the filter and output transforms and the phase
+// gather (forward) / scatter (backward data) differ. The cooperative variant: the whole
 // block transforms each 16-channel chunk of input once into LDS, and every wave reads its B
 // fragments from there, so one transformed value feeds all of the block's out channels.
 //
@@ -35,7 +37,8 @@
 // ch = c / 16) holds 256 elements in the atom's A lane order: (row r = k % 16, channel j = c % 16)
 // at ((j / KPL) * 16 + r) * KPL + j % KPL. Units run [g][bin][ceil(cgo / 16)][cgiPad / 16]; the
 // rows of a partial last k block are never written (their outputs are discarded).
-template <class T, int LAYOUT, int DIR, int KPL>
+// M 2: F(2,3) on the 3x3 filter; M 3: F(3,2) on the stride-2 phase sub-filters (virtual channels).
+template <class T, int LAYOUT, int DIR, int KPL, int M = 2>
 __device__ void k5CoopFilterTransform(const K5Args& a)
 {
     constexpr int P = 16;
@@ -46,28 +49,39 @@ __device__ void k5CoopFilterTransform(const K5Args& a)
     const int i = static_cast<int>(idx % cgiPad);
     const int o = static_cast<int>((idx / cgiPad) % cgo);
     const int g = static_cast<int>(idx / (static_cast<long long>(cgiPad) * cgo));
-    const int cgf = DIR == K5_FORWARD ? cgi : cgo;
-    const bool rot = (DIR == K5_BACKWARD_DATA) != (a.flip != 0);
-    const T* w = static_cast<const T*>(a.w);
-    float f[9], u[P];
-#pragma unroll
-    for(int q = 0; q < 9; ++q)
-        f[q] = 0.0f;
-    if(i < cgi)
+    float u[P];
+    if constexpr(M == 3)
     {
-        const int kf = DIR == K5_FORWARD ? g * cgo + o : g * cgi + i;
-        const int cf = DIR == K5_FORWARD ? i : o;
+        float f[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if(i < cgi)
+            k5GatherFilter<T, LAYOUT, DIR, 2>(a, g, o, i, f);
+        k5FilterTile<3>(f, u);
+    }
+    else
+    {
+        const int cgf = DIR == K5_FORWARD ? cgi : cgo;
+        const bool rot = (DIR == K5_BACKWARD_DATA) != (a.flip != 0);
+        const T* w = static_cast<const T*>(a.w);
+        float f[9];
 #pragma unroll
         for(int q = 0; q < 9; ++q)
+            f[q] = 0.0f;
+        if(i < cgi)
         {
-            const int rs = rot ? 8 - q : q;
-            const long long off = LAYOUT == K5_NCHW
-                                      ? (static_cast<long long>(kf) * cgf + cf) * 9 + rs
-                                      : (static_cast<long long>(kf) * 9 + rs) * cgf + cf;
-            f[q] = K5Elem<T>::load(w[off]);
+            const int kf = DIR == K5_FORWARD ? g * cgo + o : g * cgi + i;
+            const int cf = DIR == K5_FORWARD ? i : o;
+#pragma unroll
+            for(int q = 0; q < 9; ++q)
+            {
+                const int rs = rot ? 8 - q : q;
+                const long long off = LAYOUT == K5_NCHW
+                                          ? (static_cast<long long>(kf) * cgf + cf) * 9 + rs
+                                          : (static_cast<long long>(kf) * 9 + rs) * cgf + cf;
+                f[q] = K5Elem<T>::load(w[off]);
+            }
         }
+        k5FilterTile<2>(f, u);
     }
-    k5FilterTile<2>(f, u);
     T* U = static_cast<T*>(a.u);
     const int kbs = (cgo + 15) / 16, chs = cgiPad / 16;
     const int j = i % 16;
@@ -182,7 +196,7 @@ struct K5CoopMfma
     }
 };
 
-template <class T, class A, int MT, int NT, int KW>
+template <class T, class A, int MT, int NT, int KW, int M = 2>
 struct K5CoopCfg
 {
     static constexpr int BK = 16 * MT * KW, BT = 16 * NT, WAVES = 4 * KW, THREADS = A::WAVE * WAVES;
@@ -190,13 +204,15 @@ struct K5CoopCfg
     // (tile, channel pair) jobs per chunk: BT x 8; a lane takes one, 16 lanes per channel pair.
     static constexpr int JW = BT * 8 / A::WAVE; // waves of jobs per chunk
     static constexpr int JT = JW > WAVES ? JW / WAVES : 1; // jobs per thread
-    static constexpr int KWP = KW < 2 ? KW : 2; // K wave groups per epilogue pass
+    // K wave groups per epilogue pass: 2 where Z fits the V buffers' LDS (F(3,2)'s 3 values per
+    // bin row do not: 1).
+    static constexpr int KWP = KW < 2 ? KW : M == 2 ? 2 : 1;
     // Z row stride (floats): on CDNA the accumulator lanes 16 apart write rows 4 apart, which a
     // BT stride puts on one bank; BT + 4 spreads them over the 64 banks -- where that does not
-    // grow the block's LDS past the V buffers (64 KiB parts).
+    // grow the block's LDS past the V buffers (64 KiB parts). Z holds M values per bin row.
     static constexpr int ZS
-        = A::WAVE == 64 && 4 * 2 * 16 * KWP * (BT + 4) * 4 <= 2 * VB * 2 ? BT + 4 : BT;
-    static constexpr int ZB = 4 * 2 * 16 * KWP * ZS; // floats per epilogue pass
+        = A::WAVE == 64 && 4 * M * 16 * KWP * (BT + 4) * 4 <= 2 * VB * 2 ? BT + 4 : BT;
+    static constexpr int ZB = 4 * M * 16 * KWP * ZS; // floats per epilogue pass
     static constexpr int LDSB = 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
     // latency-bound, so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the
@@ -205,14 +221,20 @@ struct K5CoopCfg
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
 };
 
-template <class T, class W, int MT, int NT, int KW, bool F16MATH>
+// M 2: F(2,3), stride 1 (mode 0). M 3: F(3,2) on the stride-2 phase sub-filters (K5Args::mode):
+// forward (mode 1) a lane's channel pair is one real channel's two column phases of one row
+// parity, so a row is one 8-element run of x (two 12-byte loads, de-interleaved); backward data
+// (mode 2) reads dy like stride 1 and scatters each virtual out channel's 3x3 to its dx phase.
+template <class T, class W, int MT, int NT, int KW, bool F16MATH, int M = 2, int DIR = K5_FORWARD>
 __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 {
-    typedef K5CoopCfg<T, W, MT, NT, KW> C;
+    typedef K5CoopCfg<T, W, MT, NT, KW, M> C;
     typedef typename W::frag frag;
     constexpr int WAVE = W::WAVE, ACCN = W::ACCN;
     constexpr int BK = C::BK, BT = C::BT, THREADS = C::THREADS, VB = C::VB, JT = C::JT, JW = C::JW;
     constexpr bool PACKED = F16MATH && __is_same(T, k5_half);
+    constexpr int MODE = M == 3 ? (DIR == K5_FORWARD ? 1 : 2) : 0;
+    static_assert(M == 2 || M == 3, "F(2,3) or F(3,2)");
     __shared__ __attribute__((aligned(16))) unsigned char ldsRaw[C::LDSB];
     unsigned* Vd = reinterpret_cast<unsigned*>(ldsRaw); // two buffers of VB halves
     float* Zs = reinterpret_cast<float*>(ldsRaw);
@@ -221,8 +243,10 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const int nKB = (cgo + BK - 1) / BK, nTB = (a.tiles + BT - 1) / BT;
     const long long items = static_cast<long long>(a.groups) * nKB * nTB;
     const int nCh = cgiPad / 16;
-    const int chanStride = a.hi * a.wi;
-    const long long inElems = static_cast<long long>(a.n) * a.ci * a.hi * a.wi;
+    // Mode 1 reads x itself: 4 virtual channels (phases) per plane of x.
+    const int chanStride = MODE == 1 ? a.xh * a.xw : a.hi * a.wi;
+    const long long inElems
+        = static_cast<long long>(a.n) * (MODE == 1 ? a.ci / 4 : a.ci) * chanStride;
     const __amdgpu_buffer_rsrc_t rIn
         = k5Rsrc(a.in, (inElems * static_cast<long long>(sizeof(T)) + 3) / 4 * 4);
     const int kbs = (cgo + 15) / 16;
@@ -235,7 +259,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const int row = wave % 4, kw = wave / 4;
     const int col = lane & 15;
     T* out = static_cast<T*>(a.out);
-    const unsigned chunkBytes = static_cast<unsigned>(16 * chanStride) * sizeof(T);
+    const unsigned chunkBytes
+        = static_cast<unsigned>((MODE == 1 ? 4 : 16) * chanStride) * sizeof(T);
     // V swizzle: tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other half
     // of their 8 channel-pair dwords: the transform's dword stores and the B reads then spread
     // over the banks (CDNA: 16 tiles x 4 pairs a wave, conflict cycles 3.2e8 -> 1.2e8 on gfx950
@@ -287,32 +312,68 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             {
                 const int tw = t % a.tw, rr = t / a.tw;
                 const int th = rr % a.th, img = rr / a.th;
-                const int ih0 = th * 2 - a.ph, iw0 = tw * 2 - a.pw;
-#pragma unroll
-                for(int v = 0; v < 2; ++v)
+                if constexpr(MODE == 1)
                 {
-                    const int c = 2 * cp[q] + v;
+                    // Virtual channels 2 cp, 2 cp + 1 = real channel cp / 2, row parity cp % 2,
+                    // column phases 0 and 1: row r of the tile is x row 2 (th M + r) + parity,
+                    // columns 2 (tw M) - xpw + 0 .. 7 (phase = column parity).
+                    const int c = cp[q] >> 1, rp = cp[q] & 1;
                     const long long cbase
-                        = (static_cast<long long>(img) * a.ci + g * cgi + c) * chanStride;
+                        = (static_cast<long long>(img) * (a.ci >> 2) + g * (cgi >> 2) + c)
+                          * chanStride;
+                    const int iw0 = 2 * tw * M - a.xpw;
 #pragma unroll
                     for(int r = 0; r < 4; ++r)
                     {
-                        const int ih = ih0 + r;
-                        if(ih < 0 || ih >= a.hi || c >= cgi)
+                        const int ih = 2 * (th * M + r) + rp - a.xph;
+                        if(ih < 0 || ih >= a.xh || 2 * cp[q] >= cgi)
                             continue;
-                        const long long e = cbase + static_cast<long long>(ih) * a.wi + iw0;
-                        // Only the first row of the tensor with left padding starts before it.
+                        const long long e = cbase + static_cast<long long>(ih) * a.xw + iw0;
                         anyNeg = anyNeg || e < 0;
-                        voff[q][r][v] = static_cast<int>((e & ~1LL) * 2);
-                        shf[q] |= static_cast<unsigned>(e & 1) << (2 * r + v);
+                        voff[q][r][0] = static_cast<int>((e & ~1LL) * 2);
+                        voff[q][r][1] = voff[q][r][0] + 12;
+                        shf[q] |= static_cast<unsigned>(e & 1) << (2 * r);
+                    }
+#pragma unroll
+                    for(int j = 0; j < 4; ++j)
+                    {
+                        // Per channel (half): the column's half of each channel, or 0 (0x0c).
+                        const int iw = iw0 + 2 * j;
+                        const unsigned odd = (j & 1) ? 0x0202u : 0u;
+                        const unsigned lo = iw >= 0 && iw < a.xw ? 0x0100u + odd : 0x0c0cu;
+                        const unsigned hi = iw + 1 >= 0 && iw + 1 < a.xw ? 0x0504u + odd : 0x0c0cu;
+                        selc[q][j] = lo | (hi << 16);
                     }
                 }
-#pragma unroll
-                for(int j = 0; j < 4; ++j)
+                else
                 {
-                    const int iw = iw0 + j;
-                    if(iw >= 0 && iw < a.wi)
-                        selc[q][j] = (j & 1) ? 0x07060302u : 0x05040100u;
+                    const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
+#pragma unroll
+                    for(int v = 0; v < 2; ++v)
+                    {
+                        const int c = 2 * cp[q] + v;
+                        const long long cbase
+                            = (static_cast<long long>(img) * a.ci + g * cgi + c) * chanStride;
+#pragma unroll
+                        for(int r = 0; r < 4; ++r)
+                        {
+                            const int ih = ih0 + r;
+                            if(ih < 0 || ih >= a.hi || c >= cgi)
+                                continue;
+                            const long long e = cbase + static_cast<long long>(ih) * a.wi + iw0;
+                            // Only the first row of the tensor with left padding starts before it.
+                            anyNeg = anyNeg || e < 0;
+                            voff[q][r][v] = static_cast<int>((e & ~1LL) * 2);
+                            shf[q] |= static_cast<unsigned>(e & 1) << (2 * r + v);
+                        }
+                    }
+#pragma unroll
+                    for(int j = 0; j < 4; ++j)
+                    {
+                        const int iw = iw0 + j;
+                        if(iw >= 0 && iw < a.wi)
+                            selc[q][j] = (j & 1) ? 0x07060302u : 0x05040100u;
+                    }
                 }
             }
         }
@@ -361,7 +422,42 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                     continue;
                 const int tw = t % a.tw, rr = t / a.tw;
                 const int th = rr % a.th, img = rr / a.th;
-                const int ih0 = th * 2 - a.ph, iw0 = tw * 2 - a.pw;
+                if constexpr(MODE == 1)
+                {
+                    // The row's 8-element run, element by element, in the aligned load format.
+                    const int c = cp[q] >> 1, rp = cp[q] & 1;
+                    const int iw0 = 2 * tw * M - a.xpw;
+#pragma unroll
+                    for(int r = 0; r < 4; ++r)
+                    {
+                        const int ih = 2 * (th * M + r) + rp - a.xph;
+                        const bool rok = ih >= 0 && ih < a.xh && 2 * cp[q] < cgi;
+                        unsigned hv[8];
+#pragma unroll
+                        for(int j = 0; j < 8; ++j)
+                        {
+                            const int iw = iw0 + j;
+                            const long long e
+                                = ((static_cast<long long>(img) * (a.ci >> 2) + g * (cgi >> 2) + c)
+                                       * a.xh
+                                   + ih)
+                                      * a.xw
+                                  + iw;
+                            hv[j] = __builtin_amdgcn_raw_buffer_load_b16(
+                                rIn,
+                                rok && iw >= 0 && iw < a.xw
+                                    ? static_cast<unsigned>(e * static_cast<long long>(sizeof(T)))
+                                    : static_cast<unsigned>(K5C_OOB),
+                                0,
+                                0);
+                        }
+                        raw[q][r][0] = k5u3{
+                            hv[0] | (hv[1] << 16), hv[2] | (hv[3] << 16), hv[4] | (hv[5] << 16)};
+                        raw[q][r][1] = k5u3{hv[6] | (hv[7] << 16), 0u, 0u};
+                    }
+                    continue;
+                }
+                const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
 #pragma unroll
                 for(int v = 0; v < 2; ++v)
                 {
@@ -408,14 +504,33 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                 unsigned x[4][2][2];
 #pragma unroll
                 for(int r = 0; r < 4; ++r)
-#pragma unroll
-                    for(int v = 0; v < 2; ++v)
+                {
+                    if constexpr(MODE == 1)
                     {
-                        const unsigned s = aligned ? 0u : ((shf[q] >> (2 * r + v)) & 1u) * 16u;
-                        const k5u3 d = raw[q][r][v];
-                        x[r][v][0] = __builtin_amdgcn_alignbit(d.y, d.x, s);
-                        x[r][v][1] = __builtin_amdgcn_alignbit(d.z, d.y, s);
+                        // Realign the row's run, then de-interleave the column phases.
+                        const unsigned s = aligned ? 0u : ((shf[q] >> (2 * r)) & 1u) * 16u;
+                        const k5u3 d = raw[q][r][0], e = raw[q][r][1];
+                        const unsigned a0 = __builtin_amdgcn_alignbit(d.y, d.x, s);
+                        const unsigned a1 = __builtin_amdgcn_alignbit(d.z, d.y, s);
+                        const unsigned a2 = __builtin_amdgcn_alignbit(e.x, d.z, s);
+                        const unsigned a3 = __builtin_amdgcn_alignbit(e.y, e.x, s);
+                        x[r][0][0] = __builtin_amdgcn_perm(a1, a0, 0x05040100u);
+                        x[r][0][1] = __builtin_amdgcn_perm(a3, a2, 0x05040100u);
+                        x[r][1][0] = __builtin_amdgcn_perm(a1, a0, 0x07060302u);
+                        x[r][1][1] = __builtin_amdgcn_perm(a3, a2, 0x07060302u);
                     }
+                    else
+                    {
+#pragma unroll
+                        for(int v = 0; v < 2; ++v)
+                        {
+                            const unsigned s = aligned ? 0u : ((shf[q] >> (2 * r + v)) & 1u) * 16u;
+                            const k5u3 d = raw[q][r][v];
+                            x[r][v][0] = __builtin_amdgcn_alignbit(d.y, d.x, s);
+                            x[r][v][1] = __builtin_amdgcn_alignbit(d.z, d.y, s);
+                        }
+                    }
+                }
                 unsigned vout[16];
                 if constexpr(PACKED)
                 {
@@ -458,7 +573,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 #pragma unroll
                             for(int j = 0; j < 4; ++j)
                             {
-                                const bool cok = selc[q][j] != 0x0c0c0c0cu;
+                                // Per channel: mode 1's column phases end at different columns.
+                                const bool cok = ((selc[q][j] >> (16 * v)) & 0xffffu) != 0x0c0cu;
                                 const float e = k5WregHalf<T>(x[r][v][j >> 1], (j & 1) != 0);
                                 f[v][r][j] = cok ? e : 0.0f;
                             }
@@ -573,6 +689,187 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             step(ch, K5Int<0>{});
             if(ch + 1 < nCh)
                 step(ch + 1, K5Int<1>{});
+        }
+
+        if constexpr(M == 3)
+        {
+            // F(3,2) epilogue, per 16-channel slab: each bin row folds to 3 values (Z = M A) in
+            // LDS, then A^T over the 4 rows gives the tile's 3x3. Mode 1 writes y in place; mode
+            // 2 writes virtual channel 4c + p to dx row 2 (3 th + r) + p / 2 - xph, column
+            // 2 (3 tw + s) + p % 2 - xpw.
+            const int eTt = tid % BT;
+            const int eT2 = t0 + eTt;
+            const bool eTile = eT2 < a.tiles;
+            int eTh = 0, eTw = 0, eImg = 0;
+            // Mode 2: the tile's 6 dx rows (bit 2r + pr) and columns (bit j) with a dy element
+            // under the filter (k5LiveBwd2, separable), and the columns inside dx.
+            unsigned eRowLive = 0, eColLive = 0, eColIn = 0;
+            if(eTile)
+            {
+                eTw = eT2 % a.tw;
+                const int r1 = eT2 / a.tw;
+                eTh = r1 % a.th;
+                eImg = r1 / a.th;
+                if constexpr(MODE == 2)
+                {
+                    auto cover = [](int x, int pad, int n) __attribute__((always_inline))
+                    {
+                        const int x0 = (x + pad - 1) >> 1, x1 = (x + pad) >> 1;
+                        return (x0 > 0 ? x0 : 0) <= (x1 < n - 1 ? x1 : n - 1);
+                    };
+#pragma unroll
+                    for(int j = 0; j < 6; ++j)
+                    {
+                        const int h = 6 * eTh + j - a.xph, w = 6 * eTw + j - a.xpw;
+                        eRowLive |= static_cast<unsigned>(cover(h, a.xph, a.hi)) << j;
+                        eColLive |= static_cast<unsigned>(cover(w, a.xpw, a.wi)) << j;
+                        eColIn |= static_cast<unsigned>(w >= 0 && w < a.xw) << j;
+                    }
+                }
+            }
+            constexpr int KWP = C::KWP;
+#pragma unroll
+            for(int m = 0; m < MT; ++m)
+#pragma unroll
+                for(int pg = 0; pg < KW / KWP; ++pg)
+                {
+                    if(kw / KWP == pg)
+                    {
+#pragma unroll
+                        for(int n = 0; n < NT; ++n)
+#pragma unroll
+                            for(int e = 0; e < ACCN; ++e)
+                            {
+                                const float m0 = acc[0][m][n][e], m1 = acc[1][m][n][e],
+                                            m2 = acc[2][m][n][e], m3 = acc[3][m][n][e];
+                                const int kk = (kw % KWP) * 16 + W::dRow(lane, e),
+                                          tt = n * 16 + col;
+                                Zs[((row * 3 + 0) * 16 * KWP + kk) * C::ZS + tt] = m0 + m1 + m2;
+                                Zs[((row * 3 + 1) * 16 * KWP + kk) * C::ZS + tt] = m1 - m2;
+                                Zs[((row * 3 + 2) * 16 * KWP + kk) * C::ZS + tt] = m1 + m2 + m3;
+                            }
+                    }
+                    k5cLdsBarrier();
+                    static_assert(THREADS % BT == 0, "epilogue tile per thread");
+                    // The tile's 3x3 of virtual channel kk (Z rows i, columns s).
+                    auto tileOut = [&](int kk, float(&y)[3][3]) __attribute__((always_inline))
+                    {
+                        float z[4][3];
+#pragma unroll
+                        for(int i = 0; i < 4; ++i)
+#pragma unroll
+                            for(int s = 0; s < 3; ++s)
+                                z[i][s] = Zs[((i * 3 + s) * 16 * KWP + kk) * C::ZS + eTt];
+#pragma unroll
+                        for(int s = 0; s < 3; ++s)
+                        {
+                            y[0][s] = z[0][s] + z[1][s] + z[2][s];
+                            y[1][s] = z[1][s] - z[2][s];
+                            y[2][s] = z[1][s] + z[2][s] + z[3][s];
+                        }
+                    };
+                    if constexpr(MODE == 1)
+                    {
+#pragma unroll
+                        for(int pi = tid; pi < 16 * KWP * BT; pi += THREADS)
+                        {
+                            const int kk = pi / BT;
+                            const int k = k0 + (pg * KWP + kk / 16) * 16 * MT + m * 16 + kk % 16;
+                            if(!eTile || k >= cgo)
+                                continue;
+                            float y[3][3];
+                            tileOut(kk, y);
+                            T* o = out
+                                   + ((static_cast<long long>(eImg) * a.co + g * cgo + k) * a.ho
+                                      + eTh * 3)
+                                         * a.wo
+                                   + eTw * 3;
+#pragma unroll
+                            for(int r = 0; r < 3; ++r)
+#pragma unroll
+                                for(int s = 0; s < 3; ++s)
+                                {
+                                    const int oh = eTh * 3 + r, ow = eTw * 3 + s;
+                                    if(oh < a.ho && ow < a.wo)
+                                        o[r * a.wo + s]
+                                            = K5Elem<T>::store(k5Live(a, oh, ow) ? y[r][s] : 0.0f);
+                                }
+                        }
+                    }
+                    else
+                    {
+                        // A thread takes one real channel's two column phases of one row parity
+                        // pr: dx rows 6 th - xph + 2 r + pr, the tile's 6 contiguous columns
+                        // 6 tw - xpw + 2 s + pc, stored in aligned pairs where both are in range.
+#pragma unroll
+                        for(int pi = tid; pi < 8 * KWP * BT; pi += THREADS)
+                        {
+                            const int pr = (pi / BT) & 1, kq = pi / (2 * BT);
+                            const int kk0 = 4 * kq;
+                            const int k = k0 + (pg * KWP + kk0 / 16) * 16 * MT + m * 16 + kk0 % 16;
+                            if(!eTile || k >= cgo)
+                                continue;
+                            float y[2][3][3];
+                            tileOut(kk0 + 2 * pr, y[0]);
+                            tileOut(kk0 + 2 * pr + 1, y[1]);
+                            const long long plane = (static_cast<long long>(eImg) * (a.co >> 2)
+                                                     + g * (cgo >> 2) + (k >> 2))
+                                                    * a.xh * a.xw;
+                            const int w0 = 6 * eTw - a.xpw;
+#pragma unroll
+                            for(int r = 0; r < 3; ++r)
+                            {
+                                const int h = 6 * eTh + 2 * r + pr - a.xph;
+                                if(h < 0 || h >= a.xh)
+                                    continue;
+                                const bool hLive = (eRowLive >> (2 * r + pr)) & 1u;
+                                const long long rowOff
+                                    = plane + static_cast<long long>(h) * a.xw + w0;
+                                T* o = out + rowOff;
+                                unsigned short v[6];
+#pragma unroll
+                                for(int j = 0; j < 6; ++j)
+                                {
+                                    const bool live = hLive && ((eColLive >> j) & 1u);
+                                    v[j] = __builtin_bit_cast(
+                                        unsigned short,
+                                        K5Elem<T>::store(live ? y[j & 1][r][j >> 1] : 0.0f));
+                                }
+                                auto one = [&](int j) __attribute__((always_inline))
+                                {
+                                    if((eColIn >> j) & 1u)
+                                        o[j] = __builtin_bit_cast(T, v[j]);
+                                };
+                                auto two = [&](int j) __attribute__((always_inline))
+                                {
+                                    if(((eColIn >> j) & 3u) == 3u)
+                                        *reinterpret_cast<unsigned*>(o + j)
+                                            = v[j] | (static_cast<unsigned>(v[j + 1]) << 16);
+                                    else
+                                    {
+                                        one(j);
+                                        one(j + 1);
+                                    }
+                                };
+                                if((rowOff & 1) == 0)
+                                {
+                                    two(0);
+                                    two(2);
+                                    two(4);
+                                }
+                                else
+                                {
+                                    one(0);
+                                    two(1);
+                                    two(3);
+                                    one(5);
+                                }
+                            }
+                        }
+                    }
+                    k5cLdsBarrier();
+                }
+            continue;
         }
 
         // Epilogue, one 16-channel slab (m) at a time: Z[i][s][kw * 16 + kk][t] in LDS.

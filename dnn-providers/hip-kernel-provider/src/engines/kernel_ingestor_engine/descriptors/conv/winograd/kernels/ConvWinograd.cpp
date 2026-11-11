@@ -9,10 +9,11 @@
 //                        4 fused VALU with register operands (wave64: gfx9),
 //                        5 fused WMMA / MFMA, cooperative input transform (gfx11 / gfx12 /
 //                          CDNA)
-//   CONV_WINO_DIR        0 forward, 1 backward data (the filter pre-pass only)
+//   CONV_WINO_DIR        0 forward, 1 backward data (the filter pre-pass; and the cooperative
+//                        F(3,2) kernel, which gathers x or scatters dx by phases)
 //   CONV_WINO_LAYOUT     0 NCHW (filter KCRS), 1 NHWC (filter KRSC); fused variants read NCHW
 //   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
-//                        F(3,2) (stride 2 by phases; multipass and fused VALU)
+//                        F(3,2) (stride 2 by phases; multipass, fused VALU and cooperative)
 //   multipass:  CONV_WINO_GEMM_BM, _BN, _BK          the batched-GEMM tile
 //   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN    K-block, tile-block, chunk, micro-tile
 //   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12         K-block, waves, gfx12 operand layout
@@ -157,12 +158,21 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
 #else
 #define CONV_WINO_COOP_ATOM K5CoopWmma<CONV_WINO_T, CONV_WINO_GFX12 != 0>
 #endif
-#define CONV_WINO_COOP_CFG \
-    K5CoopCfg<CONV_WINO_T, CONV_WINO_COOP_ATOM, CONV_WINO_MT, CONV_WINO_NT, CONV_WINO_KW>
+#define CONV_WINO_COOP_CFG         \
+    K5CoopCfg<CONV_WINO_T,         \
+              CONV_WINO_COOP_ATOM, \
+              CONV_WINO_MT,        \
+              CONV_WINO_NT,        \
+              CONV_WINO_KW,        \
+              CONV_WINO_M>
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5CoopFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR, CONV_WINO_COOP_ATOM::KPL>(a);
+    k5CoopFilterTransform<CONV_WINO_T,
+                          K5_NCHW,
+                          CONV_WINO_DIR,
+                          CONV_WINO_COOP_ATOM::KPL,
+                          CONV_WINO_M>(a);
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
@@ -173,7 +183,9 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
                 CONV_WINO_MT,
                 CONV_WINO_NT,
                 CONV_WINO_KW,
-                CONV_WINO_F16MATH != 0>(a);
+                CONV_WINO_F16MATH != 0,
+                CONV_WINO_M,
+                CONV_WINO_DIR>(a);
 }
 
 #endif
