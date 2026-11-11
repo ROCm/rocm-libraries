@@ -2955,3 +2955,33 @@ def test_solution_rejects_adaptive_ntab_on_a_shared_ab_set(
     assert _AGNTAB_RULE in out, out
     _, pairedOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, AdaptiveGemmNTAB=1)
     assert _AGNTAB_RULE not in pairedOut
+
+
+from tensilelite.Components.NonTemporal import tdmAbsentHints
+
+_ABSENT_RULE = "Cache-hint keys on a tensor this problem does not carry"
+
+
+def test_absent_tensor_hints_are_listed_unless_an_unsuffixed_key_copied_them():
+    """A scale the problem does not carry, and dense-problem metadata, are never loaded."""
+    oneScale = dict(_hintState(0, "mx_a"), NonTemporalMXSB=3, TemporalHintMXSB=2,
+                    NonVolatileMXSB=1, TemporalHintMetadata=1)
+    assert sorted(tdmAbsentHints(oneScale)) == [("NonTemporalMXSB", 3), ("NonVolatileMXSB", 1),
+                                                 ("TemporalHintMXSB", 2), ("TemporalHintMetadata", 1)]
+    copied = dict(_hintState(0, "no_mx"), TemporalHint=1, TemporalHintMXSA=1, TemporalHintMXSB=1,
+                  TemporalHintMetadata=1, NonTemporal=2, NonTemporalMetadata=2)
+    assert tdmAbsentHints(copied) == []
+    assert tdmAbsentHints(dict(copied, NonTemporalMXSA=2)) == [("NonTemporalMXSA", 2)]
+    sparse = dict(_hintState(0, "mx"), TemporalHintMetadata=1)
+    sparse["ProblemType"] = dict(sparse["ProblemType"], Sparse=1)
+    assert tdmAbsentHints(sparse) == []
+
+
+def test_solution_rejects_hints_on_an_absent_scale(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ProblemType=_NO_MX,
+                       NonVolatileMXSA=1)
+    assert sol.get("Valid") is False
+    assert _ABSENT_RULE in out and "NonVolatileMXSA=1" in out, out
+    _, copiedOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ProblemType=_NO_MX,
+                           NonVolatile=1)
+    assert _ABSENT_RULE not in copiedOut, copiedOut

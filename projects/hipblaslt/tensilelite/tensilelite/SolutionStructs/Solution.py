@@ -59,7 +59,7 @@ from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTe
                                        tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
                                        tdmGroupingSeparatesAB, tdmPairOnEveryWave, \
                                        tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
-from ..Components.NonTemporal import tdmIgnoredHints
+from ..Components.NonTemporal import tdmAbsentHints, tdmIgnoredHints
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3913,6 +3913,14 @@ class Solution(collections.abc.Mapping):
              "(TDMFuse=%d). Use TDMFuse=1 for per-tensor A/B hints, with each scale's hints equal "
              "to those of the data tensor it rides"
              % (", ".join("%s=%d emits %d" % hint for hint in ignoredHints), tdmFuse))
+      return
+
+    absentHints = tdmAbsentHints(state) if isaInfoMap[isa].asmCaps.get("HasTHModifier", False) else []
+    if absentHints:
+      reject(state, printRejectionReason,
+             "Cache-hint keys on a tensor this problem does not carry (%s): an MX scale without "
+             "MXBlock, or the metadata of a dense problem, is never loaded. Set them to 0"
+             % ", ".join("%s=%d" % hint for hint in absentHints))
       return
 
     # DepthU == -1?
