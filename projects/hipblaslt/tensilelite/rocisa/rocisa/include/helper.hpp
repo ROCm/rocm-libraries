@@ -29,8 +29,14 @@
 
 using IsaVersion = std::array<int, 3>;
 
-std::pair<int, std::string>
-            run(const std::vector<char*>& cmd, const std::string& input, bool debug = false);
+// Runs cmd with input on its stdin and returns its exit code. In debug mode the
+// child writes to our stdout and stderr; otherwise captureOutput returns what it
+// wrote to both (Windows returns it either way).
+std::pair<int, std::string> run(const std::vector<char*>& cmd,
+                                const std::string&        input,
+                                bool                      debug         = false,
+                                bool                      captureOutput = false);
+
 std::string demangle(const char* name);
 std::string nullDevicePath();
 

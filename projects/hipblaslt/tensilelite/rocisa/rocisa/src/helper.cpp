@@ -38,7 +38,10 @@
 // Linker hint to ensure dbghelp.lib is linked.
 #pragma comment(lib, "dbghelp.lib")
 
-std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string& input, bool debug)
+// The child's output is collected whenever it isn't shown (debug), so
+// captureOutput changes nothing here.
+std::pair<int, std::string>
+    run(const std::vector<char*>& cmd, const std::string& input, bool debug, bool)
 {
     struct State
     {
@@ -245,24 +248,103 @@ std::string nullDevicePath()
 
 #else
 // POSIX implementation.
+#include <algorithm>
 #include <cerrno>
+#include <climits>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #ifdef __GNUG__
 #include <cxxabi.h>
 #endif
 
-std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string& input, bool debug)
+namespace
 {
-    // The pipe only feeds `input` to the child's stdin. O_CLOEXEC keeps it out of
-    // children forked concurrently by other threads: an inherited write end would
-    // keep this child's stdin from ever seeing EOF.
+    // Writes input to the child's stdin and, given its output pipe, reads what
+    // it writes until it closes the pipe. Both go through one poll loop, so a
+    // child that writes before it has read all of its input can't fill the
+    // output pipe while we wait to write. Closes both descriptors. Returns 0, or
+    // the errno of a failed poll, when the output may be incomplete.
+    int exchange(int toChild, const std::string& input, int fromChild, std::string& output)
+    {
+        size_t written = 0;
+        int    error   = 0;
+        if(input.empty())
+        {
+            close(toChild);
+            toChild = -1;
+        }
+        while(toChild != -1 || fromChild != -1)
+        {
+            // poll skips the negative descriptors.
+            pollfd fds[2] = {{toChild, POLLOUT, 0}, {fromChild, POLLIN, 0}};
+            // Python's signal handlers don't restart interrupted system calls, so
+            // poll, write, read and waitpid below retry on EINTR. An interrupted
+            // write would leave the child an empty or partial source, which the
+            // assembler may well accept.
+            if(poll(fds, 2, -1) == -1)
+            {
+                if(errno == EINTR)
+                    continue;
+                error = errno;
+                break;
+            }
+            if(toChild != -1 && fds[0].revents)
+            {
+                // Once poll reports the pipe writable, PIPE_BUF bytes go in without blocking.
+                ssize_t n = write(toChild,
+                                  input.data() + written,
+                                  std::min<size_t>(input.size() - written, PIPE_BUF));
+                if(n > 0)
+                    written += static_cast<size_t>(n);
+                // Done, or the child stopped reading; its exit status tells the rest.
+                if(written == input.size() || (n == -1 && errno != EINTR))
+                {
+                    close(toChild);
+                    toChild = -1;
+                }
+            }
+            if(fromChild != -1 && fds[1].revents)
+            {
+                char    buffer[4096];
+                ssize_t n = read(fromChild, buffer, sizeof(buffer));
+                if(n > 0)
+                    output.append(buffer, static_cast<size_t>(n));
+                else if(n == 0 || errno != EINTR)
+                {
+                    close(fromChild);
+                    fromChild = -1;
+                }
+            }
+        }
+        if(toChild != -1)
+            close(toChild);
+        if(fromChild != -1)
+            close(fromChild);
+        return error;
+    }
+}
+
+std::pair<int, std::string>
+    run(const std::vector<char*>& cmd, const std::string& input, bool debug, bool captureOutput)
+{
+    // The pipes feed input to the child's stdin and, with captureOutput, bring
+    // back its stdout and stderr. O_CLOEXEC keeps them out of children forked
+    // concurrently by other threads: an inherited write end would keep this
+    // child's stdin, or our end of its output, from ever seeing EOF.
     int   p[2];
+    int   o[2] = {-1, -1};
     pid_t pid;
     if(pipe2(p, O_CLOEXEC) == -1)
     {
+        throw std::runtime_error("cmd failed!");
+    }
+    if(captureOutput && pipe2(o, O_CLOEXEC) == -1)
+    {
+        close(p[0]);
+        close(p[1]);
         throw std::runtime_error("cmd failed!");
     }
 
@@ -271,17 +353,31 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     {
         close(p[0]);
         close(p[1]);
+        if(captureOutput)
+        {
+            close(o[0]);
+            close(o[1]);
+        }
         throw std::runtime_error("fork failed!");
     }
     if(pid == 0)
     {
-        // dup2 clears FD_CLOEXEC on the new descriptor; the pipe fds themselves are
-        // closed by execvp.
-        if(p[0] == STDIN_FILENO)
-            fcntl(p[0], F_SETFD, 0);
-        else
-            dup2(p[0], STDIN_FILENO);
-        if(!debug)
+        // dup2 clears FD_CLOEXEC on the new descriptor, but a descriptor that
+        // already has the right number keeps it, so clear it there instead. The
+        // pipe fds themselves are closed by execvp.
+        auto redirect = [](int fd, int target) {
+            if(fd == target)
+                fcntl(fd, F_SETFD, 0);
+            else
+                dup2(fd, target);
+        };
+        redirect(p[0], STDIN_FILENO);
+        if(captureOutput)
+        {
+            redirect(o[1], STDOUT_FILENO);
+            redirect(o[1], STDERR_FILENO);
+        }
+        else if(!debug)
         {
             // Discard the child's output; only its exit status is reported.
             int devNull = open("/dev/null", O_WRONLY);
@@ -302,21 +398,10 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     else
     {
         close(p[0]);
-        // Python's signal handlers don't restart interrupted system calls, so
-        // both calls below retry on EINTR. An interrupted write would leave the
-        // child an empty or partial source, which the assembler may well accept.
-        for(size_t written = 0; written < input.size();)
-        {
-            ssize_t n = write(p[1], input.data() + written, input.size() - written);
-            if(n == -1 && errno == EINTR)
-                continue;
-            if(n == -1)
-                break; // The child stopped reading; its exit status tells the rest.
-            written += static_cast<size_t>(n);
-        }
-        close(p[1]);
-        // The child's output is not captured (see above), so there is no result text.
+        if(captureOutput)
+            close(o[1]);
         std::string result;
+        int         lost   = exchange(p[1], input, o[0], result);
         int         status = 0;
         pid_t       waited;
         do
@@ -325,6 +410,8 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
         // Without the child's status there is no answer; status 0 would read as accepted.
         if(waited == -1)
             throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
+        if(lost)
+            throw std::runtime_error(std::string("poll failed: ") + std::strerror(lost));
         // Like a shell, a child killed by a signal is 128 + the signal, so it can't
         // read as an exit code (SIGHUP would otherwise look like a rejection, 1).
         int rcode = status;

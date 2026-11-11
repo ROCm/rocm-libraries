@@ -21,10 +21,14 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,6 +43,40 @@ inline std::optional<std::vector<std::string>>& rejectedEmptySourceCommand()
 {
     thread_local std::optional<std::vector<std::string>> cmd;
     return cmd;
+}
+
+// The probes of the ISA that initAsmCaps is probing on the calling thread: the
+// answers so far, keyed by command line and source, and the probes asked for
+// since the last batch.
+struct ProbeSession
+{
+    using Key = std::pair<std::vector<std::string>, std::string>;
+
+    bool                active = false;
+    std::map<Key, bool> answers;
+    std::vector<Key>    pending;
+};
+
+inline ProbeSession& probeSession()
+{
+    thread_local ProbeSession session;
+    return session;
+}
+
+// 127 means the assembler could not be executed at all (e.g. missing binary),
+// which is not the same as the assembler rejecting this particular ISA/instruction.
+inline std::pair<int, std::string> runAssembler(std::vector<std::string> cmd,
+                                                const std::string&       source,
+                                                bool                     debug,
+                                                bool                     captureOutput = false)
+{
+    std::vector<char*> args(cmd.size());
+    std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
+    args.push_back(nullptr);
+    auto result = run(args, source, debug, captureOutput);
+    if(result.first == 127)
+        throw std::runtime_error("Assembler not found or not executable: " + cmd[0]);
+    return result;
 }
 
 inline bool tryAssembler(const IsaVersion&  isaVersion,
@@ -65,10 +103,21 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     // debug prints every run, so it runs them all.
     if(!debug && rejectedEmptySourceCommand() == cmd)
         return false;
-    std::vector<char*> args(cmd.size());
-    std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
-    args.push_back(nullptr);
-    auto [rcode, result] = run(args, asmString, debug);
+    auto&             session = probeSession();
+    ProbeSession::Key key{cmd, asmString};
+    if(session.active)
+    {
+        if(auto found = session.answers.find(key); found != session.answers.end())
+            return found->second;
+        // Answered with the next batch, after which initAsmCaps asks again. The
+        // empty source runs now: it decides whether anything else needs to.
+        if(!asmString.empty())
+        {
+            session.pending.push_back(std::move(key));
+            return false;
+        }
+    }
+    auto [rcode, result] = runAssembler(cmd, asmString, debug);
 
     if(debug)
     {
@@ -82,15 +131,82 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
         std::cout << "return code: " << rcode << std::endl;
     }
 
-    // 127 means the assembler could not be executed at all (e.g. missing binary),
-    // which is not the same as the assembler rejecting this particular ISA/instruction.
-    if(rcode == 127)
-        throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
     if(rcode == 1 && asmString.empty())
         rejectedEmptySourceCommand() = cmd;
-    if(rcode != 0)
-        return false;
-    return true;
+    if(session.active)
+        session.answers[key] = rcode == 0;
+    return rcode == 0;
+}
+
+// The source lines named by "<stdin>:LINE:COLUMN: error:" diagnostics, or nothing
+// if the output reports an error without naming a line.
+inline std::optional<std::set<int>> rejectedLines(const std::string& output)
+{
+    const std::string  prefix = "<stdin>:";
+    std::set<int>      lines;
+    std::istringstream in(output);
+    for(std::string line; std::getline(in, line);)
+    {
+        if(line.find("error:") == std::string::npos)
+            continue;
+        if(line.compare(0, prefix.size(), prefix) != 0)
+            return std::nullopt;
+        char* rest;
+        long  number = std::strtol(line.c_str() + prefix.size(), &rest, 10);
+        if(*rest != ':')
+            return std::nullopt;
+        std::strtol(rest + 1, &rest, 10);
+        if(std::string(rest).compare(0, 8, ": error:") != 0)
+            return std::nullopt;
+        lines.insert(static_cast<int>(number));
+    }
+    return lines;
+}
+
+// Answers the calling thread's pending probes with one assembler run per command
+// line: its sources go in as one file, and since the assembler reports every
+// line it rejects, a probe is rejected exactly when one of its lines is. A batch
+// that can't be read that way, because it failed without naming a line or ended
+// other than by accepting (0) or rejecting (1), is probed one source at a time.
+inline void answerPendingProbes()
+{
+    auto&                                                        session = probeSession();
+    std::map<std::vector<std::string>, std::vector<std::string>> batches;
+    for(auto& [cmd, source] : session.pending)
+    {
+        auto& sources = batches[cmd];
+        if(std::find(sources.begin(), sources.end(), source) == sources.end())
+            sources.push_back(source);
+    }
+    session.pending.clear();
+
+    for(auto& [cmd, sources] : batches)
+    {
+        std::string                      input;
+        std::vector<std::pair<int, int>> spans; // first and last line of each source
+        for(auto& source : sources)
+        {
+            int first = spans.empty() ? 1 : spans.back().second + 1;
+            spans.emplace_back(first, first + std::count(source.begin(), source.end(), '\n'));
+            input += source + "\n";
+        }
+        auto [rcode, output] = runAssembler(cmd, input, false, true);
+        auto rejected        = rejectedLines(output);
+        bool readable
+            = rejected && ((rcode == 0 && rejected->empty()) || (rcode == 1 && !rejected->empty()));
+        for(size_t i = 0; i < sources.size(); ++i)
+        {
+            bool accepted;
+            if(readable)
+            {
+                auto line = rejected->lower_bound(spans[i].first);
+                accepted  = line == rejected->end() || *line > spans[i].second;
+            }
+            else
+                accepted = runAssembler(cmd, sources[i], false).first == 0;
+            session.answers[{cmd, sources[i]}] = accepted;
+        }
+    }
 }
 
 inline int getMaxCnt(const IsaVersion&  isaVersion,
@@ -110,12 +226,10 @@ inline int getMaxCnt(const IsaVersion&  isaVersion,
 }
 
 inline std::map<std::string, int>
-    initAsmCaps(const IsaVersion& isaVersion, const std::string& assemblerPath, bool isDebug)
+    probeAsmCaps(const IsaVersion& isaVersion, const std::string& assemblerPath, bool isDebug)
 {
     // Determine assembler capabilities by testing short instructions sequences
     std::map<std::string, int> rv;
-    // Each probe set finds out for itself whether the assembler rejects this ISA.
-    rejectedEmptySourceCommand().reset();
     rv["SupportedISA"] = tryAssembler(isaVersion, assemblerPath, "", isDebug);
 
     rv["HasPartialOOB"] = checkNotInList(isaVersion, {{12,5,0}});
@@ -583,6 +697,36 @@ inline std::map<std::string, int>
     rv["SupportedSource"] = true;
 
     return rv;
+}
+
+inline std::map<std::string, int>
+    initAsmCaps(const IsaVersion& isaVersion, const std::string& assemblerPath, bool isDebug)
+{
+    // Each probe set finds out for itself whether the assembler rejects this ISA.
+    rejectedEmptySourceCommand().reset();
+    // debug prints every run, so it runs them one at a time.
+    if(isDebug)
+        return probeAsmCaps(isaVersion, assemblerPath, isDebug);
+
+    struct SessionGuard
+    {
+        ProbeSession& session;
+        ~SessionGuard()
+        {
+            session = ProbeSession{};
+        }
+    } guard{probeSession()};
+    guard.session.active = true;
+    // Until a probe is answered it counts as rejected, so each pass asks for the
+    // probes it reaches on the answers so far, and the passes end when one asks
+    // for nothing new.
+    for(;;)
+    {
+        auto rv = probeAsmCaps(isaVersion, assemblerPath, isDebug);
+        if(guard.session.pending.empty())
+            return rv;
+        answerPendingProbes();
+    }
 }
 
 inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
