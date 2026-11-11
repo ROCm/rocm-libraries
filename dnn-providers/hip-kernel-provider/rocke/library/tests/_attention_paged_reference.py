@@ -8,6 +8,8 @@ them as the kernel's dtype, and compare the output with an FP32 numpy
 reference over the same rounded values.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import numpy.typing as npt
 
@@ -22,20 +24,38 @@ __all__ = [
 ]
 
 
+_HALF_DTYPES = ("fp16", "bf16")
+
+
+def _require_half_dtype(dtype: str) -> None:
+    """Refuse a ``dtype`` these helpers have no host encoding for, so an fp8 or
+    fp32 caller fails here instead of being read as bf16."""
+    if dtype not in _HALF_DTYPES:
+        raise ValueError(
+            f"paged attention host encoding failed - dtype={dtype!r}, "
+            f"expected one of {_HALF_DTYPES}"
+        )
+
+
 def encode_half(values: npt.ArrayLike, dtype: str) -> np.ndarray:
     """float32 ``values`` as the kernel's ``dtype`` host array: float16 for
-    ``"fp16"``, raw uint16 bit patterns for ``"bf16"``."""
+    ``"fp16"``, raw uint16 bit patterns for ``"bf16"``. Any other ``dtype``
+    raises ``ValueError``."""
+    _require_half_dtype(dtype)
     values = np.asarray(values, dtype=np.float32)
     return values.astype(np.float16) if dtype == "fp16" else f32_to_bf16(values)
 
 
 def decode_half(array: np.ndarray, dtype: str) -> np.ndarray:
-    """The float32 values of an ``encode_half`` array."""
+    """The float32 values of an ``encode_half`` array. Any ``dtype`` other than
+    ``"fp16"`` or ``"bf16"`` raises ``ValueError``."""
+    _require_half_dtype(dtype)
     return array.astype(np.float32) if dtype == "fp16" else bf16_to_f32(array)
 
 
 def round_to_half(values: npt.ArrayLike, dtype: str) -> np.ndarray:
-    """float32 ``values`` rounded to ``dtype``: what the kernel reads back."""
+    """float32 ``values`` rounded to ``dtype``: what the kernel reads back. Any
+    ``dtype`` other than ``"fp16"`` or ``"bf16"`` raises ``ValueError``."""
     return decode_half(encode_half(values, dtype), dtype)
 
 
