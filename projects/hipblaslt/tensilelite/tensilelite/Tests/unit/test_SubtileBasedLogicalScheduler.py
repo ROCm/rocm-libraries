@@ -5155,6 +5155,200 @@ class TestHalfDisjointLds:
         assert not s.halfDisjoint
 
 
+class TestHalfDisjointBalance:
+    """Even an even-split half-disjoint body by reading late wrap A tiles in partition 0.
+
+    A wrap tile loads in the first half and an own tile in the second, so with more wrap
+    tiles the first half carries more loads and fewer reads. Moving the last k wrap A tiles
+    to partition 0 moves k loads to the second half and their reads to the first.
+    """
+
+    @staticmethod
+    def _plan(**kw):
+        from tensilelite.Components.Subtile.LogicalScheduler import planHalfDisjointBalance
+        args = dict(firstHalfMfmas=40, secondHalfMfmas=40, wrapTiles=10, ownTiles=8,
+                    wrapA=(0, 4), partitionZeroB=6, grAmn=1, lrAmn=1,
+                    wrapLoads=10, ownLoads=8, loadsPerATile=1)
+        args.update(kw)
+        return planHalfDisjointBalance(**args)
+
+    @staticmethod
+    def _lrs(parts):
+        return [
+            [(lr.tensor, lr.mtIteration, lr.tiles.tileId_start, lr.tiles.tileId_end,
+              lr.targetPartition, lr.balancedCurrentCell)
+             for slot in slots for lr in slot.lrs if lr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    def test_plan_moves_the_last_wrap_tiles(self):
+        assert self._plan() == (3, 4)
+        assert self._plan(wrapTiles=12, ownTiles=8, wrapLoads=12, wrapA=(0, 4),
+                          partitionZeroB=8) == (2, 4)
+
+    @pytest.mark.parametrize("kw", [
+        dict(firstHalfMfmas=48, secondHalfMfmas=32),
+        dict(wrapTiles=8, wrapLoads=8),
+        dict(wrapTiles=9, wrapLoads=9),
+        dict(ownTiles=12, ownLoads=12),
+    ])
+    def test_plan_needs_an_even_split_and_a_wrap_surplus(self, kw):
+        assert self._plan(**kw) is None
+
+    def test_plan_skips_short_halves(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import BALANCE_MIN_HALF_MFMAS
+        n = BALANCE_MIN_HALF_MFMAS
+        assert self._plan(firstHalfMfmas=n - 4, secondHalfMfmas=n - 4) is None
+        assert self._plan(firstHalfMfmas=n, secondHalfMfmas=n) == (3, 4)
+
+    def test_plan_keeps_loads_from_overshooting(self):
+        # One A tile costs two loads: 7/6 would become 5/8.
+        assert self._plan(wrapLoads=7, ownLoads=6, loadsPerATile=2) is None
+        assert self._plan(wrapLoads=8, ownLoads=4, loadsPerATile=2) == (3, 4)
+
+    def test_plan_keeps_the_first_use_lead(self):
+        # Tile 1 feeds partition-0 MFMA 1 * 2 = 2 < BALANCE_MIN_LEAD_MFMAS.
+        assert self._plan(wrapA=(0, 2), partitionZeroB=2) is None
+        assert self._plan(wrapA=(3, 4)) is None
+
+    def test_plan_keeps_atoms_whole(self):
+        assert self._plan(grAmn=2) is None
+        assert self._plan(lrAmn=2) is None
+        assert self._plan(wrapTiles=12, wrapLoads=12, grAmn=2) == (2, 4)
+
+    def test_8x10_reads_a3_in_partition_zero(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        parts = s.build(stop_after=Pass.LR)
+        assert s.halfDisjoint
+        assert self._lrs(parts) == [
+            [("A", 0, 3, 4, 0, True), ("B", 0, 6, 10, 1, False)],
+            [("A", 0, 4, 8, 2, False)],
+            [],
+            [("A", 1, 0, 3, 0, False), ("B", 1, 0, 6, 0, False)],
+        ]
+        first = sorted(k for k, h in s._halfLoadHalf.items() if h == 0)
+        assert first == [("A", t) for t in range(3)] + [("B", t) for t in range(6)]
+        assert len(s._halfLoadHalf) - len(first) == 9
+
+    def test_even_tile_counts_stay_unbalanced(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.LR)
+        assert not any(flag for row in self._lrs(parts) for *_, flag in row)
+
+    def test_flag_off_leaves_the_wrap_prefetch(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(
+            8, 10, grB=1, grSA=8, size_n=6, half_disjoint=False))
+        parts = s.build(stop_after=Pass.LR)
+        assert not any(flag for row in self._lrs(parts) for *_, flag in row)
+
+    def test_8x10_full_pipeline_emits(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        assert s.build() is not None
+        assert s.halfDisjoint
+        s.build_ngll()
+        s.build_nll()
+
+
+class TestDeferBalancedCurrentCellWait:
+    """Balanced current-cell reads leave the partition-0 prefix and wait at their consumer."""
+
+    @staticmethod
+    def _parts():
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB128, MXMFMAInstruction, SBarrier, SWaitCnt
+
+        def mfma(a, comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(a, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def read(dst, src, comment):
+            return DSLoadB128(dst=vgpr(dst, 4), src=vgpr(src),
+                              ds=DSModifiers(offset=0), comment=comment)
+
+        def drain(comment):
+            return SWaitCnt(dscnt=0, comment=comment)
+
+        return mfma, read, drain, SBarrier, SWaitCnt
+
+    def _body(self, other_prefix_read=False):
+        from rocisa.code import Module
+        mfma, read, drain, SBarrier, SWaitCnt = self._parts()
+        body = [drain("head drain"), SWaitCnt(vlcnt=18, comment="top vmcnt"),
+                SBarrier(comment="top barrier"),
+                read(108, 2, "A tile 3 low; balanced current-cell"),
+                read(112, 4, "A tile 3 high; balanced current-cell")]
+        if other_prefix_read:
+            body.append(read(200, 7, "B current"))
+        body += [drain("prefix drain"), mfma(20, "M0")]
+        for n in range(1, 10):
+            if n in (2, 3, 6):
+                body.append(read(40 + 4 * n, 7, f"next {n}"))
+            body.append(mfma(108 if n == 8 else 20, f"M{n}"))
+        module = Module("MAINLOOP")
+        for inst in body:
+            module.add(inst)
+        return module
+
+    def test_barrier_returns_behind_m0_and_reads_spread(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module = self._body()
+        assert deferBalancedCurrentCellWait(module)
+        assert _labels(module) == [
+            "head drain", "M0", "top vmcnt", "top barrier", "M1", "next 2", "M2",
+            "A tile 3 low; balanced current-cell", "next 3", "M3",
+            "A tile 3 high; balanced current-cell", "M4",
+            "M5", "next 6", "M6", "M7", "Wait for balanced current-cell LR", "M8", "M9"]
+        wait = [x for x in module.flatitems()
+                if getattr(x, "comment", "") == "Wait for balanced current-cell LR"]
+        assert wait[0].dscnt == 1
+
+    def test_drain_stays_for_other_prefix_reads(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module = self._body(other_prefix_read=True)
+        assert deferBalancedCurrentCellWait(module)
+        labels = _labels(module)
+        assert labels[:6] == ["head drain", "top vmcnt", "top barrier", "B current",
+                              "prefix drain", "M0"]
+        assert labels.index("Wait for balanced current-cell LR") == labels.index("M8") - 1
+        assert labels.index("A tile 3 low; balanced current-cell") > labels.index("M1")
+
+    def test_no_marked_reads_is_a_no_op(self):
+        from rocisa.code import Module
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        mfma, read, drain, SBarrier, SWaitCnt = self._parts()
+        module = Module("MAINLOOP")
+        for inst in [SBarrier(comment="b"), read(108, 2, "plain"), drain("d"), mfma(108, "M0")]:
+            module.add(inst)
+        before = _labels(module)
+        assert not deferBalancedCurrentCellWait(module)
+        assert _labels(module) == before
+
+    def test_reads_stay_ahead_of_an_address_write(self):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module = self._body()
+        items = list(module.flatitems())
+        swap = VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A")
+        at = _labels(module).index("M1")
+        items.insert(at, swap)
+        rebuilt = Module("MAINLOOP")
+        for inst in items:
+            rebuilt.add(inst)
+        assert deferBalancedCurrentCellWait(rebuilt)
+        labels = _labels(rebuilt)
+        assert labels.index("A tile 3 low; balanced current-cell") < labels.index("swap A")
+
+
 class TestFirstConsumerRank:
     """The emit-identity rank is the MFMA ordinal of the next consumer.
 

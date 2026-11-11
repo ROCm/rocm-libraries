@@ -24,6 +24,7 @@ from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
     SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
+    LocalReadInstruction,
 )
 from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
@@ -327,6 +328,10 @@ class InstructionEmitter:
                     reads = emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled,
                         mt=placement.mtIteration, k_index=k)
+                    if getattr(placement, "balancedCurrentCell", False):
+                        for inst in reads.flatitems():
+                            if isinstance(inst, LocalReadInstruction):
+                                inst.comment = f"{inst.comment}; balanced current-cell"
                     instruction_metadata.extend(
                         self._local_read_group_metadata(
                             reads.flatitems(), placement, tileId))

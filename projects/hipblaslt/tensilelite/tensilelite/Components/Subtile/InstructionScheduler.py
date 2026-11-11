@@ -5020,3 +5020,142 @@ def relaxWaitGrForOutstandingStores(module):
             keep = min(inst.vlcnt, len(outstanding))
             del outstanding[:len(outstanding) - keep]
     return module
+
+
+
+BALANCED_CURRENT_CELL_NOTE = "balanced current-cell"
+_BALANCED_READ_LEAD_MFMAS = 4
+
+
+def _lgkmCovers(wait, issuedAfter) -> bool:
+    """Whether wait retires an LDS op with issuedAfter LDS/scalar ops behind it."""
+    if getattr(wait, "waitAll", False):
+        return True
+    if wait.dscnt < 0 and wait.kmcnt < 0:
+        return False
+    count = (0 if wait.dscnt < 0 else wait.dscnt) + (0 if wait.kmcnt < 0 else wait.kmcnt)
+    return issuedAfter >= count
+
+
+def _blocksBalancedRead(inst, read) -> bool:
+    """Whether a balanced current-cell read may not issue after inst."""
+    if _isBarrier(inst) or isinstance(inst, LocalWriteInstruction):
+        return True
+    readSpans = _instructionRegisterSpans(read)
+    sources = [span for role, span in readSpans if role == "src"]
+    dests = [span for role, span in readSpans if role == "dst"]
+    for role, span in _instructionRegisterSpans(inst):
+        if role == "dst" and any(_spansOverlap(span, x) for x in sources + dests):
+            return True
+        if role == "src" and any(_spansOverlap(span, x) for x in dests):
+            return True
+    return False
+
+
+def _gapOpenForRead(gap) -> bool:
+    """Whether a gap may take one more ds_read: no load, barrier or wait, at most one
+    ds_read and three instructions already."""
+    work = [x for x in gap if not isinstance(x, TextBlock)]
+    if any(_isBufferLoad(x) or _isBarrier(x) or _isWaitCnt(x) for x in work):
+        return False
+    return sum(1 for x in work if _isDsRead(x)) <= 1 and len(work) <= 3
+
+
+def deferBalancedCurrentCellWait(module) -> bool:
+    """Spread balanced current-cell reads behind the first MFMA and drain them at their consumer.
+
+    The cell scheduler issues partition 0's current-cell reads ahead of its first MFMA,
+    followed by an lgkmcnt(0). The balanced reads (planHalfDisjointBalance) feed a later
+    MFMA of partition 0, so they leave that prefix. When nothing else needs the
+    drain, it goes, and the top vmcnt wait and barrier return behind the first MFMA. Each
+    read then takes the earliest gap past the barrier gap and the gap after it that has no
+    load, barrier or wait, at most one other ds_read and three instructions, while staying
+    ahead of any write to its registers, of the next barrier, and _BALANCED_READ_LEAD_MFMAS
+    MFMAs ahead of its consumer (else the first slot behind the barrier). One lgkm wait goes
+    right before the first MFMA reading their destinations, unless an earlier wait retires
+    them. Returns False, leaving the module alone, when the body does not have that shape.
+    """
+    items = list(module.flatitems())
+    first = next((k for k, inst in enumerate(items) if _isMfma(inst)), None)
+    reads = [k for k, inst in enumerate(items)
+             if _isDsRead(inst)
+             and BALANCED_CURRENT_CELL_NOTE in (getattr(inst, "comment", "") or "")]
+    if first is None or not reads or reads[-1] > first:
+        return False
+    readInsts = [items[k] for k in reads]
+    if any(_blocksBalancedRead(items[k], read)
+           for read in readInsts for k in range(reads[0] + 1, first)
+           if k not in reads):
+        return False
+    barrier = max((k for k in range(reads[0]) if _isBarrier(items[k])), default=None)
+    if barrier is None:
+        return False
+    rest = [inst for k, inst in enumerate(items) if k not in reads]
+    first = rest.index(items[first])
+    barrier = rest.index(items[barrier])
+    waits = [k for k in range(barrier + 1, first) if _isWaitCnt(rest[k])]
+    pending = any(_incrementsLgkm(rest[k]) for k in range(barrier + 1, first))
+    start = barrier
+    while start > 0 and _isWaitCnt(rest[start - 1]):
+        start -= 1
+    syncs = [k for k in range(start, barrier + 1)
+             if _isBarrier(rest[k]) or rest[k].vlcnt >= 0]
+    drained = any(_isWaitCnt(rest[k]) and _isFullLgkmDrain(rest[k]) for k in range(start, barrier))
+    if (not pending and drained and len(waits) == 1 and _isFullLgkmDrain(rest[waits[0]])
+            and rest[waits[0]].vlcnt < 0 and rest[waits[0]].vscnt < 0
+            and not any(rest[k].dscnt >= 0 or rest[k].kmcnt >= 0
+                        for k in syncs if _isWaitCnt(rest[k]))):
+        moved = set(syncs) | set(waits)
+        head = [inst for k, inst in enumerate(rest[:first]) if k not in moved]
+        rest = head + [rest[first]] + [rest[k] for k in syncs] + rest[first + 1:]
+        first = len(head)
+    bodyStart = first + 1
+    while bodyStart < len(rest) and (_isBarrier(rest[bodyStart]) or (
+            _isWaitCnt(rest[bodyStart]) and rest[bodyStart].vlcnt >= 0)):
+        bodyStart += 1
+    mfmas = [k for k in range(first, len(rest)) if _isMfma(rest[k])]
+    dests = [span for inst in readInsts
+             for role, span in _instructionRegisterSpans(inst) if role == "dst"]
+    consumer = next((n for n, k in enumerate(mfmas) if _readsSpans(rest[k], dests)), None)
+    if consumer is None:
+        return False
+    limit = mfmas[consumer]
+    for read in readInsts:
+        limit = min(limit, next((k for k in range(bodyStart, limit)
+                                 if _blocksBalancedRead(rest[k], read)), limit))
+    if bodyStart > limit:
+        return False
+    firstGap = 2 if bodyStart > first + 1 else 1
+    slots = {}
+    for read in readInsts:
+        at = bodyStart
+        for n in range(firstGap + 1, consumer - _BALANCED_READ_LEAD_MFMAS + 1):
+            lo = max(mfmas[n - 1] + 1, bodyStart)
+            if lo > limit:
+                break
+            if _gapOpenForRead(rest[lo:mfmas[n]] + slots.get(lo, [])):
+                at = lo
+                break
+        slots.setdefault(at, []).append(read)
+    out = []
+    for k, inst in enumerate(rest):
+        out.extend(slots.get(k, []))
+        out.append(inst)
+    last = max(out.index(read) for read in readInsts)
+    issuedAfter, scalar = 0, False
+    for k in range(last + 1, len(out)):
+        inst = out[k]
+        if _isWaitCnt(inst) and not scalar and _lgkmCovers(inst, issuedAfter):
+            break
+        if _isWaitCnt(inst) and _isFullLgkmDrain(inst):
+            break
+        if _isMfma(inst) and _readsSpans(inst, dests):
+            out.insert(k, SWaitCnt(
+                dscnt=0 if scalar else min(issuedAfter, _MAX_LGKM_COUNT),
+                comment="Wait for balanced current-cell LR"))
+            break
+        scalar = scalar or isinstance(inst, SMemLoadInstruction)
+        if _incrementsLgkm(inst):
+            issuedAfter += 1
+    module.setItems(out)
+    return True

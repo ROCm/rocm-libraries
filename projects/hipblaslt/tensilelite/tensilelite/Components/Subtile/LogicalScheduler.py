@@ -204,6 +204,43 @@ class MFMATileRange:
         return f"[{self.tileId_start}-{self.tileId_end - 1}]"
 
 
+BALANCE_MIN_LEAD_MFMAS = 6
+BALANCE_MIN_HALF_MFMAS = 28
+
+
+def planHalfDisjointBalance(firstHalfMfmas, secondHalfMfmas, wrapTiles, ownTiles,
+                            wrapA, partitionZeroB, grAmn, lrAmn,
+                            wrapLoads, ownLoads, loadsPerATile):
+    """A tiles [ts, te) to move from the wrap prefetch to partition 0, or None.
+
+    Each moved tile shifts its loads from the first half to the second and its reads the other
+    way, so only an even MFMA split can balance both; k = (wrapTiles - ownTiles) // 2 tiles
+    then even the reads (to within one tile).  The move must also leave the first-half and
+    second-half load counts (wrapLoads, ownLoads; loadsPerATile per moved tile) strictly
+    closer, since A and B tiles need not cost the same number of buffer loads.  The last k
+    wrap A tiles move, and the range must keep the A load and read atoms whole and leave
+    every moved tile at least BALANCE_MIN_LEAD_MFMAS partition-0 MFMAs before its first use
+    (tile j feeds MFMA j * partitionZeroB).  Halves shorter than BALANCE_MIN_HALF_MFMAS are
+    left alone: the move adds issue work to the barrier gap, which only pays off when the
+    long load stream of a long half is what stalls.
+    """
+    if firstHalfMfmas != secondHalfMfmas or firstHalfMfmas < BALANCE_MIN_HALF_MFMAS:
+        return None
+    k = (wrapTiles - ownTiles) // 2
+    if k <= 0:
+        return None
+    shifted = k * loadsPerATile
+    if abs(wrapLoads - ownLoads - 2 * shifted) >= abs(wrapLoads - ownLoads):
+        return None
+    start, end = wrapA
+    ts = end - k
+    if ts <= start or (ts - start) * partitionZeroB < BALANCE_MIN_LEAD_MFMAS:
+        return None
+    if (ts - start) % grAmn or (ts - start) % lrAmn or k % grAmn or k % lrAmn:
+        return None
+    return ts, end
+
+
 # ── Config ──────────────────────────────────────────────────
 
 @dataclass
@@ -654,6 +691,7 @@ class LRPlacement(Emittable):
     partition: int = 0         # which partition this LR belongs to
     targetPartition: int = 0   # partition that consumes the loaded operands
     mustPrecedeP0Overwrite: bool = False  # hoisted read protecting p0 future write
+    balancedCurrentCell: bool = False  # half-disjoint balance: wrap tile read in its own first half
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -1210,12 +1248,93 @@ class LogicalScheduler:
         if cfg.dualPeriodScale:
             self._place_scale_LRs_epoch(partitions)
 
+        self._balance_half_disjoint_reads(partitions)
         self._halfLoadHalf = self._plan_half_disjoint_loads(partitions)
+        if self._halfLoadHalf is None:
+            self._unbalance_half_disjoint_reads(partitions)
         if cfg.uniformPgrEpoch and self._halfLoadHalf is None:
             self._move_uniform_epoch_p0_overwrite_reads(partitions)
 
         self._partitions = partitions
         return partitions
+
+    def _balance_half_disjoint_reads(self, partitions):
+        """Read late partition-0 A tiles in their own first half instead of the wrap prefetch.
+
+        On the half-disjoint path a tile's load and its read sit in opposite halves: a tile the
+        previous iteration's wrap prefetch reads (second half) loads in the first half, one read
+        in its own first half loads in the second.  The first half therefore issues one load per
+        wrap tile and the second one per own tile, whatever the MFMA split.  With an even split
+        and more wrap tiles than own ones, moving k = (wrap - own) // 2 A tiles from the wrap
+        prefetch to a read in partition 0 itself evens both: k loads move to the second half and
+        2 * k reads per tile to the first.  The read stays legal there: its LDS data has been
+        visible since the previous mid barrier, its registers are free after the previous
+        iteration's last reader, and its overwriting load now issues after the mid barrier.
+        Only A tiles with at least BALANCE_MIN_LEAD_MFMAS partition-0 MFMAs ahead of their first
+        use move (partition MFMAs run A-outer, so A tile j of the partition first feeds MFMA
+        j * nB).
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        if not (cfg.halfDisjointLds and cfg.uniformPgrEpoch and cfg.dualPeriodScale
+                and cfg.numSubIterK == 1 and numP >= 2 and numP % 2 == 0
+                and cfg.grPlacement == GRPlacementStrategy.SPREAD
+                and not self._is_multi_du()):
+            return
+        half = numP // 2
+        ranges = [self._partition_tile_range(pi) for pi in range(numP)]
+        mfmas = [(r['A'][1] - r['A'][0]) * (r['B'][1] - r['B'][0]) for r in ranges]
+        perTile = {t: max(1, int(cfg.grLoadsPerAtom.get(t, 1))) / g.mn
+                   for t, g in (('A', cfg.grA), ('B', cfg.grB))}
+        wrapTiles, ownTiles, wrapLoads, ownLoads, wrapA = 0, 0, 0, 0, None
+        for pi, slots in enumerate(partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    if lr.tensor not in ('A', 'B'):
+                        continue
+                    n = lr.tiles.tileId_end - lr.tiles.tileId_start
+                    if lr.mtIteration == 1 and pi >= half:
+                        wrapTiles += n
+                        wrapLoads += n * perTile[lr.tensor]
+                        if lr.tensor == 'A':
+                            wrapA = lr
+                    elif lr.mtIteration == 0 and pi < half and lr.targetPartition != pi:
+                        ownTiles += n
+                        ownLoads += n * perTile[lr.tensor]
+                    else:
+                        return
+        if wrapA is None:
+            return
+        moved = planHalfDisjointBalance(
+            sum(mfmas[:half]), sum(mfmas[half:]), wrapTiles, ownTiles,
+            (wrapA.tiles.tileId_start, wrapA.tiles.tileId_end),
+            ranges[0]['B'][1] - ranges[0]['B'][0], cfg.grA.mn, cfg.lrA.mn,
+            wrapLoads, ownLoads, perTile['A'])
+        if moved is None:
+            return
+        ts, te = moved
+        k = wrapA.tiles
+        wrapA.tiles = MFMATileRange(k.subIterK_start, k.subIterK_end, k.tileId_start, ts)
+        partitions[0][0].lrs.insert(0, LRPlacement(
+            tensor='A', mtIteration=0,
+            tiles=MFMATileRange(k.subIterK_start, k.subIterK_end, ts, te),
+            subIterK_slot=0, partition=0, targetPartition=0, balancedCurrentCell=True))
+
+    def _unbalance_half_disjoint_reads(self, partitions):
+        """Undo _balance_half_disjoint_reads when the half-disjoint plan is not taken."""
+        moved = [lr for lr in partitions[0][0].lrs if lr.balancedCurrentCell]
+        if not moved:
+            return
+        lr = moved[0]
+        partitions[0][0].lrs.remove(lr)
+        for slot in partitions[-1]:
+            for wrap in slot.lrs:
+                if (wrap.tensor == 'A' and wrap.mtIteration == 1
+                        and wrap.tiles.tileId_end == lr.tiles.tileId_start):
+                    t = wrap.tiles
+                    wrap.tiles = MFMATileRange(t.subIterK_start, t.subIterK_end,
+                                               t.tileId_start, lr.tiles.tileId_end)
+                    return
 
     def _plan_half_disjoint_loads(self, partitions):
         """Return the load half of every A/B GR atom, or None.
@@ -1247,7 +1366,7 @@ class LogicalScheduler:
                     if lr.tensor not in ('A', 'B'):
                         continue
                     if (lr.mtIteration == 0 and pi < half
-                            and lr.targetPartition != pi):
+                            and (lr.targetPartition != pi or lr.balancedCurrentCell)):
                         loadHalf = 1
                     elif lr.mtIteration == 1 and pi >= half:
                         loadHalf = 0
@@ -5331,6 +5450,7 @@ class LogicalScheduler:
         """
         from .InstructionScheduler import (
             appendC1ScaleShadowReads,
+            deferBalancedCurrentCellWait,
             dropEntryScaleReads,
             guardExitOverwriteReread,
             insertPrefetchedScaleCopies,
@@ -5668,6 +5788,7 @@ class LogicalScheduler:
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
         if self.halfDisjoint and label.startswith("MAINLOOP"):
+            deferBalancedCurrentCellWait(module)
             issueSaluFirst(module)
             keepValuBehindLeader(module)
             # C1 still places scale refreshes in C0, so C0 is final only here.
