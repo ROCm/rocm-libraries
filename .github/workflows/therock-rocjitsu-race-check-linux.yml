@@ -4,11 +4,12 @@
 # emulation, so the workflow uses the CPU build runner instead of consuming GPU
 # test capacity.
 #
-# The workload input selects what runs:
-#   smoke         Two small hipBLASLt and TensileLite workloads, through
-#                 run_rocjitsu_hipblaslt_race_check.sh.
-#   random-gemms  Fixed-seed sampled GEMMs for the emulated target, through
-#                 run_rocjitsu_hipblaslt_gemm_race_checks.sh.
+# The workload input selects what runs, through
+# run_rocjitsu_hipblaslt_gemm_race_checks.sh:
+#   random-gemms  Fixed-seed sampled GEMMs for the emulated target.
+#
+# The small per-PR race checks are a TheRock test (hipblaslt-rocjitsu-race),
+# not part of this workflow.
 #
 # Each run emulates one GPU target: amdgpu_families selects the TheRock
 # artifact group to fetch and amdgpu_targets the target whose kernels and
@@ -33,7 +34,7 @@ on:
         default: ""
       workload:
         type: string
-        default: smoke
+        default: random-gemms
       workers:
         description: "Concurrent GEMMs for GEMM workloads"
         type: number
@@ -96,7 +97,7 @@ jobs:
         uses: ./.github/actions/ci-env
 
   rocjitsu-race-check-linux:
-    name: ${{ inputs.workload == 'smoke' && format('rocjitsu race check ({0})', inputs.amdgpu_families) || format('rocjitsu GEMM race checks ({0}, {1})', inputs.workload, inputs.amdgpu_families) }}
+    name: rocjitsu GEMM race checks (${{ inputs.workload }}, ${{ inputs.amdgpu_families }})
     needs: ci-env
     # This job is advisory. Failures remain visible, but continue-on-error keeps
     # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
@@ -127,11 +128,6 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # The smoke driver uses these values for its two timeout commands. Both are
-      # shorter than the job timeout, so reports can still upload after a
-      # workload timeout.
-      RACE_TIMEOUT_SECONDS: "180"
-      TENSILELITE_TIMEOUT_SECONDS: "420"
       GEMM_WORKLOAD: ${{ inputs.workload }}
       GEMM_WORKERS: ${{ inputs.workers }}
       # GEMM workloads bound each emulated command separately. Hosted cases take
@@ -204,35 +200,18 @@ jobs:
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
 
-      # setup_test_environment installs only TheRock's common test
-      # requirements. Install TensileLite's requirements explicitly from its
-      # test artifact instead of relying on them to remain in that shared
-      # environment.
-      - name: Install TensileLite test requirements
-        if: inputs.workload == 'smoke'
-        run: |
-          python ./build_tools/install_additional_requirements.py \
-            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
-
-      - name: Run rocjitsu race check
-        if: inputs.workload == 'smoke'
-        timeout-minutes: 75
-        run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
-
       # hipblaslt_gentest.py converts each GEMM's YAML input for the bench.
       - name: Install bench input conversion dependency
-        if: inputs.workload != 'smoke'
         run: uv pip install PyYAML
 
       - name: Run rocjitsu GEMM race checks
-        if: inputs.workload != 'smoke'
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh
 
       # The driver adds per-stage timings to the job summary; the workload's
       # summary.md adds totals, per-case timings, slowest cases and failures.
       - name: Show GEMM race check results
-        if: ${{ always() && inputs.workload != 'smoke' }}
+        if: ${{ always() }}
         run: |
           if [ -f "race-reports/${GEMM_WORKLOAD}/summary.md" ]; then
             cat "race-reports/${GEMM_WORKLOAD}/summary.md" >> "$GITHUB_STEP_SUMMARY"
@@ -246,6 +225,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: ${{ inputs.workload == 'smoke' && format('rocjitsu-race-reports-{0}', inputs.amdgpu_families) || format('rocjitsu-{0}-{1}', inputs.workload, inputs.amdgpu_families) }}
+          name: rocjitsu-${{ inputs.workload }}-${{ inputs.amdgpu_families }}
           path: race-reports/
           if-no-files-found: ignore
