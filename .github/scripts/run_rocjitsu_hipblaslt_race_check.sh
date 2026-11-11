@@ -201,8 +201,7 @@ echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 echo "PYTHONPATH=${PYTHONPATH}"
 
-TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH}/.info/version")" \
-  "${TENSILELITE_PYTHON}" -m pip install \
+"${TENSILELITE_PYTHON}" -m pip install \
     --disable-pip-version-check --force-reinstall --no-deps --no-build-isolation \
     "${TENSILELITE_ROOT}"
 "${TENSILELITE_PYTHON}" -m tensilelite_configure_client --ensure-client "${TENSILELITE_CLIENT}"
