@@ -137,7 +137,10 @@ SDK_VERSION_BY_OP: dict[str, str] = {
 # for. A launch() enqueues only kernels and async memsets on the handle's stream -- the
 # SDPA head-pad copies, the dropout-mask and RNG-dump kernels, sdpa_aiw's fill kernel and the
 # zero-bias and by-value-seed memsets included -- with no allocation, no synchronization
-# and no host read of device data.
+# and no host read of device data. The SDPA backward engines (sdpa_bwd_merged,
+# sdpa_bwd_split) enqueue only kernels and async seed-word memsets on the handle's stream;
+# the integration graph-capture lanes verify them on gfx950 (merged, split) and gfx11
+# (split).
 GRAPH_CAPTURE_OPS: tuple[str, ...] = (
     "rmsnorm",
     "rmsnorm_bwd",
@@ -147,6 +150,8 @@ GRAPH_CAPTURE_OPS: tuple[str, ...] = (
     "sdpa_rdna",
     "sdpa_rdna_decode",
     "sdpa_aiw",
+    "sdpa_bwd_merged",
+    "sdpa_bwd_split",
 )
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
@@ -1263,26 +1268,27 @@ class SplitEngine:
         self.symbols = f"hipkernel.{self.stem}"
 
     def documents(self) -> dict[str, dict[str, Any]]:
-        return {
-            f"{self.stem}.ued.json": {
-                "version": SLOTTED_VERSION,
-                "id": _uuid(f"ued/{SPLIT_ENGINE}"),
-                "name": f"hipkernel:{self.stem}",
-                # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
-                # tensors, non-default alignment and ragged offset multipliers.
-                "sdk_version": SDK_VERSION_BY_OP[SPLIT_ENGINE],
-                "graph_match": {"native": f"{self.symbols}.graph_match"},
-                "shared_workspace": SPLIT_SHARED_WORKSPACE,
-                "slots": [
-                    {
-                        "name": slot.slot,
-                        "metadata": slot.kmd_id,
-                        "knobs": knob_fields(slot.op, slot.fields),
-                    }
-                    for slot in self.slot_ops.values()
-                ],
-            }
+        ued: dict[str, Any] = {
+            "version": SLOTTED_VERSION,
+            "id": _uuid(f"ued/{SPLIT_ENGINE}"),
+            "name": f"hipkernel:{self.stem}",
+            # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
+            # tensors, non-default alignment and ragged offset multipliers.
+            "sdk_version": SDK_VERSION_BY_OP[SPLIT_ENGINE],
+            "graph_match": {"native": f"{self.symbols}.graph_match"},
+            "shared_workspace": SPLIT_SHARED_WORKSPACE,
+            "slots": [
+                {
+                    "name": slot.slot,
+                    "metadata": slot.kmd_id,
+                    "knobs": knob_fields(slot.op, slot.fields),
+                }
+                for slot in self.slot_ops.values()
+            ],
         }
+        if SPLIT_ENGINE in GRAPH_CAPTURE_OPS:
+            ued["behavior_notes"] = ["supports_graph_capture"]
+        return {f"{self.stem}.ued.json": ued}
 
 
 def build_documents(

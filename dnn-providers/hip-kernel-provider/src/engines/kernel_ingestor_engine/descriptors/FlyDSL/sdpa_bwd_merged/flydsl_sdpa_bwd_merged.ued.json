@@ -26,5 +26,8 @@
     "block_kv",
     "block_m",
     "block_q"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

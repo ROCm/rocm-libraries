@@ -722,6 +722,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 ${_hkp_bwd_category_args}
             )
             message(STATUS "Created ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration-check target")
+            _hkp_add_graph_capture_lane(
+                ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}
+                "${_hkp_bwd_external_ctest}"
+                ENGINE_NAME    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    "${_hkp_bwd_toml}"
+                ${_hkp_bwd_shard_args}
+            )
         endforeach()
     endforeach()
 

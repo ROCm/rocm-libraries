@@ -182,7 +182,8 @@ def test_a_field_in_two_sets_is_refused(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 ROCKE_DESCRIPTORS = DESCRIPTORS.parent / "rocKE"
-# Verified on gfx950 (CDNA engines), gfx1152 and gfx1201 (RDNA engines). The note is
+# Verified on gfx950 (CDNA engines, SDPA backward merged and split), gfx11 (SDPA backward
+# split), gfx1152 and gfx1201 (RDNA engines). The note is
 # engine-level (the host dispatch path is arch-independent), so it covers every target an
 # engine ships for.
 CAPTURE_SAFE = {
@@ -194,6 +195,8 @@ CAPTURE_SAFE = {
     "sdpa_rdna",
     "sdpa_rdna_decode",
     "sdpa_aiw",
+    "sdpa_bwd_merged",
+    "sdpa_bwd_split",
     "gfx950_attention_dense",
     "gfx1151_wmma_attention",
     "gfx1151_wmma_attention_decode",
