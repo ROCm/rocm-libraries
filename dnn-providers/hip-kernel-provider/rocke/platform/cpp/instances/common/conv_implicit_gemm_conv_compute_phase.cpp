@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
@@ -112,24 +113,14 @@ rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
      * containing l % 16, and lane l supplies the (l % 8)-th K row of the run:
      *     col  = mn_base + ((l % 16) / 8) * 8
      *     row0 = k_base  + (l / 16) * n + (l % 8)
-     * Verified on silicon. Mirrors the wave32 branch of _tr_frag() in Python. */
+     * Verified on silicon. Mirrors the wave32 branch of
+     * _BoundConvKOuterFragmentReader.fragment() in Python; the lane map itself
+     * is the shared rocke_conv_tr_lane_offsets32. */
     if(wave_size == 32)
     {
-        /* Python binds ONE const_i32(16) and ONE const_i32(8) and reuses each;
-         * emitting a duplicate here consumes an extra SSA id and drifts every
-         * later number. Keep the op order identical to the Python branch. */
-        rocke_value_t* c16w = rocke_b_const_i32(b, 16);
-        rocke_value_t* c8w = rocke_b_const_i32(b, 8);
-        rocke_value_t* lane_mod16 = rocke_b_mod(b, lane, c16w);
-        rocke_value_t* col_grp = rocke_b_div(b, lane_mod16, c8w);
-        rocke_value_t* col_off = rocke_b_mul(b, col_grp, c8w);
-        rocke_value_t* col32 = rocke_b_add(b, mn_base, col_off);
-        rocke_value_t* lane_div16 = rocke_b_div(b, lane, c16w);
-        rocke_value_t* c_n32 = rocke_b_const_i32(b, n);
-        rocke_value_t* row_mul32 = rocke_b_mul(b, lane_div16, c_n32);
-        rocke_value_t* lane_mod8 = rocke_b_mod(b, lane, c8w);
-        rocke_value_t* row_sum32 = rocke_b_add(b, row_mul32, lane_mod8);
-        rocke_value_t* row032 = rocke_b_add(b, k_base, row_sum32);
+        rocke_value_t* col32;
+        rocke_value_t* row032;
+        rocke_conv_tr_lane_offsets32(b, lane, n, mn_base, k_base, &col32, &row032);
         rocke_value_t* out32 = NULL;
         for(int r = 0; r < n / 8; ++r)
         {

@@ -413,8 +413,10 @@ regeneration drops it (and the regeneration gate's byte compare fails):
 Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
 `gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
 is the generator's native UHD (so that role also needs `heuristic: native`). Values are
-non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
-per slot. Without `engine.heuristics` every output is unchanged.
+what promote writes: a non-empty list of distinct UUIDs for every role -- one model per
+ranking metric for `sort_kernel_catalog` and `predict_engine`, and the candidate generators
+(`predict_applicable_kernels`) for future JIT spaces. A slotted engine refuses the key: its
+rankers are per slot. Without `engine.heuristics` every output is unchanged.
 
 ## Output
 
@@ -929,11 +931,18 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
-  native_symbols_from: hipkernel:Other   # optional: the descriptors name that engine's
-                                  # registered native symbols instead of minting this
-                                  # engine's own (e.g. a test-only engine serving a
-                                  # subset of a shipped catalog). Ignore the emitted
-                                  # native stub then: nothing registers it.
+  native_symbols_from: hipkernel.other_engine   # optional: another engine's dotted
+                                  # native-symbol namespace, stated exactly as that
+                                  # engine registers it (`<namespace>.<its slug>`, any
+                                  # '-' folded to '_'; e.g.
+                                  # hipkernel.gfx950_attention_unified_2d). The
+                                  # descriptors name its registered native symbols
+                                  # instead of minting this engine's own (e.g. a
+                                  # test-only engine serving a subset of a shipped
+                                  # catalog). Only an engine's own namespace is derived,
+                                  # so a borrowed one never guesses at the other
+                                  # engine's `slug`. Ignore the emitted native stub
+                                  # then: nothing registers it.
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
       gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.

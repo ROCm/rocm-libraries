@@ -382,6 +382,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         ident = self._ident()
         fields = asdict(ident)
         del fields["prefetch_addr"]
+        del fields["prefetch_global_regs"]  # the register-prefetch K loop, off
         del fields["ws_replicas"]
         del fields["uniform_k_decode"]  # dgrad's flag, likewise hash-neutral
         del fields["patch"]  # dgrad's patch store, likewise

@@ -361,6 +361,30 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
+    struct GL2PrefetchSAddrCheckPacket
+    {
+        bool   tluA;
+        bool   tluB;
+        size_t depthUA;
+        size_t depthUB;
+        // MacroTile times ClusterDim on that side: the cluster prefetches every
+        // tile it consumes, not just its own.
+        size_t clusterMT0;
+        size_t clusterMT1;
+        // MX scales: MXBlock 0 means the kernel prefetches no scales on that side.
+        size_t depthU;
+        size_t matrixInstK;
+        size_t mxBlockA;
+        size_t mxBlockB;
+        size_t mxBlockFreeA;
+        size_t mxBlockFreeB;
+        // Sparse metadata, prefetched only when it is loaded through TDM.
+        bool   metadata;
+        bool   tluMetadata;
+        size_t depthUMetadata;
+        size_t clusterMTMetadata;
+    };
+
     // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
     enum class TileProcessingStrategy { None, DataParallel, StreamK };
     enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
@@ -1672,4 +1696,6 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                      stream,
+                                                    GL2PrefetchSAddrCheckPacket const& st);
 } // namespace TensileLite

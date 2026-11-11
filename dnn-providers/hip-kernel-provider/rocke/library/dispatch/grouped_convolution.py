@@ -60,11 +60,13 @@ WHAT DISPATCH DECIDES
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
 * **Selection** among admitted instances, with no ``ranker``, is the first one
-  by a deterministic key (the instance's label, sorted; see
-  ``_instance_sort_key``) -- a registered list is a set, not a priority order,
-  so its on-disk position carries no meaning. That is a placeholder policy
-  until measured rankings exist; the ``ranker`` hook of
-  :func:`dispatch_conv_grouped` is where one plugs in.
+  in the direction's list order. dgrad's list is a set
+  (:func:`instance_list_is_set`): the first by a deterministic key (the
+  instance's label, sorted; see ``_instance_sort_key``), its on-disk position
+  carrying no meaning. fwd's list is a priority order: the first in the
+  file's own hand-tuned order. That is a placeholder policy until measured
+  rankings exist; the ``ranker`` hook of :func:`dispatch_conv_grouped` is
+  where one plugs in.
 
 Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
@@ -164,6 +166,7 @@ __all__ = [
     "dispatch_conv_grouped",
     "dispatch_conv_grouped_all",
     "format_instance_list",
+    "instance_list_is_set",
     "iter_dispatch_conv_grouped_all",
     "launch_plan_for",
     "load_instance_list",
@@ -976,8 +979,11 @@ class InstanceListError(ValueError):
 class InstanceList:
     """One instance list file: ``grouped_convolution_instances/<arch>_<dir>.json``.
 
-    ``identities`` are a set, no position meaning carried; stored sorted by
-    label (:func:`_instance_sort_key`) for diff stability. ``defaults`` are field values every
+    ``identities`` are a set for a direction where
+    :func:`instance_list_is_set` (dgrad), no position meaning carried, stored
+    sorted by label (:func:`_instance_sort_key`) for diff stability; for any
+    other direction (fwd) they are a priority order, the file's own order
+    deciding the default pick. ``defaults`` are field values every
     record shares unless it spells its own (``llvm_flavor``, ``wave_size``);
     a record spells only the fields that leave the family's baseline
     (:func:`kernels.conv.kernel_label.field_baseline`) or ``defaults``,
@@ -1090,9 +1096,10 @@ class InstanceList:
 
 
 def load_instance_list(path: Path) -> InstanceList:
-    """The instance list in ``path``: a set of identities, in on-disk order
-    (canonically sorted by :func:`_instance_sort_key` when the file was
-    written by :func:`format_instance_list`, but not re-sorted on load).
+    """The instance list in ``path``: its identities in on-disk order, never
+    re-sorted on load. For a set direction (:func:`instance_list_is_set`,
+    dgrad) that order carries no meaning (a canonically written file is
+    sorted by :func:`_instance_sort_key`); for fwd it is the priority order.
 
     Fails on a broken list rather than skipping an entry: a record that does
     not spell an identity of the list's arch and direction, or one that repeats an
@@ -1154,10 +1161,12 @@ def _json(value: object) -> str:
 
 
 def _instance_sort_key(identity: KernelIdentity) -> str:
-    """The deterministic key the registered instances are a set under.
+    """The deterministic key a set direction's instances are ordered by.
 
-    A list's ``identities`` carry no selection meaning by position; a
-    record's file order is irrelevant. ``label()`` is already the canonical,
+    In a set direction (:func:`instance_list_is_set`, dgrad) a list's
+    ``identities`` carry no selection meaning by position; a record's file
+    order is irrelevant. (fwd's list is a priority order and is never sorted
+    by this key.) ``label()`` is already the canonical,
     unique, lossless name every identity has (used for dedup in
     :func:`load_instance_list`), so it doubles as the sort key that makes the
     on-disk file -- and the default (no ``ranker``) pick among admitted
@@ -1177,7 +1186,7 @@ def format_instance_list(lst: InstanceList) -> str:
     not erase."""
     identities = (
         sorted(lst.identities, key=_instance_sort_key)
-        if lst.direction in _SET_SEMANTICS_DIRECTIONS
+        if instance_list_is_set(lst.direction)
         else lst.identities
     )
     lines = ["{"]
@@ -1210,6 +1219,18 @@ def format_instance_list(lst: InstanceList) -> str:
 _SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
 
 
+def instance_list_is_set(direction: str) -> bool:
+    """Whether ``direction``'s instance lists are a set rather than a
+    priority order.
+
+    True (dgrad): file position carries no meaning; the lists are written and
+    read sorted by label (:func:`_instance_sort_key`). False (fwd): the file's
+    own order is the default-pick priority, which every reader and writer
+    keeps.
+    """
+    return direction in _SET_SEMANTICS_DIRECTIONS
+
+
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
     """The registered instances of ``(arch, direction)``.
 
@@ -1228,7 +1249,7 @@ def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]
             f"{path.name}: declares {lst.arch} {lst.direction}, "
             f"registered as {arch} {direction}"
         )
-    if direction in _SET_SEMANTICS_DIRECTIONS:
+    if instance_list_is_set(direction):
         return tuple(sorted(lst.identities, key=_instance_sort_key))
     return tuple(lst.identities)
 
@@ -1284,9 +1305,9 @@ CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
 CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
 
 # Registered instances by name; a candidate's spec does not depend on the request.
-# ``priority`` here is the index in _read_instance_list's deterministic
-# (sorted-by-label) order, not file position -- a list is a set on disk; see
-# _instance_sort_key.
+# ``priority`` here is the index in _read_instance_list's order: sorted by
+# label for a set direction (dgrad; see _instance_sort_key), the file's own
+# order for fwd.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
     for _priority, _identity in enumerate(_read_instance_list(_arch, _direction)):

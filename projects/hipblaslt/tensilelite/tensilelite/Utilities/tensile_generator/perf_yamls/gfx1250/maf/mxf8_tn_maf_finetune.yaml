@@ -68,6 +68,7 @@ BenchmarkProblems:
         - InitCIterWmma: [1]
         - SwInstructionPrefetch: [0]
         - PrefetchGL2: [2]
+        - PrefetchGL2SAddr: [True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]

@@ -1358,6 +1358,112 @@ def _intersection_cases():
     return out
 
 
+def _dense_tile_cases():
+    """Tile-multiple lengths (S_q a multiple of 256, S_kv of 64): the shapes the
+    dense prefill kernels take without an on-chip ragged path, which gfx942's
+    dense kernel does not have."""
+    out = []
+    add = out.append
+    masks = {
+        "none": ((), {}),
+        "tl": ((5,), _mask("tl")),
+        "window": (
+            (11, 5),
+            {"diagonal": "top_left", "left_bound": 63, "right_bound": 0},
+        ),
+    }
+    for d in (64, 128):
+        for dtype in ("fp16", "bf16"):
+            for name, (reqs, kw) in masks.items():
+                add(
+                    _mk(
+                        f"dense_tile_{name}_d{d}_{dtype}",
+                        reqs=(1, 9) + reqs,
+                        dtype=dtype,
+                        d=d,
+                        s_q=256,
+                        **kw,
+                    )
+                )
+            add(
+                _mk(
+                    f"dense_tile_tl_lse_d{d}_{dtype}",
+                    reqs=(1, 9, 5, 7),
+                    dtype=dtype,
+                    d=d,
+                    s_q=256,
+                    emit_lse=True,
+                    **_mask("tl"),
+                )
+            )
+    for name, (reqs, kw) in masks.items():
+        if name != "none":
+            add(_mk(f"dense_tile_{name}_s512", reqs=reqs, b=1, h_q=4, s_q=512, **kw))
+    # Rows past s_kv + 63 see no key: O = 0, LSE = -inf.
+    add(
+        _mk(
+            "dense_tile_window_q_gt_kv_fully_masked",
+            reqs=(11, 7),
+            b=1,
+            h_q=4,
+            s_q=512,
+            s_kv=256,
+            emit_lse=True,
+            diagonal="top_left",
+            left_bound=63,
+            right_bound=0,
+        )
+    )
+    add(_mk("dense_tile_none_q_lt_kv", reqs=(8,), s_q=256, s_kv=512))
+    add(_mk("dense_tile_br_q_lt_kv", reqs=(6,), s_q=256, s_kv=512, **_mask("br")))
+    return out
+
+
+def _kv_page_cases():
+    """Full-length packed K/V whose length is a multiple of the 16-row KV page
+    (BSHD, and THD with every sequence at full length): the unified binding
+    hands these to the kernel as its paged cache in place, with no copy."""
+    out = []
+    add = out.append
+    add(
+        _mk(
+            "kv_page_bshd_br",
+            reqs=(2, 8, 6),
+            tier="smoke",
+            layout="bshd",
+            h_k=2,
+            s_q=64,
+            s_kv=128,
+            **_mask("br"),
+        )
+    )
+    add(
+        _mk(
+            "kv_page_bshd_decode_br",
+            reqs=(2, 8, 6, 13),
+            layout="bshd",
+            h_k=2,
+            s_q=1,
+            s_kv=256,
+            emit_lse=True,
+            **_mask("br"),
+        )
+    )
+    add(
+        _mk(
+            "kv_page_thd_full_length_br",
+            reqs=(12, 6),
+            tier="smoke",
+            h_k=2,
+            q_lens=(64, 64),
+            kv_lens=(128, 128),
+            length_mode="ragged",
+            **_mask("br"),
+        )
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # table access
 # ---------------------------------------------------------------------------
@@ -1375,6 +1481,8 @@ _BUILDERS = (
     _bias_cases,
     _intersection_cases,
     _cross_cases,
+    _dense_tile_cases,
+    _kv_page_cases,
 )
 _CACHE = None
 

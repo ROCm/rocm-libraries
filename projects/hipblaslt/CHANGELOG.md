@@ -2,6 +2,17 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.5.0 for ROCm 10.3.0
+
+### Added
+
+* Device scalar alpha on gfx1250 through
+  `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
+  `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
+  `hipblaslt-bench --device_scalar_alpha`. Alpha points to one FP32 value in
+  device memory and beta remains on the host. The descriptor mode requires
+  `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
+
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
 ### Added

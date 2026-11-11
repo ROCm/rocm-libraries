@@ -143,15 +143,16 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
   `dvc pull -r ingestor <path-to-pointer>.dvc`.
 - **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:** if a DVC output is missing or differs from its
   pointer (file size, or file count for a folder), configure prints a warning and the
-  shipped bundle is not packed. Builds and tests still run, so a build without a `dvc pull`
-  works, for example a shallow clone or an ASAN run. A heuristic model is the same, one
-  `model.bin.dvc` pointer each: configure warns, and the pack ships the bundle without
-  that model's UHD and logs `warning: not shipping UHD ...` with the `dvc pull` command.
-  The UED still names the model; the loader reads the dangling id as that role being off
-  for the architecture, so the engine stays available and falls back to its other
-  rankers. A missing model with no `.dvc` pointer beside it is a bug and still fails the
-  pack. Every warning prints the `dvc pull` command. A build that sets
-  `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
+  whole bundle is left out of the pack, git-tracked descriptors included (a UED in git may
+  name a UHD that lives in `heuristics/`). Builds and tests still run, so a build without a
+  `dvc pull` works, for example a shallow clone or an ASAN run. A heuristic model is the
+  same, one `model.bin.dvc` pointer each, but finer-grained: configure warns, and the pack
+  ships the rest of the bundle without that model's UHD and logs `warning: not shipping
+  UHD ...` with the `dvc pull` command. The UED still names the model; the loader reads
+  the dangling id as that role being off for the architecture, so the engine stays
+  available and falls back to its other rankers. A missing model with no `.dvc` pointer
+  beside it is a bug and still fails the pack. Every warning prints the `dvc pull`
+  command. A build that sets `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
   checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
   an error. Release builds should set it.
 - **`OFF`:** rocKE descriptors are not consumed. DVC is not needed.

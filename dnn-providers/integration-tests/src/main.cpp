@@ -24,6 +24,8 @@
 #include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
+#include "harness/CaptureReport.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
@@ -205,6 +207,15 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark-warmup")
             .scan<'i', int>()
             .help("Untimed executions before timing (default 30). Requires --benchmark.");
+        parser.add_argument("--graph-capture")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After a bundle test verifies the engine's outputs, capture the same "
+                  "execution into a HIP graph on the handle's stream, replay it a few "
+                  "times into reset outputs and verify the replayed outputs against the "
+                  "same oracle. Engines that do not report the SUPPORTS_GRAPH_CAPTURE "
+                  "behavior note are skipped. Needs a GPU; cannot be combined with "
+                  "--benchmark.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -415,6 +426,31 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        hipdnn_integration_tests::CaptureRequest captureRequest;
+        captureRequest.enabled = parser.get<bool>("--graph-capture");
+        captureRequest.benchmark = benchmarkRequest.enabled;
+        captureRequest.skipGraphValidation = skipGraphValidation;
+        captureRequest.captureBundles = captureDir.has_value();
+        captureRequest.writeSupportClaims = writeSupportClaims;
+        // TestConfig applies the same env override later; it wins over --no-bundles.
+        {
+            const auto bundlesEnv = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+            if(bundlesEnv == "0" || bundlesEnv == "false")
+            {
+                captureRequest.bundlesDisabled = true;
+            }
+            else if(bundlesEnv != "1" && bundlesEnv != "true")
+            {
+                captureRequest.bundlesDisabled = !allowBundles;
+            }
+        }
+        auto graphCapture = hipdnn_integration_tests::resolveCapture(captureRequest);
+        if(graphCapture.error.has_value())
+        {
+            std::cerr << "Error: " << *graphCapture.error << "\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -429,6 +465,7 @@ int main(int argc, char** argv) noexcept
         opts.captureDir = std::move(captureDir);
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
+        opts.graphCapture = graphCapture.settings;
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
@@ -460,8 +497,10 @@ int main(int argc, char** argv) noexcept
         testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
         listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
         // With --gtest_repeat=N the coverage summary's counts are the last iteration's;
-        // the verifier tally printed beside them has to restart with each iteration too.
+        // the verifier and capture tallies printed beside them have to restart with each
+        // iteration too.
         listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
+        listeners.Append(new hipdnn_integration_tests::CaptureTallyIterationReset);
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,
@@ -697,6 +736,33 @@ int main(int argc, char** argv) noexcept
                           << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
                           << ", rejected " << verifiers.rejected << ", none " << verifiers.none
                           << "\n";
+            }
+
+            if(graphCapture.settings.has_value())
+            {
+                const auto captures = hipdnn_integration_tests::CaptureTally::get().counts();
+                std::cerr << "Graph capture: replayed " << captures.replayed << ", mismatch "
+                          << captures.mismatch << ", declined " << captures.declined << ", failed "
+                          << captures.failed << "\n";
+
+                // A pass that never reached the capture step (an enforcement-level rung,
+                // or a C++ graph test) checks nothing --graph-capture asked for. A run
+                // whose passes were all of that kind would otherwise report success
+                // having captured nothing. A run where every test skipped is left
+                // alone: on another architecture an engine-pinned lane skips by design.
+                //
+                // An expected rejection passes for any engine that declines the graph and
+                // has nothing to capture, so it does not count: an engine that serves none
+                // of the selected cases would otherwise fail on the rejection cases alone.
+                const auto rejected = static_cast<int>(verifiers.rejected);
+                const int capturablePasses = passed > rejected ? passed - rejected : 0;
+                if(capturablePasses > 0 && captures.replayed == 0)
+                {
+                    std::cerr << "\nFATAL: --graph-capture is active and " << capturablePasses
+                              << " test(s) passed other than expected rejections, but not one "
+                                 "graph was captured and replayed.\n";
+                    exitCode = 1;
+                }
             }
         }
 

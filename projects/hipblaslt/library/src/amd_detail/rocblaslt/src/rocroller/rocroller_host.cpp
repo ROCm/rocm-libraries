@@ -304,22 +304,35 @@ rocblaslt_status
                                          std::shared_ptr<GemmKernel>& kernel)
 {
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
-    try
+
+    // Kernels whose LDS ops leave diverging waitcnt states at the KLoop labels are rejected by
+    // rocRoller; regenerating them with the LDS queue drained at those labels makes the states
+    // agree. Kernels that build on the first attempt are left untouched.
+    for(bool syncLDSQueue : {false, true})
     {
-        kernel = RocRollerGemmKernel::generate(params);
-        rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
-    }
-    catch(const std::exception& e)
-    {
-        std::stringstream msg;
-        msg << "Error building the following kernel:" << std::endl;
-        msg << params->toString() << std::endl;
-        msg << e.what() << std::endl;
-        log_info(__func__, msg.str());
-        return rocblaslt_status_not_implemented;
+        params->syncLDSQueueAtKLoop = syncLDSQueue;
+        try
+        {
+            kernel = RocRollerGemmKernel::generate(params);
+            rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
+            return rocblaslt_status_success;
+        }
+        catch(const std::exception& e)
+        {
+            std::stringstream msg;
+            msg << "Error building the following kernel:" << std::endl;
+            msg << params->toString() << std::endl;
+            msg << e.what() << std::endl;
+            log_info(__func__, msg.str());
+
+            bool waitcntStateDiverged
+                = std::string(e.what()).find("with a different waitcnt state") != std::string::npos;
+            if(syncLDSQueue || !waitcntStateDiverged)
+                return rocblaslt_status_not_implemented;
+        }
     }
 
-    return rocblaslt_status_success;
+    return rocblaslt_status_not_implemented;
 }
 
 /**

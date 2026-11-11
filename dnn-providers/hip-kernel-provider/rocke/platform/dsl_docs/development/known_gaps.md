@@ -327,6 +327,64 @@ cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
 
+## 9. Tiling primitives — Python-only authoring layer
+
+**Subsystem:** `python/rocke/helpers/tiling/` (the fragment verbs, `TileMma`, the MMA catalog
+`traits/data/mma_traits.json` and the backend coverage record `traits/data/backend_coverage.json`)
+
+The tiling package builds kernels in Python only: it has no C++ twin of its verbs, its MMA plan or
+driver, and the C++ engine never reads the catalog or the coverage record.
+
+**What is gated:** the kernels it builds are lowered by both engines. Its MMA and fragment tests
+parametrize over `rocke.tests.engines.ENGINES` and lower each form the package emits with
+`lower_with_engine`: the Python case runs in every lane, and the C++ case, which skips only where the
+`rocke_engine` binding is not built, requires the same IR as the Python engine. They cover 8-bit
+vector loads and LDS accesses, packed sub-byte words, tf32 held as i32, and one single-instruction
+tile for every dense instruction the coverage record classes `issuable`, the family `TileMma`
+drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The tensor_transforms tests lower
+with `lower_with_both_engines`, which skips the whole case without the binding. The coverage record
+itself is measured with the Python lowerer at one LLVM flavor.
+
+**What unblocks a C++ twin:** a decision to port the authoring layer; until then, a new form the
+package emits gets a lowering test parametrized over `ENGINES`.
+
+---
+
+## 9. gfx942 4-warp GQA attention body — Python-only kernel builder
+
+**Subsystem:** `library/kernels/gfx942/attention_tiled_2d.py`
+(`build_gfx942_4warp_gqa`, `_build_gfx942_4warp_gqa_lean`),
+`library/kernels/common/attention_unified.py` (`_gfx942_4warp_route`)
+
+The gfx942 4-warp GQA paged-attention body (the D192/D256 bf16 lean body and
+the D128 sliding-window head-fold) has **no C++ twin**. The C selector mirrors
+the cohort predicate (`d256_gfx942_fast` in
+`instances/common/attention_unified_selectors.cpp` picks tile size 32 for it),
+but `instances/gfx942/attention_tiled_2d*.cpp` builds only the default tiled 2D
+body; nothing in `platform/cpp/` emits the 4-warp V-transpose kernel.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_gfx942_4warp_gqa` (lean D192/D256 body and D128 fold) | `cpp/instances/gfx942/` |
+| The `_gfx942_4warp_route` launch geometry (BLOCK_M 128, 256 threads) | the C selectors return a tile size only |
+
+**What is gated:** the Python IR of each body is pinned at every
+`GOLDEN_FLAVORS` flavor by
+`platform/tests/golden/rocke_representative_ir_sha256/attention_d256.json`
+(`attention_d256/gfx942/4warp_gqa`, `4warp_gqa_d192`) and
+`attention_d128_swa.json` (`attention_d128_swa/gfx942/4warp_gqa_fold`), and the
+C++ *lowerer* is checked byte-identical against the Python lowerer on the
+`attention_d256` family
+(`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`).
+A body fix therefore re-blesses those goldens and needs no C++ change; the
+row-bound, block-table and keyless-row fixes of #13115 are one such change.
+
+**Why deferred:** the same owner decision as §6 and §8 — per-family C++ builder
+mirrors are not maintained for attention bodies added after the port.
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine.
+
 ---
 
 ## Structural debt (not per-family gaps)

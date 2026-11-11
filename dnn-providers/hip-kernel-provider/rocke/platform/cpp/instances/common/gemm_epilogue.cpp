@@ -304,7 +304,7 @@ void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
     if(!rocke_ir_builder_ok(b))
         return;
 
-    c_map = rocke_mmaop_c_layout(op, b);
+    c_map = rocke_mma_op_dst_layout(op, b);
 
     for(mi = 0; mi < mfmas_m; ++mi)
     {

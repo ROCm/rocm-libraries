@@ -242,9 +242,8 @@ struct _rocsparselt_matmul_descr
             delete matrix_B;
             delete matrix_C;
             delete matrix_D;
-        }
-        if(gate_residual_desc != nullptr)
             delete gate_residual_desc;
+        }
         is_init = 0;
         matrix_A           = nullptr;
         matrix_B           = nullptr;

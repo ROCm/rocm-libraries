@@ -323,6 +323,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("ClusterAIDMapping")
 
+    # PrefetchGL2Inc64Bit=False (32-bit increment) is the default; naming it would rename every kernel.
+    if not state.get("PrefetchGL2Inc64Bit", False):
+      requiredParametersTemp.discard("PrefetchGL2Inc64Bit")
+    # PrefetchGL2SAddr=False (vgpr-pair address) is the default; naming it would rename every kernel.
+    if not state.get("PrefetchGL2SAddr", False):
+      requiredParametersTemp.discard("PrefetchGL2SAddr")
+
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":
         continue

@@ -757,7 +757,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
         # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
-        # scatter is driven by the op's ``c_layout()`` map, so the emitter is
+        # scatter is driven by the op's ``dst_layout()`` map, so the emitter is
         # already arch-neutral and nothing MFMA-shaped leaks in -- what the
         # other WMMA targets lack is *coverage*, not capability: the parity
         # configs and the on-silicon verification are gfx1250. Admitting it
@@ -3071,14 +3071,13 @@ def _emit_wmma_acc_scatter(
     """WMMA sibling of :func:`_emit_mfma_acc_scatter`.
 
     The wave32 accumulator distributes a warp tile across lanes differently
-    from MFMA, so each slot's ``(row, col)`` comes from the op's ``c_layout()``
-    map instead of lane math. Sharing the traversal keeps the default (global
-    store) and cshuffle (LDS staging) epilogues on one copy of it; the caller's
-    ``per_cell(c_m, c_n, acc_h, i)`` owns the write, and the base offsets say
-    whether the coordinates are block-absolute or warp-relative.
+    from MFMA, so each result slot's ``(row, col)`` comes from the op's
+    ``dst_layout()`` map instead of lane math. The cshuffle epilogue uses this
+    traversal for LDS staging; the caller's ``per_cell(c_m, c_n, acc_h, i)``
+    owns the write, and the base offsets locate the warp within the block.
     """
     t = spec.tile
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     flat = 0
     for mi in range(t.mfmas_per_warp_m):
         atom_m = b.add(m_base_off, b.const_i32(mi * t.warp_tile_m))
