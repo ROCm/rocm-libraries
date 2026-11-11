@@ -26,7 +26,7 @@
 from rocisa.container import TENSORModifiers
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
-from .TDMFuse import tdmHintDeciders, tdmHintSets
+from .TDMFuse import tdmHintDeciders, tdmHintSets, tdmMemberIsLive
 
 
 def _has_temporal_hint(asm_caps):
@@ -138,6 +138,30 @@ def tdmIgnoredHints(state, asm_caps):
                 if given != field:
                     ignored.append((k + tc, given, field))
     return ignored
+
+
+# The tensors an unsuffixed key is copied to (Solution.assignDerivedParameters).
+_UNSUFFIXED_COPIES = {"NonTemporal": ("Metadata",), "TemporalHint": ("MXSA", "MXSB", "Metadata"),
+                      "NonVolatile": ("MXSA", "MXSB", "Metadata")}
+
+
+def tdmAbsentHints(state):
+    """Hint keys of an MX scale or sparse metadata tensor the problem does not carry: ``[(key, value)]``.
+
+    Such a tensor is never loaded, so a nonzero key reaches no instruction. The copy an
+    unsuffixed key makes is not listed: TemporalHint and NonVolatile are copied to every
+    tensor, NonTemporal to A, B, C, D, Gate and Metadata.
+    """
+    absent = [tc for tc in ("MXSA", "MXSB") if not tdmMemberIsLive(state, tc)]
+    if not (state.get("ProblemType") or {}).get("Sparse"):
+        absent.append("Metadata")
+    keys = []
+    for tc in absent:
+        for k in _TDM_HINT_KEYS:
+            value, unsuffixed = state.get(k + tc, 0), state.get(k, -1)
+            if value and not (unsuffixed == value and tc in _UNSUFFIXED_COPIES[k]):
+                keys.append((k + tc, value))
+    return keys
 
 
 def _at_least_device_scope(scope):
