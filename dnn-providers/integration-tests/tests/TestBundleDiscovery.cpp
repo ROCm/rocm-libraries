@@ -489,6 +489,29 @@ TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
     EXPECT_TRUE(result.empty());
 }
 
+TEST_F(TestBundleDiscoveryFixture, FindEmptyLeafFoldersReportsOnlyLeavesWithoutAGraph)
+{
+    const auto emptyLeaf = _tempDir / "conv" / "case_12312";
+    std::filesystem::create_directories(emptyLeaf);
+    const auto metaOnlyLeaf = _tempDir / "conv" / "meta_only";
+    std::filesystem::create_directories(metaOnlyLeaf);
+    std::ofstream(metaOnlyLeaf / "meta.json") << "{}";
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+
+    const auto sweepWithGolden = _tempDir / "quick" / "Op" / "WithGolden";
+    createTemplateSweep(sweepWithGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto sweepWithoutGolden = _tempDir / "quick" / "Op" / "WithoutGolden";
+    createTemplateSweep(sweepWithoutGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}, false}});
+    ASSERT_TRUE(std::filesystem::is_directory(sweepWithGolden / "golden" / "case0"));
+
+    const auto emptyLeaves = detail::findEmptyLeafFolders(_tempDir, findSweepDirectories(_tempDir));
+
+    const std::vector<std::filesystem::path> expected{emptyLeaf, metaOnlyLeaf};
+    EXPECT_EQ(emptyLeaves, expected);
+}
+
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
     auto result = discoverBundles(_tempDir);
@@ -570,6 +593,58 @@ TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
     ASSERT_EQ(files.size(), 2u);
     EXPECT_EQ(files[0].filename(), "m.json");
     EXPECT_EQ(files[1].filename(), "z.json");
+}
+
+TEST(TestHasAncestorIn, MatchesIsDescendantOfOnEveryPair)
+{
+    const std::vector<std::filesystem::path> paths{
+        "a",       "a/b",      "a/b/c",        "a/bc",      "a/bc/d",    "a/./b/c",    "a/../a/b",
+        "a//b/c",  "a/b/",     "a/b/c/",       ".",         "../x/a",    "/r/a",       "/r/a/b",
+        "/r/a/bc", "/r/./a/b", "/r/a/../a/b/", "/r//a/b/c", "/r/a/b/..", "/r/x/../a/b"};
+    const std::vector<std::vector<std::filesystem::path>> ancestorSets{{"a"},
+                                                                       {"a/b"},
+                                                                       {"a/b/"},
+                                                                       {"a/b/c"},
+                                                                       {"a/./b"},
+                                                                       {"a//b"},
+                                                                       {"a/b/../b"},
+                                                                       {"x", "a/bc"},
+                                                                       {".."},
+                                                                       {"."},
+                                                                       {"/"},
+                                                                       {"/r/a"},
+                                                                       {"/r/a/"},
+                                                                       {"/r/a/b", "/r/x"},
+                                                                       {"/r/a/b/c", "a/b"},
+                                                                       {"/r/./a//b/"},
+                                                                       {""}};
+
+    size_t matches = 0;
+    size_t misses = 0;
+    for(const auto& ancestors : ancestorSets)
+    {
+        const auto normalized = detail::lexicallyNormalSet(ancestors);
+        for(const auto& path : paths)
+        {
+            const bool expected
+                = std::any_of(ancestors.begin(), ancestors.end(), [&](const auto& ancestor) {
+                      return isDescendantOf(path, ancestor);
+                  });
+            EXPECT_EQ(detail::hasAncestorIn(path, normalized), expected)
+                << "path '" << path.string() << "', first ancestor '" << ancestors.front().string()
+                << "'";
+            if(expected)
+            {
+                ++matches;
+            }
+            else
+            {
+                ++misses;
+            }
+        }
+    }
+    EXPECT_GT(matches, 0u);
+    EXPECT_GT(misses, 0u);
 }
 
 TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)

@@ -98,6 +98,45 @@ inline bool isDescendantOf(const std::filesystem::path& path, const std::filesys
     return ancestorIt == normalizedAncestor.end();
 }
 
+namespace detail
+{
+
+// True when isDescendantOf(path, a) holds for some `a` whose lexically_normal() form
+// is in `normalizedAncestors`. The cost is one set lookup per level of `path`.
+inline bool hasAncestorIn(const std::filesystem::path& path,
+                          const std::set<std::filesystem::path>& normalizedAncestors)
+{
+    auto current = path.lexically_normal();
+    while(true)
+    {
+        if(normalizedAncestors.count(current) != 0)
+        {
+            return true;
+        }
+        auto parent = current.parent_path();
+        if(parent == current)
+        {
+            break;
+        }
+        current = std::move(parent);
+    }
+    // An empty ancestor has no elements, so isDescendantOf matches every path.
+    return normalizedAncestors.count(std::filesystem::path{}) != 0;
+}
+
+inline std::set<std::filesystem::path>
+    lexicallyNormalSet(const std::vector<std::filesystem::path>& paths)
+{
+    std::set<std::filesystem::path> normalized;
+    for(const auto& path : paths)
+    {
+        normalized.insert(path.lexically_normal());
+    }
+    return normalized;
+}
+
+} // namespace detail
+
 // The directory `path` resolves to, or the path itself when it cannot be resolved,
 // for comparing the directories a walk has descended through.
 inline std::filesystem::path canonicalDirectory(const std::filesystem::path& path)
@@ -389,22 +428,28 @@ inline std::vector<std::filesystem::path>
     return {sweepDirs.begin(), sweepDirs.end()};
 }
 
-// Golden tensor directories under a sweep are leaves by design; they are data,
-// not incomplete bundle folders, so empty-leaf warnings skip them.
-inline bool isSweepGoldenLeaf(const std::filesystem::path& leaf,
-                              const std::vector<std::filesystem::path>& sweepDirs)
+namespace detail
 {
-    return std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
-        return isDescendantOf(leaf, sweepDir / "golden");
-    });
-}
 
-inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
-                                   const std::vector<std::filesystem::path>& sweepDirs)
+// Leaf folders at or under `bundleDir` that hold no graph .json. Sweep roots are
+// not reported. Golden tensor directories under a sweep are leaves by design; they
+// are data, not incomplete bundle folders, so they are not reported either.
+inline std::vector<std::filesystem::path>
+    findEmptyLeafFolders(const std::filesystem::path& bundleDir,
+                         const std::vector<std::filesystem::path>& sweepDirs)
 {
+    std::vector<std::filesystem::path> goldenDirs;
+    goldenDirs.reserve(sweepDirs.size());
+    for(const auto& sweepDir : sweepDirs)
+    {
+        goldenDirs.push_back(sweepDir / "golden");
+    }
+    const auto normalizedGoldenDirs = lexicallyNormalSet(goldenDirs);
+
+    std::vector<std::filesystem::path> emptyLeaves;
     for(const auto& leaf : findLeafDirectories(bundleDir))
     {
-        if(isSweepBundleRoot(leaf) || isSweepGoldenLeaf(leaf, sweepDirs))
+        if(isSweepBundleRoot(leaf) || hasAncestorIn(leaf, normalizedGoldenDirs))
         {
             continue;
         }
@@ -417,8 +462,20 @@ inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
                           });
         if(!hasGraph)
         {
-            HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
+            emptyLeaves.push_back(leaf);
         }
+    }
+    return emptyLeaves;
+}
+
+} // namespace detail
+
+inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
+                                   const std::vector<std::filesystem::path>& sweepDirs)
+{
+    for(const auto& leaf : detail::findEmptyLeafFolders(bundleDir, sweepDirs))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
     }
 }
 
@@ -535,11 +592,10 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
         }
     }
 
+    const auto normalizedSweepDirs = detail::lexicallyNormalSet(sweepDirs);
     for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
     {
-        if(std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
-               return isDescendantOf(jsonPath, sweepDir);
-           }))
+        if(detail::hasAncestorIn(jsonPath, normalizedSweepDirs))
         {
             continue;
         }
