@@ -139,8 +139,10 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         hiptensor::AutotuneOps::Autotune_BinaryOp, handle, plan);
 
     std::vector<hiptensor::ElementwiseSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ElementwiseSolution*)plan->mPref->mSolution);
+    // Load the plan's solution once: another thread sharing this plan may update it.
+    if(auto* planSolution
+       = static_cast<hiptensor::ElementwiseSolution*>(plan->mPref->mSolution.load()))
+        solutions.push_back(planSolution);
     else
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
@@ -155,22 +157,22 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
             hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
     }
 
-    bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaD, gammaD},
-                                     {descA->mLengths, descC->mLengths},
-                                     {descA->mStrides, descC->mStrides},
-                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
-                                      std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
-                                     {descD->mLengths},
-                                     {descD->mStrides},
-                                     {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
-                                     {opAC, opA, opC},
-                                     {A, C},
-                                     {D});
+        auto args
+            = pSolution->makeArgs({alphaD, gammaD},
+                                  {descA->mLengths, descC->mLengths},
+                                  {descA->mStrides, descC->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                  {descD->mLengths},
+                                  {descD->mStrides},
+                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                  {opAC, opA, opC},
+                                  {A, C},
+                                  {D});
 
-        if(canRun)
+        if(args.mValid)
         {
             float time = 0.0f;
             // Perform elementwise binary with LOG_LEVEL_PERF_TRACE
@@ -179,23 +181,24 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
                 using hiptensor::HiptensorOptions;
                 auto& options = HiptensorOptions::instance();
 
-                time = (*pSolution)(StreamConfig{
-                    stream, // stream id
-                    true, // time_kernel
-                    0, // log_level
-                    options->coldRuns(), // cold_niters
-                    options->hotRuns(), // nrepeat
-                });
+                time = pSolution->run(args,
+                                      StreamConfig{
+                                          stream, // stream id
+                                          true, // time_kernel
+                                          0, // log_level
+                                          options->coldRuns(), // cold_niters
+                                          options->hotRuns(), // nrepeat
+                                      });
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
 
-                auto flops = std::size_t(5) * pSolution->problemSize();
+                auto flops = std::size_t(5) * args.mSize;
                 auto bytes = (hiptensor::hiptensorDataTypeSize(descA->mType)
                               + hiptensor::hiptensorDataTypeSize(descC->mType)
                               + hiptensor::hiptensorDataTypeSize(descD->mType))
-                             * pSolution->problemSize();
+                             * args.mSize;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -219,14 +222,14 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
             // Perform elementwise binary without timing
             else
             {
-                time = (*pSolution)(StreamConfig{stream, false});
+                time = pSolution->run(args, StreamConfig{stream, false});
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
             }
 
-            plan->mPref->mSolution = pSolution;
+            plan->mPref->mSolution.store(pSolution);
             autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
                 hiptensor::AutotuneOps::Autotune_BinaryOp, time, handle, plan);
 

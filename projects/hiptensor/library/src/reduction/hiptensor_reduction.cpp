@@ -264,8 +264,10 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         hiptensor::AutotuneOps::Autotune_Redution, handle, plan);
 
     std::vector<hiptensor::ReductionSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ReductionSolution*)plan->mPref->mSolution);
+    // Load the plan's solution once: another thread sharing this plan may update it.
+    if(auto* planSolution
+       = static_cast<hiptensor::ReductionSolution*>(plan->mPref->mSolution.load()))
+        solutions.push_back(planSolution);
     else
     {
         // Query reduction solutions for the correct reduction operation and type
@@ -356,6 +358,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 options->hotRuns(), // nrepeat
             }:
         StreamConfig{stream, false};
+        hiptensor::ReductionMetrics problemMetrics;
         auto [isSupported, time] = (*pSolution)(descA->mLengths,
                                                 descA->mStrides,
                                                 {modeA, modeA + descA->mLengths.size()},
@@ -369,7 +372,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                                 A,
                                                 D,
                                                 opReduce,
-                                                streamConfig);
+                                                streamConfig,
+                                                &problemMetrics);
         if(isSupported)
         {
             if(time < 0)
@@ -378,10 +382,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
             }
             if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
             {
-
-                int  n     = pSolution->problemDim();
-                auto flops = std::size_t(2) * n;
-                auto bytes = pSolution->problemBytes();
+                auto flops = std::size_t(2) * problemMetrics.mElements;
+                auto bytes = problemMetrics.mBytes;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -403,7 +405,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 logger->logPerformanceTrace("hiptensorReduce", msg);
             }
 
-            plan->mPref->mSolution = pSolution;
+            plan->mPref->mSolution.store(pSolution);
             autotuneMgr->saveAutotune<hiptensor::ReductionSolution>(
                 hiptensor::AutotuneOps::Autotune_Redution, time, handle, plan);
 

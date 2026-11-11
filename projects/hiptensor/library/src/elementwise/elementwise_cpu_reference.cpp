@@ -59,18 +59,20 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaD},
-                                  {descA->mLengths},
-                                  {descA->mStrides},
-                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
-                                  {descB->mLengths},
-                                  {descB->mStrides},
-                                  {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
-                                  {opA},
-                                  {A},
-                                  {B}))
+        auto args
+            = refCandidate->makeArgs({alphaD},
+                                     {descA->mLengths},
+                                     {descA->mStrides},
+                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
+                                     {descB->mLengths},
+                                     {descB->mStrides},
+                                     {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
+                                     {opA},
+                                     {A},
+                                     {B});
+        if(args.mValid)
         {
-            (*refCandidate)();
+            refCandidate->run(args);
             return HIPTENSOR_STATUS_SUCCESS;
         }
     }
@@ -121,19 +123,21 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*             
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaD, gammaD},
-                                  {descA->mLengths, descC->mLengths},
-                                  {descA->mStrides, descC->mStrides},
-                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
-                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
-                                  {descD->mLengths},
-                                  {descD->mStrides},
-                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
-                                  {opAC, opA, opC},
-                                  {A, C},
-                                  {D}))
+        auto args
+            = refCandidate->makeArgs({alphaD, gammaD},
+                                     {descA->mLengths, descC->mLengths},
+                                     {descA->mStrides, descC->mStrides},
+                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                      std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                     {descD->mLengths},
+                                     {descD->mStrides},
+                                     {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                     {opAC, opA, opC},
+                                     {A, C},
+                                     {D});
+        if(args.mValid)
         {
-            (*refCandidate)();
+            refCandidate->run(args);
             return HIPTENSOR_STATUS_SUCCESS;
         }
     }
@@ -196,20 +200,22 @@ hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*            
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaD, betaD, gammaD},
-                                  {descA->mLengths, descB->mLengths, descC->mLengths},
-                                  {descA->mStrides, descB->mStrides, descC->mStrides},
-                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
-                                   std::vector<int32_t>(modeB, modeB + descB->mLengths.size()),
-                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
-                                  {descD->mLengths},
-                                  {descD->mStrides},
-                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
-                                  {opABC, opAB, opA, opB, opC},
-                                  {A, B, C},
-                                  {D}))
+        auto args
+            = refCandidate->makeArgs({alphaD, betaD, gammaD},
+                                     {descA->mLengths, descB->mLengths, descC->mLengths},
+                                     {descA->mStrides, descB->mStrides, descC->mStrides},
+                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                      std::vector<int32_t>(modeB, modeB + descB->mLengths.size()),
+                                      std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                     {descD->mLengths},
+                                     {descD->mStrides},
+                                     {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                     {opABC, opAB, opA, opB, opC},
+                                     {A, B, C},
+                                     {D});
+        if(args.mValid)
         {
-            (*refCandidate)();
+            refCandidate->run(args);
             return HIPTENSOR_STATUS_SUCCESS;
         }
     }

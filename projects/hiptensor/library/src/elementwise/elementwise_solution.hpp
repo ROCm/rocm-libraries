@@ -41,6 +41,17 @@
 
 namespace hiptensor
 {
+    // Kernel arguments for one call, owned by the caller.
+    // An ElementwiseSolution is shared by every plan (and thread) that selects it,
+    // so per-call state must never be stored on the solution itself.
+    struct ElementwiseArgs
+    {
+        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
+        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
+        ck::index_t                                                 mSize  = 0;
+        bool                                                        mValid = false;
+    };
+
     class ElementwiseSolution
     {
     public:
@@ -57,46 +68,38 @@ namespace hiptensor
         explicit ElementwiseSolution(
             std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp);
 
-        // Must specialize incoming arg handling
-        virtual bool initArgs(std::vector<double> const&                   scalarValues,
-                              std::vector<std::vector<std::size_t>> const& inLengthsArray,
-                              std::vector<std::vector<std::size_t>> const& inStridesArray,
-                              std::vector<std::vector<int32_t>> const&     inModesArray,
-                              std::vector<std::vector<std::size_t>> const& outLengthsArray,
-                              std::vector<std::vector<std::size_t>> const& outStridesArray,
-                              std::vector<std::vector<int32_t>> const&     outModesArray,
-                              std::vector<hiptensorOperator_t> const&      operators,
-                              std::vector<const void*> const&              inBuffers,
-                              std::vector<void*> const&                    outBuffers)
+        // Must specialize incoming arg handling.
+        // Builds the kernel arguments for one call; mValid is false if this kernel
+        // cannot solve the problem.
+        virtual ElementwiseArgs
+            makeArgs(std::vector<double> const&                   scalarValues,
+                     std::vector<std::vector<std::size_t>> const& inLengthsArray,
+                     std::vector<std::vector<std::size_t>> const& inStridesArray,
+                     std::vector<std::vector<int32_t>> const&     inModesArray,
+                     std::vector<std::vector<std::size_t>> const& outLengthsArray,
+                     std::vector<std::vector<std::size_t>> const& outStridesArray,
+                     std::vector<std::vector<int32_t>> const&     outModesArray,
+                     std::vector<hiptensorOperator_t> const&      operators,
+                     std::vector<const void*> const&              inBuffers,
+                     std::vector<void*> const&                    outBuffers) const
             = 0;
 
-        float operator()(StreamConfig const& streamConfig = StreamConfig{});
+        // Launches the kernel with arguments from makeArgs. Returns a negative time if
+        // the arguments are not valid.
+        float run(ElementwiseArgs const& args,
+                  StreamConfig const&    streamConfig = StreamConfig{}) const;
 
         /// Accessors
 
         // Unique ID for the kernel
         size_t uid() const;
 
-        // Problem size
-        ck::index_t problemSize() const;
-
         // Kernel's name encoding
         std::string kernelName() const;
 
-        // Reset all arguments
-        void resetArgs();
-
     protected:
-        // Derived runtime arguments
-        ck::index_t mDim;
-        ck::index_t mSize;
-        bool        mValid;
-        uint32_t    mThreadDim;
-
         // Kernel Params
         std::unique_ptr<ck::tensor_operation::device::BaseOperator> mDeviceOp;
-        std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
-        std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;
     };
 
 } // namespace hiptensor
