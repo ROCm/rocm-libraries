@@ -5,12 +5,15 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
@@ -18,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 
 // ---- hipkernel:hip_conv_fwd_rdna on the GPU ----
 //
@@ -257,6 +261,168 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // Depthwise (and any group with fewer than 16 output channels) is left to other kernel
 // families.
+namespace
+{
+
+int64_t elementCount(const std::vector<int64_t>& dims)
+{
+    int64_t count = 1;
+    for(const auto extent : dims)
+    {
+        count *= extent;
+    }
+    return count;
+}
+
+/// @p count elements of @p dtype with small, exactly representable values.
+std::vector<uint8_t> patternBytes(DataType dtype, int64_t count, int seed)
+{
+    const size_t elementSize = dtype == DataType::FLOAT ? 4 : 2;
+    std::vector<uint8_t> bytes(static_cast<size_t>(count) * elementSize);
+    for(int64_t i = 0; i < count; ++i)
+    {
+        const float value = static_cast<float>((i * 7 + seed) % 9 - 4) * 0.25F;
+        uint8_t* slot = bytes.data() + static_cast<size_t>(i) * elementSize;
+        if(dtype == DataType::FLOAT)
+        {
+            std::memcpy(slot, &value, 4);
+        }
+        else if(dtype == DataType::HALF)
+        {
+            const _Float16 half = static_cast<_Float16>(value);
+            std::memcpy(slot, &half, 2);
+        }
+        else
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, 4);
+            const auto upper = static_cast<uint16_t>(bits >> 16);
+            std::memcpy(slot, &upper, 2);
+        }
+    }
+    return bytes;
+}
+
+/// Device copies of x and w and a y buffer for one case, freed on destruction.
+class CaseBuffers
+{
+public:
+    explicit CaseBuffers(const ConvCase& convCase)
+    {
+        const auto xDims = concat({convCase.n, convCase.c}, convCase.in);
+        const auto wDims = concat({convCase.k, convCase.c / convCase.groups}, convCase.filter);
+        int64_t yCount = convCase.n * convCase.k;
+        for(size_t i = 0; i < convCase.in.size(); ++i)
+        {
+            yCount *= (convCase.in[i] + convCase.prePad[i] + convCase.postPad[i]
+                       - convCase.dilation[i] * (convCase.filter[i] - 1) - 1)
+                          / convCase.stride[i]
+                      + 1;
+        }
+        const auto x = patternBytes(convCase.dtype, elementCount(xDims), 1);
+        const auto w = patternBytes(convCase.dtype, elementCount(wDims), 5);
+        _yBytes = static_cast<size_t>(yCount) * (convCase.dtype == DataType::FLOAT ? 4 : 2);
+        EXPECT_EQ(hipMalloc(&_x, x.size()), hipSuccess);
+        EXPECT_EQ(hipMalloc(&_w, w.size()), hipSuccess);
+        EXPECT_EQ(hipMalloc(&_y, _yBytes), hipSuccess);
+        EXPECT_EQ(hipMemcpy(_x, x.data(), x.size(), hipMemcpyHostToDevice), hipSuccess);
+        EXPECT_EQ(hipMemcpy(_w, w.data(), w.size(), hipMemcpyHostToDevice), hipSuccess);
+    }
+    ~CaseBuffers()
+    {
+        (void)hipFree(_x);
+        (void)hipFree(_w);
+        (void)hipFree(_y);
+    }
+    CaseBuffers(const CaseBuffers&) = delete;
+    CaseBuffers& operator=(const CaseBuffers&) = delete;
+
+    std::unordered_map<int64_t, void*> variantPack() const
+    {
+        return {{1, _x}, {2, _w}, {3, _y}};
+    }
+
+    /// Clears y, runs @p graph, and returns y's bytes.
+    std::vector<uint8_t> run(Graph& graph, hipdnnHandle_t handle, hipStream_t stream)
+    {
+        EXPECT_EQ(hipMemset(_y, 0xff, _yBytes), hipSuccess);
+        auto pack = variantPack();
+        const auto result = graph.execute(handle, pack, nullptr);
+        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        std::vector<uint8_t> y(_yBytes);
+        EXPECT_EQ(hipMemcpy(y.data(), _y, _yBytes, hipMemcpyDeviceToHost), hipSuccess);
+        return y;
+    }
+
+private:
+    void* _x = nullptr;
+    void* _w = nullptr;
+    void* _y = nullptr;
+    size_t _yBytes = 0;
+};
+
+/// One case per kernel shape that a saved plan must reproduce: 2-D NCHW, 3-D, NHWC 16-bit.
+bool savesThisCase(const ConvCase& convCase)
+{
+    return convCase.name == "F32Groups2K96" || convCase.name == "F32Conv3dS2Dil2"
+           || convCase.name == "F16NhwcTileN128" || convCase.name == "Bf16NdhwcConv3d";
+}
+
+} // namespace
+
+// The engine reports plan serialization, and a plan saved in either form, loaded into a fresh
+// handle, launches the same kernel on the same geometry: its output is bit-identical to the
+// output of the plan it was saved from.
+TEST_P(IntegrationGpuHipConvFwdRdna, SavedPlanReproducesTheOutput)
+{
+    const auto& convCase = GetParam();
+    if(!savesThisCase(convCase))
+    {
+        GTEST_SKIP() << "saved plans are checked on four representative graphs";
+    }
+    CaseBuffers buffers(convCase);
+
+    for(const auto form : {SaveForm::PLAN_ONLY, SaveForm::GRAPH_AND_PLAN})
+    {
+        SCOPED_TRACE(form == SaveForm::PLAN_ONLY ? "plan only" : "graph and plan");
+
+        std::vector<uint8_t> bytes;
+        std::vector<uint8_t> expected;
+        {
+            auto graph = buildGraph(convCase);
+            graph->set_preferred_engine_id_ext(engineId());
+            auto result = graph->build(_handle);
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+            std::vector<BehaviorNote> notes;
+            result = graph->get_behavior_notes_for_engine(engineId(), notes);
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            ASSERT_NE(std::find(notes.begin(),
+                                notes.end(),
+                                BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                      notes.end());
+
+            expected = buffers.run(*graph, _handle, _stream);
+            auto [saved, error] = detail::saveInForm(*graph, form);
+            ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+            bytes = std::move(saved);
+        }
+
+        ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(_handle, _stream));
+
+        Graph loaded;
+        const auto result = detail::loadInForm(loaded, _handle, bytes, form);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        int64_t servingEngineId = 0;
+        ASSERT_EQ(loaded.get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
+        EXPECT_EQ(servingEngineId, engineId());
+
+        const auto actual = buffers.run(loaded, _handle, _stream);
+        EXPECT_TRUE(actual == expected) << "the loaded plan's output differs";
+    }
+}
+
 TEST_P(IntegrationGpuHipConvFwdRdna, DeclinesNarrowGroups)
 {
     const auto& base = GetParam();
