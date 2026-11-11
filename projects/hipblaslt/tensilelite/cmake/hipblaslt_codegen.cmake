@@ -338,21 +338,14 @@ function(create_device_library)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
 
-    # Both codegen steps glob their inputs at run time, so without an explicit
-    # file list nothing invalidates the stamps and edits ship stale kernels.
-    # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
+    # Both codegen steps glob their logic inputs at run time, so without an
+    # explicit file list nothing invalidates the stamps and edits ship stale
+    # kernels. CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches
+    # edits. The generator itself is the unpacked wheel: its stamp changes
+    # only when the wheel does, which already depends on the generator sources.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
          "${_cdl_LOGIC_PATH}/*.yaml")
-    # .py generators, plus the packaged static headers (resources.py) and the
-    # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
-    file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
-         "${_codegen_dir}/tensilelite/*.py"
-         "${_codegen_dir}/tensilelite/*.h"
-         "${_codegen_dir}/tensilelite/*.s")
-    list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
-    list(APPEND _codegen_dependencies
-         ${_logic_files}
-         ${_codegen_sources})
+    list(APPEND _codegen_dependencies ${_logic_files} ${HIPBLASLT_PYTHON_INPUTS})
 
     # ninja only compares mtimes of inputs that still exist, so a *removed* file
     # leaves the stamp clean (nothing is newer), as does a file added with an
@@ -361,7 +354,7 @@ function(create_device_library)
     # rewritten only when the set changes, and that rewrite dirties the stamp.
     # file(GLOB_RECURSE) orders results lexicographically.
     set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
-    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
+    string(JOIN "\n" _manifest_content ${_logic_files})
     # file(CONFIGURE) rewrites only when the content differs.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
     list(APPEND _codegen_dependencies "${_manifest}")
