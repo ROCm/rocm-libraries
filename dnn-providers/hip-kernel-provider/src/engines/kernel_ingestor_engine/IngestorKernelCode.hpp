@@ -84,6 +84,7 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& hipConvFwdFmaIgemmRdnaKpackModuleCache();
+compilation::KpackModuleCache& hipConvFwdBiasFmaIgemmRdnaKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();

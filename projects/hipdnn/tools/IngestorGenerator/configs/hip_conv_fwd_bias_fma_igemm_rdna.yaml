@@ -1,0 +1,209 @@
+# Source of truth for the shipped hipkernel:hip_conv_fwd_bias_fma_igemm_rdna catalog: a forward
+# convolution followed by a per-output-channel bias ADD, for the gfx11 (RDNA3/3.5) and gfx12
+# (RDNA4) targets. It is the FMA implicit-GEMM kernel of hipkernel:hip_conv_fwd_fma_igemm_rdna
+# (../conv_rdna/kernels/ConvFwdFmaIgemm.cpp, shared with that bundle) built with its bias
+# epilogue (CONV_HAS_BIAS). One kernel per dtype x layout x output-channel tile.
+#
+# The native matcher (HipConvFwdBiasFmaIgemmRdnaNative.cpp) admits a conv_fprop node whose
+# virtual output feeds a pointwise ADD with a bias of one value per output channel, and picks
+# the tile from the output channels per group, so each graph has one candidate.
+
+dialect: packaged
+authored_subpath: hip/conv_bias_rdna
+engine:
+  name: hipkernel:hip_conv_fwd_bias_fma_igemm_rdna
+  sdk_version: "1.0.0"
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: kernel_family
+  type: string
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: tile_n
+  type: int
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hip
+workspace_policy: none
+
+packs:
+- name: hip_conv_fwd_bias_fma_igemm_rdna
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernels:
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nchw_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nchw_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nchw_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_FIRST, tile_n: 128}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nhwc_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nhwc_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f32_nhwc_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 0, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: FLOAT, layout: CHANNELS_LAST, tile_n: 128}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nchw_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nchw_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nchw_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_FIRST, tile_n: 128}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nhwc_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nhwc_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_f16_nhwc_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 1, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: HALF, layout: CHANNELS_LAST, tile_n: 128}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nchw_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nchw_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nchw_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 0, CONV_WEI_KCZYX: 1, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_FIRST, tile_n: 128}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nhwc_tile_n32
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 32, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_LAST, tile_n: 32}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nhwc_tile_n64
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 64, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_LAST, tile_n: 64}
+    priority: 0
+  - name: hip_conv_fwd_bias_fma_igemm_rdna.fma_bf16_nhwc_tile_n128
+    kernel_source:
+      kind: hip
+      source: ../conv_rdna/kernels/ConvFwdFmaIgemm.cpp
+      entry: ConvFwdFmaIgemm
+      build:
+        defines: {CONV_DTYPE: 2, CONV_CHANNELS_LAST: 1, CONV_WEI_KCZYX: 0, TILE_N: 128, CONV_HAS_BIAS: 1}
+    metadata: {kernel_family: fma_igemm, dtype: BFLOAT16, layout: CHANNELS_LAST, tile_n: 128}
+    priority: 0
+
+# hip kernels are compiled from source by hkp_pack and hydrate no builder object, so every
+# field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [kernel_family, dtype, layout, tile_n]
+  bindings: {}
+  vocabulary: {}
