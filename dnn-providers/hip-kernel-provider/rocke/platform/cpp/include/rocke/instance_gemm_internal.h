@@ -51,6 +51,7 @@
 #include <stdint.h>
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_archtarget_t */
+#include "rocke/helper_rocke.helpers.global_read.h" /* prepared global read cursors */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_hotloop_inst_list_t, policy */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t, descriptors */
 #include "rocke/instance_gemm_universal.h"
@@ -73,6 +74,18 @@ extern "C" {
 
 /* Maximum TDM ring depth. Mirrors Python _TDM_MAX_DEPTH = 4. */
 #define ROCKE_GEMM_TDM_MAX_DEPTH 4
+
+/* gfx1201's LDS limit admits at most 128 f16 eight-element A/B vectors per
+ * thread at the minimum 32-thread workgroup. Reject any configuration that
+ * exceeds this shared inline storage rather than allocating per-vector state. */
+#define ROCKE_GEMM_MAX_GLOBAL_READS 128
+
+typedef struct rocke_gemm_global_read
+{
+    rocke_global_read_cursor_t cursor;
+    rocke_value_t* row;
+    rocke_value_t* col;
+} rocke_gemm_global_read_t;
 
 /* ===================================================================== *
  *  rocke_gemm_build_ctx_t
@@ -216,6 +229,13 @@ typedef struct rocke_gemm_build_ctx
     rocke_tensor_view_t a_lds_view; /* LDS view over A_smem              */
     rocke_tensor_view_t b_lds_view; /* LDS view over B_smem              */
 
+    /* ---- prepared A/B reads (non-legacy global_addressing only) -- */
+    bool global_reads;
+    bool wide_c_offsets; /* set per addressing path by the read callback */
+    /* A entries precede B entries; all cursors are bound in the selected
+     * helper callback and consumed before its resolved plans leave scope. */
+    rocke_gemm_global_read_t global_read[ROCKE_GEMM_MAX_GLOBAL_READS];
+
     /* ---- DirectToLDS (DTLA/DTLB) plumbing (direct_to_lds only) -- */
     bool dtl; /* spec.trait.direct_to_lds                  */
     int dtl_dwords; /* _DTL_DWORDS = 4                           */
@@ -279,6 +299,12 @@ typedef struct rocke_gemm_build_ctx
 
 /* _atom_frag_lengths(op) -> (src0, src1, dst) fragment lengths. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
+
+/* gemm_direct_a.py: the VGPRs a direct_a tile's accumulators and fragments
+ * hold at once, and whether its B fragments are read one K atom ahead. */
+int rocke_gemm_direct_a_fragment_vgprs(const rocke_gemm_universal_spec_t* spec,
+                                       bool local_prefetch);
+bool rocke_gemm_direct_a_local_prefetch(const rocke_gemm_universal_spec_t* spec);
 
 /* _emit_zero_acc_op(b, op): zero_vec(srcs[2].dtype, srcs[2].frag_len). Used to build
  * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not
@@ -591,7 +617,8 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       int c_per_lane,
                                       rocke_value_t* batch_off_c,
                                       void* fused_epilogue,
-                                      bool fused_is_mde);
+                                      bool fused_is_mde,
+                                      bool wide_c);
 
 /* _emit_epilogue_split_k(...): split-K atomic-add epilogue. Scatters each
  * warp's per-lane f32 accumulator to its output (c_m, c_n) (the canonical MFMA

@@ -86,6 +86,31 @@ def test_gfx1201_wmma_db1wg_numeric(tile, dtype, grid):
     _check_numeric(tile, dtype, dict(lds_db_allow_1wg=True, **_TRAITS["all"]), grid)
 
 
+@arch_specific(
+    ("gfx1201",),
+    reason="prepared global reads are admitted on gfx1201 FP16 compv4 only",
+)
+@pytest.mark.parametrize(
+    "grid", _GRIDS + [(2, 2, 1)], ids=lambda g: "x".join(map(str, g))
+)
+@pytest.mark.parametrize("addressing", ("auto", "global64"))
+@pytest.mark.parametrize(
+    "tile, one_wg",
+    (
+        ((128, 128, 32, 2, 2), False),
+        ((64, 64, 64, 2, 2), False),
+        ((128, 128, 64, 2, 4), True),
+    ),
+    ids=("128x128x32-w2x2", "64x64x64-w2x2", "128x128x64-w2x4"),
+)
+def test_gfx1201_wmma_prepared_reads_numeric(tile, one_wg, addressing, grid):
+    # (2, 2, 1) is one K tile: the double-buffered loop runs zero iterations.
+    traits = dict(
+        global_addressing=addressing, lds_db_allow_1wg=one_wg, **_TRAITS["all"]
+    )
+    _check_numeric(tile, "fp16", traits, grid)
+
+
 def _check_numeric(tile, dtype, traits, grid):
     arch = current_device_arch_in(("gfx1201",))
     spec = _spec(tile, dtype, **traits)

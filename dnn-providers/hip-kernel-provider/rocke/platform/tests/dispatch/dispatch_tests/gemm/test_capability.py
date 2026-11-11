@@ -24,6 +24,7 @@ _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 # to reach the decode candidate.
 _DIMS = (1, 2, 16, 32, 64, 128, 256, 512, 1024, 4096)
 _SHAPES = tuple((m, n, k) for m in _DIMS for n in _DIMS for k in _DIMS) + (
+    (256, 256, 8192),
     (2048, 2048, 8192),
     (2048, 2560, 6144),
     (2048, 6144, 2560),

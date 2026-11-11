@@ -53,6 +53,7 @@ from .common import (
     apply_split_k,
     rcr_request_errors,
 )
+from .direct_a import gfx1201_direct_a_candidates
 from .support import (
     gemm_config_supported,
     request_shape_supported,
@@ -280,6 +281,20 @@ _CDNA_MFMA_BF16 = ("gfx90a", "gfx942", "gfx950")
 _CDNA_MEM_BF16 = ("gfx942", "gfx950")
 _CDNA_DECODE_BF16 = ("gfx950",)
 
+# gfx1201 BF16 takes the direct-A classes measured for FP16 (direct_a.py); the
+# kernel differs only in the matrix atom. Requests outside them keep the mem
+# candidates; M or N that no tile divides take the last-resort direct-A ones.
+_DIRECT_A = gfx1201_direct_a_candidates(
+    dtype="bf16",
+    family=_FAMILY,
+    algorithm=_ALGORITHM,
+    abi_version=GEMM_BF16_RCR_ABI_VERSION,
+    request_errors=_request_errors,
+    grid=_grid,
+    class_priority=0,
+    fallback_priority=90,
+)
+
 GEMM_BF16_REGISTRY = CandidateRegistry(
     _FAMILY,
     dim_vocabulary=GEMM_DIM_VOCABULARY,
@@ -326,6 +341,7 @@ GEMM_BF16_REGISTRY.extend(
             # shape gate; as data it is visible to a coverage query.
             shapes=(ShapeRange("M", max=_DECODE_M_MAX),),
         ),
+        *_DIRECT_A,
     )
 )
 

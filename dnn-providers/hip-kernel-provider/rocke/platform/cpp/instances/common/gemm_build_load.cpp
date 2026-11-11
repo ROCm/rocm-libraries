@@ -521,6 +521,32 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
          : rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype))
 #define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
 
+    if(ctx->global_reads)
+    {
+        rocke_value_t* deltas[3] = {ctx->c0, ctx->c0, k_off};
+        int offset = 0;
+        for(int operand = 0; operand < 2; ++operand)
+        {
+            const int vectors = operand == 0 ? ctx->a_vecs_per_thread : ctx->b_vecs_per_thread;
+            const int rows = operand == 0 ? ctx->block_m : ctx->block_n;
+            const rocke_tile_window_t* lds_tile = operand == 0 ? &a_lds_tile : &b_lds_tile;
+            for(int e = 0; e < vectors; ++e)
+            {
+                const rocke_gemm_global_read_t* read = &ctx->global_read[offset + e];
+                rocke_value_t* val
+                    = load_vec == 1
+                          ? rocke_global_read_load_scalar(b, &read->cursor, deltas, 3)
+                          : rocke_global_read_load_vec(b, &read->cursor, deltas, 3, load_vec);
+                rocke_value_t* lidx[2]
+                    = {LD_ROW(read->row, rows), rocke_gemm_swz_col(ctx, read->col, read->row)};
+                rocke_gemm_lds_store(
+                    b, defer_stores, lds_tile, lidx, val, load_vec == 1 ? 0 : load_vec);
+            }
+            offset += vectors;
+        }
+        return;
+    }
+
     /* A-load loop. */
     for(int e = 0; e < ctx->a_vecs_per_thread; ++e)
     {

@@ -187,6 +187,37 @@ class TensorDescriptor:
             off = term if off is None else b.add(off, term)
         return off if off is not None else b.const_i32(0)
 
+    def offset_i64(self, b: IRBuilder, indices: Sequence[Value]) -> Value:
+        """Signed element offset, widening each operand before arithmetic.
+
+        Unlike :meth:`offset`, this is safe for products beyond i32 and for
+        negative strides. Coordinates and runtime strides must be i32 or i64.
+        The existing offset convention and default emission are unchanged.
+        """
+        from ..core.ir import I32, I64
+
+        if len(indices) != self.rank:
+            raise ValueError(f"expected {self.rank} indices, got {len(indices)}")
+
+        def wide(value: Value) -> Value:
+            if value.type == I64:
+                return value
+            if value.type != I32:
+                raise TypeError("offset_i64 requires signed i32 or i64 operands")
+            return b.sext(value, I64)
+
+        off: Optional[Value] = None
+        for idx, stride in zip(indices, self.strides):
+            idx = wide(idx)
+            if isinstance(stride, Value):
+                term = b.mul(idx, wide(stride))
+            elif int(stride) == 1:
+                term = idx
+            else:
+                term = b.mul(idx, b.const_i64(int(stride)))
+            off = term if off is None else b.add(off, term)
+        return off if off is not None else b.const_i64(0)
+
     def offset_fn(self) -> Callable[[IRBuilder, Sequence[Value]], Value]:
         """Return ``self.offset`` as a bound callable for descriptor APIs."""
         return self.offset

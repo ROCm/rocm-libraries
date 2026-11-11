@@ -218,6 +218,7 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.k_stagger = 0;
     s.trait.k_stagger_step = 1;
     s.trait.lds_db_allow_1wg = false;
+    s.trait.global_addressing = "legacy";
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -287,8 +288,9 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_c[32];
     char part_gm[32];
     char part_kst[48];
-    const char* flag_names[19];
-    int flag_on[19];
+    char part_addressing[48];
+    const char* flag_names[20];
+    int flag_on[20];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -349,6 +351,9 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     snprintf(part_c, sizeof(part_c), "c%s", spec->data.dtype_c ? spec->data.dtype_c : "");
     flag_names[17] = part_c;
     flag_names[18] = "db1wg";
+    const char* addressing = tr->global_addressing ? tr->global_addressing : "legacy";
+    snprintf(part_addressing, sizeof(part_addressing), "addr_%s", addressing);
+    flag_names[19] = part_addressing;
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -372,9 +377,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
                       ? 1
                       : 0;
     flag_on[18] = tr->lds_db_allow_1wg ? 1 : 0;
+    flag_on[19] = strcmp(addressing, "legacy") != 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 19, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 20, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -799,7 +805,144 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         return false;
     }
 
+    /* gemm_direct_a.py :: is_valid_direct_a_spec. The direct-A pipeline has its
+     * own emitter and its own gate; same order and reasons as the Python. */
+    if(spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "direct_a") == 0)
+    {
+        const rocke_gemm_tile_spec_t* dt = &spec->tile;
+        const rocke_gemm_trait_spec_t* dtr = &spec->trait;
+        const rocke_gemm_data_spec_t* dd = &spec->data;
+        const bool ab_16 = strcmp(dd->dtype_a, "fp16") == 0 || strcmp(dd->dtype_a, "f16") == 0
+                           || strcmp(dd->dtype_a, "bf16") == 0;
+        const bool c_f32 = strcmp(dd->dtype_c, "fp32") == 0 || strcmp(dd->dtype_c, "f32") == 0;
+        if(strcmp(arch, "gfx1201") != 0 || spec->wave_size != 32)
+        {
+            CK_GEMM_REJECT("direct_a is a gfx1201 wave32 pipeline");
+        }
+        if(!ab_16 || strcmp(dd->dtype_b, dd->dtype_a) != 0)
+        {
+            CK_GEMM_REJECT("direct_a requires FP16 or BF16 A and B of the same type");
+        }
+        if(strcmp(dd->dtype_c, dd->dtype_a) != 0 && !c_f32)
+        {
+            CK_GEMM_REJECT("direct_a requires C in the A/B type or FP32");
+        }
+        if((strcmp(dd->dtype_acc, "fp32") != 0 && strcmp(dd->dtype_acc, "f32") != 0)
+           || strcmp(dd->layout, "RCR") != 0)
+        {
+            CK_GEMM_REJECT("direct_a requires an fp32 accumulator and the RCR layout");
+        }
+        if(strcmp(dtr->scheduler, "intrawave") != 0 || strcmp(dtr->epilogue, "default") != 0)
+        {
+            CK_GEMM_REJECT("direct_a requires the intrawave scheduler and default epilogue");
+        }
+        if(dt->warp_tile_m != 16 || dt->warp_tile_n != 16 || dt->warp_tile_k != 16
+           || dt->warp_k != 1)
+        {
+            CK_GEMM_REJECT("direct_a requires the 16x16x16 WMMA atom and warp_k=1");
+        }
+        if(dt->warp_n != 1)
+        {
+            CK_GEMM_REJECT("direct_a requires warp_n=1 (each wave owns its M rows)");
+        }
+        if(dt->tile_m <= 0 || dt->tile_n <= 0 || dt->tile_k <= 0 || dt->warp_m <= 0)
+        {
+            CK_GEMM_REJECT("tile dimensions must be positive");
+        }
+        if(dt->tile_m % (dt->warp_m * 16) != 0 || dt->tile_n % 16 != 0 || dt->tile_k % 16 != 0)
+        {
+            CK_GEMM_REJECT("tile must be whole 16x16x16 atoms per wave");
+        }
+        if(spec->block_size != dt->warp_m * spec->wave_size)
+        {
+            CK_GEMM_REJECT("block_size must be warp_m waves");
+        }
+        if((dt->tile_n * dt->tile_k) % (8 * spec->block_size) != 0)
+        {
+            CK_GEMM_REJECT("the B tile must be whole 8-element vectors per thread");
+        }
+        if(spec->batched || dtr->persistent || dtr->split_k != 1)
+        {
+            CK_GEMM_REJECT("direct_a does not support batching, persistence or split-K");
+        }
+        if(spec->_fused_epilogue != NULL)
+        {
+            CK_GEMM_REJECT("direct_a does not support a fused epilogue");
+        }
+        if(dtr->pad_m || dtr->pad_n || dtr->pad_k || dtr->chiplet_swizzle || dtr->preshuffle_b
+           || dtr->direct_to_lds || dtr->dtl_prefetch || dtr->tdm || dtr->active_tile_skip
+           || dtr->lds_store_after_mma || dtr->lds_db_allow_1wg || dtr->cshuffle_no_alias
+           || dtr->split_barrier || dtr->lds_k_pad != 0 || dtr->ab_load_elem_bytes_set
+           || (dtr->global_addressing != NULL && strcmp(dtr->global_addressing, "legacy") != 0))
+        {
+            CK_GEMM_REJECT("direct_a takes only group_m, k_stagger, lds_swizzle and waves_per_eu; "
+                           "partial M/N tiles and bounded addressing are built in");
+        }
+        if(dtr->group_m < 0 || dtr->k_stagger < 0 || dtr->k_stagger_step < 1)
+        {
+            CK_GEMM_REJECT("group_m and k_stagger must be nonnegative, k_stagger_step positive");
+        }
+        if(dtr->lds_swizzle && ((dt->tile_k / 8) & (dt->tile_k / 8 - 1)) != 0)
+        {
+            CK_GEMM_REJECT("lds_swizzle needs a power-of-two count of 8-element slots per row");
+        }
+        {
+            const rocke_mmaop_t* dop = ck_gemm_resolve_mma_op(spec, target);
+            int fa = 0, fb = 0, fc = 0;
+            if(dop != NULL)
+            {
+                rocke_gemm_atom_frag_lengths(dop, &fa, &fb, &fc);
+            }
+            if(dop == NULL || fa != 8 || fb != 8 || fc != 8)
+            {
+                CK_GEMM_REJECT("direct_a requires the gfx12 eight-element WMMA fragments");
+            }
+        }
+        if(!rocke_archtarget_fits_lds(target, (long)(2 * dt->tile_n * dt->tile_k)))
+        {
+            CK_GEMM_REJECT("the B tile exceeds the LDS capacity");
+        }
+        if(rocke_gemm_direct_a_fragment_vgprs(spec, false) > 216)
+        {
+            CK_GEMM_REJECT("the tile's accumulators and fragments exceed the VGPR file");
+        }
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "ok");
+        }
+        return true;
+    }
+
     t = &spec->tile;
+    const char* addressing
+        = spec->trait.global_addressing ? spec->trait.global_addressing : "legacy";
+    if(strcmp(addressing, "legacy") != 0 && strcmp(addressing, "auto") != 0
+       && strcmp(addressing, "global64") != 0)
+    {
+        CK_GEMM_REJECT("global_addressing must be legacy, auto, or global64");
+    }
+    if(strcmp(addressing, "legacy") != 0)
+    {
+        const rocke_gemm_trait_spec_t* tr = &spec->trait;
+        if(!(strcmp(arch, "gfx1201") == 0 && spec->wave_size == 32 && spec->data.dtype_a
+             && (strcmp(spec->data.dtype_a, "fp16") == 0 || strcmp(spec->data.dtype_a, "f16") == 0)
+             && spec->data.dtype_b && strcmp(spec->data.dtype_b, spec->data.dtype_a) == 0
+             && spec->data.dtype_c && strcmp(spec->data.dtype_c, spec->data.dtype_a) == 0
+             && spec->data.dtype_acc
+             && (strcmp(spec->data.dtype_acc, "fp32") == 0
+                 || strcmp(spec->data.dtype_acc, "f32") == 0)
+             && spec->data.layout && strcmp(spec->data.layout, "RCR") == 0 && tr->pipeline
+             && strcmp(tr->pipeline, "compv4") == 0 && tr->epilogue
+             && strcmp(tr->epilogue, "default") == 0 && !spec->batched && !spec->_fused_epilogue
+             && !tr->persistent && tr->split_k == 1
+             && !(tr->pad_m || tr->pad_n || tr->pad_k || tr->preshuffle_b || tr->direct_to_lds
+                  || tr->dtl_prefetch || tr->tdm)))
+        {
+            CK_GEMM_REJECT(
+                "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR "
+                "compv4/default without split-K, persistence, preshuffle, DTL, TDM, or fusion");
+        }
+    }
 
     /* _storage_dtype(spec): validates the storage dtypes / fp32 acc / RCR. */
     if(ck_gemm_storage_dtype(spec, NULL, reason, reason_cap) == NULL)
@@ -1254,6 +1397,18 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     {
         CK_GEMM_REJECT("block too small for one element/thread/phase");
     }
+    if(strcmp(addressing, "legacy") != 0)
+    {
+        int width = rocke_gemm_choose_load_vec(spec);
+        if(width <= 0 || width > 8)
+        {
+            CK_GEMM_REJECT("global_addressing needs FP16 load vectors of at most 8 elements");
+        }
+        if(a_total / width / threads + b_total / width / threads > 128)
+        {
+            CK_GEMM_REJECT("global_addressing needs at most 128 prepared input vectors per thread");
+        }
+    }
 
     /* Split-K (over the production body): only static invariants are checked
      * here -- split_k >= 1, and the atomic-add epilogue is MFMA (CDNA) only.
@@ -1278,6 +1433,20 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     return true;
 
 #undef CK_GEMM_REJECT
+}
+
+/* gemm_direct_a.py :: _fragment_vgprs / direct_a_local_prefetch. */
+int rocke_gemm_direct_a_fragment_vgprs(const rocke_gemm_universal_spec_t* spec, bool local_prefetch)
+{
+    const int mm = rocke_gemm_tile_mfmas_per_warp_m(&spec->tile);
+    const int nn = rocke_gemm_tile_mfmas_per_warp_n(&spec->tile);
+    const int nk = rocke_gemm_tile_k_atoms_per_tile_k(&spec->tile);
+    return 8 * mm * nn + 2 * 4 * mm * nk + 4 * nn * (local_prefetch ? 2 : 1);
+}
+
+bool rocke_gemm_direct_a_local_prefetch(const rocke_gemm_universal_spec_t* spec)
+{
+    return rocke_gemm_direct_a_fragment_vgprs(spec, true) <= 176;
 }
 
 /* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths mirror the Python module's

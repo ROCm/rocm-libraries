@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Real FP16 dispatch selections against exact independent GEMM references.
 
-The shapes exercise output/reduction bands, all three one-workgroup layouts,
-short K and non-128/64 alignment. Integer inputs keep accumulation exact; only
+The shapes exercise the direct-A classes (including M and N that are not
+whole tiles), the compv4 output/reduction bands it leaves, short K and
+non-128/64 alignment. Integer inputs keep accumulation exact; only
 C's fp16 store rounds. NaN-filled C exposes tiles a selected kernel never writes.
 """
 import numpy as np
@@ -33,6 +34,16 @@ from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_ge
         (256, 256, 48),
         (128, 128, 16),
         (256, 256, 32),
+        (1000, 1000, 1024),
+        (3000, 1500, 512),
+        (8192, 128, 2048),
+        (768, 1536, 2048),
+        (1024, 1024, 8192),
+        (704, 704, 8192),
+        (256, 256, 8192),
+        (300, 400, 640),
+        (130, 128, 32),
+        (77, 33, 16),
     ),
     ids=lambda shape: "x".join(map(str, shape)),
 )

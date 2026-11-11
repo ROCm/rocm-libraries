@@ -39,6 +39,7 @@ from .common import (
     apply_split_k,
     rcr_request_errors,
 )
+from .direct_a import gfx1201_direct_a_candidates
 from .support import (
     gemm_config_supported,
     request_shape_supported,
@@ -176,6 +177,7 @@ def _spec_gfx1201_compv4(
     group_m: int = 4,
     k_stagger: int = 8,
     k_stagger_step: int = 4,
+    global_addressing: str = "auto",
 ) -> UniversalGemmSpec:
     return _make_spec(
         name=name,
@@ -191,6 +193,7 @@ def _spec_gfx1201_compv4(
             group_m=group_m,
             k_stagger=k_stagger,
             k_stagger_step=k_stagger_step,
+            global_addressing=global_addressing,
         ),
     )
 
@@ -294,6 +297,7 @@ _GFX1201_LARGE_SHAPES = (
 _GFX1201_SMALL = partial(
     _spec_gfx1201_compv4, tile=TileSpec(64, 64, 64, 2, 2, 1, 16, 16, 16)
 )
+_GFX1201_SMALL_LOW_K = partial(_GFX1201_SMALL, group_m=8, k_stagger=0, k_stagger_step=1)
 _GFX1201_DEFAULT = partial(
     _spec_gfx1201_compv4, tile=TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 16)
 )
@@ -318,8 +322,12 @@ _GFX1201_LONG_K = partial(
     tile=TileSpec(256, 128, 32, 4, 2, 1, 16, 16, 16),
     allow_1wg=True,
 )
+# Measured: the two-path kernel is slower than legacy addressing on this tile
+# and on short_k32, so both keep the legacy loads.
 _GFX1201_K16 = partial(
-    _spec_gfx1201_compv4, tile=TileSpec(128, 128, 16, 2, 2, 1, 16, 16, 16)
+    _spec_gfx1201_compv4,
+    tile=TileSpec(128, 128, 16, 2, 2, 1, 16, 16, 16),
+    global_addressing="legacy",
 )
 _GFX1201_FRINGE_M = partial(
     _spec_gfx1201_compv4, tile=TileSpec(32, 64, 64, 1, 2, 1, 16, 16, 16)
@@ -332,6 +340,17 @@ _GFX1201_FRINGE = partial(
 )
 _GFX1201_SHORT = partial(
     _spec_gfx1201_compv4, tile=TileSpec(32, 32, 16, 1, 1, 1, 16, 16, 16)
+)
+
+_DIRECT_A = gfx1201_direct_a_candidates(
+    dtype="fp16",
+    family=_FAMILY,
+    algorithm=_ALGORITHM,
+    abi_version=GEMM_FP16_RCR_ABI_VERSION,
+    request_errors=_request_errors,
+    grid=_grid,
+    class_priority=0,
+    fallback_priority=90,
 )
 
 GEMM_FP16_REGISTRY = CandidateRegistry(
@@ -349,6 +368,8 @@ GEMM_FP16_REGISTRY.extend(
             spec_fn=_spec_cdna_cshuffle,
             arches=_CDNA_MFMA_FP16,
         ),
+        # The measured gfx1201 direct-A classes come first (see direct_a.py).
+        *_DIRECT_A[:4],
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_short_k32",
             spec_id="gfx1201_compv4_short_k32",
@@ -357,18 +378,58 @@ GEMM_FP16_REGISTRY.extend(
                 _spec_gfx1201_compv4,
                 tile=TileSpec(128, 128, 32, 2, 4, 1, 16, 16, 16),
                 store_after_mma=False,
+                global_addressing="legacy",
             ),
             arches=_GFX1201_ARCHES,
             shapes=(ShapeRange("K", max=32),),
         ),
+        # K a multiple of 8192 is a 16 KiB row stride: rows alias in the
+        # caches, so the K-32 tiles and direct A reads are the slow choices
+        # there. Bands: the 128x128x64 tile with
+        # grouped-M 8 from 2^21 outputs, the same tile with the stagger above
+        # 2^18, then 64x64x64 (grouped-M 8 above 2^18, where 128 does not
+        # divide M and N).
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_long_stride",
             spec_id="gfx1201_compv4_long_stride",
             priority=2,
+            spec_fn=_GFX1201_MEDIUM_LOW_K,
+            arches=_GFX1201_ARCHES,
+            shapes=(
+                ShapeRange("output_elements", min=1 << 21),
+                ShapeRange("K", multiple_of=8192),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_long_stride_medium",
+            spec_id="gfx1201_compv4_long_stride_medium",
+            priority=2,
+            spec_fn=_GFX1201_MEDIUM,
+            arches=_GFX1201_ARCHES,
+            shapes=(
+                ShapeRange("output_elements", min=(1 << 18) + 1),
+                ShapeRange("K", multiple_of=8192),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_long_stride_small_grouped",
+            spec_id="gfx1201_compv4_long_stride_small_grouped",
+            priority=2,
+            spec_fn=_GFX1201_SMALL_LOW_K,
+            arches=_GFX1201_ARCHES,
+            shapes=(
+                ShapeRange("output_elements", min=(1 << 18) + 1),
+                ShapeRange("K", multiple_of=8192),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_long_stride_small",
+            spec_id="gfx1201_compv4_long_stride_small",
+            priority=2,
             spec_fn=_GFX1201_SMALL,
             arches=_GFX1201_ARCHES,
             shapes=(
-                ShapeRange("output_elements", max=_GFX1201_LARGE_MIN_OUTPUT),
+                ShapeRange("output_elements", max=1 << 18),
                 ShapeRange("K", multiple_of=8192),
             ),
         ),
@@ -489,6 +550,9 @@ GEMM_FP16_REGISTRY.extend(
             spec_fn=_spec_rdna_wmma_small,
             arches=RDNA_WMMA_GEMM_ARCHES,
         ),
+        # Last resort on gfx1201: M or N that no other tile divides. Partial
+        # tiles make these correct for any M and N; they are not tuned.
+        *_DIRECT_A[4:],
     )
 )
 
