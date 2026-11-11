@@ -28,6 +28,7 @@ from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 from ..Common.Utilities import isMxf4SubtilePath, printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
+from ..Components.LoopModel.Order import FACTOR_PARAM
 
 from .Problem import ProblemType
 
@@ -322,6 +323,52 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.add("ClusterAIDMapping")
     else:
       requiredParametersTemp.discard("ClusterAIDMapping")
+
+    # An equal pair says nothing the scalar does not, so it collapses onto it; a differing pair
+    # REPLACES the scalar, which could not have said it. Either way the name states it once.
+    for _scalar in ("PrefetchLocalRead", "ClusterLocalRead"):
+      _a, _b = state.get(_scalar + "A", -1), state.get(_scalar + "B", -1)
+      if _a == _b:
+        requiredParametersTemp.discard(_scalar + "A")
+        requiredParametersTemp.discard(_scalar + "B")
+      else:
+        requiredParametersTemp.update((_scalar + "A", _scalar + "B"))
+        requiredParametersTemp.discard(_scalar)
+
+    # Same rule for the split, whose scalar is the BOOL that only an equal 0/1 pair can spell;
+    # an equal pair of any other factor has no scalar spelling and keeps the pair.
+    _sa, _sb = int(state.get("TDMSplitA", 0) or 0), int(state.get("TDMSplitB", 0) or 0)
+    if _sa == _sb and _sa in (0, 1):
+      requiredParametersTemp.add("TDMSplit")
+      requiredParametersTemp.discard("TDMSplitA")
+      requiredParametersTemp.discard("TDMSplitB")
+    else:
+      requiredParametersTemp.update(("TDMSplitA", "TDMSplitB"))
+      requiredParametersTemp.discard("TDMSplit")
+
+    # Registers calculates every value; names describe the final schedule.
+    for _registerParam in ("VgprGroupA", "VgprGroupB", "VgprAllocA", "VgprAllocB"):
+      if state.get("UseLoopModel", False):
+        requiredParametersTemp.add(_registerParam)
+      else:
+        requiredParametersTemp.discard(_registerParam)
+
+    # Same rule for the LoopModel knobs: UseLoopModel=False is every shipped kernel, and the
+    # traversal order only exists on that path, so neither is named off it.
+    if state.get("UseLoopModel", False):
+      requiredParametersTemp.update(("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+    else:
+      requiredParametersTemp.difference_update(
+          ("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+
+    # The factor IS the nest, so it is named whenever it makes an axis -- including where
+    # TDMSplit pins it, which the name would otherwise only imply.  A factor of 1 adds no
+    # axis and naming it would rename every kernel that has none.
+    for _factorParam in FACTOR_PARAM.values():
+      if state.get("UseLoopModel", False) and int(state.get(_factorParam, 1) or 1) > 1:
+        requiredParametersTemp.add(_factorParam)
+      else:
+        requiredParametersTemp.discard(_factorParam)
 
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":

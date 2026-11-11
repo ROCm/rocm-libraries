@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --StinkyBuildImplicitDependencyPass --GirWaitCntInsertionPass --emit-asm --preserve-comments
+#
+# Every wait GirWaitCntInsertionPass emits names the hazard kind that required it, so a GIR wait
+# is distinguishable from a generic register wait in the assembly. The kind is carried from the
+# hazard through the counter flow, not inferred from the counter: a RAW whose producer is a
+# ds_write takes the DS counter, so `dscnt => WAR` is not a sound rule on its own.
+#
+# One rotating buffer, read then overwritten in the loop. The read's RAW on the prologue copy
+# takes the tensor counter; the overwrite's WAR on that read takes the DS counter.
+#
+# CHECK: s_wait_tensorcnt 0{{.*}}// GIR RAW
+# CHECK-NEXT: s_barrier_signal -1
+# CHECK-NEXT: s_barrier_wait -1{{.*}}// GIR fence (RAW)
+# CHECK: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt 0{{.*}}// GIR WAR
+# CHECK-NEXT: s_barrier_signal -1
+# CHECK-NEXT: s_barrier_wait -1{{.*}}// GIR fence (WAR)
+# CHECK-NEXT: tensor_load_to_lds
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+}
+
+st.func @gir_wait_names_its_hazard_kind() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 1, anchor = 1, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 2, anchor = 1, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -82,6 +82,50 @@ def _forward_modifiers(rocisa_item: Any, logical: Any) -> None:
     _forward_true16(rocisa_item, logical)
 
 
+def _forward_gir_action(rocisa_item: Any, logical: Any) -> None:
+    """Copy the complete GIR action record onto logical instructions."""
+    getter = getattr(rocisa_item, "getGirActionData", None)
+    data = getter() if callable(getter) else None
+    if data is None:
+        return
+    if not isinstance(data, dict):
+        raise TypeError(
+            "getGirActionData() must return the full GIR action mapping; "
+            "a bare action id would discard anchor, kind, and access facts"
+        )
+    required = {"action_id", "anchor_action", "kind", "accesses"}
+    missing = required.difference(data)
+    if missing:
+        raise ValueError(
+            "getGirActionData() is missing GIR action fields: "
+            + ", ".join(sorted(missing))
+        )
+    targets = logical if isinstance(logical, list) else (logical,)
+    for inst in targets:
+        setter = getattr(inst, "set_gir_action", None)
+        if callable(setter):
+            setter(data)
+
+
+def _forward_gir_action_tag_count(module: Any, asm_module: Any) -> None:
+    """Publish how many rocisa items carried a GIR action, as module plugin data.
+
+    Mirrors the native converter (``ToStinkyTofuUtils.cpp``), which bumps
+    ``gir.action_tag_count`` once per tagged instruction. ``GirFrameContractImportPass``
+    reads it to tell "no GIR in this kernel" from "the contract arrived but the tags did
+    not"; without it a contract-carrying module aborts the pipeline.
+    """
+    tagged = 0
+    for item in module.flatitems():
+        getter = getattr(item, "getGirActionData", None)
+        if callable(getter) and getter() is not None:
+            tagged += 1
+    if not tagged:
+        return
+    key = "gir.action_tag_count"
+    asm_module.setPluginDataI64(key, asm_module.getPluginDataI64(key, 0) + tagged)
+
+
 # Synthetic instruction-group name that marks the DAG-scheduler region spanning
 # the persistent prefetch prologue + main loop. Must match the registered gfx125x
 # group name (see Gfx1250Backend.cpp) and native's kPGR literal.
@@ -432,6 +476,16 @@ class _PostProcessModule:
 # We mirror every one of these points so an adapter swap is byte-identical
 # at both the asm-emit layer (``Module.toString``) and the debug-dump layer
 # (``Module.prettyPrint``).
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate anything not overridden to the wrapped module.
+
+        The explicit methods above exist to ADD behaviour; everything else on
+        ``StinkyAsmModule`` (setPluginDataStr, pass controls, ...) should reach it
+        unchanged rather than be enumerated one at a time.
+        """
+        return getattr(self._inner, name)
+
 class TextBlock(Item):
     """Raw text leaf; mirror of ``rocisa::TextBlock`` (code.hpp:133-160).
 
@@ -1479,7 +1533,9 @@ class Module(Item):
         epilogue_range = _detect_epilogue_range(self.itemList)
         self._populate_logical_module(lm, pgr_range, epilogue_range)
 
-        return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
+        asm = _st.lower_logical_module(lm, list(arch), options)
+        _forward_gir_action_tag_count(self, asm)
+        return _PostProcessModule(asm)
 
     def _populate_logical_module(
         self, lm: Any, pgr_range: Any = None, epilogue_range: Any = None
@@ -1503,17 +1559,15 @@ class Module(Item):
         before epilogue so a shared boundary matches native's push order
         (``kEpilogue`` then ``kPGR``). Recursive walks pass neither range.
 
-        The epilogue span is bracketed by empty text blocks. Group endpoints
-        are recorded on the logical IR, and ``ToStinkyAsmPass`` then unlinks
-        every Python-owned logical (``safeErase`` only removes it). A group
-        whose first node was that logical starts ``ScopeAdaptor`` on a
-        detached ``LogicalInstruction``, which is neither a
-        ``StinkyInstruction`` nor an ``AsmDirective``. An empty
-        ``TEXTBLOCK`` stays linked and emits no bytes, so it can be the
-        endpoint instead. A later ``noLoadLoopBody`` copy can extend the
-        earlier multi-region extract past that opening anchor; the extract
-        deletes the comment and retargets any group still pointing at it
-        onto the neighboring instruction before ``EpilogueStoreSinkPass``.
+        Every span is bracketed by empty text blocks. Group endpoints are
+        recorded while this incremental walk is still appending the rest of
+        the kernel. Without a closing anchor, a group ending at the current
+        end of the list records ``end == nullptr``; after the tail and
+        epilogue are appended, ``ScopeAdaptor`` then reads that as the new end
+        of the whole kernel and schedules code outside the group. The anchors
+        are stable linked nodes and emit no bytes. They also keep
+        ``ToStinkyAsmPass`` from leaving an endpoint on a detached logical
+        instruction.
         """
         for idx, it in enumerate(self.itemList):
             if epilogue_range is not None and idx == epilogue_range[0]:
@@ -1521,8 +1575,10 @@ class Module(Item):
                 lm.add_textblock("")
             if pgr_range is not None and idx == pgr_range[0]:
                 lm.begin_group(_PGR_GROUP)
+                lm.add_textblock("")
             self._populate_one_item(lm, it)
             if pgr_range is not None and idx == pgr_range[1]:
+                lm.add_textblock("")
                 lm.end_group(_PGR_GROUP)
             if epilogue_range is not None and idx == epilogue_range[1]:
                 lm.add_textblock("")
@@ -1539,8 +1595,10 @@ class Module(Item):
                 return
             if it.name:
                 lm.begin_group(it.name)
+                lm.add_textblock("")
             it._populate_logical_module(lm)
             if it.name:
+                lm.add_textblock("")
                 lm.end_group(it.name)
             return
         if isinstance(it, ValueIf):
@@ -1588,6 +1646,7 @@ class Module(Item):
         # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
         _forward_memtoken(it, logical)
         _forward_modifiers(it, logical)
+        _forward_gir_action(it, logical)
         if isinstance(logical, list):
             for inst in logical:
                 if comment and not inst.comment:
@@ -1613,6 +1672,7 @@ class Module(Item):
                 continue
             _forward_memtoken(it, logical)
             _forward_modifiers(it, logical)
+            _forward_gir_action(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:

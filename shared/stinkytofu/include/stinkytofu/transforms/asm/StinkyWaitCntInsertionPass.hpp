@@ -39,6 +39,10 @@ struct WaitCntInsertionOptions {
     /// first WMMA, instead of one per WMMA, so a scheduled WMMA batch stays
     /// back-to-back (see WmmaRunWaitMerge). Set when WMMA batching is on.
     bool mergeWaitsInWmmaRuns = false;
+
+    /// Skip the s_wait_tensorcnt arm only; every other counter is still inserted.
+    /// For a producer that owns its tensorcnt waits already and wants the rest.
+    bool disableTensorcntInsertion = false;
 };
 
 /**
