@@ -1,0 +1,128 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": "${case.override_shape}",
+  "name": "ConvBwdDataFusionTest",
+  "nodes": [
+    {
+      "compute_data_type": "${case.attributes.conv_compute}",
+      "inputs": {
+        "dy_tensor_uid": 5,
+        "w_tensor_uid": 6
+      },
+      "name": "ConvolutionDgrad_0",
+      "outputs": {
+        "dx_tensor_uid": 1
+      },
+      "parameters": {
+        "conv_mode": "${case.attributes.conv_mode}",
+        "dilation": "${case.attributes.dilation}",
+        "post_padding": "${case.attributes.post_padding}",
+        "pre_padding": "${case.attributes.pre_padding}",
+        "stride": "${case.attributes.stride}"
+      },
+      "type": "ConvolutionBwdAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 1,
+        "in_1_tensor_uid": 3,
+        "in_2_tensor_uid": null,
+        "operation": "add",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_1",
+      "outputs": {
+        "out_0_tensor_uid": 2
+      },
+      "type": "PointwiseAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 2,
+        "in_1_tensor_uid": 4,
+        "in_2_tensor_uid": null,
+        "operation": "relu_bwd",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_2",
+      "outputs": {
+        "out_0_tensor_uid": 0
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_2::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "ConvolutionDgrad_0::DX",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": "${case.attributes.inter_virtual}"
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "dx_residual",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "dy",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "w",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    }
+  ]
+}
