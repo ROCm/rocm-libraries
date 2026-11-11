@@ -2066,11 +2066,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             FmhaFwdTileSize(32, 128, 256, 256, 128, 256, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 1),
         ),
     }  # fmt: skip
-    # Must match kFmhaTdmSchedFp8{,Bias,D256,D192Mx,D192Merged,OneWave}BlockPerCu in the policy.
+    # Workgroups per CU; the pipeline takes them from the generated traits.
+    # Every quantization mode fits 512 VGPRs without mainloop spills, so all run two per CU.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
+    # The elementwise bias tile does not fit two workgroups' VGPRs, so it runs one per CU.
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
+    # D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
     _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
+    # D192 MX scales (six bytes per Q/K row) spill at two per CU, so it runs one per CU.
     _QR_TDM_SCHED_FP8_D192_MX_OCCUPANCY = 1
+    # D192 merged-GQA decode runs one per CU where two overflow the LDS (FP32 O) or VGPRs (sink).
     _QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY = 1
 
     @classmethod
@@ -2183,8 +2188,23 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             )
         return CppConstraint(expr)
 
-    # Launch-bound occupancy of the one-wavefront tiles.
+    # Launch-bound occupancy of the one-wavefront tiles: target 2 per SIMD; D128/D192 are
+    # LDS-bound to 1 until the one-wavefront LDS footprint shrinks.
     _QR_TDM_SCHED_FP8_ONE_WAVE_OCCUPANCY = {64: 2, 128: 2, 192: 2, 256: 1}
+
+    @classmethod
+    def qr_tdm_fp8_sched_pipelines(
+        cls, hdim: int, hdim_v: int, mask_impl: str, qscales, biases
+    ) -> List[FmhaFwdPipeline]:
+        # Packed GQA decode first (one-wavefront tile, then the full tile), then the full tiles.
+        pipelines = []
+        for packgqa, bias_values in (("t", ["no"]), ("f", biases)):
+            for mask, lse, qscale, sink, bias in itertools.product(
+                get_mask_map(mask_impl).keys(), ["f", "t"], qscales, ["f", "t"], bias_values
+            ):
+                sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa=packgqa))  # fmt: skip
+        return pipelines
 
     @classmethod
     def get_rules(cls) -> List[CompatibilityRule]:
@@ -2535,25 +2555,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 dtype in cls._DT_QR_TDM_SCHED_FP8
                 and (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES
             ):
-                # Packed GQA decode first: the one-wavefront tile, then the full tile.
-                for mask, lse, qscale, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
-                    ["no", "pertensor", "perhead", "blockscale"],
-                    ["f", "t"],
-                ):
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
                 # No alibi/dropout; bias runs one workgroup per CU. Dispatched ahead of qr_tdm.
-                for mask, lse, qscale, sink, bias in itertools.product(
-                    get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
-                    ["no", "pertensor", "perhead", "blockscale"],
-                    ["f", "t"],
-                    ["no", "bias"],
-                ):
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
+                pipelines.extend(
+                    cls.qr_tdm_fp8_sched_pipelines(
+                        hdim,
+                        hdim_v,
+                        mask_impl,
+                        ["no", "pertensor", "perhead", "blockscale"],
+                        ["no", "bias"],
+                    )
+                )
 
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
@@ -2563,17 +2574,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_MXFP8:
             # MX only on the scheduled FP8 pipeline: no bias/dropout.
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES:
-                # Packed GQA decode first, as for FP8.
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
-                ):
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
-                ):
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
+                pipelines.extend(
+                    cls.qr_tdm_fp8_sched_pipelines(hdim, hdim_v, mask_impl, ["mx"], ["no"])
+                )
         return pipelines
 
 

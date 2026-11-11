@@ -692,27 +692,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     }
 };
 
-// Every quantization mode fits 512 VGPRs without mainloop spills, so all run two per CU.
-inline constexpr index_t kFmhaTdmSchedFp8BlockPerCu = 2;
-// The elementwise bias tile does not fit two workgroups' VGPRs, so it runs one per CU.
-inline constexpr index_t kFmhaTdmSchedFp8BiasBlockPerCu = 1;
-// D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
-inline constexpr index_t kFmhaTdmSchedFp8D256BlockPerCu = 1;
-// D192 MX scales (six bytes per Q/K row) spill at two per CU, so it runs one per CU.
-inline constexpr index_t kFmhaTdmSchedFp8D192MxBlockPerCu = 1;
-// D192 merged-GQA decode runs one per CU where two overflow the LDS (FP32 O) or VGPRs (sink).
-inline constexpr index_t kFmhaTdmSchedFp8D192MergedBlockPerCu = 1;
-template <typename Problem>
-inline constexpr bool kFmhaTdmSchedFp8D192MergedOnePerCu =
-    Problem::BlockFmhaShape::kQKHeaddim == 192 && Problem::kMergeNumHeadGroupsSeqLenQ &&
-    (((Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-       Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE) &&
-      sizeof(typename Problem::ODataType) == 4) ||
-     (Problem::kHasSink && Problem::FmhaMask::IsMasking));
-// Target 2 per SIMD; D128/D192 are LDS-bound to 1 until the one-wavefront LDS footprint shrinks.
-template <index_t HeadDim>
-inline constexpr index_t kFmhaTdmSchedFp8OneWaveBlockPerCu = HeadDim == 256 ? 1 : 2;
-
 // Dense four-wavefront D256 splits each K/V tile across LDS segments by wavefront parity.
 template <typename Problem>
 inline constexpr bool kFmhaTdmSchedFp8LdsSegLayout =
@@ -723,18 +702,10 @@ inline constexpr bool kFmhaTdmSchedFp8LdsSegLayout =
     !Problem::kMergeNumHeadGroupsSeqLenQ && !Problem::kHasSink && !Problem::FmhaMask::IsMasking &&
     Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
 
+// Workgroups per CU come from the generated traits (the codegen holds the occupancy rules).
 template <typename Problem>
-using FmhaTdmSchedFp8TuningFor = FmhaTdmSchedDerivedTuning<
-    FmhaTdmSchedGeometryFor<Problem>,
-    Problem::BlockFmhaShape::kM0 == 32
-        ? kFmhaTdmSchedFp8OneWaveBlockPerCu<Problem::BlockFmhaShape::kQKHeaddim>
-    : Problem::BlockFmhaShape::kQKHeaddim == 256 ? kFmhaTdmSchedFp8D256BlockPerCu
-    : Problem::BlockFmhaShape::kQKHeaddim == 192 &&
-            Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX
-        ? kFmhaTdmSchedFp8D192MxBlockPerCu
-    : kFmhaTdmSchedFp8D192MergedOnePerCu<Problem>          ? kFmhaTdmSchedFp8D192MergedBlockPerCu
-    : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
-                                                           : kFmhaTdmSchedFp8BiasBlockPerCu>;
+using FmhaTdmSchedFp8TuningFor =
+    FmhaTdmSchedDerivedTuning<FmhaTdmSchedGeometryFor<Problem>, Problem::kBlockPerCu>;
 
 template <typename Problem>
 using FmhaTdmSchedFp8PolicyFor = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<
