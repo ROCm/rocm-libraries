@@ -18,7 +18,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 
 | Engine(s) | Built for | Directions | Archs | Configs |
 |---|---|---|---|---|
-| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 1628 |
+| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 1648 |
 | `CONV_IGEMM_NCHW_BWD` (K7) | NCHW bwd-data in place: strided pointwise, patchify, 1-D/vocoder ConvTranspose, dilated rows, 3-D stride 2. Weak on large compute-bound GEMMs (K1 wins there). | bwd-data | MFMA, WMMA, FMA | 1839 |
 | `CONV_DIRECT_FWD/BWD` (K2) | Stride-1 halo-tile direct conv, 3x3 / 5x5 / 7x7 / 1x7 / 3x3x3. The `rows` kind is the gfx950 dense 3x3 path (hipconv-class). | fwd, bwd-data (stride 1) | MFMA, WMMA, FMA | 442 |
 | `CONV_WINOGRAD_FWD/BWD` (K5) | 3x3 stride 1 (stride 2 by phases). `coop` is the cooperative WMMA/MFMA F(2,3), and F(3,2) for stride 2; the fused VALU and register variants target gfx906, grouped, and fp32 on RDNA (including 24-wide K blocks). | fwd, bwd-data | all | 320 |
