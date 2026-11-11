@@ -105,7 +105,7 @@ option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
 # HIPCUB_USE_LEGACY_API. rocprim/hipcub declare the same option, so it can also be set when
 # configuring either of them directly.
 option(HIPCCL_USE_LEGACY_API
-    "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" OFF)
+    "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" ON)
 
 # --- Component selection ---
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
