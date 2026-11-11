@@ -1326,6 +1326,59 @@ TYPED_TEST(PageTileForward, MatchesReferenceSink)
     }
 }
 
+// Sink instance: no attended key falls in the pages between the sink tile and the first window
+// tile, so their table entries may hold anything. Out-of-range ids there must leave the output
+// bitwise equal to the plain table's, and correct.
+TYPED_TEST(PageTileForward, SkippedSinkPages)
+{
+    if constexpr(!kSink)
+        GTEST_SKIP() << "sink instance only";
+    else
+    {
+        // A copy of h whose table entries of the pages lying entirely in keys [begin, end) of
+        // every sequence hold `id` (the vLLM table and the SGLang list alike). The pool, the
+        // logical data and h's own table stay as they are, so the reference of h still describes
+        // the problem.
+        const auto with_table_pages = [](HostProblem h, int begin, int end, int32_t id) {
+            auto& l = h.layout;
+            for(int b = 0; b < l.batch(); ++b)
+                for(int page = 0; page * kPage < l.seqlen_k[b]; ++page)
+                    if(page * kPage >= begin && (page + 1) * kPage <= end)
+                    {
+                        l.block_table[b * l.table_stride + page] = id;
+                        l.kv_page_indices[l.kv_indptr[b] + page] = id;
+                    }
+            return h;
+        };
+        // One sequence, bottom-right: the first query row attends keys from
+        // (3000 - 300) - 300 = 2400 on, so the key tiles between the sink tile (keys 0..127) and
+        // the tile of key 2400 are never visited.
+        const Case shape{"long", 4, 2, {300}, {3000}};
+        const Window window{false, 300, 0, 4, false};
+        const int first_window_key = (3000 - 300) - 300;
+        const int skipped_begin    = 128;
+        const int skipped_end      = first_window_key / 128 * 128;
+        const auto h = MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, false, 73);
+        DeviceProblem base_device(h);
+        const auto base_output = Run<TypeParam>(h, base_device, window);
+        const auto poisoned =
+            with_table_pages(h, skipped_begin, skipped_end, std::numeric_limits<int32_t>::min());
+        ASSERT_NE(poisoned.layout.block_table, h.layout.block_table) << "no page was skipped";
+        DeviceProblem d(poisoned);
+        const auto o       = Run<TypeParam>(poisoned, d, window);
+        const auto metrics = CompareWithReference(h, o, true, {}, window);
+        std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " sink "
+                  << (kSglang ? "sglang " : "") << "skipped pages rows=" << metrics.checked_rows
+                  << " max_abs=" << metrics.max_abs_error << " passed=" << metrics.passed << '\n';
+        EXPECT_EQ(metrics.checked_rows, LogicalRows(h.layout));
+        EXPECT_EQ(metrics.nonfinite_output_count, 0u);
+        EXPECT_TRUE(metrics.passed);
+        ASSERT_EQ(o.size(), base_output.size());
+        EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(Data)), 0)
+            << "the table entries of skipped pages changed the output";
+    }
+}
+
 // An elementwise bias can carry a materialized mask. Here it is -inf on the first key tile (keys
 // 0..127) of every row, so that tile has no finite score: the softmax must keep a finite exponent
 // base, as with a mask, instead of forming -inf - (-inf). V is 0 on those keys and 1 on the
