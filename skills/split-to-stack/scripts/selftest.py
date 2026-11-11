@@ -791,6 +791,29 @@ def test_regressions():
         bld(repo, runs, "--refs", "update").returncode == 0,
         "--refs update still works after a plain rebuild",
     )
+    # a branch with a remote-tracking ref is published: --refs update moves it only with --allow-published
+    git(repo, "remote", "add", "origin", repo)
+    g1 = git(repo, "rev-parse", "users/t/g1").strip()
+    git(repo, "update-ref", "refs/remotes/origin/users/t/g1", g1)
+    plan(runs, mkgroups(2), [asgrow(ia, 1, 1, "01"), asgrow(ib, 1, 1, "02")])
+    p = bld(repo, runs, "--refs", "update")
+    check(
+        p.returncode != 0
+        and b"published" in p.stderr
+        and git(repo, "rev-parse", "users/t/g1").strip() == g1,
+        "--refs update refuses to move a published branch and moves nothing",
+    )
+    p = bld(repo, runs, "--refs", "update", "--allow-published")
+    check(
+        p.returncode == 0 and git(repo, "rev-parse", "users/t/g1").strip() != g1,
+        "--allow-published moves a published branch",
+    )
+    check(
+        bld(repo, runs, "--refs", "update").returncode == 0,
+        "a published branch whose SHA does not change does not trip the guard",
+    )
+    git(repo, "update-ref", "-d", "refs/remotes/origin/users/t/g1")
+    git(repo, "remote", "remove", "origin")
     git(
         repo, "branch", "-f", "users/t/g2", git(repo, "rev-parse", "users/t/g1").strip()
     )
