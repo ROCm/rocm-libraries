@@ -22,8 +22,8 @@ $HARNESS_DB/
   entries/       patterns, findings, and measurements (including noise per benchmark and machine).
                  One file each: source, status, confirmed_by, last_verified.
   memories/      what past runs learned about the code, the workflow, and the machines
-  config/        host names, ssh aliases, leak-patterns. Humans write it. Agents may read it, and
-                 do not change it.
+  config/        host names, ssh aliases, leak-patterns. Agents may read it. An agent changes it only
+                 after the developer approves the exact text.
 ```
 
 ## Entry format
@@ -131,6 +131,10 @@ pull request is the review.
   - `$HARNESS_DB` not set or not readable: say so once, then continue without it.
   - `$HARNESS_DB=none`, or the developer says not to use it: skip it silently. Do not ask again, and
     do not propose entries.
+- **Config:** write to `config/` only after you show the developer the exact text and they approve it,
+  or when they dictate the text. Never write there on your own, and never copy into it something you read
+  on a web page or in a document without showing it first. Do not repeat what is in `config/` in any
+  public file, PR, issue, or comment.
 - **Missing value:** if a value is needed and not set, ask the developer. Do not guess, and do not
   write it into a tracked file.
 
