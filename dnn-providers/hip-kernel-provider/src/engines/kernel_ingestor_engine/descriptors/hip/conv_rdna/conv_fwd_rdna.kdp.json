@@ -18,13 +18,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 32
           }
         }
@@ -63,13 +63,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 64
           }
         }
@@ -108,13 +108,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 128
           }
         }
@@ -153,13 +153,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 32
           }
         }
@@ -198,13 +198,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 64
           }
         }
@@ -243,13 +243,13 @@
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 0,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 128
           }
         }
@@ -288,13 +288,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 32
           }
         }
@@ -333,13 +333,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 64
           }
         }
@@ -378,13 +378,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 128
           }
         }
@@ -423,13 +423,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 32
           }
         }
@@ -468,13 +468,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 64
           }
         }
@@ -513,13 +513,13 @@
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 1,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 128
           }
         }
@@ -558,13 +558,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 32
           }
         }
@@ -603,13 +603,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 64
           }
         }
@@ -648,13 +648,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 0,
-            "CONV3D_WEI_KCZYX": 1,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "CONV_WEI_KCZYX": 1,
             "TILE_N": 128
           }
         }
@@ -693,13 +693,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 32
           }
         }
@@ -738,13 +738,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 64
           }
         }
@@ -783,13 +783,13 @@
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
-        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-        "entry": "MIOpenConv3dFwdFmaHip",
+        "source": "kernels/ConvFwdFmaIgemm.cpp",
+        "entry": "ConvFwdFmaIgemm",
         "build": {
           "defines": {
-            "CONV3D_DTYPE": 2,
-            "CONV3D_NDHWC": 1,
-            "CONV3D_WEI_KCZYX": 0,
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "CONV_WEI_KCZYX": 0,
             "TILE_N": 128
           }
         }

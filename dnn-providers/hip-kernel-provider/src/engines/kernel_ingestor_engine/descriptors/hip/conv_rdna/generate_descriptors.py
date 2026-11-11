@@ -75,15 +75,15 @@ def fwd_descriptors():
                         "name": name,
                         "kernel_source": {
                             "kind": "hip",
-                            "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
-                            "entry": "MIOpenConv3dFwdFmaHip",
+                            "source": "kernels/ConvFwdFmaIgemm.cpp",
+                            "entry": "ConvFwdFmaIgemm",
                             "build": {
                                 "defines": {
-                                    "CONV3D_DTYPE": dcode,
-                                    "CONV3D_NDHWC": lcode,
+                                    "CONV_DTYPE": dcode,
+                                    "CONV_CHANNELS_LAST": lcode,
                                     # Channels-first weights are read in place; channels-last
                                     # weights are K x taps x C already.
-                                    "CONV3D_WEI_KCZYX": 1 - lcode,
+                                    "CONV_WEI_KCZYX": 1 - lcode,
                                     "TILE_N": tile,
                                 }
                             },
