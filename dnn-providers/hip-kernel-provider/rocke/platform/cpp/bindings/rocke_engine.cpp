@@ -1456,6 +1456,13 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     rocke_implicit_gemm_conv_spec_t s = rocke_implicit_gemm_conv_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
         fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+    /* An explicit pipeline=None / epilogue=None is a malformed spec (Python
+     * rejects it), not a request for the "mem" / "default" defaults: pass
+     * NULL so the engine rejects it. Only an absent key keeps the default. */
+    if(d.contains("pipeline") && d["pipeline"].is_none())
+        s.pipeline = NULL;
+    if(d.contains("epilogue") && d["epilogue"].is_none())
+        s.epilogue = NULL;
 
     {
         std::string v;
@@ -3317,6 +3324,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     s.prefetch_addr = dict_bool(d, "prefetch_addr", s.prefetch_addr);
     s.register_prefetch = dict_bool(d, "register_prefetch", s.register_prefetch);
+    s.prefetch_global_regs = dict_bool(d, "prefetch_global_regs", s.prefetch_global_regs);
     s.streamk_ctas = dict_int(d, "streamk_ctas", s.streamk_ctas);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
     s.async_dma = dict_bool(d, "async_dma", s.async_dma);

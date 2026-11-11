@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import ctypes
 import json
+import random
+import tracemalloc
 from dataclasses import replace
 from pathlib import Path
 
@@ -51,6 +53,7 @@ from builders.common.convolution_backward_data import (
     PACKAGED_LLVM_FLAVOR,
     Gfx950ConvDgradAotSpec,
     Gfx950ConvDgradProblem,
+    _covered,
     aot_dgrad_direct_instance_fields,
     build_gfx950_conv_dgrad_aot,
     gfx950_conv_dgrad_aot_helper_fields,
@@ -630,6 +633,62 @@ def test_a_patch_plan_zero_fills_only_between_patches(catalog):
         full = all((h, w) in written for h in range(p.Hi) for w in range(p.Wi))
         assert full != gaps
         assert plan.zero_dx == gaps
+
+
+def _covered_by_marking(extent: int, runs) -> bool:
+    """``_covered`` by marking every position: the definition it must match."""
+    hit = bytearray(extent)
+    for offset, stride, count, width in runs:
+        for t in range(count):
+            start = offset + stride * t
+            for pos in range(max(start, 0), min(start + width, extent)):
+                hit[pos] = 1
+    return all(hit)
+
+
+def test_coverage_is_decided_as_marking_every_position_would():
+    rng = random.Random(0)
+    covered = 0
+    for _ in range(20000):
+        extent = rng.randint(0, 40)
+        runs = [
+            (
+                rng.randint(-6, 12),
+                rng.randint(-4, 7),
+                rng.randint(-1, 12),
+                rng.randint(-1, 6),
+            )
+            for _ in range(rng.randint(0, 4))
+        ]
+        expected = _covered_by_marking(extent, runs)
+        assert _covered(extent, runs) == expected, (extent, runs)
+        covered += expected
+    assert 0 < covered < 20000
+
+
+def test_coverage_costs_nothing_per_position(catalog):
+    """A long, narrow problem (Wi = 1, Hi up to what one image admits) is decided
+    without a buffer of Hi: the check is arithmetic over the records."""
+    extent = 2**31 - 1
+    tracemalloc.start()
+    try:
+        assert _covered(extent, [(r, 3, extent // 3 + 1, 1) for r in range(3)])
+        assert not _covered(extent, [(r, 3, extent // 3 + 1, 1) for r in range(2)])
+        assert not _covered(extent, [(0, 1, extent - 1, 1)])
+        spec = next(
+            s
+            for _, s in catalog
+            if not s.is_direct and not s.patch and s.filter_h == 0 and s.dtype == "bf16"
+        )
+        plan, why = gfx950_conv_dgrad_aot_plan(
+            spec, _p(1, 2**22, 1, 64, 64, 3, 1, p=(1, 0), dtype="bf16")
+        )
+        assert plan is not None, why
+        assert not plan.zero_dx
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 2**20
 
 
 def test_the_digest_is_fnv1a_over_the_serialized_plan(catalog):

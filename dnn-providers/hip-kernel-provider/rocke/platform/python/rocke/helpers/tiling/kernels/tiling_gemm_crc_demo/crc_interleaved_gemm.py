@@ -194,18 +194,18 @@ def build_crc_gemm(
     if ab_swap:
         mma = TileMma(
             (warp_n, warp_m, tile_k),
-            a="f16",
-            b="f16",
-            c="f32",
+            a=F16,
+            b=F16,
+            c=F32,
             target=arch,
             tiling=Tiling(atom_shape=(_ATOM, _ATOM, _ATOM)),
         )
     else:
         mma = TileMma(
             (warp_m, warp_n, tile_k),
-            a="f16",
-            b="f16",
-            c="f32",
+            a=F16,
+            b=F16,
+            c=F32,
             target=arch,
             tiling=Tiling(atom_shape=(_ATOM, _ATOM, _ATOM)),
         )

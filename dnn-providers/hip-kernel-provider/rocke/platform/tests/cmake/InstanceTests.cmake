@@ -118,6 +118,36 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp"
                rocke_gemm_universal_spec_guards)
 endif()
 
+# Forward implicit-GEMM gates around the gfx950 MFMA split-K (parity configs
+# 66..85 of conv_implicit_gemm_emit, whose spec table it compiles in): the C++
+# verdicts and reasons against Python's. CI checks those configs with the
+# Python engine only, and the pybind engine-agreement tests skip there.
+# Guarded on the sibling library tree, as in platform/CMakeLists.txt, so a
+# platform-only copy still configures.
+set(_rocke_conv_igemm_parity_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests/parity")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_implicit_gemm_spec_guards.cpp"
+   AND EXISTS "${_rocke_conv_igemm_parity_dir}/conv_implicit_gemm_emit.c")
+  add_executable(rocke_conv_implicit_gemm_spec_guards
+                 instances/conv_implicit_gemm_spec_guards.cpp)
+  target_include_directories(rocke_conv_implicit_gemm_spec_guards
+                             PRIVATE "${_rocke_conv_igemm_parity_dir}")
+  target_link_libraries(rocke_conv_implicit_gemm_spec_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_conv_implicit_gemm_spec_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_conv_implicit_gemm_spec_guards
+           COMMAND rocke_conv_implicit_gemm_spec_guards)
+  set_tests_properties(rocke_conv_implicit_gemm_spec_guards
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_implicit_gemm_spec_guards)
+  set_target_properties(rocke_conv_implicit_gemm_spec_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_conv_implicit_gemm_spec_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_conv_implicit_gemm_spec_guards)
+endif()
+
 # Depthwise dgrad entries the byte-identity gate cannot see: the lowering's
 # failure path when the kernel name overflows, the pad_w < -1 refusals and
 # the per-axis padding in the tiled dgrad kernel name.

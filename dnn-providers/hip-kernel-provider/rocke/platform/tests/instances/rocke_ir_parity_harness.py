@@ -150,10 +150,12 @@ def build_conv(
     group_merge=1,
     split_k=1,
     split_k_cluster=0,
+    dtype="fp16",
     tf32=False,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
+            ConvDataSpec,
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -162,6 +164,7 @@ def build_conv(
         p = ConvProblem(*problem_args)
         spec = ImplicitGemmConvSpec(
             problem=p,
+            data=(_tf32_conv_data() if tf32 else ConvDataSpec(dtype, dtype, dtype)),
             name=name,
             tile_m=tile_m,
             tile_n=tile_n,
@@ -179,7 +182,6 @@ def build_conv(
             group_merge=group_merge,
             split_k=split_k,
             split_k_cluster=split_k_cluster,
-            **({"data": _tf32_conv_data()} if tf32 else {}),
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -2495,6 +2497,33 @@ def cases():
                 split_k_cluster=skc,
             ),
         )
+    # gfx950 split-K forward (MFMA, wave64): the same two-stage binary on the
+    # plain mem / compv3 K loops, one per dtype.
+    for tag, pipeline, dtype in (
+        ("splitk_mem_fp16", "mem", "fp16"),
+        ("splitk_compv3_bf16", "compv3", "bf16"),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n1h7c256k64r3/{tag}",
+            "gfx950",
+            build_conv(
+                "irhash_conv_950_" + tag,
+                "gfx950",
+                conv_small_m,
+                wave_size=64,
+                wtm=32,
+                wtn=32,
+                wtk=16,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline=pipeline,
+                epilogue="cshuffle",
+                split_k=2,
+                dtype=dtype,
+            ),
+        )
     # Its Stage 2: the runtime slab loop and the degree-unrolled fold.
     for tag, kw in (
         ("bf16_v4", dict(dtype_d="bf16", vec=4)),
@@ -2878,6 +2907,75 @@ def cases():
             tile_k=32,
             split_k=4,
             epilogue="cshuffle",
+        ),
+    )
+    # The register-prefetch K loop (prefetch_global_regs): the plain synchronous
+    # loop with tile k+1's reads held in VGPRs under tile k's MFMAs, behind
+    # LDS-only barriers. K-outer cshuffle without and with the packed fp16
+    # atomic (the 16x16x32 atom, compv3), and two-stage into bf16 dW.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_spk4_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv3",
+            split_k=4,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_2stage_bf16_pgr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_2stage_bf16_pgr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv4",
+            split_k=4,
+            two_stage=True,
+            dtype_d="bf16",
+            lds_k_outer=True,
+            prefetch_global_regs=True,
         ),
     )
     add(
