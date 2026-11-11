@@ -460,6 +460,27 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
 /* tile.mma routing (Python _op_tile_mma -> ISABackend.emit_mma)          */
 /* ====================================================================== */
 
+/* A scaled MFMA's scale_sel: the byte, 0..3, of the A and of the B scale VGPR
+ * each lane reads (opsel_a / opsel_b); byte 0 of both when absent. Python's
+ * _scale_sel accepts the same values. */
+static void mma_scale_sel(rocke_lower_t* L, const rocke_op_t* op, int64_t* sel_a, int64_t* sel_b)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "scale_sel");
+    *sel_a = 0;
+    *sel_b = 0;
+    if(!v)
+    {
+        return;
+    }
+    if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 2 || v->u.ilist.ints[0] < 0 ||
+       v->u.ilist.ints[0] > 3 || v->u.ilist.ints[1] < 0 || v->u.ilist.ints[1] > 3)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
+    }
+    *sel_a = v->u.ilist.ints[0];
+    *sel_b = v->u.ilist.ints[1];
+}
+
 /* op_id -> handler. Mirrors the Python CDNA emit_mma which rebuilds the legacy
  * ``tile.<op_id>`` op and re-dispatches it to the matching _op_tile_<op_id>
  * method. We dispatch directly to the file-static handler to keep the emitted
@@ -485,25 +506,35 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        int64_t sel_a = 0;
+        int64_t sel_b = 0;
+        mma_scale_sel(L, op, &sel_a, &sel_b);
         rocke_ll_need(L, "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32");
         rocke_ll_emitf(
             L,
             "  %s = call <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32("
-            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 0, i32 %s, i32 0, "
-            "i32 %s)",
+            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 %lld, i32 %s, "
+            "i32 %lld, i32 %s)",
             mma_result_name(L, op),
             rocke_ll_operand(L, op->operands[0]),
             rocke_ll_operand(L, op->operands[1]),
             rocke_ll_operand(L, op->operands[2]),
             rocke_mfma_matrix_format(atom->a_dtype),
             rocke_mfma_matrix_format(atom->b_dtype),
+            (long long)sel_a,
             rocke_ll_operand(L, op->operands[3]),
+            (long long)sel_b,
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
     char tf32_error[ROCKE_ERR_MSG_CAP];
     if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+    if(rocke_attr_get(&op->attrs, "scale_sel"))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.mma %s: scale_sel applies only to a scaled MFMA atom",
+                      op_id);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom

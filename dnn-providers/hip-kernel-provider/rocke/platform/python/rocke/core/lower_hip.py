@@ -708,6 +708,8 @@ class _Lowerer:
             MATRIX_FORMATS,
         )
 
+        from .lower_llvm import _scale_sel
+
         atom = gfx950_scaled_mfma(op_id)
         if atom is not None:
             if self.arch.gfx != "gfx950":
@@ -716,12 +718,17 @@ class _Lowerer:
             if error:
                 raise ValueError(error)
             a, b, c, sa, sb = op.operands
+            sel_a, sel_b = _scale_sel(op)
             self._emit(
                 f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4("
                 f"{_name(a)}, {_name(b)}, {_name(c)}, {MATRIX_FORMATS[atom.a_dtype]}, {MATRIX_FORMATS[atom.b_dtype]}, "
-                f"0, {_name(sa)}, 0, {_name(sb)});"
+                f"{sel_a}, {_name(sa)}, {sel_b}, {_name(sb)});"
             )
             return
+        if "scale_sel" in op.attrs:
+            raise ValueError(
+                f"tile.mma {op_id}: scale_sel applies only to a scaled MFMA atom"
+            )
         if op_id in TF32_MMA:
             error = tf32_mma_target_error(op_id, self.arch)
             if error:
@@ -1349,14 +1356,17 @@ class _Lowerer:
         # restricts ``size`` to {1, 2, 4}, but the LLVM intrinsic accepts
         # 12 / 16 (i.e. dwords ∈ {1, 3, 4}). compv4 and split-KV attention
         # need the 16-byte form.
+        from .lower_llvm import _lds_dma_offset
+
         rsrc, lds_addr, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
         size_bytes = dwords * 4
+        offset = _lds_dma_offset(op)
         self._emit(
             f"_llvm_amdgcn_raw_ptr_buffer_load_lds("
             f"{_name(rsrc)}, "
             f"(__attribute__((address_space(3))) void*)({_name(lds_addr)}), "
-            f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, 0);"
+            f"{size_bytes}, {_name(voff)}, {_name(soff)}, {offset}, 0);"
         )
 
     @staticmethod
@@ -2281,9 +2291,12 @@ class _Lowerer:
         # Typed-LDS variant: the second operand is a ``smem<...>`` value.
         # Materialise an LDS pointer from the ``__shared__`` storage and
         # hand it to the same intrinsic as the addr variant.
+        from .lower_llvm import _lds_dma_offset
+
         rsrc, lds_val, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
         aux = int(op.attrs.get("aux", 0))
+        offset = _lds_dma_offset(op)
         size_bytes = dwords * 4
         storage = lds_val.op.attrs.get("_storage") if lds_val.op else None
         if storage is None:
@@ -2295,7 +2308,7 @@ class _Lowerer:
             f"_llvm_amdgcn_raw_ptr_buffer_load_lds("
             f"{_name(rsrc)}, "
             f"(__attribute__((address_space(3))) void*)&{storage}[0], "
-            f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, {aux});"
+            f"{size_bytes}, {_name(voff)}, {_name(soff)}, {offset}, {aux});"
         )
 
     def _op_tile_ds_bpermute(self, op: Op) -> None:

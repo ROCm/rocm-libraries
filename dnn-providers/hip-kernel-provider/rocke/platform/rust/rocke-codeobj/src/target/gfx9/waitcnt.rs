@@ -300,8 +300,8 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys, store_wait: bool) -> O
 /// `state`. Scalar loads return out of order: with one outstanding, only an
 /// lgkmcnt of 0 settles anything on that counter.
 fn retire(state: &mut Running, imm: i64) {
-    let vm = (imm & 0xf | (imm >> 14 & 3) << 4) as u8;
-    let lgkm = (imm >> 8 & 0xf) as u8;
+    let (vm, _, lgkm) = imm_fields(imm);
+    let (vm, lgkm) = (vm as u8, lgkm as u8);
     if vm < 63 {
         state.vm.wait(vm);
         state.vm_any &= vm != 0;
@@ -329,6 +329,12 @@ pub fn explicit_imm(vm: i64, exp: i64, lgkm: i64) -> i64 {
     let field = |c: i64, max: i64| if c < 0 { max } else { c.min(max) };
     let (vm, exp, lgkm) = (field(vm, 63), field(exp, 7), field(lgkm, 15));
     (vm & 0xf) | exp << 4 | lgkm << 8 | (vm >> 4 & 3) << 14
+}
+
+/// The counts of a gfx9 `s_waitcnt` immediate, the inverse of `explicit_imm`:
+/// vmcnt (bits 3:0 and 15:14), expcnt (6:4) and lgkmcnt (11:8).
+pub fn imm_fields(imm: i64) -> (i64, i64, i64) {
+    (imm & 0xf | (imm >> 14 & 3) << 4, imm >> 4 & 7, imm >> 8 & 0xf)
 }
 
 /// Inserts `s_waitcnt` before every instruction that reads or overwrites an

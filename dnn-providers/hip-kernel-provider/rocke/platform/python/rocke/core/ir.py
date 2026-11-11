@@ -740,6 +740,15 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
     return reg_id | (offset << 6) | ((size - 1) << 11)
 
 
+def _lds_dma_attrs(dwords: int, coherency: int, offset: int) -> Dict[str, Any]:
+    """The attrs of a buffer LDS-DMA op. ``offset`` is recorded only when
+    nonzero, so a kernel without one serializes as before."""
+    attrs: Dict[str, Any] = {"dwords": int(dwords), "aux": int(coherency)}
+    if offset:
+        attrs["offset"] = int(offset)
+    return attrs
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -3043,6 +3052,7 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
+        scale_sel: Optional[Tuple[int, int]] = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -3068,6 +3078,10 @@ class IRBuilder:
 
         ``*extra`` carries the additional operands the scaled MX atoms need
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
+
+        ``scale_sel`` (scaled MX atoms only) is the byte, 0..3, of the A and of
+        the B scale VGPR each lane reads: the intrinsic's ``opsel_a`` and
+        ``opsel_b``. ``None`` reads byte 0 of both and records no attribute.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
@@ -3093,11 +3107,14 @@ class IRBuilder:
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
+        attrs: Dict[str, Any] = {"op_id": op_id}
+        if scale_sel is not None:
+            attrs["scale_sel"] = [int(s) for s in scale_sel]
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
             [VectorType(c_elem, c_frag_len)],
-            attrs={"op_id": op_id},
+            attrs=attrs,
             result_name_hint=hint,
         ).result
 
@@ -4833,6 +4850,7 @@ class IRBuilder:
         soffset: Value,
         dwords: int,
         coherency: int = 0,
+        offset: int = 0,
     ) -> None:
         """Variant of `async_buffer_load_lds` that takes a raw i64 LDS
         address instead of a typed `smem<...>` value. This is the form
@@ -4847,6 +4865,8 @@ class IRBuilder:
         (AUX) argument of ``llvm.amdgcn.raw.ptr.buffer.load[.lds]``. ``CACHE_STREAM`` is the
         right hint for one-shot streaming loads in a
         ping-pong pipeline that won't reuse the data.
+        offset: the instruction's immediate offset, 0..4095 bytes. The
+        hardware adds it to the global address and to the LDS address.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -4857,7 +4877,7 @@ class IRBuilder:
         self._op(
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
-            attrs={"dwords": int(dwords), "aux": int(coherency)},
+            attrs=_lds_dma_attrs(dwords, coherency, offset),
         )
 
     # ----- scheduler / synchronisation hints -----
@@ -6090,6 +6110,7 @@ class IRBuilder:
         soffset: Value,
         dwords: int,
         coherency: int = 0,
+        offset: int = 0,
     ) -> None:
         """Async DRAM->LDS copy via `raw_ptr_buffer_load_lds`.
 
@@ -6104,6 +6125,9 @@ class IRBuilder:
         ``coherency`` selects AUX-bit cache-coherence hints — see
         :data:`CACHE_ALL` / :data:`CACHE_GLOBAL` /
         :data:`CACHE_STREAM` / :data:`NON_TEMPORAL`.
+
+        ``offset`` is the instruction's immediate offset, 0..4095 bytes, which
+        the hardware adds to the global address and to the LDS address.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -6114,7 +6138,7 @@ class IRBuilder:
         self._op(
             "tile.async_buffer_load_lds",
             [rsrc, lds_ptr, voffset, soffset],
-            attrs={"dwords": int(dwords), "aux": int(coherency)},
+            attrs=_lds_dma_attrs(dwords, coherency, offset),
         )
 
     def global_load_lds(

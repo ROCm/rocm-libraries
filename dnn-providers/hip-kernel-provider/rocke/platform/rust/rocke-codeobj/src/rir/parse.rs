@@ -958,6 +958,7 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
     let mut agpr_limit = None;
     crate::rir::set_agpr_acc_request(0);
     crate::rir::set_agpr_cap(256);
+    crate::rir::set_kernel_levers(None);
     let mut lds_dma_explicit = false;
     let mut m0_early = false;
     let mut passes = Passes::default();
@@ -985,6 +986,19 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 ("lds_dma_explicit", Attr::Bool(b)) => lds_dma_explicit = b,
                 // M0 writes move up to cover H12's wait state.
                 ("m0_early", Attr::Bool(b)) => m0_early = b,
+                // The kernel's own levers (`rir::kernel_lever`), in an op scope's syntax: each lever it names is
+                // on (`-name`: off) whatever `ROCKE_DIRECT_LEVERS` says. An unknown name is malformed IR, not
+                // unsupported: `compile_kernel` would fall back to COMGR and hide the misspelling.
+                ("dlevers", Attr::Str(text)) => {
+                    let unknown = crate::rir::unknown_levers(&text);
+                    if !unknown.is_empty() {
+                        return Err(CompileError::new(
+                            "ROCKE_DIRECT_MALFORMED",
+                            format!("kernel attribute dlevers: unknown lever(s) {}", unknown.join(",")),
+                        ));
+                    }
+                    crate::rir::set_kernel_levers(Some(std::sync::Arc::new(crate::rir::LeverDelta::parse(&text))));
+                }
                 // The optional passes (`ast::Passes`).
                 (name, Attr::Bool(b)) if Passes::NAMES.contains(&name) => {
                     passes.set(name, b);

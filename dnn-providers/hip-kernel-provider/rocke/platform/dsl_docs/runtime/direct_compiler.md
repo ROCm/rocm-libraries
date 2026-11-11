@@ -310,6 +310,8 @@ qualified.
 | `ROCKE_DIRECT_THREADS` | integer (the machine's parallelism, at most 4) | Threads one compile may use when a large kernel spills. The output does not change. |
 | `ROCKE_DIRECT_PARSE_THREADS` | integer (by input size) | Threads that parse one input. By default, 1 below 256 KiB of text, then one per 128 KiB, at most 4 and the machine's parallelism; in a session, 1 below 128 KiB, then one per 64 KiB, at most 3 and the session's threads. The output does not change. |
 | `ROCKE_DIRECT_SCAN` | `scalar` \| `avx2` (the best level the CPU has) | A lower SIMD level for the parser's byte scanner. The output does not change. |
+| `ROCKE_DIRECT_LEVERS` | lever names, `,` or `+` joined (unset) | Code-generation levers for every kernel compiled (`LEVERS` in `rir/mod.rs`; `target_compile --list-levers`). An unknown name is an error. A kernel's `dlevers` attribute decides the levers it names for that kernel (see [kernel attributes](#kernel-attributes)). |
+| `ROCKE_DIRECT_FORCE_ATTRS` | pass attribute names, comma-separated (unset) | Turns those pass attributes, and `m0_early`, on in every kernel compiled, whatever its IR says, to measure a pass before a builder sets it. A name that is no such attribute is an error. |
 
 Switches for both targets:
 
@@ -374,6 +376,22 @@ gfx950 only:
 | `nolanecse` | No merging of identical cross-lane exchanges. |
 | `nom0order` | Keeps M0 writes and LDS DMA loads as scheduling fences. |
 | `litshare` | Keeps one register per literal and block. Off by default. |
+
+### Kernel attributes
+
+Besides the attributes rocKE's LLVM lowering also reads, a kernel can turn on
+passes and levers of this compiler alone; the LLVM lowering ignores them, so a
+COMGR object does not change.
+
+- Pass attributes, each `b:true` to turn the pass on (`ast::Passes`):
+  `dead_lanes`, `m0_fill`, `peep_waits`, `peep_shifts`, `ds_rebase`, `m0_cse`,
+  `pin_vmem`, `acc_init_keep`, `lds_waw`, `u16_zext`, `kernarg_preload`; and
+  `m0_early`.
+- `dlevers = s:"<levers>"`: the kernel's own levers, in an op scope's syntax
+  (`,` or `+` joined; `-name` turns a lever off). Each lever it names is
+  decided for that kernel whatever `ROCKE_DIRECT_LEVERS` says; an op's own
+  `dlevers` scope still overrides it. An unknown name is
+  `ROCKE_DIRECT_MALFORMED`, so `compile_kernel` does not fall back to COMGR.
 
 ## Changing the compiler
 
