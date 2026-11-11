@@ -64,7 +64,7 @@ TDM_K0_MAX_SUBMAX_MAP = {**K0_MAX_SUBMAX_MAP, 96: 96, 160: 160}
 
 # Same RDNA float->bf16 rounding as the CMake targets, for builds that only run generate.py.
 FMHA_FWD_BF16_ROUNDING = """#if !defined(CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT) && (defined(__GFX11__) || defined(__GFX12__))
-#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT 5 // CK_TILE_FLOAT_TO_BFLOAT16_STANDARD_CNAN
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT 6 // CK_TILE_FLOAT_TO_BFLOAT16_RTA_NO_NAN
 #endif
 """
 

@@ -6,8 +6,8 @@
 """
 Codegen tests for the float->bf16 rounding mode of generated FMHA sources.
 
-The FMHA CMake targets select round-to-nearest-even through
-CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT (5 for RDNA forward, 3 for backward). Builds
+The FMHA CMake targets select round-to-nearest conversions through
+CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT (6 for RDNA forward, 3 for backward). Builds
 that run generate.py with their own build system do not see those flags, and
 without them ck_tile falls back to truncation. The generated sources therefore
 set the same default themselves, unless the build already defines it.
@@ -42,7 +42,7 @@ _CLANG = next(
 
 _MACRO = "CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT"
 _STANDARD_ASM = "3"
-_STANDARD_CNAN = "5"
+_RTA_NO_NAN = "6"
 
 
 def _generate(api, output_dir):
@@ -123,9 +123,9 @@ class TestFmhaBf16RoundingCodegen(unittest.TestCase):
         fwd_rdna = self._one("fwd", "_gfx115.cpp")
         fwd_gfx9 = self._one("fwd", "_gfx9.cpp")
         bwd = self._one("bwd", "_bf16_")
-        # RDNA forward and all backward kernels round to nearest even.
-        self.assertEqual(self._effective_mode(fwd_rdna, "gfx1151"), _STANDARD_CNAN)
-        self.assertEqual(self._effective_mode(fwd_rdna, "gfx1201"), _STANDARD_CNAN)
+        # RDNA forward rounds half away (no NaN handling), backward to nearest even.
+        self.assertEqual(self._effective_mode(fwd_rdna, "gfx1151"), _RTA_NO_NAN)
+        self.assertEqual(self._effective_mode(fwd_rdna, "gfx1201"), _RTA_NO_NAN)
         self.assertEqual(self._effective_mode(bwd, "gfx1151"), _STANDARD_ASM)
         self.assertEqual(self._effective_mode(bwd, "gfx942"), _STANDARD_ASM)
         # gfx9 forward keeps the ck_tile default, as in the CMake build.

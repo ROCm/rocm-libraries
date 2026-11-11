@@ -11,10 +11,11 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed out-of-bounds stores in CK Tile multi-reduction kernels when the output row count is not a multiple of the block tile size.
 * Fixed padded-row output updates in the global-atomic path of CK Tile multiblock reduction, including float outputs on gfx11.
 * Fixed partial-vector direct reduction stores and scalar atomic output tails, and rejected incomplete packed atomic output vectors.
-* Fixed CK Tile FMHA bf16 accuracy in builds that compile `generate.py` output with their own build system (such as PyTorch). Generated FMHA sources now default to the round-to-nearest-even float-to-bf16 conversion that the FMHA CMake targets use (backward on all targets, forward on gfx11 and gfx12) instead of truncation.
+* Fixed CK Tile FMHA bf16 accuracy in builds that compile `generate.py` output with their own build system (such as PyTorch). Generated FMHA sources now default to the round-to-nearest float-to-bf16 conversion that the FMHA CMake targets use (backward on all targets, forward on gfx11 and gfx12) instead of truncation.
 
 ### Added
 
+* Added the `rta_no_nan` CK Tile bf16 rounding mode (`CK_TILE_FLOAT_TO_BFLOAT16_RTA_NO_NAN`): round half away from zero in one integer add, without NaN handling. FMHA forward on gfx11 and gfx12 now uses it by default.
 * Added gfx1250 support and WMMA regression tests for CK Tile GEMM Stream-K with atomic, linear, and tree reduction.
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
 
@@ -24,6 +25,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Optimized
 
+* Optimized the bf16 conversion of P in the CK Tile FMHA forward `qr` pipeline on gfx11 for head dims up to 128: the conversion is fused into the C-to-A layout permute, packing value pairs with `v_perm_b32`. With round-to-nearest P this costs no more than the previous truncation.
 ### Resolved issues
 
 ### Known issues

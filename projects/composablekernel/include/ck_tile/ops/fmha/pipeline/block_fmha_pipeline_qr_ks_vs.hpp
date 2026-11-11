@@ -1116,9 +1116,14 @@ struct BlockFmhaPipelineQRKSVS
 #if defined(__gfx11__)
                     auto p_result = make_static_distributed_tensor<PDataType>(
                         decltype(gemm_1)::template MakeABlockTileDistribution<kM0, kN0>());
-                    PermuteWarpGemmCToA(p_result,
-                                        cast_tile<PDataType>(tile_elementwise_in(
-                                            p_compute_element_func, p_compute)));
+                    // The fused bf16 pack adds spills to the larger head dims.
+                    if constexpr(std::is_same_v<PDataType, bf16_t> && kQKHeaddim <= 128)
+                        PermuteWarpGemmCToAFromF32(
+                            p_result, tile_elementwise_in(p_compute_element_func, p_compute));
+                    else
+                        PermuteWarpGemmCToA(p_result,
+                                            cast_tile<PDataType>(tile_elementwise_in(
+                                                p_compute_element_func, p_compute)));
 #else
                     const auto p_result = cast_tile<PDataType>(
                         tile_elementwise_in(p_compute_element_func, p_compute));
