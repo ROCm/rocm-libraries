@@ -52,7 +52,6 @@
 
 #ifdef __cplusplus
 #include <memory>
-#include <regex>
 #include <vector>
 #endif
 
