@@ -488,6 +488,9 @@ EXTRA_TILES = {
     # 361 us, gfx1201 953 against 1052.
     ("mfma32x16", ("3x3g32",)): [(32, 32, 1, 1, 32)],
     ("wmma12", ("3x3g32",)): [(32, 32, 2, 2, 32)],
+    # Channels-last 1x1 on the output rows, measured (bf16) on gfx1201 and gfx1101: the wide
+    # tile for most maps, the 64 x 128 one for sdxl c960 k320 192^2.
+    ("wmma", ("1x1clr0",)): [(128, 128, 4, 2, 32), (64, 128, 2, 4, 32)],
     # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
     ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
@@ -561,9 +564,21 @@ FILTERS = [
     ("3x3s2pk", 3, 2, 1, 1, 7, [], [0], [CF]),
     # 32 x 32 rings for 32-channel groups (ResNeXt c1024 g32 14^2; EXTRA_TILES).
     ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
+    # Channels-last pointwise on RDNA's output rows (diffusion VAE / UNet 1x1; EXTRA_TILES).
+    ("1x1clr0", 1, 1, 1, 1, 0, [], [0], [CL]),
 ]
 # Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
-MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk", "3x3g32"}
+MATRIX16_ONLY = {
+    "7x1",
+    "3x1",
+    "5x5r1",
+    "5x5",
+    "1x1r0",
+    "3x3pk",
+    "3x3s2pk",
+    "3x3g32",
+    "1x1clr0",
+}
 BASE = {
     "3x3",
     "1x1",
