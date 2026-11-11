@@ -136,7 +136,8 @@ CK_TILE_DEVICE void run(Args a)
                                      BN == 128 && QueryTiles == 5));
     static_assert(QKPriority >= 0 && QKPriority <= 3 && PVPriority >= 0 && PVPriority <= 3);
     static_assert(SetPVPriority || PVPriority == 0);
-    static_assert(!PeelCausal || (Causal && !Pad && BM == BN && StaticS > 0 && StaticS % BN == 0));
+    static_assert(!PeelCausal ||
+                  (!Generic && Causal && !Pad && BM == BN && (!StaticS || StaticS % BN == 0)));
     // The host dispatch checks this fixed B32/H8 square shape before launch.
     // Runtime scale and tensor pointers are preserved.
     if constexpr(StaticS)
@@ -542,6 +543,8 @@ CK_TILE_DEVICE void run(Args a)
             {
                 if((Pad && start + BN > a.sk) || (Causal && start + BN > tile * BM))
                 {
+                    // Combine padding and causal bounds once for this score row.
+                    const int last_key = Causal ? (Pad ? min(a.sk - 1, row) : row) : a.sk - 1;
 #pragma unroll
                     for(int n = 0; n < BN / 16; ++n)
                     {
@@ -555,7 +558,7 @@ CK_TILE_DEVICE void run(Args a)
                         for(int i = 0; i < 8; ++i)
                         {
                             const int col = start + n * 16 + lane / 16 * 8 + i;
-                            if((Pad && col >= a.sk) || (Causal && col > row))
+                            if(col > last_key)
                                 s[qm][n][i] = -INFINITY;
                         }
                     }
@@ -772,7 +775,7 @@ CK_TILE_DEVICE void run(Args a)
     }
     else if constexpr(PeelCausal)
     {
-        // For square, aligned M=N tiles, only the final K tile meets the diagonal.
+        // For aligned M=N block tiles, only the final K tile can meet the diagonal.
         // Keep its mask outside the unrolled prefix to shorten register lifetimes.
         int start = begin;
 #pragma unroll LoopUnroll
@@ -790,7 +793,8 @@ CK_TILE_DEVICE void run(Args a)
 
     __builtin_amdgcn_s_setprio(0);
 
-    if constexpr(Generic && DQ == 128 && BM == 64)
+    constexpr bool DirectOutput = Generic && DQ == 128 && BM == 64;
+    if constexpr(DirectOutput)
     {
         // The WMMA result already holds eight contiguous values per row/lane.
         // Short strided tiles benefit from writing these vectors without an LDS shuffle.
@@ -837,7 +841,15 @@ CK_TILE_DEVICE void run(Args a)
                 TailFragments ||
                 (!StoreLSE && !Causal && !Generic &&
                  ((QueryTiles == 4 && KeyTiles == 4) || (QueryTiles == 5 && KeyTiles == 5)));
+            // Compact rows are nonempty. Correct the reciprocal with one Newton
+            // step without the general division sequence's exceptional-value fixup.
+            auto refined_reciprocal = [](float sum) {
+                float r = ck_tile::rcp(sum);
+                r       = __builtin_fmaf(r, __builtin_fmaf(-sum, r, 1.f), r);
+                return r;
+            };
             const float inv     = NativeReciprocal             ? ck_tile::rcp(sums[qm])
+                                  : !Generic && !StoreLSE      ? refined_reciprocal(sums[qm])
                                   : Generic && sums[qm] == 0.f ? 0.f
                                                                : 1.f / sums[qm];
             const int local_row = wave * 16 + lane % 16 + qm * 16 * Waves;
@@ -855,86 +867,18 @@ CK_TILE_DEVICE void run(Args a)
             }
         }
 
-        // The row redistribution stays within each wave's own 16-row fragments.
-        __builtin_amdgcn_sched_barrier(0);
-        asm volatile("s_wait_dscnt 0" ::: "memory");
-
-        constexpr bool Dense64 = Generic && DQ == 64 && BM == 64 && !Causal;
-        // Async stores use a 32-bit byte offset; wider output strides retain
-        // the 64-bit vector-store path below.
-        constexpr uint64_t MaxAsyncStride = ((uint64_t{1} << 32) - DV * 2) / (2 * (BM - 1));
-        const bool async_rows =
-            (!Generic && BM == 128) || (Dense64 && uint64_t(row_stride) <= MaxAsyncStride);
-        // A complete 16-row wave fragment can use the asynchronous burst
-        // even when a different fragment intersects the query boundary.
-        constexpr bool PartialAsync = !Generic && BM == 128 && !Causal;
+        // Each wave stores only its own 16-row fragments, including a partial tail.
 #pragma unroll
         for(int qm = 0; qm < QM; ++qm)
         {
-            const bool full_fragment = tile * BM + wave * 16 + qm * 16 * Waves + 16 <= a.sq;
-            const bool fifteen_rows =
-                TailFragments && tile * BM + wave * 16 + qm * 16 * Waves + 15 == a.sq;
-            const bool async_fragment = TailFragments
-                                            ? (full_fragment || fifteen_rows)
-                                            : (FullQ || (async_rows && tile * BM + BM <= a.sq) ||
-                                               (PartialAsync && (full_fragment || fifteen_rows)));
-            if(async_fragment)
-            {
-                uint32_t offset[VFragments], local[VFragments];
-#pragma unroll
-                for(int t = 0; t < VFragments; ++t)
-                {
-                    const int local_row =
-                        wave * 16 + qm * 16 * Waves + (256 / DV) * t + lane / (DV / 8);
-                    offset[t] = uint32_t(local_row * row_stride + (lane % (DV / 8)) * 8) * 2;
-                    local[t]  = uint32_t(reinterpret_cast<uintptr_t>(
-                        output_lds + local_row * OPitch + (lane % (DV / 8)) * 8));
-                }
-                if constexpr(VFragments == 8)
-                {
-                    if constexpr(TailFragments)
-                    {
-                        if(!full_fragment)
-                            store_async_15(o + int64_t(tile * BM) * row_stride, offset, local);
-                        else
-                            store_async_x8(o + int64_t(tile * BM) * row_stride, offset, local);
-                    }
-                    else
-                        store_async_x8(o + int64_t(tile * BM) * row_stride, offset, local);
-                }
-                else
-                    store_async_x4(o + int64_t(tile * BM) * row_stride, offset, local);
-            }
-            else if constexpr(!TailFragments)
-            {
-                // With Q % 16 == 15, a fragment that is neither full nor 15 rows
-                // has no valid rows, so the tail specialization needs no fallback.
-                // Keep only one vector live to avoid private scratch/LDS materialization.
-#pragma unroll
-                for(int t = 0; t < VFragments; ++t)
-                {
-                    const int local_row =
-                        wave * 16 + qm * 16 * Waves + (256 / DV) * t + lane / (DV / 8);
-                    const int row = tile * BM + local_row;
-                    if(row < a.sq)
-                    {
-                        V8<T> result;
-                        __builtin_memcpy(&result,
-                                         __builtin_assume_aligned(output_lds + local_row * OPitch +
-                                                                      (lane % (DV / 8)) * 8,
-                                                                  16),
-                                         sizeof(result));
-                        __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
-                                                                      (lane % (DV / 8)) * 8,
-                                                                  16),
-                                         &result,
-                                         sizeof(result));
-                    }
-                }
-            }
+            const int local_row = get_warp_id() * 16 + qm * 16 * Waves;
+            const int row       = tile * BM + local_row;
+            if(FullQ || row < a.sq)
+                store_strided<16, DV, OPitch>(output_lds + local_row * OPitch,
+                                              o + int64_t(row) * row_stride,
+                                              FullQ ? 16 : a.sq - row,
+                                              uint32_t(row_stride));
         }
-        if constexpr(FullQ || (!Generic && BM == 128) || Dense64)
-            __builtin_amdgcn_s_wait_asynccnt(0);
     }
 
     if constexpr(StoreLSE)
@@ -948,6 +892,9 @@ CK_TILE_DEVICE void run(Args a)
         }
     }
 
+    // LSE writes do not access output LDS and can overlap the pending TDM stores.
+    if constexpr(!DirectOutput)
+        wait();
 #else
     (void)a;
 #endif

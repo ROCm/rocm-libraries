@@ -82,7 +82,7 @@ struct BlockFmhaPipelineQRKSVSTdmCr
         return 2 * kN0 * (kHeadDim + (kHeadDim == 192 ? 24 : 8) + kValueDim + 16) * 2;
     }
 
-    // The pipeline includes the LDS shuffle and asynchronous O epilogue. Keeping
+    // The pipeline includes the LDS shuffle and TDM O epilogue. Keeping
     // them in one scheduling region preserves the standalone kernel's allocation.
     template <typename Tuning, typename Args>
     CK_TILE_DEVICE static void Run(Args a)
@@ -145,6 +145,8 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                              : !S || S == 512 || (kCausal && S <= 4096) ? 1
                                                                                         : 0;
             constexpr bool set_pv_priority = aligned_tiles || !S || kCausal || S != 2048;
+            constexpr bool peel_causal     = kCausal && !Problem::kPadSeqLenK && kM0 == kN0 &&
+                                         ((S && S != 512) || (!S && Tuning::kFirstScore));
             detail::fmha_cr::run<kCausal,
                                  Problem::kPadSeqLenK,
                                  !Problem::kPadSeqLenQ,
@@ -154,7 +156,7 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                  padding,
                                  S,
                                  unroll,
-                                 S && kCausal && S != 512,
+                                 peel_causal,
                                  qk_priority,
                                  pv_priority,
                                  set_pv_priority,

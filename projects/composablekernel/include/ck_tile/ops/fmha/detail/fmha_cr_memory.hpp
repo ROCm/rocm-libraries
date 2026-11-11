@@ -3,6 +3,7 @@
 
 #pragma once
 #include "ck_tile/core/arch/amd_cluster_load.hpp"
+#include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
 #include <hip/hip_runtime.h>
 #include <cstdint>
 #include <type_traits>
@@ -53,115 +54,49 @@ load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
 #endif
 }
 
-// Keep store address operands live until every instruction in the burst has XACKed.
-// Preserve the address registers across replay, as in the CK async store helper.
-__device__ __forceinline__ void
-store_async_x8(const void* base, const uint32_t (&offset)[8], const uint32_t (&local)[8])
+// Store one row per TDM iteration so the LDS pitch need not match a dense tensor.
+// The issuing wave owns these rows; descriptor setup overlaps its pending LDS writes.
+// remaining is positive; both row strides are measured in 16-bit elements.
+template <int Rows, int Width, int LdsPitch, class T>
+__device__ __forceinline__ void store_strided(T* lds, T* global, int remaining, uint32_t row_stride)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    asm volatile("global_store_async_from_lds_b128 %0, %8, %16\n\t"
-                 "global_store_async_from_lds_b128 %1, %9, %16\n\t"
-                 "global_store_async_from_lds_b128 %2, %10, %16\n\t"
-                 "global_store_async_from_lds_b128 %3, %11, %16\n\t"
-                 "global_store_async_from_lds_b128 %4, %12, %16\n\t"
-                 "global_store_async_from_lds_b128 %5, %13, %16\n\t"
-                 "global_store_async_from_lds_b128 %6, %14, %16\n\t"
-                 "global_store_async_from_lds_b128 %7, %15, %16\n\t"
-                 "s_wait_xcnt 0"
-                 :
-                 : "v"(offset[0]),
-                   "v"(offset[1]),
-                   "v"(offset[2]),
-                   "v"(offset[3]),
-                   "v"(offset[4]),
-                   "v"(offset[5]),
-                   "v"(offset[6]),
-                   "v"(offset[7]),
-                   "v"(local[0]),
-                   "v"(local[1]),
-                   "v"(local[2]),
-                   "v"(local[3]),
-                   "v"(local[4]),
-                   "v"(local[5]),
-                   "v"(local[6]),
-                   "v"(local[7]),
-                   "s"(base)
-                 : "memory");
+    static_assert(sizeof(T) == 2);
+    static_assert(sizeof(TDM_GROUP0) == 16 && sizeof(TDM_GROUP1) == 32);
+    static_assert(Rows > 0 && Rows <= 16);
+    static_assert(Width == 64 || Width == 128);
+    static_assert(LdsPitch >= Width);
+    const int count = remaining < Rows ? remaining : Rows;
+    TDM_GROUP0 address(reinterpret_cast<uintptr_t>(lds), reinterpret_cast<uintptr_t>(global), 0, 0);
+    TDM_GROUP1 shape;
+    // Two 64-byte subrows avoid the intermittent D64 corruption observed with
+    // a single 128-byte TDM row. Keep the 256-byte D128 transfer unchanged.
+    constexpr int Chunk  = Width == 64 ? 32 : Width;
+    shape.data_size      = 1; // 16-bit elements
+    shape.iterate_enable = 1;
+    shape.tensorDim0(Chunk);
+    shape.tensorDim1(Width / Chunk);
+    shape.tile_dim0 = Chunk;
+    shape.tile_dim1 = Width / Chunk;
+    shape.tensorDim0Stride(Chunk); // One iteration covers a complete output row.
+    U4 g0 = bit_cast<U4>(address.bitfield);
+    I8 g1 = bit_cast<I8>(shape.bitfield);
+    // Iteration uses exactly four dwords. Pack the count in dword 3's high half;
+    // TDM_GROUP2_MODE0's nested unions do not place iterate_count there.
+    // The count excludes the first row; increments use 16-bit element units.
+    I4 g2 = {0, LdsPitch, int(row_stride), (count - 1) << 16};
+    g0    = amd_wave_read_first_lane(g0);
+    g1    = amd_wave_read_first_lane(g1);
+    g2    = amd_wave_read_first_lane(g2);
+    // Keep descriptor preparation and LDS writes ahead of the wait/issue pair.
+    __builtin_amdgcn_sched_barrier(0);
+    ck_tile::s_wait_dscnt<0>();
+    __builtin_amdgcn_tensor_store_from_lds(g0, g1, g2, I4{}, I8{}, 0);
 #else
-    (void)base;
-    (void)offset;
-    (void)local;
-#endif
-}
-
-// A 15-row fragment contains seven full pairs of rows and one final row.
-// The upper half-wave must not store the missing sixteenth row.
-__device__ __forceinline__ void
-store_async_15(const void* base, const uint32_t (&offset)[8], const uint32_t (&local)[8])
-{
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    asm volatile("global_store_async_from_lds_b128 %0, %7, %14\n\t"
-                 "global_store_async_from_lds_b128 %1, %8, %14\n\t"
-                 "global_store_async_from_lds_b128 %2, %9, %14\n\t"
-                 "global_store_async_from_lds_b128 %3, %10, %14\n\t"
-                 "global_store_async_from_lds_b128 %4, %11, %14\n\t"
-                 "global_store_async_from_lds_b128 %5, %12, %14\n\t"
-                 "global_store_async_from_lds_b128 %6, %13, %14\n\t"
-                 "s_wait_xcnt 0"
-                 :
-                 : "v"(offset[0]),
-                   "v"(offset[1]),
-                   "v"(offset[2]),
-                   "v"(offset[3]),
-                   "v"(offset[4]),
-                   "v"(offset[5]),
-                   "v"(offset[6]),
-                   "v"(local[0]),
-                   "v"(local[1]),
-                   "v"(local[2]),
-                   "v"(local[3]),
-                   "v"(local[4]),
-                   "v"(local[5]),
-                   "v"(local[6]),
-                   "s"(base)
-                 : "memory");
-    if(threadIdx.x % 32 < 16)
-        asm volatile("global_store_async_from_lds_b128 %0, %1, %2\n\t"
-                     "s_wait_xcnt 0"
-                     :
-                     : "v"(offset[7]), "v"(local[7]), "s"(base)
-                     : "memory");
-#else
-    (void)base;
-    (void)offset;
-    (void)local;
-#endif
-}
-
-__device__ __forceinline__ void
-store_async_x4(const void* base, const uint32_t (&offset)[4], const uint32_t (&local)[4])
-{
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    asm volatile("global_store_async_from_lds_b128 %0, %4, %8\n\t"
-                 "global_store_async_from_lds_b128 %1, %5, %8\n\t"
-                 "global_store_async_from_lds_b128 %2, %6, %8\n\t"
-                 "global_store_async_from_lds_b128 %3, %7, %8\n\t"
-                 "s_wait_xcnt 0"
-                 :
-                 : "v"(offset[0]),
-                   "v"(offset[1]),
-                   "v"(offset[2]),
-                   "v"(offset[3]),
-                   "v"(local[0]),
-                   "v"(local[1]),
-                   "v"(local[2]),
-                   "v"(local[3]),
-                   "s"(base)
-                 : "memory");
-#else
-    (void)base;
-    (void)offset;
-    (void)local;
+    (void)lds;
+    (void)global;
+    (void)remaining;
+    (void)row_stride;
 #endif
 }
 

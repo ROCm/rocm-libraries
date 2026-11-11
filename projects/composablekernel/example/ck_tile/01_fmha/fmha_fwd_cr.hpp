@@ -113,7 +113,7 @@ struct FmhaFwdLaunch<
                        a.seqlen_k < 640)
                     {
                         // Nearly full tails have a fixed K tile count and benefit from
-                        // fragment masks and the 15-row asynchronous store.
+                        // fragment masks for their partial query/key tiles.
                         if(a.seqlen_q % 16 == 15 && a.seqlen_k % 128 > 112)
                             return launch(ck_tile::FmhaTdmCrTileTuning<5, 0, true>{});
                         return launch(ck_tile::FmhaTdmCrTileTuning<5, 0>{});
