@@ -101,23 +101,30 @@ __device__ void block_sync_lds_direct_load()
 #endif
 }
 
-// Waits for the outstanding asynchronous global->LDS DMA loads to drain down to `vmcnt` still in
-// flight (0 == wait for all), then publishes the LDS to the workgroup with a barrier. Leaving a
-// nonzero count outstanding lets callers keep the next iteration's prefetch running (software
-// pipelining). On the asyncmark path this is arch-agnostic -- wait_asyncmark(vmcnt) is visible to
-// the LLVM memory model (no manual fence/waitcnt needed other than what you get from
+// Completes the outstanding asynchronous global->LDS DMA loads and publishes the LDS to the
+// workgroup with a barrier. On the asyncmark path this is arch-agnostic -- wait_asyncmark() is
+// visible to the LLVM memory model (no manual fence/waitcnt needed other than what you get from
 // block_sync_lds), then block_sync_lds() barriers. The #else fallbacks reproduce the pre-asyncmark
 // behavior per arch.
-template <index_t vmcnt = 0>
+//
+// The two counts let software-pipelined callers leave later loads in flight, and are in different
+// units:
+// - `asyncmarks`: async DMAs (one asyncmark each) issued after the ones being waited on that may
+//   stay outstanding. Used by wait_asyncmark() and by gfx125's s_wait_asynccnt, which only count
+//   async DMAs.
+// - `vmcnt`: all VMEM loads (async DMAs *and* ordinary loads to VGPRs) issued after the ones being
+//   waited on that may stay outstanding. Used by the gfx9 fallback, where DMAs share vmcnt with
+//   ordinary loads. On the asyncmark path the compiler derives the equivalent vmcnt itself.
+template <index_t asyncmarks = 0, index_t vmcnt = asyncmarks>
 __device__ void block_sync_lds_async_load()
 {
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_wait_asyncmark(vmcnt);
+    __builtin_amdgcn_wait_asyncmark(asyncmarks);
     block_sync_lds();
 #elif defined(__gfx125__)
     // Fallback: async-engine completion wait + "local" fences + manual barrier (avoids the
     // redundant s_wait_loadcnt_dscnt that __syncthreads would inject).
-    __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    __builtin_amdgcn_s_wait_asynccnt(asyncmarks);
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
