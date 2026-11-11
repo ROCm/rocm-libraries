@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -42,6 +43,10 @@ constexpr int64_t Y2_UID = 7;
 constexpr int64_t W2_UID = 8;
 constexpr int64_t RAW_X_UID = 9;
 constexpr int64_t MUL2_OUT_UID = 10;
+constexpr int64_t ADD_OUT_UID = 11;
+constexpr int64_t BRANCH_OUT_UID = 12;
+constexpr int64_t CYCLE_A_UID = 13;
+constexpr int64_t CYCLE_B_UID = 14;
 
 // How a multiply is wired into the graph.
 enum class Mul
@@ -72,6 +77,15 @@ struct GraphSpec
     DataType convOutputType = DataType::FLOAT; ///< the type of the convolution's result
     DataType intermediateType = DataType::FLOAT; ///< the type of the multiplies' results
     DataType pointwiseCompute = DataType::FLOAT; ///< the compute type of every pointwise node
+    std::optional<DataType> addCompute; ///< the compute type of the bias add, when it differs
+    DataType biasType = DataType::HALF; ///< the type of the bias, a graph input
+    DataType outputType = DataType::HALF; ///< the type of the graph's output
+    bool withRelu = false; ///< RELU_FWD after the bias add, as the Variant2 bundles have it
+    bool branch
+        = false; ///< a second output, ADD(y, bias): the convolution's result has two readers
+    bool branchFirst = false; ///< with branch: that add is listed before the multiply
+    bool reverseNodes = false; ///< the nodes are listed from the last to the first
+    bool cycle = false; ///< two more nodes, each reading the other's result
 };
 
 // x [2, 16, 8, 8], w as given, y [2, 32, 6, 6]; scale [1, 3, 1, 1].
@@ -148,30 +162,37 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     {
         addTensor(SCALE_UID, "scale", scaleDims, false);
     }
-    addTensor(OUT_UID, "out", yDims, false);
-    addTensor(BIAS_UID, "bias", biasDims, false);
+    addTensor(OUT_UID, "out", yDims, false, spec.outputType);
+    addTensor(BIAS_UID, "bias", biasDims, false, spec.biasType);
+    addTensor(ADD_OUT_UID, "add_out", yDims, true, spec.intermediateType);
     addTensor(MUL_OUT_UID, "mul_out", yDims, true, spec.intermediateType);
     addTensor(MUL2_OUT_UID, "mul2_out", yDims, true, spec.intermediateType);
+    addTensor(BRANCH_OUT_UID, "branch_out", yDims, false);
+    addTensor(CYCLE_A_UID, "cycle_a", yDims, true, spec.intermediateType);
+    addTensor(CYCLE_B_UID, "cycle_b", yDims, true, spec.intermediateType);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    const auto addPointwise
-        = [&](PointwiseMode mode, int64_t in0, flatbuffers::Optional<int64_t> in1, int64_t out) {
-              const auto pointwise = CreatePointwiseAttributes(b,
-                                                               mode,
-                                                               flatbuffers::nullopt,
-                                                               flatbuffers::nullopt,
-                                                               flatbuffers::nullopt,
-                                                               flatbuffers::nullopt,
-                                                               in0,
-                                                               in1,
-                                                               flatbuffers::nullopt,
-                                                               out);
-              nodes.push_back(CreateNodeDirect(b,
-                                               "pointwise",
-                                               spec.pointwiseCompute,
-                                               NodeAttributes::PointwiseAttributes,
-                                               pointwise.Union()));
-          };
+    const auto addPointwise = [&](PointwiseMode mode,
+                                  int64_t in0,
+                                  flatbuffers::Optional<int64_t> in1,
+                                  int64_t out,
+                                  std::optional<DataType> compute = std::nullopt) {
+        const auto pointwise = CreatePointwiseAttributes(b,
+                                                         mode,
+                                                         flatbuffers::nullopt,
+                                                         flatbuffers::nullopt,
+                                                         flatbuffers::nullopt,
+                                                         flatbuffers::nullopt,
+                                                         in0,
+                                                         in1,
+                                                         flatbuffers::nullopt,
+                                                         out);
+        nodes.push_back(CreateNodeDirect(b,
+                                         "pointwise",
+                                         compute.value_or(spec.pointwiseCompute),
+                                         NodeAttributes::PointwiseAttributes,
+                                         pointwise.Union()));
+    };
     const auto addConv = [&](int64_t x, int64_t w, int64_t y) {
         const std::vector<int64_t> zeros = {0, 0};
         const std::vector<int64_t> unit = {1, 1};
@@ -192,6 +213,10 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     if(spec.secondConv)
     {
         addConv(X_UID, W2_UID, Y2_UID);
+    }
+    if(spec.branch && spec.branchFirst)
+    {
+        addPointwise(PointwiseMode::ADD, Y_UID, BIAS_UID, BRANCH_OUT_UID);
     }
     int64_t last = Y_UID;
     switch(spec.mul)
@@ -222,11 +247,29 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     default:
         break;
     }
+    if(spec.branch && !spec.branchFirst)
+    {
+        addPointwise(PointwiseMode::ADD, Y_UID, BIAS_UID, BRANCH_OUT_UID);
+    }
+    if(spec.cycle)
+    {
+        addPointwise(PointwiseMode::ADD, CYCLE_A_UID, BIAS_UID, CYCLE_B_UID);
+        addPointwise(PointwiseMode::ADD, CYCLE_B_UID, BIAS_UID, CYCLE_A_UID);
+    }
     if(spec.withBias)
     {
-        addPointwise(PointwiseMode::ADD, last, BIAS_UID, OUT_UID);
+        const int64_t addOut = spec.withRelu ? ADD_OUT_UID : OUT_UID;
+        addPointwise(PointwiseMode::ADD, last, BIAS_UID, addOut, spec.addCompute);
+        if(spec.withRelu)
+        {
+            addPointwise(PointwiseMode::RELU_FWD, ADD_OUT_UID, flatbuffers::nullopt, OUT_UID);
+        }
     }
 
+    if(spec.reverseNodes)
+    {
+        std::reverse(nodes.begin(), nodes.end());
+    }
     const auto graph = CreateGraphDirect(
         b, "conv", DataType::FLOAT, DataType::HALF, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
@@ -431,67 +474,304 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
     }
 }
 
-// The model has one rounding, of the final result. A convolution result that another node reads
-// and that is kept in a type other than float (half, bfloat16, an unset type) is one more
-// rounding, so the fixed default applies.
-TEST(TestConvFwdDynamicTolerance, VirtualConvolutionResultNotStoredInFloatIsNotModeled)
+// ── Rounding points ─────────────────────────────────────────────────────────
+
+constexpr double HALF_EPS = 0.0009765625; // 2^-10
+constexpr double BFLOAT16_EPS = 0.0078125; // 2^-7
+
+// sqrt(K * mean(x^2) * mean(w^2)) for the default graph: K = 8 * 3 * 3, x = 2, w = 0.5.
+const double SIGMA = std::sqrt(72.0);
+
+// The statistics the default inputs give the bias: half(0.01) is a little below 0.01.
+const double BIAS_RMS = static_cast<double>(static_cast<half>(0.01f));
+
+// A convolution result that another node reads and that is kept in half or bfloat16 is rounded
+// there, whether or not the tensor is virtual: bfloat16 results 1 and 1.0078125 differ by one
+// step, and after adding -1 they are 0 and 0.0078125, which no relative term covers. The point
+// sits at the size of the convolution's output, and an add passes the error on as it is.
+TEST(TestConvFwdDynamicTolerance, ConvolutionResultReadByANodeAndStoredBelowFloatIsARoundingPoint)
 {
-    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    for(const bool isVirtual : {true, false})
     {
-        GraphSpec spec;
-        spec.withBias = true;
-        spec.convOutputType = type;
-        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+        for(const auto& [type, eps] :
+            {std::pair{DataType::HALF, HALF_EPS}, std::pair{DataType::BFLOAT16, BFLOAT16_EPS}})
+        {
+            GraphSpec spec;
+            spec.withBias = true;
+            spec.convOutputVirtual = isVirtual;
+            spec.convOutputType = type;
+            const auto scale = errorScale(spec);
+            SCOPED_TRACE(std::string(EnumNameDataType(type)) + (isVirtual ? " virtual" : ""));
+            ASSERT_TRUE(scale.has_value());
+            ASSERT_EQ(scale->roundingPoints.size(), 1u);
+            EXPECT_DOUBLE_EQ(scale->roundingPoints[0].epsilon, eps);
+            EXPECT_NEAR(scale->roundingPoints[0].magnitude, SIGMA, 1e-12);
+            EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
+        }
     }
 }
 
-// Virtual or not, a tensor that one node writes and another reads is rounded to its own type:
-// bfloat16 results 1 and 1.0078125 differ by one step, and after adding -1 they are 0 and
-// 0.0078125, which no relative term covers.
-TEST(TestConvFwdDynamicTolerance, NonVirtualConvolutionResultReadByANodeIsNotModeled)
+// float and double hold the result exactly as the model's float accumulation has it.
+TEST(TestConvFwdDynamicTolerance, IntermediatesStoredInFloatOrDoubleAreNoRoundingPoint)
 {
-    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    for(const auto type : {DataType::FLOAT, DataType::DOUBLE})
     {
         GraphSpec spec;
-        spec.convOutputVirtual = false;
         spec.withBias = true;
+        spec.withRelu = true;
         spec.convOutputType = type;
-        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+        spec.intermediateType = type;
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value()) << EnumNameDataType(type);
+        EXPECT_TRUE(scale->roundingPoints.empty()) << EnumNameDataType(type);
     }
 }
 
 // A convolution result that no node reads is the graph's output: rounded once, to the output
-// type, which is what the model describes.
-TEST(TestConvFwdDynamicTolerance, ConvolutionResultNoNodeReadsMayBeStoredInLowPrecision)
+// type, which is the model's rtol.
+TEST(TestConvFwdDynamicTolerance, ConvolutionResultNoNodeReadsIsNoRoundingPoint)
 {
     for(const auto type : {DataType::HALF, DataType::BFLOAT16})
     {
         GraphSpec spec;
         spec.convOutputVirtual = false;
         spec.convOutputType = type;
-        EXPECT_TRUE(errorScale(spec).has_value()) << EnumNameDataType(type);
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value()) << EnumNameDataType(type);
+        EXPECT_TRUE(scale->roundingPoints.empty()) << EnumNameDataType(type);
     }
 }
 
-// The same for the virtual output of a pointwise node between the convolution and the output.
-TEST(TestConvFwdDynamicTolerance, VirtualPointwiseResultNotStoredInFloatIsNotModeled)
+// The model knows the rounding of half, bfloat16, float and double. An intermediate of any other
+// type, or of none, is outside it.
+TEST(TestConvFwdDynamicTolerance, IntermediateOfAnUnknownTypeIsNotModeled)
 {
-    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    for(const auto type : {DataType::UNSET, DataType::INT32, DataType::UINT8, DataType::BOOLEAN})
+    {
+        GraphSpec convResult;
+        convResult.withBias = true;
+        convResult.convOutputType = type;
+        EXPECT_FALSE(errorScale(convResult).has_value()) << EnumNameDataType(type);
+
+        GraphSpec pointwiseResult;
+        pointwiseResult.mul = Mul::SCALE_SECOND;
+        pointwiseResult.withBias = true;
+        pointwiseResult.intermediateType = type;
+        EXPECT_FALSE(errorScale(pointwiseResult).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// A pointwise result stored below float that another node reads is a point at the size of that
+// result: after a multiply the convolution's output is scaled by the largest magnitude of the
+// scale (3).
+TEST(TestConvFwdDynamicTolerance, PointwiseResultStoredBelowFloatIsARoundingPointAtItsOwnSize)
+{
+    GraphSpec spec;
+    spec.mul = Mul::SCALE_SECOND;
+    spec.withBias = true;
+    spec.intermediateType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 1u);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].epsilon, BFLOAT16_EPS);
+    EXPECT_NEAR(scale->roundingPoints[0].magnitude, 3.0 * SIGMA, 1e-12);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
+}
+
+// An error in the convolution's result is multiplied by the scale on its way to the output:
+// the slope of a point before a multiply is the largest magnitude of the scale, and the slopes of
+// several multiplies multiply.
+TEST(TestConvFwdDynamicTolerance, SlopeOfARoundingPointIsTheProductOfTheScalesAfterIt)
+{
+    GraphSpec one;
+    one.mul = Mul::SCALE_SECOND;
+    one.convOutputType = DataType::BFLOAT16;
+    const auto single = errorScale(one);
+    ASSERT_TRUE(single.has_value());
+    ASSERT_EQ(single->roundingPoints.size(), 1u);
+    EXPECT_NEAR(single->roundingPoints[0].magnitude, SIGMA, 1e-12);
+    EXPECT_DOUBLE_EQ(single->roundingPoints[0].slope, 3.0);
+
+    GraphSpec two;
+    two.mul = Mul::TWO_SCALES;
+    two.convOutputType = DataType::BFLOAT16;
+    const auto both = errorScale(two);
+    ASSERT_TRUE(both.has_value());
+    ASSERT_EQ(both->roundingPoints.size(), 1u);
+    EXPECT_NEAR(both->roundingPoints[0].slope, 3.0 * BIAS_RMS, 1e-12);
+}
+
+// A bias add computed in bfloat16 over a float convolution result (the develop Variant2
+// graph): the add converts the result to bfloat16 and rounds its own result to bfloat16. The
+// bias is stored in bfloat16 already, so it takes no rounding. The first point is the
+// convolution's output, the second is the output of the add: the bias adds in quadrature.
+TEST(TestConvFwdDynamicTolerance, PointwiseComputingBelowFloatRoundsItsOperandsAndItsResult)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    spec.withRelu = true;
+    spec.addCompute = DataType::BFLOAT16;
+    spec.biasType = DataType::BFLOAT16;
+    spec.outputType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    for(const auto& point : scale->roundingPoints)
+    {
+        EXPECT_DOUBLE_EQ(point.epsilon, BFLOAT16_EPS);
+        EXPECT_DOUBLE_EQ(point.slope, 1.0);
+    }
+    EXPECT_NEAR(scale->roundingPoints[0].magnitude, SIGMA, 1e-12);
+    EXPECT_NEAR(
+        scale->roundingPoints[1].magnitude, std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS), 1e-12);
+}
+
+// An operand stored as another type than the node computes in is converted, and rounded: the
+// bias too, when it is stored in half and the add computes in bfloat16.
+TEST(TestConvFwdDynamicTolerance, OperandStoredAsAnotherTypeThanTheComputeTypeIsRounded)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    spec.addCompute = DataType::BFLOAT16;
+    spec.biasType = DataType::HALF;
+    spec.outputType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    // the convolution's result, the bias; the add's result is the graph output, stored in the
+    // type the add computes in: that rounding is the model's rtol.
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    EXPECT_NEAR(scale->roundingPoints[0].magnitude, SIGMA, 1e-12);
+    EXPECT_NEAR(scale->roundingPoints[1].magnitude, BIAS_RMS, 1e-12);
+}
+
+// The same type stored and computed is one rounding, not two: a bfloat16 graph throughout has
+// a point at every intermediate and none for the nodes' own conversions.
+TEST(TestConvFwdDynamicTolerance, StoredAndComputedInTheSameTypeIsOneRoundingPerIntermediate)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    spec.withRelu = true;
+    spec.pointwiseCompute = DataType::BFLOAT16;
+    spec.convOutputType = DataType::BFLOAT16;
+    spec.intermediateType = DataType::BFLOAT16;
+    spec.biasType = DataType::BFLOAT16;
+    spec.outputType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    EXPECT_NEAR(scale->roundingPoints[0].magnitude, SIGMA, 1e-12);
+    EXPECT_NEAR(
+        scale->roundingPoints[1].magnitude, std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS), 1e-12);
+}
+
+// A multiply that computes below float rounds the scale too when the scale is stored in another
+// type, and an error in the scale reaches the output multiplied by the size of the
+// convolution's result: that point's slope is the result's magnitude, not the scale's largest
+// magnitude, whichever operand the scale is.
+TEST(TestConvFwdDynamicTolerance, ScaleOfAMultiplyComputingBelowFloatIsRoundedWithTheResultAsSlope)
+{
+    const double scaleRms = std::sqrt(14.0 / 3.0);
+    for(const auto order : {Mul::SCALE_SECOND, Mul::SCALE_FIRST})
+    {
+        GraphSpec spec;
+        spec.mul = order;
+        spec.pointwiseCompute = DataType::BFLOAT16;
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value());
+        // the convolution's result and the scale, in the multiply's operand order, then the
+        // product
+        ASSERT_EQ(scale->roundingPoints.size(), 3u);
+        const bool scaleFirst = order == Mul::SCALE_FIRST;
+        const auto& result = scale->roundingPoints[scaleFirst ? 1 : 0];
+        const auto& scaleOperand = scale->roundingPoints[scaleFirst ? 0 : 1];
+        EXPECT_NEAR(result.magnitude, SIGMA, 1e-12);
+        EXPECT_DOUBLE_EQ(result.slope, 3.0);
+        EXPECT_NEAR(scaleOperand.magnitude, scaleRms, 1e-12);
+        EXPECT_NEAR(scaleOperand.slope, SIGMA, 1e-12);
+        EXPECT_NEAR(scale->roundingPoints[2].magnitude, 3.0 * SIGMA, 1e-12);
+        EXPECT_DOUBLE_EQ(scale->roundingPoints[2].slope, 1.0);
+    }
+}
+
+// A tensor that two nodes read has the largest of their slopes: the convolution's result feeds a
+// multiply (slope 3) and an add (slope 1), in whichever order they are listed.
+TEST(TestConvFwdDynamicTolerance, TensorTwoNodesReadHasTheLargestSlopeOfThem)
+{
+    for(const bool branchFirst : {true, false})
     {
         GraphSpec spec;
         spec.mul = Mul::SCALE_SECOND;
-        spec.withBias = true;
-        spec.intermediateType = type;
-        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+        spec.convOutputType = DataType::BFLOAT16;
+        spec.branch = true;
+        spec.branchFirst = branchFirst;
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value()) << branchFirst;
+        ASSERT_EQ(scale->roundingPoints.size(), 1u) << branchFirst;
+        EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 3.0) << branchFirst;
     }
 }
 
-// A pointwise node that computes in a type other than float rounds its result in that type, even
-// when every tensor of the graph is float.
-TEST(TestConvFwdDynamicTolerance, PointwiseNotComputingInFloatIsNotModeled)
+// The order in which the graph lists its nodes does not matter: each node is walked once the
+// tensors it reads have a magnitude.
+TEST(TestConvFwdDynamicTolerance, NodesListedAgainstTheDependencyOrderGiveTheSameScale)
 {
-    for(const auto compute :
-        {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    GraphSpec spec;
+    spec.withBias = true;
+    spec.withRelu = true;
+    spec.pointwiseCompute = DataType::BFLOAT16;
+    spec.biasType = DataType::BFLOAT16;
+    spec.outputType = DataType::BFLOAT16;
+    const auto forward = errorScale(spec);
+    spec.reverseNodes = true;
+    const auto reversed = errorScale(spec);
+    ASSERT_TRUE(forward.has_value());
+    ASSERT_TRUE(reversed.has_value());
+    ASSERT_EQ(forward->roundingPoints.size(), 3u);
+    ASSERT_EQ(reversed->roundingPoints.size(), forward->roundingPoints.size());
+    for(size_t i = 0; i < forward->roundingPoints.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(reversed->roundingPoints[i].epsilon, forward->roundingPoints[i].epsilon);
+        EXPECT_DOUBLE_EQ(reversed->roundingPoints[i].magnitude,
+                         forward->roundingPoints[i].magnitude);
+        EXPECT_DOUBLE_EQ(reversed->roundingPoints[i].slope, forward->roundingPoints[i].slope);
+    }
+    EXPECT_DOUBLE_EQ(reversed->outputScale, forward->outputScale);
+}
+
+// Nodes that read each other's results have no order to walk them in: the graph is outside the
+// model.
+TEST(TestConvFwdDynamicTolerance, NodesThatReadEachOthersResultsAreNotModeled)
+{
+    GraphSpec spec;
+    EXPECT_TRUE(errorScale(spec).has_value());
+    spec.cycle = true;
+    EXPECT_FALSE(errorScale(spec).has_value());
+}
+
+// A node that computes below float and stores in a type with more bits than it computes in
+// still rounds its result in the compute type, and the output of the graph is no exception: the
+// rtol covers only the rounding to the stored type.
+TEST(TestConvFwdDynamicTolerance, ResultOfANodeComputingBelowFloatIsRoundedEvenWhenStoredInFloat)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    spec.addCompute = DataType::HALF;
+    spec.outputType = DataType::FLOAT;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    // the convolution's result (float to half) and the result of the add; the bias is half
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    for(const auto& point : scale->roundingPoints)
+    {
+        EXPECT_DOUBLE_EQ(point.epsilon, HALF_EPS);
+    }
+}
+
+// A compute type the model does not know (an unset one included) leaves the graph outside it;
+// double is as exact as float.
+TEST(TestConvFwdDynamicTolerance, PointwiseComputeTypeTheModelDoesNotKnowIsNotModeled)
+{
+    for(const auto compute : {DataType::UNSET, DataType::INT32, DataType::UINT8})
     {
         GraphSpec spec;
         spec.mul = Mul::SCALE_SECOND;
@@ -499,6 +779,37 @@ TEST(TestConvFwdDynamicTolerance, PointwiseNotComputingInFloatIsNotModeled)
         spec.pointwiseCompute = compute;
         EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(compute);
     }
+    GraphSpec spec;
+    spec.mul = Mul::SCALE_SECOND;
+    spec.withBias = true;
+    spec.pointwiseCompute = DataType::DOUBLE;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+}
+
+// The statistics of an operand are asked for when a multiply or a point needs them, and not
+// otherwise: a graph whose bias has none is modelled while no point depends on it, and is not
+// once a point after the add does.
+TEST(TestConvFwdDynamicTolerance, OperandWithoutStatisticsOnlyMattersToThePointsThatNeedIt)
+{
+    GraphSpec floatOnly;
+    floatOnly.withBias = true;
+    auto in = defaultInputs(floatOnly);
+    in.byUid.erase(BIAS_UID);
+    EXPECT_TRUE(errorScale(floatOnly, in).has_value());
+
+    GraphSpec pointAfterTheAdd;
+    pointAfterTheAdd.withBias = true;
+    pointAfterTheAdd.withRelu = true;
+    pointAfterTheAdd.intermediateType = DataType::BFLOAT16;
+    EXPECT_TRUE(errorScale(pointAfterTheAdd).has_value());
+    EXPECT_FALSE(errorScale(pointAfterTheAdd, in).has_value());
+
+    // A point before the add does not look at the bias.
+    GraphSpec pointBeforeTheAdd;
+    pointBeforeTheAdd.withBias = true;
+    pointBeforeTheAdd.convOutputType = DataType::BFLOAT16;
+    EXPECT_TRUE(errorScale(pointBeforeTheAdd, in).has_value());
 }
 
 // ── Fused pointwise nodes ───────────────────────────────────────────────────
@@ -635,8 +946,8 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
 
-// The two types differ by a factor of about 16,000 in atol (half carries the lambda term, bfloat16
-// does not) and by 8 the other way in rtol, so a swap of the dispatch shows in the values.
+// The three types differ in atol (half carries the lambda term, bfloat16 and float do not) and in
+// rtol (2^-9, 2^-6 and about 2^-22), so a swap of the dispatch shows in the values.
 TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
@@ -649,8 +960,12 @@ TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<half>(scale);
     const auto expectedBfloat16
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<bfloat16>(scale);
+    const auto expectedFloat
+        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale);
     ASSERT_NE(expectedHalf.atol, expectedBfloat16.atol);
     ASSERT_NE(expectedHalf.rtol, expectedBfloat16.rtol);
+    ASSERT_NE(expectedFloat.rtol, expectedBfloat16.rtol);
+    ASSERT_NE(expectedFloat.atol, expectedBfloat16.atol);
 
     const auto halfTolerance = tol::convFwdOutputTolerance(scale, DataType::HALF);
     ASSERT_TRUE(halfTolerance.has_value());
@@ -661,16 +976,43 @@ TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
     ASSERT_TRUE(bfloat16Tolerance.has_value());
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->atol, expectedBfloat16.atol);
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->rtol, expectedBfloat16.rtol);
+
+    const auto floatTolerance = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
+    ASSERT_TRUE(floatTolerance.has_value());
+    EXPECT_DOUBLE_EQ(floatTolerance->atol, expectedFloat.atol);
+    EXPECT_DOUBLE_EQ(floatTolerance->rtol, expectedFloat.rtol);
 }
 
-TEST(TestConvFwdDynamicTolerance, OnlyLowPrecisionOutputsGetADynamicTolerance)
+// The coefficients an engine sets reach the tolerance of the type they are passed with.
+TEST(TestConvFwdDynamicTolerance, EngineCoefficientsReachTheToleranceOfTheirOutputType)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::FLOAT).has_value());
+    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    coefficients.summationOrder = 11.0;
+
+    const auto withDefault = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
+    const auto withEngine = tol::convFwdOutputTolerance(scale, DataType::FLOAT, coefficients);
+    const auto expected
+        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
+                                                                                     coefficients);
+    ASSERT_TRUE(withDefault.has_value());
+    ASSERT_TRUE(withEngine.has_value());
+    EXPECT_DOUBLE_EQ(withEngine->atol, expected.atol);
+    EXPECT_DOUBLE_EQ(withEngine->rtol, expected.rtol);
+    EXPECT_GT(withEngine->atol, withDefault->atol);
+}
+
+TEST(TestConvFwdDynamicTolerance, OnlyHalfBfloat16AndFloatOutputsGetADynamicTolerance)
+{
+    hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
+    scale.accumulationLength = 144;
+    scale.inputMeanSquare = 1.0 / 3.0;
+    scale.weightMeanSquare = 1.0 / 3.0;
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::DOUBLE).has_value());
+    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::INT32).has_value());
 }
 
 // The harness asks hasDynamicToleranceFor() before it scans any input, and convFwdOutputTolerance()
@@ -689,7 +1031,8 @@ TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFu
     }
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::HALF));
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::BFLOAT16));
-    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::FLOAT));
+    EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::FLOAT));
+    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::DOUBLE));
 }
 
 // ── Recipe and host moments ─────────────────────────────────────────────────

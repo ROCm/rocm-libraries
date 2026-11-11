@@ -1425,6 +1425,88 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ConstantsAtAFixedScale)
     EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
 }
 
+// Each rounding point adds slope * eps * magnitude to atol, summed over the points, and leaves
+// rtol alone: the point of a value rounded to bfloat16 at 1.5 reaching the output doubled, and
+// one rounded to half at 0.25 reaching it as it is.
+TYPED_TEST(ConvFpropOutputToleranceFixture, RoundingPointsAddSlopeTimesEpsilonTimesMagnitude)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto without = calculateConvFpropOutputTolerance<T>(s);
+
+    const double bfloat16Eps = std::ldexp(1.0, -7);
+    const double halfEps = std::ldexp(1.0, -10);
+    s.roundingPoints = {{bfloat16Eps, 1.5, 2.0}};
+    const auto one = calculateConvFpropOutputTolerance<T>(s);
+    EXPECT_NEAR(one.atol - without.atol, 2.0 * bfloat16Eps * 1.5, 1e-12);
+    EXPECT_DOUBLE_EQ(one.rtol, without.rtol);
+
+    s.roundingPoints.push_back({halfEps, 0.25, 1.0});
+    const auto two = calculateConvFpropOutputTolerance<T>(s);
+    EXPECT_NEAR(two.atol - without.atol, 2.0 * bfloat16Eps * 1.5 + halfEps * 0.25, 1e-12);
+    EXPECT_DOUBLE_EQ(two.rtol, without.rtol);
+}
+
+// A value rounded to bfloat16 before an add that cancels it: the conv result 1.005 rounds to
+// 1.0078125, and after adding -1 the output is 0.0078125 where the exact result is 0.005. No
+// relative term of the output (0.005) or sum-order term covers the 0.0028 between them; the point
+// of the rounding, at the size of the value rounded, does. A graph that has no such point keeps
+// its band, and fails this. (Half has its lambda term, which is wider than this at this scale, so
+// the test is for the outputs whose atol does not reach that far.)
+TEST(TestConvFpropOutputToleranceRoundingPoints, BfloatRoundingBeforeACancellingAddIsCovered)
+{
+    using T = bfloat16;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 16;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const double sigma = std::sqrt(16.0 / 9.0);
+
+    const double convResult = 1.005;
+    const double rounded = static_cast<double>(
+        static_cast<float>(static_cast<bfloat16>(static_cast<float>(convResult))));
+    ASSERT_EQ(rounded, 1.0078125);
+    const double impl = rounded - 1.0;
+    const double ref = convResult - 1.0;
+
+    EXPECT_FALSE(withinTolerance<float>(impl, ref, calculateConvFpropOutputTolerance<T>(s)));
+
+    s.roundingPoints = {{std::ldexp(1.0, -7), sigma, 1.0}};
+    EXPECT_TRUE(withinTolerance<float>(impl, ref, calculateConvFpropOutputTolerance<T>(s)));
+}
+
+// A rounding point that is not a finite non-negative number is rejected, as the statistics are.
+TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidRoundingPointIsRejected)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale valid;
+    valid.accumulationLength = 144;
+    valid.inputMeanSquare = 1.0 / 3.0;
+    valid.weightMeanSquare = 1.0 / 3.0;
+    valid.roundingPoints = {{std::ldexp(1.0, -7), 1.0, 1.0}};
+    ASSERT_NO_THROW(calculateConvFpropOutputTolerance<T>(valid));
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for(const RoundingPoint& bad : {RoundingPoint{-1.0, 1.0, 1.0},
+                                    RoundingPoint{nan, 1.0, 1.0},
+                                    RoundingPoint{inf, 1.0, 1.0},
+                                    RoundingPoint{0.01, -1.0, 1.0},
+                                    RoundingPoint{0.01, nan, 1.0},
+                                    RoundingPoint{0.01, inf, 1.0},
+                                    RoundingPoint{0.01, 1.0, -1.0},
+                                    RoundingPoint{0.01, 1.0, nan},
+                                    RoundingPoint{0.01, 1.0, inf}})
+    {
+        auto scale = valid;
+        scale.roundingPoints.push_back(bad);
+        EXPECT_THROW(calculateConvFpropOutputTolerance<T>(scale), std::invalid_argument);
+    }
+}
+
 // A fused multiply by a scale scales the typical output, and with it atol; rtol, a fraction of
 // the reference itself, stays. Only the magnitude counts.
 TYPED_TEST(ConvFpropOutputToleranceFixture, OutputScaleWidensAtolNotRtol)
@@ -1507,6 +1589,181 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
     s.weightMeanSquare = 1e300;
     s.outputScale = 0.0;
     EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
+}
+
+// ── summation-order coefficient ─────────────────────────────────────────────
+
+// An engine's coefficient multiplies the summation-order term of atol and leaves rtol alone for
+// half and bfloat16, whose default is 1.
+TYPED_TEST(ConvFpropOutputToleranceFixture, SummationOrderCoefficientScalesTheSumTermOfAtol)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto unset = calculateConvFpropOutputTolerance<T>(s);
+    ConvFpropCoefficients one;
+    one.summationOrder = 1.0;
+    const auto explicitOne = calculateConvFpropOutputTolerance<T>(s, one);
+    EXPECT_DOUBLE_EQ(explicitOne.atol, unset.atol);
+    EXPECT_DOUBLE_EQ(explicitOne.rtol, unset.rtol);
+
+    ConvFpropCoefficients five;
+    five.summationOrder = 5.0;
+    const auto wider = calculateConvFpropOutputTolerance<T>(s, five);
+    // sqrt(144) * 2^-24 * sigma (4) = 48 * 2^-24 more per unit of coefficient
+    EXPECT_NEAR(wider.atol - unset.atol, 4.0 * 12.0 * std::ldexp(1.0, -24) * 4.0, 1e-12);
+    EXPECT_DOUBLE_EQ(wider.rtol, unset.rtol);
+}
+
+// A coefficient that is not finite and positive is rejected, for every output type.
+TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidSummationOrderCoefficientIsRejected)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    for(const double bad : {0.0,
+                            -1.0,
+                            std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity()})
+    {
+        ConvFpropCoefficients coefficients;
+        coefficients.summationOrder = bad;
+        EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s, coefficients), std::invalid_argument)
+            << bad;
+    }
+}
+
+// ── float outputs ───────────────────────────────────────────────────────────
+//
+// For a float output the one rounding is of the float result itself: rtol is 2 eps of float plus
+// the summation-order term, which atol carries on sigma: c * sqrt(K) * u32 on |ref| and on
+// sigma, with c = DEFAULT_FLOAT_SUMMATION_ORDER (3) unless the engine sets it.
+
+// K = 144, sigma = 4, c = 3: written out here, not taken from the library.
+TEST(TestConvFpropOutputToleranceFloat, ConstantsAtAFixedScale)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<float>(s);
+    const double sumTerm = 3.0 * 12.0 * std::ldexp(1.0, -24);
+    EXPECT_NEAR(tol.rtol, std::ldexp(1.0, -22) + sumTerm, 1e-15);
+    EXPECT_NEAR(tol.atol, sumTerm * 4.0 + std::ldexp(1.0, -126), 1e-15);
+}
+
+// With no coefficient set the default is used, and the default is 3.
+TEST(TestConvFpropOutputToleranceFloat, BaseCoefficientIsUsedWhenTheEngineSetsNone)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    ConvFpropCoefficients base;
+    base.summationOrder = 3.0;
+    const auto unset = calculateConvFpropOutputTolerance<float>(s);
+    const auto three = calculateConvFpropOutputTolerance<float>(s, base);
+    EXPECT_DOUBLE_EQ(unset.atol, three.atol);
+    EXPECT_DOUBLE_EQ(unset.rtol, three.rtol);
+    EXPECT_DOUBLE_EQ(DEFAULT_FLOAT_SUMMATION_ORDER, 3.0);
+}
+
+// An engine's coefficient replaces the default in atol and in rtol.
+TEST(TestConvFpropOutputToleranceFloat, EngineCoefficientReplacesTheBaseOne)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    ConvFpropCoefficients engine;
+    engine.summationOrder = 9.0;
+    const auto base = calculateConvFpropOutputTolerance<float>(s);
+    const auto wider = calculateConvFpropOutputTolerance<float>(s, engine);
+    const double perUnit = 12.0 * std::ldexp(1.0, -24);
+    EXPECT_NEAR(wider.rtol - base.rtol, 6.0 * perUnit, 1e-15);
+    EXPECT_NEAR(wider.atol - base.atol, 6.0 * perUnit * 4.0, 1e-15);
+}
+
+// A float output has no lambda term: atol is the summation-order term and nothing else.
+TEST(TestConvFpropOutputToleranceFloat, HasNoPartialResultTerm)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 65536;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<float>(s);
+    const double sigma = std::sqrt(65536.0) / 3.0;
+    EXPECT_LT(tol.atol,
+              1.001 * (3.0 * 256.0 * std::ldexp(1.0, -24) * sigma + std::ldexp(1.0, -126)));
+}
+
+// A tree-ordered sum and the exact sum stay within the tolerance of the reference's sequential
+// float sum at every reduction length.
+TEST(TestConvFpropOutputToleranceFloat, CorrectSumsInAnyOrderPass)
+{
+    for(const uint64_t k : {uint64_t{16}, uint64_t{1152}, uint64_t{65536}})
+    {
+        for(unsigned seed = 0; seed < 32; ++seed)
+        {
+            const auto p = makeDotProblem<float>(k, seed);
+            const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+            const auto ref = static_cast<double>(sequentialDot(p));
+            const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
+            EXPECT_TRUE(withinTolerance<float>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
+            EXPECT_TRUE(withinTolerance<float>(exactDot(p), ref, tol))
+                << "K=" << k << " seed=" << seed;
+        }
+    }
+}
+
+// An output near zero has only the summation-order term to lean on: the sequential and the tree
+// sum of products that cancel differ by a random walk of roundings.
+TEST(TestConvFpropOutputToleranceFloat, NearZeroOutputsNeedTheSummationOrderTerm)
+{
+    for(const uint64_t k : {uint64_t{1152}, uint64_t{65536}})
+    {
+        double largestOverTerm = 0.0;
+        for(unsigned seed = 0; seed < 32; ++seed)
+        {
+            const auto p = makeCancellingProblem<float>(k, seed);
+            const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+            const auto ref = static_cast<double>(sequentialDot(p));
+            const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
+            EXPECT_TRUE(withinTolerance<float>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
+            largestOverTerm = std::max(largestOverTerm, std::abs(tree - ref) / tol.atol);
+        }
+        // Check on the test itself: the sums really do differ, by a good part of atol, so that
+        // removing the term fails the comparison above.
+        EXPECT_GT(largestOverTerm, 0.02) << "K=" << k;
+    }
+}
+
+// Leaving out the largest of 1152 products (an error of up to about 1) is far outside a float
+// tolerance, at every draw.
+TEST(TestConvFpropOutputToleranceFloat, MissingTermFails)
+{
+    const uint64_t k = 1152;
+    for(unsigned seed = 0; seed < 32; ++seed)
+    {
+        const auto p = makeDotProblem<float>(k, seed);
+        uint64_t largest = 0;
+        for(uint64_t i = 0; i < k; ++i)
+        {
+            if(std::abs(p.x[i] * p.w[i]) > std::abs(p.x[largest] * p.w[largest]))
+            {
+                largest = i;
+            }
+        }
+        const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+        const auto withoutLargest = static_cast<double>(pairwiseDot(p, 0, k, largest));
+        const auto ref = static_cast<double>(sequentialDot(p));
+        EXPECT_FALSE(withinTolerance<float>(withoutLargest, ref, tol)) << "seed=" << seed;
+    }
 }
 
 // C/groups times the filter volume, for 1D, 2D and 3D weights.
