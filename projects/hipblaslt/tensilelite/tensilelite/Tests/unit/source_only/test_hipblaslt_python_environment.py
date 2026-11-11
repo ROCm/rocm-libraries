@@ -15,14 +15,18 @@ _CMAKE_HELPER = _HIPBLASLT_ROOT / "cmake" / "hipblaslt_python.cmake"
 _CODEGEN_HELPER = _HIPBLASLT_ROOT / "tensilelite" / "cmake" / "hipblaslt_codegen.cmake"
 
 
-def _configured_environment(tmp_path: Path, *, therock: bool) -> str:
+def _configured_environment(
+    tmp_path: Path, *, therock: bool, version: str = "10.1.0.dev0+abcdef"
+) -> str:
     script = tmp_path / "environment.cmake"
     script.write_text(
         "\n".join(
             [
                 f'set(HIPBLASLT_ENABLE_THEROCK {"ON" if therock else "OFF"})',
                 'set(HIPBLASLT_BUILD_ROCM_ROOT "/graph/rocm")',
-                'set(HIPBLASLT_BUILD_ROCM_VERSION "10.1.0.dev0+abcdef")',
+                f'set(HIPBLASLT_BUILD_ROCM_VERSION "{version}")',
+                'set(HIPBLASLT_TENSILELITE_WHEEL_ROOT "/build/tensilelite-wheel")',
+                'set(hipblaslt_SOURCE_DIR "/src/hipblaslt")',
                 'set(ENV{PATH} "/graph/bin:/ambient/bin")',
                 f'include("{_CMAKE_HELPER.as_posix()}")',
                 "hipblaslt_tensilelite_python_environment(environment)",
@@ -129,21 +133,53 @@ def _build_codegen_with_configured_dependency(tmp_path: Path) -> subprocess.Comp
     )
 
 
-def test_therock_environment_uses_package_identity_and_captured_path(tmp_path):
+def test_therock_environment_marks_the_adapter_and_passes_a_real_version(tmp_path):
     environment = _configured_environment(tmp_path, therock=True)
 
+    assert "TENSILELITE_ROCM_ADAPTER=therock-ci" in environment
     assert "THEROCK_PACKAGE_VERSION=10.1.0.dev0+abcdef" in environment
-    assert "TENSILELITE_ROCM_VERSION=10.1.0.dev0+abcdef" in environment
     assert "PATH=/graph/bin:/ambient/bin" in environment
     assert "ROCM_PATH=" not in environment
+    assert "TENSILELITE_ROCM_VERSION" not in environment
+
+
+def test_therock_environment_without_a_version_still_marks_the_adapter(tmp_path):
+    environment = _configured_environment(tmp_path, therock=True, version="")
+
+    assert "TENSILELITE_ROCM_ADAPTER=therock-ci" in environment
+    assert "THEROCK_PACKAGE_VERSION" not in environment
 
 
 def test_standalone_environment_retains_selected_rocm_path(tmp_path):
     environment = _configured_environment(tmp_path, therock=False)
 
     assert "ROCM_PATH=/graph/rocm" in environment
-    assert "TENSILELITE_ROCM_VERSION=10.1.0.dev0+abcdef" in environment
+    assert "TENSILELITE_ROCM_ADAPTER" not in environment
     assert "THEROCK_PACKAGE_VERSION=" not in environment
+    assert "TENSILELITE_ROCM_VERSION" not in environment
+
+
+@pytest.mark.parametrize("therock", [True, False])
+def test_codegen_imports_tensilelite_from_the_unpacked_wheel(tmp_path, therock):
+    environment = _configured_environment(tmp_path, therock=therock)
+    python_path = environment.split("PYTHONPATH=", 1)[1].split(";", 1)[0]
+
+    entries = python_path.split(":")
+    assert entries[0] == "/build/tensilelite-wheel"
+    # The source tree's tensilelite package must never shadow the wheel; only
+    # the adaptor, which the wheel does not ship yet, comes from the source.
+    source_entries = [entry for entry in entries if entry.startswith("/src/hipblaslt")]
+    assert source_entries == ["/src/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor"]
+
+
+def test_codegen_depends_on_the_wheel_not_on_source_globs():
+    codegen = _CODEGEN_HELPER.read_text(encoding="utf-8")
+    python_cmake = _CMAKE_HELPER.read_text(encoding="utf-8")
+
+    assert "_codegen_sources" not in codegen
+    assert "${HIPBLASLT_PYTHON_INPUTS}" in codegen
+    assert "install_release_wheels.py" in python_cmake
+    assert "pip install" not in python_cmake
 
 
 def test_device_codegen_uses_the_configured_python_command(tmp_path):
