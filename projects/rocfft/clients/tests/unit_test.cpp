@@ -348,6 +348,76 @@ struct LocalCleanup
     std::function<void()> f;
 };
 
+TEST(rocfft_UnitTest, planar_with_field_on_other_side)
+{
+    // planar array types are rejected if a field is set on either side
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        int device = hipInvalidDeviceId;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+
+        const size_t length = 64;
+        // lone brick on the current device covering the whole data range
+        // (length, then batch)
+        const std::vector<size_t> lower  = {0, 0};
+        const std::vector<size_t> upper  = {length, 1};
+        const std::vector<size_t> stride = {1, length};
+
+        for(const bool field_on_input : {true, false})
+        {
+            rocfft_plan_description desc = nullptr;
+            ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
+            LocalCleanup desc_cleanup([&desc]() { rocfft_plan_description_destroy(desc); });
+
+            ASSERT_EQ(rocfft_plan_description_set_data_layout(
+                          desc,
+                          field_on_input ? rocfft_array_type_complex_interleaved
+                                         : rocfft_array_type_complex_planar,
+                          field_on_input ? rocfft_array_type_complex_planar
+                                         : rocfft_array_type_complex_interleaved,
+                          nullptr,
+                          nullptr,
+                          0,
+                          nullptr,
+                          0,
+                          0,
+                          nullptr,
+                          0),
+                      rocfft_status_success);
+
+            rocfft_field field = nullptr;
+            ASSERT_EQ(rocfft_field_create(&field), rocfft_status_success);
+            LocalCleanup field_cleanup([&field]() { rocfft_field_destroy(field); });
+            rocfft_brick brick = nullptr;
+            ASSERT_EQ(rocfft_brick_create(
+                          &brick, lower.data(), upper.data(), stride.data(), lower.size(), device),
+                      rocfft_status_success);
+            LocalCleanup brick_cleanup([&brick]() { rocfft_brick_destroy(brick); });
+            ASSERT_EQ(rocfft_field_add_brick(field, brick), rocfft_status_success);
+            ASSERT_EQ(field_on_input ? rocfft_plan_description_add_infield(desc, field)
+                                     : rocfft_plan_description_add_outfield(desc, field),
+                      rocfft_status_success);
+
+            rocfft_plan plan = nullptr;
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         1,
+                                         &length,
+                                         1,
+                                         desc),
+                      rocfft_status_invalid_array_type)
+                << "field set on " << (field_on_input ? "input" : "output");
+            rocfft_plan_destroy(plan);
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
