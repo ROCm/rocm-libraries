@@ -288,6 +288,11 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(
             1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
 
+        // The batch counts are checked before the quick return for the same reason.
+        ROCSPARSE_CHECKARG(8, batch_count_A, (batch_count_A != 1), rocsparse_status_invalid_value);
+        ROCSPARSE_CHECKARG(16, batch_count_B, (batch_count_B != 1), rocsparse_status_invalid_value);
+        ROCSPARSE_CHECKARG(22, batch_count_C, (batch_count_C != 1), rocsparse_status_invalid_value);
+
         const rocsparse_status status = rocsparse::bellmm_quickreturn(handle,
                                                                       trans_A,
                                                                       trans_B,
@@ -348,12 +353,6 @@ namespace rocsparse
                            rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             21, ldc, (ldc < n && order_C == rocsparse_order_row), rocsparse_status_invalid_size);
-
-        ROCSPARSE_CHECKARG(8, batch_count_A, (batch_count_A != 1), rocsparse_status_invalid_value);
-
-        ROCSPARSE_CHECKARG(16, batch_count_B, (batch_count_B != 1), rocsparse_status_invalid_value);
-
-        ROCSPARSE_CHECKARG(22, batch_count_C, (batch_count_C != 1), rocsparse_status_invalid_value);
 
         return rocsparse_status_continue;
     }
