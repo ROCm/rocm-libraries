@@ -1150,7 +1150,6 @@ namespace precond_ut
         ASSERT_EQ((set_value<K>(handle, descr, In::policy, &opt.policy, sizeof(opt.policy))),
                   rocsparse_status_success);
 
-<<<<<<< HEAD
         const int32_t boost_enable = opt.boost ? 1 : 0;
         const double  boost_tol    = opt.boost_tol;
         const T       boost_val    = make_value<T>(opt.boost_val, 0.0);
