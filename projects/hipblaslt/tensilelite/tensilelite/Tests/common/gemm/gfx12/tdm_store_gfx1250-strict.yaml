@@ -892,3 +892,46 @@ BenchmarkProblems:
           - Exact: [511, 512, 1, 128]
           - Exact: [512, 509, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # ReuseAcrossPersistent with DataParallel and TDM loads, the RAP candidate: fp32 D from fp8 inputs at MT64x256,
+  # PrefetchGlobalRead 1 and 2, with and without PrefetchAcrossPersistent. RAP's runtime predicate takes M at and
+  # below MacroTile0 (64 and 61, the M edge), N a multiple of MacroTile1 with more tiles than workgroups (257),
+  # and K a multiple of DepthU.
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      UseBeta: True
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [256]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - AssertSummationElementMultiple: [256]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - PrefetchAcrossPersistent: [0, 1]
+        - ReuseAcrossPersistent: [1]
+        - TDMStoreInst: [0, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 65792, 1, 256]
+          - Exact: [61, 65792, 1, 256]
