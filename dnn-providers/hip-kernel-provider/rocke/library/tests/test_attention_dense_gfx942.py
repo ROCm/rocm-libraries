@@ -30,6 +30,7 @@ what keeps the gfx950 goldens untouched by anything in this file.
 """
 
 import dataclasses
+import functools
 import hashlib
 import inspect
 import re
@@ -169,6 +170,8 @@ def _lower(kd, arch: str = "gfx942") -> str:
     )
 
 
+# Memoized: the injectivity cases rebuild each base spec once per field.
+@functools.cache
 def _ir_body_sha(spec, *, arch: str = "gfx942", build=build_attention_dense) -> str:
     """SHA of the lowered IR with the kernel SYMBOL normalised out.
 
