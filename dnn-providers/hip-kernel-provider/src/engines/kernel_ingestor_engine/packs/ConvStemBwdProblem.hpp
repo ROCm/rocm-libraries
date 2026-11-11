@@ -83,6 +83,12 @@ inline constexpr int64_t LAYOUT_CHANNELS_LAST = 1;
 /// The most input channels the engine serves (stems: RGB, RGBA, grey).
 inline constexpr int64_t MAX_CHANNELS = 4;
 
+/// The most filter depth taps a 3-D config folds into the reduction.
+inline constexpr int64_t MAX_DEPTH_TAPS = 8;
+
+/// The super-pixel edge of space-to-depth configs (stride 1, StemBwdConfig::sd).
+inline constexpr int64_t SPACE_TO_DEPTH = 2;
+
 /// The most GEMM columns (input channels x stride phases) a config may compute.
 inline constexpr int64_t MAX_COLUMNS = 64;
 
@@ -108,6 +114,12 @@ struct StemBwdConfig
     /// The filter's height and width strides.
     int64_t sh = 0;
     int64_t sw = 0;
+    /// 3-D: the filter's depth taps (unit depth stride and dilation; the dx planes in the grid,
+    /// the taps in the reduction). 0: 2-D (a trivial depth axis).
+    int64_t ft = 0;
+    /// Stride 1: SPACE_TO_DEPTH, super-pixels of sd x sd dx pixels on a space-to-depth view of
+    /// dy (the phases fill the GEMM columns, the sub-pixels join the reduction). 0: off.
+    int64_t sd = 0;
 };
 
 /// A backward-data convolution the kernels serve.
@@ -126,6 +138,15 @@ struct StemBwdProblem
     int64_t ow = 0;
     int64_t u = 0;
     int64_t v = 0;
+    /// The filter's depth taps when the depth axis is not trivial, else 0 (StemBwdConfig::ft).
+    int64_t depthTaps = 0;
+    /// Height and width stride 1: the space-to-depth window (spaceToDepthWindowOf), else zero.
+    int64_t sdOh = 0;
+    int64_t sdOw = 0;
+    int64_t sdU = 0;
+    int64_t sdV = 0;
+    int64_t sdShiftH = 0;
+    int64_t sdShiftW = 0;
 };
 
 /// The window of a filter of @p filter taps at @p stride and @p padding along one axis: super-
@@ -138,17 +159,31 @@ struct Window
 };
 Window windowOf(int64_t filter, int64_t stride, int64_t padding);
 
+/// The window of a stride-1 axis on its space-to-depth view: super-pixel i (dx 2 i + p, p < 2)
+/// reads dy super-positions i + offset - t for t < extent, super-position y holding dy 2 y +
+/// shift + e (e < 2). The dy span 2 i + lo .. 2 i + padding + 1, lo = padding - filter + 1:
+/// shift = lo mod 2, offset = floor((padding + 1 - shift) / 2), extent = offset - floor(lo / 2)
+/// + 1.
+struct SpaceToDepthWindow
+{
+    int64_t offset = 0;
+    int64_t extent = 0;
+    int64_t shift = 0;
+};
+SpaceToDepthWindow spaceToDepthWindowOf(int64_t filter, int64_t padding);
+
 /**
  * @brief The stem backward-data convolution @p context's graph describes, or nullopt when the
  *        kernels do not serve it.
  *
  * Everything parseConvNaiveProblem gates (both convolution modes), plus: fp32, fp16 or bf16;
  * one group; at most MAX_CHANNELS input channels; a trivial depth axis (dx, dy and the filter
- * of depth 1, no depth padding; the depth stride and dilation then change nothing); unit height
+ * of depth 1, no depth padding; the depth stride and dilation then change nothing) or one of
+ * unit stride and dilation, 1 to MAX_DEPTH_TAPS filter taps and padding at most 64; unit height
  * and width dilation; height and width strides, filter extents and padding at most 64 (the
  * window and the GEMM columns stay small; configs fix the strides and window); dy packed
  * channels-first or channels-last; dx packed either way (written through its strides); the
- * filter packed K C R S or K R S C; the batch within 65535 (the grid's z); every extent and
+ * filter packed K C R S or K R S C; the batch times dx's depth within 65535 (the grid's z); every extent and
  * the output channels within 32 bits; one image of dy within 2^31 bytes (32-bit buffer
  * offsets).
  */
@@ -191,10 +226,12 @@ inline constexpr int64_t MAX_TRANSFORM_BLOCKS = 1024;
  * runsMatrixAtomFor finds no atom for the type); the layout, one dy is
  * packed in; vec (channels-last: 16 bytes, the output channels whole vectors; channels-first:
  * 1, or 16 bytes when dy rows are whole vectors); u and v the problem's window extents; sh and
- * sw the problem's strides; nb at least the input channels times the phases, at most
+ * sw the problem's strides; ft the problem's depth taps (0 on a trivial depth axis); sd 0, or
+ * SPACE_TO_DEPTH on a stride-1 problem of trivial depth (u and v then its space-to-depth
+ * window's, channels-first vec 1, the phases sd x sd); nb at least the input channels times the phases, at most
  * MAX_COLUMNS, whole fragments on a matrix atom; kc whole atom steps and 16-byte units; th and
  * fm >= 1 with the block within 1024 threads; the LDS within the device's; the grid within the
- * launch limits (x 2^31 - 1; y 65535); the transformed filter within 2^31 bytes (32-bit buffer
+ * launch limits (x 2^31 - 1; y and z 65535); the transformed filter within 2^31 bytes (32-bit buffer
  * offsets).
  */
 std::optional<StemBwdLaunch>

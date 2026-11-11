@@ -133,9 +133,84 @@ TEST(TestConvStemBwdWindow, EveryTapOfEveryPhaseFallsInTheWindow)
     }
 }
 
+TEST(TestConvStemBwdWindow, SpaceToDepthOffsetsExtentsAndShifts)
+{
+    using conv_stem_bwd::spaceToDepthWindowOf;
+    const auto check
+        = [](int64_t filter, int64_t padding, int64_t offset, int64_t extent, int64_t shift) {
+              const auto window = spaceToDepthWindowOf(filter, padding);
+              EXPECT_EQ(window.offset, offset) << filter << " " << padding;
+              EXPECT_EQ(window.extent, extent) << filter << " " << padding;
+              EXPECT_EQ(window.shift, shift) << filter << " " << padding;
+          };
+    check(3, 1, 0, 2, 1); // U-Net / VGG "same" 3x3
+    check(5, 2, 1, 3, 0);
+    check(7, 3, 1, 4, 1);
+    check(1, 0, 0, 1, 0);
+    check(3, 0, 0, 2, 0);
+    check(3, 5, 2, 2, 1); // padding past the filter
+}
+
+TEST(TestConvStemBwdWindow, SpaceToDepthPairsEveryTapOfEveryPhaseOnce)
+{
+    // dx row 2 i + p reads dy row 2 (i + offset - u) + shift + e against filter row r = 2 (u -
+    // offset) + p + padding - shift - e (ConvStemBwdTransform): each r in [0, filter) exactly
+    // once over u < extent and e < 2, for both phases.
+    for(int64_t filter = 1; filter <= 12; ++filter)
+    {
+        for(int64_t padding = 0; padding <= 12; ++padding)
+        {
+            const auto window = conv_stem_bwd::spaceToDepthWindowOf(filter, padding);
+            SCOPED_TRACE(std::to_string(filter) + " " + std::to_string(padding));
+            for(int64_t p = 0; p < 2; ++p)
+            {
+                std::vector<int> hits(static_cast<size_t>(filter), 0);
+                for(int64_t u = 0; u < window.extent; ++u)
+                {
+                    for(int64_t e = 0; e < 2; ++e)
+                    {
+                        const int64_t r = 2 * (u - window.offset) + p + padding - window.shift - e;
+                        if(r >= 0 && r < filter)
+                        {
+                            ++hits[static_cast<size_t>(r)];
+                        }
+                    }
+                }
+                for(const int hit : hits)
+                {
+                    EXPECT_EQ(hit, 1);
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Accepted shapes
 // ---------------------------------------------------------------------------
+
+/// A 3-D stem: @p taps x 7 x 7, stride (1, 2, 2), "same" depth padding, 5 dx planes.
+ConvShape threeDStem(int64_t taps)
+{
+    auto shape = baseShape();
+    shape.input = {5, 29, 64};
+    shape.filter = {taps, 7, 7};
+    shape.prePadding = {taps / 2, 3, 3};
+    shape.postPadding = {(taps - 1) / 2, 3, 3};
+    shape.stride = {1, 2, 2};
+    shape.dilation = {1, 1, 1};
+    return shape;
+}
+
+/// Stride 1: 3 x 5, padding (1, 2) (the space-to-depth windows 2 x 3).
+ConvShape stride1Shape()
+{
+    auto shape = baseShape();
+    shape.filter = {3, 5};
+    shape.prePadding = shape.postPadding = {1, 2};
+    shape.stride = {1, 1};
+    return shape;
+}
 
 struct AcceptCase
 {
@@ -179,6 +254,9 @@ std::vector<AcceptCase> acceptCases()
     threeD.stride = {3, 2, 2};
     threeD.dilation = {2, 1, 1};
     cases.push_back({"ThreeDOfDepthOne", threeD});
+    cases.push_back({"ThreeDDepthPlanes", threeDStem(1)});
+    cases.push_back({"ThreeDDepthTaps", threeDStem(3)});
+    cases.push_back({"ThreeDDepthTapsAtTheMost", threeDStem(8)});
     auto asymmetric = baseShape();
     asymmetric.prePadding = {3, 2};
     asymmetric.postPadding = {2, 4};
@@ -232,6 +310,30 @@ TEST(TestConvStemBwdForm, LayoutsAndTheWindowAreReadFromTheGraph)
     EXPECT_EQ(cf->ow, 2);
     EXPECT_EQ(cf->u, 4);
     EXPECT_EQ(cf->v, 4);
+    EXPECT_EQ(cf->depthTaps, 0);
+    // Stride 2: no space-to-depth window.
+    EXPECT_EQ(cf->sdU, 0);
+    EXPECT_EQ(cf->sdV, 0);
+
+    // Stride 1: its space-to-depth window too.
+    const auto unit = parse(specOf(stride1Shape()));
+    ASSERT_TRUE(unit.has_value());
+    EXPECT_EQ(unit->u, 3);
+    EXPECT_EQ(unit->sdOh, 0);
+    EXPECT_EQ(unit->sdU, 2);
+    EXPECT_EQ(unit->sdShiftH, 1);
+    EXPECT_EQ(unit->sdOw, 1);
+    EXPECT_EQ(unit->sdV, 3);
+    EXPECT_EQ(unit->sdShiftW, 0);
+
+    // 3-D: the depth taps, also of one tap over several planes.
+    const auto taps = parse(specOf(threeDStem(3)));
+    ASSERT_TRUE(taps.has_value());
+    EXPECT_EQ(taps->depthTaps, 3);
+    EXPECT_EQ(taps->u, 4);
+    const auto planes = parse(specOf(threeDStem(1)));
+    ASSERT_TRUE(planes.has_value());
+    EXPECT_EQ(planes->depthTaps, 1);
 
     auto shape = baseShape();
     shape.channelsLast = true;
@@ -317,28 +419,21 @@ std::vector<RefusalCase> refusalCases()
              shape.k = 18;
          })},
         {"FiveChannels", reshaped([](ConvShape& shape) { shape.c = 5; })},
-        // A trivial depth axis: extent, filter and padding.
-        {"DepthTwo", reshaped([](ConvShape& shape) {
-             shape.input = {2, 29, 64};
-             shape.filter = {1, 7, 7};
-             shape.prePadding = shape.postPadding = {0, 3, 3};
-             shape.stride = {1, 2, 2};
-             shape.dilation = {1, 1, 1};
+        // A non-trivial depth axis: unit stride and dilation, at most 8 taps, padding within
+        // the geometry.
+        {"DepthStride", reshaped([](ConvShape& shape) {
+             shape = threeDStem(3);
+             shape.stride = {2, 2, 2};
          })},
-        {"DepthFilter", reshaped([](ConvShape& shape) {
-             shape.input = {1, 29, 64};
-             shape.filter = {3, 7, 7};
-             shape.prePadding = {0, 3, 3}; // no leading depth padding: only the filter differs
-             shape.postPadding = {2, 3, 3};
-             shape.stride = {3, 2, 2};
-             shape.dilation = {1, 1, 1};
+        {"DepthDilation", reshaped([](ConvShape& shape) {
+             shape = threeDStem(3);
+             shape.dilation = {2, 1, 1};
          })},
-        {"DepthPadding", reshaped([](ConvShape& shape) {
-             shape.input = {1, 29, 64};
-             shape.filter = {1, 7, 7};
-             shape.prePadding = shape.postPadding = {1, 3, 3};
-             shape.stride = {3, 2, 2};
-             shape.dilation = {1, 1, 1};
+        {"DepthTapsBeyondTheMost", reshaped([](ConvShape& shape) { shape = threeDStem(9); })},
+        {"DepthPaddingBeyondGeometry", reshaped([](ConvShape& shape) {
+             shape = threeDStem(1);
+             shape.prePadding = {65, 3, 3};
+             shape.postPadding = {0, 3, 3};
          })},
         // Unit height and width dilation.
         {"HeightDilation", reshaped([](ConvShape& shape) {
@@ -381,10 +476,15 @@ std::vector<RefusalCase> refusalCases()
          [](ConvGraphSpec& s) {
              s.w.strides = {49, 16 * 49, 7, 1}; // C K R S
          }},
-        // The batch within the grid's z (images tiny).
+        // The batch times dx's depth within the grid's z (images tiny).
         {"BatchBeyondGrid", reshaped([](ConvShape& shape) {
              shape.n = 65536;
              shape.input = {4, 4};
+         })},
+        {"BatchTimesDepthBeyondGrid", reshaped([](ConvShape& shape) {
+             shape = threeDStem(1);
+             shape.n = 4096;
+             shape.input = {16, 4, 4};
          })},
         // Extents within 32 bits.
         {"DxWidthBeyondInt", reshaped([](ConvShape& shape) {
@@ -433,6 +533,15 @@ TEST(TestConvStemBwdLimits, TheGateCasesAreValidGraphsOneStepFromTheLimit)
     batch.n = 65535;
     batch.input = {4, 4};
     EXPECT_TRUE(parse(specOf(batch)).has_value());
+    auto planes = threeDStem(1);
+    planes.n = 4095;
+    planes.input = {16, 4, 4};
+    EXPECT_TRUE(parse(specOf(planes)).has_value());
+    EXPECT_TRUE(parse(specOf(threeDStem(8))).has_value());
+    auto depthPadding = threeDStem(1);
+    depthPadding.prePadding = {64, 3, 3};
+    depthPadding.postPadding = {0, 3, 3};
+    EXPECT_TRUE(parse(specOf(depthPadding)).has_value());
     auto width = baseShape();
     width.n = 1;
     width.c = 1;
@@ -486,7 +595,21 @@ struct ConfigFields
     std::string atom = "mfma16_f16";
     int64_t atomId = 0;
     int64_t layout = 0, vec = 8, u = 4, v = 4, nb = 16, kc = 32, th = 4, fm = 2, sh = 2, sw = 2;
+    int64_t ft = 0;
+    int64_t sd = 0;
 };
+
+/// A space-to-depth config for stride1Shape().
+ConfigFields spaceToDepthFields()
+{
+    ConfigFields f;
+    f.vec = 1;
+    f.u = 2;
+    f.v = 3;
+    f.sh = f.sw = 1;
+    f.sd = 2;
+    return f;
+}
 
 /// The FMA loop on an fp32 graph.
 ConfigFields fmaFields()
@@ -518,7 +641,9 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"th", f.th},
                        {"fm", f.fm},
                        {"sh", f.sh},
-                       {"sw", f.sw}};
+                       {"sw", f.sw},
+                       {"ft", f.ft},
+                       {"sd", f.sd}};
     return kernel;
 }
 
@@ -537,6 +662,8 @@ StemBwdConfig configOf(const ConfigFields& f)
     c.fm = f.fm;
     c.sh = f.sh;
     c.sw = f.sw;
+    c.ft = f.ft;
+    c.sd = f.sd;
     return c;
 }
 
@@ -648,6 +775,102 @@ std::vector<ConfigRefusal> configRefusals()
         {"WindowColumns", [](ConfigFields& f) { f.v = 5; }},
         {"HeightStride", [](ConfigFields& f) { f.sh = 1; }},
         {"WidthStride", [](ConfigFields& f) { f.sw = 4; }},
+        // The depth taps: 2-D configs on a trivial depth axis, 3-D ones on the problem's taps.
+        {"DepthTapsOnATrivialDepth", [](ConfigFields& f) { f.ft = 1; }},
+        {"TwoDOnADepthAxis",
+         [](ConfigFields& f) { f.ft = 0; },
+         [] {
+             ConfigFields f;
+             f.ft = 3;
+             return f;
+         },
+         "gfx942",
+         [] { return threeDStem(3); }},
+        // Space-to-depth: 2, on stride 1 and no depth taps, its own window, no column vectors,
+        // the columns every (channel, 2 x 2 phase).
+        {"SpaceToDepthOnStrideTwo", [](ConfigFields& f) { f.sd = 2; }},
+        {"SpaceToDepthOtherThanTwo",
+         [](ConfigFields& f) { f.sd = 3; },
+         spaceToDepthFields,
+         "gfx942",
+         stride1Shape},
+        {"SpaceToDepthOffOnItsWindow",
+         [](ConfigFields& f) { f.sd = 0; },
+         spaceToDepthFields,
+         "gfx942",
+         stride1Shape},
+        {"SpaceToDepthOnThePlainWindow",
+         [](ConfigFields& f) {
+             f.sd = 2;
+             f.u = 3;
+             f.v = 5;
+         },
+         [] {
+             auto f = spaceToDepthFields();
+             f.sd = 0;
+             f.u = 3;
+             f.v = 5;
+             return f;
+         },
+         "gfx942",
+         stride1Shape},
+        {"SpaceToDepthColumnVectors",
+         [](ConfigFields& f) { f.vec = 8; },
+         spaceToDepthFields,
+         "gfx942",
+         [] {
+             auto shape = stride1Shape();
+             shape.input = {29, 32}; // dy rows of 32: whole vectors
+             return shape;
+         }},
+        {"SpaceToDepthColumnsBelowThePhases",
+         [](ConfigFields& f) { f.nb = 11; },
+         [] {
+             auto f = fmaFields();
+             f.vec = 1;
+             f.u = 2;
+             f.v = 3;
+             f.sh = f.sw = 1;
+             f.sd = 2;
+             return f;
+         },
+         "gfx942",
+         [] {
+             auto shape = stride1Shape();
+             shape.dataType = DataType::FLOAT;
+             return shape;
+         }},
+        {"SpaceToDepthOnADepthAxis",
+         [](ConfigFields& f) {
+             f.sd = 2;
+             f.u = 2;
+             f.v = 2;
+         },
+         [] {
+             auto f = ConfigFields{};
+             f.vec = 1;
+             f.u = f.v = 3;
+             f.sh = f.sw = 1;
+             f.ft = 3;
+             return f;
+         },
+         "gfx942",
+         [] {
+             auto shape = threeDStem(3);
+             shape.filter = {3, 3, 3};
+             shape.prePadding = shape.postPadding = {1, 1, 1};
+             shape.stride = {1, 1, 1};
+             return shape;
+         }},
+        {"DepthTapsOtherThanTheProblems",
+         [](ConfigFields& f) { f.ft = 1; },
+         [] {
+             ConfigFields f;
+             f.ft = 3;
+             return f;
+         },
+         "gfx942",
+         [] { return threeDStem(3); }},
         // The GEMM columns.
         {"ColumnsBelowThePhases",
          [](ConfigFields& f) {
@@ -861,6 +1084,8 @@ TEST(TestConvStemBwdKernelMatch, MissingMetadataRefuses)
                              "fm",
                              "sh",
                              "sw",
+                             "ft",
+                             "sd",
                              "direction"})
     {
         auto kernel = kernelOf(ConfigFields{}, "HALF");
@@ -939,6 +1164,84 @@ TEST(TestConvStemBwdLaunch, GridsArgumentsAndTheWorkspace)
     EXPECT_EQ(t.ws[1], 49);
     EXPECT_EQ(t.ws[2], 7);
     EXPECT_EQ(t.ws[3], 1);
+    // 2-D: one plane, the reduction one tap's.
+    EXPECT_EQ(a.d, 1);
+    EXPECT_EQ(a.kpr, 32);
+    EXPECT_EQ(t.ft, 0);
+    EXPECT_EQ(t.kpr, 32);
+}
+
+TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheReduction)
+{
+    const auto launch = launchOf(spaceToDepthFields(), stride1Shape());
+    ASSERT_TRUE(launch.has_value());
+    // dx 29 x 64: 15 x 32 super-pixels of 2 x 2.
+    EXPECT_EQ(launch->gridX, 1u);
+    EXPECT_EQ(launch->gridY, 4u);
+    EXPECT_EQ(launch->gridZ, 2u);
+    // B: 16 columns x 2 x 3 offsets x 4 sub-pixels x 32.
+    EXPECT_EQ(launch->workspaceBytes, size_t{16 * 6 * 4 * 32 * 2});
+    const auto& a = launch->args;
+    EXPECT_EQ(a.kp, 4 * 32);
+    EXPECT_EQ(a.kpr, 32);
+    EXPECT_EQ(a.ho, 29);
+    EXPECT_EQ(a.wo, 64);
+    EXPECT_EQ(a.oh, 0);
+    EXPECT_EQ(a.ow, 1);
+    EXPECT_EQ(a.sdh, 1);
+    EXPECT_EQ(a.sdw, 0);
+    const auto& t = launch->transform;
+    EXPECT_EQ(t.sh, 2);
+    EXPECT_EQ(t.sw, 2);
+    EXPECT_EQ(t.oh, 0);
+    EXPECT_EQ(t.ow, 1);
+    EXPECT_EQ(t.dh, 1);
+    EXPECT_EQ(t.dw, 0);
+    EXPECT_EQ(t.u, 2);
+    EXPECT_EQ(t.v, 3);
+    EXPECT_EQ(t.kp, 4 * 32);
+    // Off: the stride's phases, no shift.
+    auto plain = spaceToDepthFields();
+    plain.sd = 0;
+    plain.u = 3;
+    plain.v = 5;
+    const auto off = launchOf(plain, stride1Shape());
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ(off->gridY, 8u);
+    EXPECT_EQ(off->args.sdh, 0);
+    EXPECT_EQ(off->transform.sh, 1);
+    EXPECT_EQ(off->args.kp, 32);
+}
+
+TEST(TestConvStemBwdLaunch, ThreeDFoldsPlanesIntoTheGridAndTapsIntoTheReduction)
+{
+    // 3 x 7 x 7, 5 dx planes (dy's 5, depth padding 1), packed N C D H W.
+    auto f = ConfigFields{};
+    f.ft = 3;
+    const auto launch = launchOf(f, threeDStem(3));
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->gridZ, 2u * 5u);
+    // B: 16 columns x 16 offsets x 3 taps x 32.
+    EXPECT_EQ(launch->workspaceBytes, size_t{16 * 16 * 3 * 32 * 2});
+    const auto& a = launch->args;
+    EXPECT_EQ(a.kp, 3 * 32);
+    EXPECT_EQ(a.kpr, 32);
+    EXPECT_EQ(a.d, 5);
+    EXPECT_EQ(a.dout, 5);
+    EXPECT_EQ(a.pd, 1);
+    EXPECT_EQ(a.dys[0], 16 * 5 * 15 * 32);
+    EXPECT_EQ(a.dys[1], 5 * 15 * 32);
+    EXPECT_EQ(a.dyd, 15 * 32);
+    EXPECT_EQ(a.dxs[1], 5 * 29 * 64);
+    EXPECT_EQ(a.dxd, 29 * 64);
+    EXPECT_EQ(a.dyImage, 16 * 5 * 15 * 32);
+    const auto& t = launch->transform;
+    EXPECT_EQ(t.kp, 3 * 32);
+    EXPECT_EQ(t.kpr, 32);
+    EXPECT_EQ(t.ft, 3);
+    EXPECT_EQ(t.ws[0], 3 * 3 * 49);
+    EXPECT_EQ(t.ws[1], 3 * 49);
+    EXPECT_EQ(t.wsd, 49);
 }
 
 TEST(TestConvStemBwdLaunch, LayoutsStridesAndTheFlip)
@@ -1027,6 +1330,17 @@ TEST(TestConvStemBwdDefines, EveryFieldIsADefine)
     ASSERT_EQ(fma.size(), 11u);
     EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_SB_T", "float"}));
     EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_SB_LAYOUT", "0"}));
+    // 3-D only: the depth taps.
+    auto threeD = ConfigFields{};
+    threeD.ft = 3;
+    const auto taps
+        = conv_stem_bwd::compileDefinesFor(DataType::HALF, configOf(threeD), "K1AtomMfmaF16");
+    ASSERT_EQ(taps.size(), 13u);
+    EXPECT_EQ(taps[12], (std::pair<std::string, std::string>{"CONV_SB_FT", "3"}));
+    const auto sd = conv_stem_bwd::compileDefinesFor(
+        DataType::HALF, configOf(spaceToDepthFields()), "K1AtomMfmaF16");
+    ASSERT_EQ(sd.size(), 13u);
+    EXPECT_EQ(sd[12], (std::pair<std::string, std::string>{"CONV_SB_SD", "2"}));
     EXPECT_THROW(static_cast<void>(conv_stem_bwd::compileDefinesFor(
                      DataType::DOUBLE, configOf(ConfigFields{}), "")),
                  std::invalid_argument);

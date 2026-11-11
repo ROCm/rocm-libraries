@@ -14,8 +14,9 @@
 #include "ConvIgemmCore.h"
 #include "ConvStemBwdArgs.h"
 
-/// B[n][uv][k] (k padded to kp, zero past K) from w, n = (c, p, q), uv = u V + v.
-template <class T>
+/// B[n][uv][k] (k padded to kp, zero past K) from w, n = (c, p, q), uv = u V + v; 3-D (FT depth
+/// taps): k = (depth tap, k), each tap's run padded to kpr.
+template <class T, int FT = 0, int SD = 0>
 __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
 {
     const T* w = static_cast<const T*>(a.w);
@@ -24,8 +25,15 @@ __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
     for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
         i += static_cast<long long>(gridDim.x) * blockDim.x)
     {
-        const int k = static_cast<int>(i % a.kp);
+        int k = static_cast<int>(i % a.kp);
         long long rest = i / a.kp;
+        // 3-D: k' = (depth tap, k).
+        int td = 0;
+        if constexpr(FT != 0 || SD != 0)
+        {
+            td = k / a.kpr;
+            k -= td * a.kpr;
+        }
         const int v = static_cast<int>(rest % a.v);
         rest /= a.v;
         const int u = static_cast<int>(rest % a.u);
@@ -35,13 +43,21 @@ __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
         if(c < a.c && k < a.k)
         {
             // Filter row r pairs dx row SH i + p with dy row i + OH - u: r = SH (u - OH) + p + ph.
-            const int r = a.sh * (u - a.oh) + p + a.ph;
-            const int s = a.sw * (v - a.ow) + q + a.pw;
+            int r = a.sh * (u - a.oh) + p + a.ph;
+            int s = a.sw * (v - a.ow) + q + a.pw;
+            if constexpr(SD != 0)
+            {
+                // Sub-pixel (eh, ew) = td: dy row SD y + dh + eh.
+                r -= a.dh + td / SD;
+                s -= a.dw + td % SD;
+            }
             if(r >= 0 && r < a.r && s >= 0 && s < a.s)
             {
                 const int rr = a.flip ? a.r - 1 - r : r;
                 const int ss = a.flip ? a.s - 1 - s : s;
-                val = K1Elem<T>::load(w[k * a.ws[0] + c * a.ws[1] + rr * a.ws[2] + ss * a.ws[3]]);
+                const long long dt = FT != 0 ? (a.flip ? FT - 1 - td : td) * a.wsd : 0;
+                val = K1Elem<T>::load(
+                    w[k * a.ws[0] + c * a.ws[1] + rr * a.ws[2] + ss * a.ws[3] + dt]);
             }
         }
         b[i] = K1Elem<T>::store(val);
@@ -100,9 +116,14 @@ template <class T,
           int TH,
           int FM,
           int SH,
-          int SW>
+          int SW,
+          int FT = 0,
+          int SD = 0>
 __device__ void sbStemBwd(const ConvStemBwdArgs& a)
 {
+    // The phases of a super-pixel: the strides, or SD x SD on a space-to-depth view of dy.
+    static_assert(SD == 0 || (FT == 0 && SH == 1 && SW == 1), "stem bwd space-to-depth");
+    constexpr int PH = SD != 0 ? SD : SH, PW = SD != 0 ? SD : SW;
     constexpr int WAVE = Atom::WAVE, DIM = Atom::DIM, KA = Atom::KA;
     constexpr int TW = FM * DIM;
     constexpr int WR = TH + U - 1, WC = TW + V - 1; // window rows, columns
@@ -115,6 +136,8 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     static_assert(FMA ? NB >= 1 : NB % DIM == 0, "stem bwd columns");
     static_assert(KC % KA == 0 && KC % EV == 0, "stem bwd chunk");
     static_assert(CL || CFV == 1 || CFV == EV, "stem bwd channels-first vector");
+    // Space-to-depth reads every other dy column: no aligned column vectors.
+    static_assert(SD == 0 || CL || CFV == 1, "stem bwd space-to-depth vector");
     static_assert(sbLdsBytes(static_cast<int>(sizeof(T)), U, V, NB, KC, TH, TW)
                       == static_cast<long long>(A_ELEMS + B_ELEMS) * sizeof(T),
                   "stem bwd LDS arithmetic");
@@ -127,7 +150,9 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int j0 = blockIdx.x * TW;
     const int i0 = blockIdx.y * TH;
-    const int n = blockIdx.z;
+    // 3-D (FT depth taps): z is (image, dx plane).
+    const int n = FT != 0 ? static_cast<int>(blockIdx.z) / a.d : static_cast<int>(blockIdx.z);
+    const int od = FT != 0 ? static_cast<int>(blockIdx.z) % a.d : 0;
     // Window origin: dy row i0 + OH - (U - 1), column j0 + OW - (V - 1).
     const int r0 = i0 + a.oh - (U - 1), c0 = j0 + a.ow - (V - 1);
 
@@ -148,6 +173,27 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     Raw16 rb[PB];
     const int c0a = c0 >= 0 ? c0 / EV * EV : -((-c0 + EV - 1) / EV) * EV;
     auto issue = [&](int k0) {
+        // 3-D: a chunk lies in one depth tap's k run; its dy plane od + pd - tap.
+        int kb0 = k0;
+        bool planeOk = true;
+        long long planeOff = 0;
+        // Space-to-depth: a chunk lies in one sub-pixel's k run; dy row SD y + sdh + eh.
+        int sy = 0, sx = 0;
+        if constexpr(SD != 0)
+        {
+            const int sub = k0 / a.kpr;
+            kb0 = k0 - sub * a.kpr;
+            sy = a.sdh + sub / SD;
+            sx = a.sdw + sub % SD;
+        }
+        if constexpr(FT != 0)
+        {
+            const int tap = k0 / a.kpr;
+            kb0 = k0 - tap * a.kpr;
+            const int plane = od + a.pd - tap;
+            planeOk = plane >= 0 && plane < a.dout;
+            planeOff = static_cast<long long>(plane) * a.dyd;
+        }
 #pragma unroll
         for(int p = 0; p < PA; ++p)
         {
@@ -158,25 +204,32 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
                 const int kv = e % (KC / EV), rc = e / (KC / EV);
                 y = r0 + rc / WC;
                 x = c0 + rc % WC;
-                k = k0 + kv * EV;
+                k = kb0 + kv * EV;
             }
             else if constexpr(CFV > 1)
             {
                 const int cu = e % NCU, rk = e / NCU;
                 y = r0 + rk % WR;
-                k = k0 + rk / WR;
+                k = kb0 + rk / WR;
                 x = c0a + cu * EV;
             }
             else
             {
                 const int col = e % WC, rk = e / WC;
                 y = r0 + rk % WR;
-                k = k0 + rk / WR;
+                k = kb0 + rk / WR;
                 x = c0 + col;
             }
-            const bool ok = e < UA && y >= 0 && y < a.ho && x >= 0 && x < a.wo && k < a.k;
+            if constexpr(SD != 0)
+            {
+                y = SD * y + sy;
+                x = SD * x + sx;
+            }
+            const bool ok
+                = e < UA && y >= 0 && y < a.ho && x >= 0 && x < a.wo && k < a.k && planeOk;
             const unsigned off
-                = ok ? static_cast<unsigned>(k * a.dys[1] + y * a.dys[2] + x * a.dys[3]) * sizeof(T)
+                = ok ? static_cast<unsigned>(k * a.dys[1] + y * a.dys[2] + x * a.dys[3] + planeOff)
+                           * sizeof(T)
                      : K1_OUT_OF_RANGE;
             ra[p] = k1BufferLoad<RawA>(dyR, off);
         }
@@ -235,7 +288,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         }
     };
 
-    T* dx = static_cast<T*>(a.dx) + n * a.dxs[0];
+    T* dx = static_cast<T*>(a.dx) + n * a.dxs[0] + (FT != 0 ? od * a.dxd : 0);
     if constexpr(FMA)
     {
         // Thread (row wave, column lane): FM super-pixels, all NB columns, in fp32.
@@ -300,14 +353,14 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
 #pragma unroll
         for(int c = 0; c < NB; ++c)
         {
-            const int q = c % SW, p = c / SW % SH, ch = c / (SW * SH);
-            const int y = SH * i + p;
+            const int q = c % PW, p = c / PW % PH, ch = c / (PW * PH);
+            const int y = PH * i + p;
             if(ch >= a.c || y >= a.hi)
                 continue;
 #pragma unroll
             for(int m = 0; m < FM; ++m)
             {
-                const int x = SW * (j0 + m * DIM + lane) + q;
+                const int x = PW * (j0 + m * DIM + lane) + q;
                 if(x < a.wi)
                     dx[ch * a.dxs[1] + y * a.dxs[2] + x * a.dxs[3]] = K1Elem<T>::store(acc[m][c]);
             }
@@ -376,8 +429,8 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         for(int f = 0; f < FN; ++f)
         {
             const int nn = f * DIM + lane % DIM;
-            const int q = nn % SW, p = nn / SW % SH, c = nn / (SW * SH);
-            const int y = SH * i + p;
+            const int q = nn % PW, p = nn / PW % PH, c = nn / (PW * PH);
+            const int y = PH * i + p;
             if(c >= a.c || y >= a.hi)
                 continue;
 #pragma unroll
@@ -386,7 +439,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
                 for(int e = 0; e < Atom::ACC; ++e)
                 {
                     const int j = j0 + m * DIM + Atom::dRow(lane, e);
-                    const int x = SW * j + q;
+                    const int x = PW * j + q;
                     if(x < a.wi)
                         dx[c * a.dxs[1] + y * a.dxs[2] + x * a.dxs[3]]
                             = K1Elem<T>::store(acc[m][f][e]);

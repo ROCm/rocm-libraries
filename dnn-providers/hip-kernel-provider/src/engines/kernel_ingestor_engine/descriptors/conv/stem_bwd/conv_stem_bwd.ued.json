@@ -17,7 +17,9 @@
     "th",
     "fm",
     "sh",
-    "sw"
+    "sw",
+    "ft",
+    "sd"
   ],
   "behavior_notes": [
     "runtime_compilation"

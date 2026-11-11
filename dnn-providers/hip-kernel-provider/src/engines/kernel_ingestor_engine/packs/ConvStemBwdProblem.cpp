@@ -119,6 +119,16 @@ Window windowOf(int64_t filter, int64_t stride, int64_t padding)
     return window;
 }
 
+SpaceToDepthWindow spaceToDepthWindowOf(int64_t filter, int64_t padding)
+{
+    const int64_t lo = padding - filter + 1;
+    SpaceToDepthWindow window;
+    window.shift = lo - floorDiv(lo, SPACE_TO_DEPTH) * SPACE_TO_DEPTH;
+    window.offset = floorDiv(padding + 1 - window.shift, SPACE_TO_DEPTH);
+    window.extent = window.offset - floorDiv(lo, SPACE_TO_DEPTH) + 1;
+    return window;
+}
+
 std::optional<StemBwdProblem>
     parseStemBwdProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
 {
@@ -146,8 +156,14 @@ std::optional<StemBwdProblem>
     {
         return std::nullopt;
     }
-    // A trivial depth axis: its stride and dilation then change nothing.
-    if(a.inSpatial[0] != 1 || a.outSpatial[0] != 1 || a.filter[0] != 1 || a.prePadding[0] != 0)
+    // The depth axis: trivial (its stride and dilation then change nothing; 2-D configs), or
+    // unit stride and dilation with at most MAX_DEPTH_TAPS taps (3-D configs: the dx planes in
+    // the grid, the taps in the reduction).
+    const bool trivialDepth
+        = a.inSpatial[0] == 1 && a.outSpatial[0] == 1 && a.filter[0] == 1 && a.prePadding[0] == 0;
+    if(!trivialDepth
+       && (a.stride[0] != 1 || a.dilation[0] != 1 || a.filter[0] < 1 || a.filter[0] > MAX_DEPTH_TAPS
+           || a.prePadding[0] > MAX_GEOMETRY))
     {
         return std::nullopt;
     }
@@ -159,7 +175,8 @@ std::optional<StemBwdProblem>
             return std::nullopt;
         }
     }
-    // Extents and channels as the kernel's ints; the batch as the grid's z.
+    // Extents and channels as the kernel's ints; the batch times dx's depth as the grid's z
+    // (which, at unit depth stride, bounds both depths too).
     for(const long long value :
         {a.k, a.inSpatial[1], a.inSpatial[2], a.outSpatial[1], a.outSpatial[2]})
     {
@@ -168,7 +185,8 @@ std::optional<StemBwdProblem>
             return std::nullopt;
         }
     }
-    if(a.n > MAX_GRID_YZ)
+    const auto images = pack_features::checkedProduct({a.n, a.inSpatial[0]});
+    if(!images.has_value() || *images > MAX_GRID_YZ)
     {
         return std::nullopt;
     }
@@ -195,7 +213,8 @@ std::optional<StemBwdProblem>
         return std::nullopt;
     }
     // One image of dy is one 32-bit-addressed buffer.
-    const auto dyImage = pack_features::checkedProduct({a.k, a.outSpatial[1], a.outSpatial[2]});
+    const auto dyImage
+        = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
     if(!dyImage.has_value() || *dyImage > INT_LIMIT / elementBytes)
     {
         return std::nullopt;
@@ -208,6 +227,18 @@ std::optional<StemBwdProblem>
     problem.elementBytes = elementBytes;
     problem.dyChannelsFirst = dyChannelsFirst;
     problem.dyChannelsLast = dyChannelsLast;
+    problem.depthTaps = trivialDepth ? 0 : a.filter[0];
+    if(a.stride[1] == 1 && a.stride[2] == 1)
+    {
+        const auto sdRows = spaceToDepthWindowOf(a.filter[1], a.prePadding[1]);
+        const auto sdCols = spaceToDepthWindowOf(a.filter[2], a.prePadding[2]);
+        problem.sdOh = sdRows.offset;
+        problem.sdU = sdRows.extent;
+        problem.sdShiftH = sdRows.shift;
+        problem.sdOw = sdCols.offset;
+        problem.sdV = sdCols.extent;
+        problem.sdShiftW = sdCols.shift;
+    }
     problem.oh = rows.offset;
     problem.u = rows.extent;
     problem.ow = cols.offset;
@@ -287,9 +318,10 @@ std::optional<StemBwdLaunch>
     }
     else if(config.layout == LAYOUT_CHANNELS_FIRST)
     {
-        // Vectors of aligned columns: dy rows whole vectors.
+        // Vectors of aligned columns: dy rows whole vectors (not on space-to-depth, which reads
+        // every other column).
         if(!problem.dyChannelsFirst || (config.vec != 1 && config.vec != ev)
-           || (config.vec == ev && a.outSpatial[2] % ev != 0))
+           || (config.vec == ev && (a.outSpatial[2] % ev != 0 || config.sd != 0)))
         {
             return std::nullopt;
         }
@@ -298,14 +330,27 @@ std::optional<StemBwdLaunch>
     {
         return std::nullopt;
     }
-    // The window and the strides are compile-time.
-    if(config.u != problem.u || config.v != problem.v || config.sh != a.stride[1]
-       || config.sw != a.stride[2])
+    // The window, the strides, the depth taps and space-to-depth are compile-time. Space-to-
+    // depth: stride 1 (the configs' sh and sw), no depth taps, its own window.
+    if(config.sd != 0 && config.sd != SPACE_TO_DEPTH)
     {
         return std::nullopt;
     }
+    const bool sd = config.sd != 0;
+    if(sd && (problem.sdU == 0 || config.ft != 0))
+    {
+        return std::nullopt;
+    }
+    if(config.u != (sd ? problem.sdU : problem.u) || config.v != (sd ? problem.sdV : problem.v)
+       || config.sh != a.stride[1] || config.sw != a.stride[2] || config.ft != problem.depthTaps)
+    {
+        return std::nullopt;
+    }
+    // The phases of a super-pixel.
+    const int64_t phH = sd ? config.sd : a.stride[1];
+    const int64_t phW = sd ? config.sd : a.stride[2];
     // The GEMM columns: every (channel, phase), whole fragments on a matrix atom.
-    const int64_t columns = a.c * a.stride[1] * a.stride[2];
+    const int64_t columns = a.c * phH * phW;
     if(config.nb < columns || config.nb > MAX_COLUMNS || (!fma && config.nb % shape.dim != 0))
     {
         return std::nullopt;
@@ -326,14 +371,19 @@ std::optional<StemBwdLaunch>
     }
     // The grid: super-columns, super-rows, images.
     const int64_t tw = config.fm * shape.dim;
-    const int64_t gridX = divUp(divUp(a.inSpatial[2], a.stride[2]), tw);
-    const int64_t gridY = divUp(divUp(a.inSpatial[1], a.stride[1]), config.th);
-    if(gridX > INT_LIMIT || gridY > MAX_GRID_YZ || a.n > MAX_GRID_YZ)
+    const int64_t gridX = divUp(divUp(a.inSpatial[2], phW), tw);
+    const int64_t gridY = divUp(divUp(a.inSpatial[1], phH), config.th);
+    // 3-D: z is (image, dx plane).
+    const int64_t planes = config.ft != 0 ? a.inSpatial[0] : 1;
+    const auto gridZ = pack_features::checkedProduct({a.n, planes});
+    if(gridX > INT_LIMIT || gridY > MAX_GRID_YZ || !gridZ.has_value() || *gridZ > MAX_GRID_YZ)
     {
         return std::nullopt;
     }
-    // The transformed filter: nb x u v x kp, one 32-bit-addressed buffer.
-    const int64_t kp = divUp(a.k, config.kc) * config.kc;
+    // The transformed filter: nb x u v x kp, one 32-bit-addressed buffer; 3-D: kp = taps x kpr;
+    // space-to-depth: kp = sub-pixels x kpr.
+    const int64_t kpr = divUp(a.k, config.kc) * config.kc;
+    const int64_t kp = kpr * std::max<int64_t>(config.ft, 1) * (sd ? phH * phW : 1);
     const auto bElems = pack_features::checkedProduct({config.nb, config.u, config.v, kp});
     if(kp > INT_LIMIT || !bElems.has_value() || *bElems > INT_LIMIT / eb)
     {
@@ -343,7 +393,7 @@ std::optional<StemBwdLaunch>
     StemBwdLaunch launch;
     launch.gridX = static_cast<unsigned int>(gridX);
     launch.gridY = static_cast<unsigned int>(gridY);
-    launch.gridZ = static_cast<unsigned int>(a.n);
+    launch.gridZ = static_cast<unsigned int>(*gridZ);
     launch.block = static_cast<unsigned int>(threads);
     launch.transformGrid = static_cast<unsigned int>(
         std::min(divUp(*bElems, int64_t{launch.transformBlock}), MAX_TRANSFORM_BLOCKS));
@@ -359,14 +409,22 @@ std::optional<StemBwdLaunch>
     m.wi = static_cast<int>(a.inSpatial[2]);
     m.ho = static_cast<int>(a.outSpatial[1]);
     m.wo = static_cast<int>(a.outSpatial[2]);
-    m.oh = static_cast<int>(problem.oh);
-    m.ow = static_cast<int>(problem.ow);
-    // (n, k, h, w) and (n, c, h, w): the depth axis is trivial.
+    m.oh = static_cast<int>(sd ? problem.sdOh : problem.oh);
+    m.ow = static_cast<int>(sd ? problem.sdOw : problem.ow);
+    // (n, k, h, w) and (n, c, h, w); the depth axis apart (2-D configs: trivial).
     const long long dyAxes[4] = {a.yStrides[0], a.yStrides[1], a.yStrides[3], a.yStrides[4]};
     const long long dxAxes[4] = {a.xStrides[0], a.xStrides[1], a.xStrides[3], a.xStrides[4]};
     std::copy(std::begin(dyAxes), std::end(dyAxes), m.dys);
     std::copy(std::begin(dxAxes), std::end(dxAxes), m.dxs);
-    m.dyImage = a.k * a.outSpatial[1] * a.outSpatial[2];
+    m.dyImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    m.d = static_cast<int>(planes);
+    m.dout = static_cast<int>(a.outSpatial[0]);
+    m.pd = static_cast<int>(a.prePadding[0]);
+    m.kpr = static_cast<int>(kpr);
+    m.dyd = a.yStrides[2];
+    m.dxd = a.xStrides[2];
+    m.sdh = static_cast<int>(sd ? problem.sdShiftH : 0);
+    m.sdw = static_cast<int>(sd ? problem.sdShiftW : 0);
 
     auto& t = launch.transform;
     t.nb = static_cast<int>(config.nb);
@@ -377,15 +435,20 @@ std::optional<StemBwdLaunch>
     t.k = static_cast<int>(a.k);
     t.r = static_cast<int>(a.filter[1]);
     t.s = static_cast<int>(a.filter[2]);
-    t.sh = static_cast<int>(a.stride[1]);
-    t.sw = static_cast<int>(a.stride[2]);
+    t.sh = static_cast<int>(phH);
+    t.sw = static_cast<int>(phW);
     t.ph = static_cast<int>(a.prePadding[1]);
     t.pw = static_cast<int>(a.prePadding[2]);
-    t.oh = static_cast<int>(problem.oh);
-    t.ow = static_cast<int>(problem.ow);
+    t.oh = m.oh;
+    t.ow = m.ow;
     t.flip = a.flipFilter != 0 ? 1 : 0;
     const long long wAxes[4] = {a.wStrides[0], a.wStrides[1], a.wStrides[3], a.wStrides[4]};
     std::copy(std::begin(wAxes), std::end(wAxes), t.ws);
+    t.ft = static_cast<int>(config.ft);
+    t.kpr = static_cast<int>(kpr);
+    t.wsd = a.wStrides[2];
+    t.dh = m.sdh;
+    t.dw = m.sdw;
     return launch;
 }
 
@@ -426,6 +489,16 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     for(const auto& [name, value] : fields)
     {
         defines.emplace_back(std::string("CONV_SB_") + name, std::to_string(value));
+    }
+    // Only when on (3-D, space-to-depth): every other config compiles from the definitions it
+    // always had.
+    if(config.ft != 0)
+    {
+        defines.emplace_back("CONV_SB_FT", std::to_string(config.ft));
+    }
+    if(config.sd != 0)
+    {
+        defines.emplace_back("CONV_SB_SD", std::to_string(config.sd));
     }
     return defines;
 }

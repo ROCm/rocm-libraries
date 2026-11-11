@@ -58,6 +58,14 @@
     {
       "name": "sw",
       "type": "int"
+    },
+    {
+      "name": "ft",
+      "type": "int"
+    },
+    {
+      "name": "sd",
+      "type": "int"
     }
   ]
 }

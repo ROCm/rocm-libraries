@@ -89,6 +89,8 @@ StemBwdConfig configOf(const KernelDefinition& kernel)
     config.fm = kernel.getIntMetadata("fm");
     config.sh = kernel.getIntMetadata("sh");
     config.sw = kernel.getIntMetadata("sw");
+    config.ft = kernel.getIntMetadata("ft");
+    config.sd = kernel.getIntMetadata("sd");
     return config;
 }
 
