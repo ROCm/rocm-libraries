@@ -2248,6 +2248,8 @@ packaging environment never sees `ROCM_PATH`, so `setup.py` fell back to
 replace the entries marked **Superseded** above; each superseded entry names its
 replacement. They also supersede D3's rule that package builds fail without a
 ROCm version, D15 and D9 in [packaging decisions](docs/PackagingDecisions.md).
+The full plan, with the per-branch changes and the longer justifications, is
+[docs/PackagingIdentityPlan.md](docs/PackagingIdentityPlan.md).
 
 ### Q121 — Does the build backend discover a ROCm installation?
 
@@ -2312,7 +2314,13 @@ Rationale: reading a saved value before git gave stale commits; a random dirty I
 made pip's three `setup.py` runs disagree; stamped editable installs go stale;
 `safe.directory=*` is needed because the backend runs in other users' trees; a
 tree copied inside another checkout would inherit that HEAD, hence the
-`ls-files` guard. See the findings at the end of this section.
+`ls-files` guard. The dirty scope is the whole repository because the commit
+identifies the whole repository; a narrower scope would call a tree clean while
+the client or hipBLASLt sources it pairs with carry uncommitted changes. No
+substitute ID is generated when no commit is found: it would record nothing about
+the source, leak into the version label, and make wheels non-reproducible;
+tarball builders know their commit and can pass it. See the findings at the end
+of this section.
 
 ### Q124 — Which ROCm identity does each installation form provide?
 
@@ -2372,7 +2380,19 @@ exposes only rocisa, its adaptor and stinkytofu, and R1 stops unpacking the whee
 into the artifact root). Kernel generation unpacks the built wheel into the
 build tree and puts it on a command-scoped `PYTHONPATH`, as develop does with the
 source tree; nothing is installed into the build Python. The reusable recipe
-module and `TENSILELITE_WHEEL_DIR` are follow-up F1.
+module and `TENSILELITE_WHEEL_DIR` are follow-up F1: with one pure-Python wheel the
+CMake recipe is thin, the reusable parts are already Python scripts, and a seam
+with no caller or CI would be untested. No provenance file is written next to the
+kernel library; recording which TensileLite generated a library belongs inside
+the library's own metadata, with the check that reads it (F6).
+
+TheRock's runner uses the installed wheel only when the artifact has `wheels/`
+and no unpacked `tensilelite/` package, because pytest would otherwise import
+the unpacked copy; R1 removing that copy switches the wheel path on, and TheRock
+T14 removes the fallback once its rocm-libraries submodule includes R1. TheRock
+T4–T6 install TensileLite's own `requirements.txt` in the BLAS stage instead of
+TheRock's hand-copied list; that is an independent improvement no rocm-libraries
+branch depends on.
 
 ### Q130 — How are pre-TheRock native installs supported?
 
