@@ -809,7 +809,7 @@ def _reference_ctests(published):
     """
     text = (_PLATFORM / "CMakeLists.txt").read_text()
     names = []
-    for template in re.findall(r"add_test\((\S*\$\{_operation\}\S*)", text):
+    for template in re.findall(r"rocke_pytest_suite\((\S*\$\{_operation\}\S*)", text):
         for operation, architectures in published.items():
             name = template.replace("${_operation}", operation)
             if "${_arch}" in name:

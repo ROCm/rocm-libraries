@@ -148,16 +148,69 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
-# Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
-# one part of the platform pytest suite. The remaining arguments are the part's
+# Append to _ROCKE_INSTALLED_CTEST_ENTRIES the installed-CTestTestfile text
+# that registers the pytest suite <name>. ARGS is the text that follows the caller's _ROCKE_PYTEST command and
+# starts with a space. LABELS lists the baked labels. ENVIRONMENT and TIMEOUT
+# give those test properties. Every entry of the suite has the same
+# properties and SKIP_RETURN_CODE 77.
+#
+# When _ROCKE_PYTEST_TIERS_<name> is empty, <name> is the only entry and runs
+# every test. Each tier that it lists (standard, comprehensive or full) adds
+# the entry <name>-<tier>, which runs the tests marked tier_<tier>. <name>
+# then runs the tests that have no tier marker. rocke.tests.ctest_shard
+# selects the tests through --rocke-tier and --rocke-suite-tiers.
+function(rocke_pytest_suite name)
+  cmake_parse_arguments(PARSE_ARGV 1 _suite "" "ARGS;ENVIRONMENT;TIMEOUT" "LABELS")
+  if(_suite_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR
+            "rocke_pytest_suite(${name}): unknown arguments ${_suite_UNPARSED_ARGUMENTS}")
+  endif()
+  set(_tiers_past_quick standard comprehensive full)
+  set(_listed_tiers ${_ROCKE_PYTEST_TIERS_${name}})
+  foreach(_tier IN LISTS _listed_tiers)
+    if(NOT _tier IN_LIST _tiers_past_quick)
+      list(JOIN _tiers_past_quick ", " _known_tiers)
+      message(FATAL_ERROR
+              "_ROCKE_PYTEST_TIERS_${name} lists ${_tier}: use ${_known_tiers}")
+    endif()
+  endforeach()
+  set(_suite_tiers quick)
+  foreach(_tier IN LISTS _tiers_past_quick)
+    if(_tier IN_LIST _listed_tiers)
+      list(APPEND _suite_tiers ${_tier})
+    endif()
+  endforeach()
+  list(JOIN _suite_tiers "," _suite_tier_list)
+  list(JOIN _suite_LABELS "\\;" _labels)
+  foreach(_tier IN LISTS _suite_tiers)
+    set(_test "${name}")
+    set(_tier_options "")
+    if(_listed_tiers)
+      set(_tier_options " --rocke-tier ${_tier} --rocke-suite-tiers ${_suite_tier_list}")
+      if(NOT _tier STREQUAL "quick")
+        set(_test "${name}-${_tier}")
+      endif()
+    endif()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(${_test} ${_ROCKE_PYTEST}${_tier_options}${_suite_ARGS})\n"
+           "set_tests_properties(${_test} PROPERTIES\n"
+           "  LABELS \"${_labels}\"\n"
+           "  ENVIRONMENT \"${_suite_ENVIRONMENT}\"\n"
+           "  SKIP_RETURN_CODE 77\n"
+           "  TIMEOUT ${_suite_TIMEOUT})\n")
+  endforeach()
+  set(_ROCKE_INSTALLED_CTEST_ENTRIES "${_ROCKE_INSTALLED_CTEST_ENTRIES}" PARENT_SCOPE)
+endfunction()
+
+# Append to _ROCKE_INSTALLED_CTEST_ENTRIES the installed-CTestTestfile text
+# that registers rocke_pytest_<part>, one part of the platform pytest suite. The remaining arguments are the part's
 # pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
 # set, lists files under tests/ that the part must not collect (for example a
 # file that runs in its own CTest entry); each becomes an --ignore. Every
-# argument is quoted. Every part shares the caller's _ROCKE_PYTEST command, the
-# marker filter, the per-test limit, the labels, the skip code, the CTest limit
-# and the environment list that the installed CTestTestfile defines as
-# _rocke_platform_pytest_environment.
-function(rocke_platform_pytest_entry out_var part)
+# argument is quoted. Every part is a rocke_pytest_suite with the same marker
+# filter, per-test limit, labels, CTest limit and environment list, which the
+# installed CTestTestfile defines as _rocke_platform_pytest_environment.
+function(rocke_platform_pytest_entry part)
   set(_test_name "rocke_pytest_${part}")
   set(_pytest_argument_list ${ARGN})
   foreach(_ignored_file IN LISTS _ROCKE_PLATFORM_PYTEST_IGNORE_${part})
@@ -167,14 +220,12 @@ function(rocke_platform_pytest_entry out_var part)
   foreach(_pytest_argument IN LISTS _pytest_argument_list)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
-  string(CONCAT _entry
-         "add_test(${_test_name} ${_ROCKE_PYTEST}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
-         "set_tests_properties(${_test_name} PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;quick\"\n"
-         "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-         "  SKIP_RETURN_CODE 77\n"
-         "  TIMEOUT 300)\n")
-  set(${out_var} "${_entry}" PARENT_SCOPE)
+  rocke_pytest_suite(${_test_name}
+    ARGS "${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60"
+    LABELS ckc python quick
+    ENVIRONMENT "\${_rocke_platform_pytest_environment}"
+    TIMEOUT 300)
+  set(_ROCKE_INSTALLED_CTEST_ENTRIES "${_ROCKE_INSTALLED_CTEST_ENTRIES}" PARENT_SCOPE)
 endfunction()
 
 set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
@@ -589,6 +640,13 @@ if(ROCKE_INSTALL_TESTS)
     # all of them. An entry whose tests all fall in other shards exits 77, so
     # each pytest entry sets SKIP_RETURN_CODE 77.
     set(_ROCKE_PYTEST "python -m pytest -p rocke.tests.ctest_shard")
+
+    # Tiers past quick that a pytest suite registers an entry for, as
+    # _ROCKE_PYTEST_TIERS_<name> (see rocke_pytest_suite).
+    # A suite opts in with one line here, for example
+    #   list(APPEND _ROCKE_PYTEST_TIERS_rocke_library_gdn_pytest standard)
+    # APPEND keeps a value given on the configure line.
+
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -742,12 +800,9 @@ if(ROCKE_INSTALL_TESTS)
           list(APPEND _rocke_pytest_group_paths "${_rocke_pytest_dir_path}")
           list(APPEND _rocke_pytest_other_arguments --ignore "${_rocke_pytest_dir_path}")
         endforeach()
-        rocke_platform_pytest_entry(_rocke_pytest_entry ${_rocke_pytest_group}
-                                    ${_rocke_pytest_group_paths})
-        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
+        rocke_platform_pytest_entry(${_rocke_pytest_group} ${_rocke_pytest_group_paths})
       endforeach()
-      rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
+      rocke_platform_pytest_entry(other ${_rocke_pytest_other_arguments})
 
       # The tensor_transforms tests live inside the package
       # (rocke/tests/helpers/tiling/tensor_transforms), so the rocke_pytest_*
@@ -767,14 +822,12 @@ if(ROCKE_INSTALL_TESTS)
           "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tensor_transforms_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
-             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tensor_transforms_pytest ${_ROCKE_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_tensor_transforms_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"\${_rocke_tensor_transforms_pytest_environment}\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 300)\n")
+             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n")
+      rocke_pytest_suite(rocke_tensor_transforms_pytest
+        ARGS " -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60"
+        LABELS ckc python quick
+        ENVIRONMENT "\${_rocke_tensor_transforms_pytest_environment}"
+        TIMEOUT 300)
     endif()
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
@@ -835,14 +888,11 @@ if(ROCKE_INSTALL_TESTS)
     # CTest limit so a hung import or structural check produces pytest diagnostics.
     # CTest remains the hard backstop for collection, cumulative runtime, and
     # failures outside an individual test item.
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-            "  TIMEOUT 180)\n")
+    rocke_pytest_suite(rocke_library_conv_pytest
+      ARGS "${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30"
+      LABELS ckc python conv host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
 
     # Library conv TF32 tests (no GPU required), as two entries:
     #
@@ -891,25 +941,19 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_CONV_TF32_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_tf32_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 300)\n")
+    rocke_pytest_suite(rocke_library_conv_tf32_pytest
+      ARGS "${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60"
+      LABELS ckc python conv host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 300)
     if(WIN32)
       message(STATUS "rocKE: rocke_library_conv_tf32_lowering_pytest not registered on Windows (CI shard time; see comment above)")
     else()
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 600)\n")
+      rocke_pytest_suite(rocke_library_conv_tf32_lowering_pytest
+        ARGS "${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120"
+        LABELS ckc python conv host quick
+        ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+        TIMEOUT 600)
     endif()
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
@@ -962,36 +1006,27 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 180)\n")
+    rocke_pytest_suite(rocke_library_attention_cpu_pytest
+      ARGS "${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30"
+      LABELS ckc python attention host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
 
     # Tiled attention cache-key contract (no GPU). The targeted share/split
     # checks take seconds and run in the quick tier. The invariant sweep compares
     # key equality with build equality across every selector threshold for each
     # tiled arch, so each sweep case runs for tens of seconds: it is a separate
     # standard-tier entry with its own budget.
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_cache_key_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 180)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_cache_key_sweep_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 900)\n")
+    rocke_pytest_suite(rocke_library_attention_cache_key_pytest
+      ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30"
+      LABELS ckc python attention host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
+    rocke_pytest_suite(rocke_library_attention_cache_key_sweep_pytest
+      ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240"
+      LABELS ckc python attention host standard
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 900)
 
     # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
     # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
@@ -1006,14 +1041,11 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_DSA_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_dsa_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_dsa_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_DSA_TESTS} -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_dsa_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;dsa\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 180)\n")
+    rocke_pytest_suite(rocke_library_dsa_pytest
+      ARGS "${_ROCKE_LIBRARY_DSA_TESTS} -v -rs --timeout=30"
+      LABELS ckc python dsa host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
 
     # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
     # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
@@ -1039,23 +1071,18 @@ if(ROCKE_INSTALL_TESTS)
            "set(_rocke_library_mla_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
            "list(APPEND _rocke_library_mla_pytest_environment\n"
            "     \${_rocke_compiler_tool_environment}\n"
-           "     \${_rocke_compiler_requirement_environment})\n"
-           "add_test(rocke_library_mla_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 900)\n")
+           "     \${_rocke_compiler_requirement_environment})\n")
+    rocke_pytest_suite(rocke_library_mla_pytest
+      ARGS "${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120"
+      LABELS ckc python mla host quick
+      ENVIRONMENT "\${_rocke_library_mla_pytest_environment}"
+      TIMEOUT 900)
 
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_reference_common_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 180)\n")
+    rocke_pytest_suite(rocke_reference_common_pytest
+      ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30"
+      LABELS ckc python host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
 
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
@@ -1069,20 +1096,18 @@ if(ROCKE_INSTALL_TESTS)
     # because library/tests/conftest.py puts the library root ahead of the test
     # root on sys.path; importlib import mode alone does not prevent it
     # (checked by tests/dispatch/attention/test_import_resolution.py).
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_pytest ${_ROCKE_PYTEST}"
+    string(CONCAT _rocke_pytest_arguments
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
-           " -v -rs --timeout=60)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 300)\n")
+           " -v -rs --timeout=60")
+    rocke_pytest_suite(rocke_library_attention_pytest
+      ARGS "${_rocke_pytest_arguments}"
+      LABELS ckc python attention dispatch host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 300)
 
     # Library SDPA CPU tests (no GPU): the hipDNN SDPA request contract and
     # from_hipdnn, the request-driven and array oracles, and the forward/backward
@@ -1094,16 +1119,11 @@ if(ROCKE_INSTALL_TESTS)
     if(_ROCKE_SDPA_HIPDNN_ASSETS)
       set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
     endif()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_sdpa_pytest ${_ROCKE_PYTEST}"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
-           "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 180)\n")
+    rocke_pytest_suite(rocke_library_sdpa_pytest
+      ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\"${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30"
+      LABELS ckc python sdpa host quick
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 180)
 
     # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
     # the golden IR hashes, the performance knobs, dispatch selection, and the
@@ -1147,27 +1167,21 @@ if(ROCKE_INSTALL_TESTS)
     if(WIN32)
       message(STATUS "rocKE: rocke_library_gdn_pytest not registered on Windows (slow GDN fused case; see comment above)")
     else()
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_library_gdn_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 600)\n")
+      rocke_pytest_suite(rocke_library_gdn_pytest
+        ARGS "${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60"
+        LABELS ckc python gdn host quick
+        ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+        TIMEOUT 600)
     endif()
 
     # cmake/InstallGpuReferences.cmake discovers the operations from library/tests.
     foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
       string(TOUPPER "${_operation}" _operation_upper)
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_${_operation}_reference_unit_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 180)\n")
+      rocke_pytest_suite(rocke_${_operation}_reference_unit_pytest
+        ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30"
+        LABELS ckc python ${_operation} host quick
+        ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+        TIMEOUT 180)
 
       # Each installed architecture retains its own GPU CTest result, which
       # covers every variant installed for it, so its timeout scales with them.
@@ -1176,14 +1190,11 @@ if(ROCKE_INSTALL_TESTS)
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
         list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
         math(EXPR _timeout "300 * ${_variant_count}")
-        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-               "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
-        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-               "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
-               "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
-               "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-               "  SKIP_RETURN_CODE 77\n"
-               "  TIMEOUT ${_timeout})\n")
+        rocke_pytest_suite(rocke_${_operation}_gpu_${_arch}_pytest
+          ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs"
+          LABELS ckc python ${_operation} gpu quick
+          ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+          TIMEOUT ${_timeout})
       endforeach()
     endforeach()
 
@@ -1202,25 +1213,19 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_ATTENTION_GPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_attn_gpu_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_gpu_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_ATTENTION_GPU_TESTS} -v -rs)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_gpu_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 1800)\n")
+    rocke_pytest_suite(rocke_library_attention_gpu_pytest
+      ARGS "${_ROCKE_LIBRARY_ATTENTION_GPU_TESTS} -v -rs"
+      LABELS ckc python attention gpu
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 1800)
 
     # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
     # one above) so its runtime does not eat into that entry's timeout.
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 1200)\n")
+    rocke_pytest_suite(rocke_library_attention_bias_gpu_pytest
+      ARGS " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs"
+      LABELS ckc python attention gpu
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 1200)
 
     # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
     # dense numeric and extended-parity attention tests run only in
@@ -1292,14 +1297,11 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_gpu_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_gpu_pytest ${_ROCKE_PYTEST}${_ROCKE_LIBRARY_GPU_TESTS} -v -rs)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;gpu\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 1800)\n")
+    rocke_pytest_suite(rocke_library_gpu_pytest
+      ARGS "${_ROCKE_LIBRARY_GPU_TESTS} -v -rs"
+      LABELS ckc python gpu
+      ENVIRONMENT "PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library"
+      TIMEOUT 1800)
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

@@ -319,6 +319,22 @@ def runs_pytest(test):
     return test.get("command", [])[1:3] == ["-m", "pytest"]
 
 
+def suite_of(name):
+    """The pytest suite of an installed entry: ``<suite>-<tier>`` entries are
+    the tier entries of an opted-in suite (rocke_pytest_suite)."""
+    return name.partition("-")[0]
+
+
+def pytest_arguments(command):
+    """The arguments of a pytest entry after the plugin and its tier options."""
+    assert command[1:5] == PYTEST_WITH_SHARD_PLUGIN, command
+    arguments = command[5:]
+    if arguments[:1] == ["--rocke-tier"]:
+        assert arguments[2] == "--rocke-suite-tiers", command
+        arguments = arguments[4:]
+    return arguments
+
+
 def reference_archives_missing():
     """True when a GPU reference archive is not pulled from DVC, so a configure
     with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON fails."""
@@ -372,7 +388,8 @@ def test_installed_pytest_entries_load_the_ctest_shard_plugin(
     assert names == {
         test["name"]
         for test in tests
-        if test["name"].endswith("_pytest") or test["name"].startswith("rocke_pytest_")
+        if suite_of(test["name"]).endswith("_pytest")
+        or test["name"].startswith("rocke_pytest_")
     }
     for test in pytest_entries:
         assert test["command"][1:5] == PYTEST_WITH_SHARD_PLUGIN, test["name"]
@@ -393,6 +410,116 @@ def test_every_installed_pytest_entry_is_in_a_provider_tier(tmp_path):
     tiers = {"quick", "standard", "comprehensive", "full"}
     untiered = sorted(name for name in names if not labels.get(name, set()) & tiers)
     assert not untiered, f"no provider tier lists {untiered}"
+
+
+# The CTestTestfile text of one pytest entry with no tier options.
+_SINGLE_PYTEST_ENTRY = re.compile(
+    r"add_test\((?P<name>\S+) python -m pytest -p rocke\.tests\.ctest_shard"
+    r"(?P<arguments> [^\n]*)\)\n"
+    r"set_tests_properties\((?P=name) PROPERTIES\n"
+    r'  LABELS "[^"\n]*"\n'
+    r'  ENVIRONMENT "[^"\n]*"\n'
+    r"  SKIP_RETURN_CODE 77\n"
+    r"  TIMEOUT \d+\)\n"
+)
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "provider_subdir", ["", "hip_kernel_provider"], ids=["standalone", "provider"]
+)
+def test_a_pytest_suite_without_tiers_registers_one_entry(tmp_path, provider_subdir):
+    """A pytest suite that lists no tier in _ROCKE_PYTEST_TIERS_<name> is one
+    entry, written as one add_test and one set_tests_properties with the
+    labels, environment, skip code and time limit, in that order."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+    )
+    text = (ctest_dir / "CTestTestfile.cmake").read_text()
+    single = {
+        match["name"]: match["arguments"]
+        for match in _SINGLE_PYTEST_ENTRY.finditer(text)
+        if not match["arguments"].startswith(" --rocke-")
+    }
+    suites = {
+        test["name"]
+        for test in list_installed_ctests(ctest_dir)
+        if runs_pytest(test) and "--rocke-tier" not in test["command"]
+    }
+    assert suites and set(single) == suites, sorted(set(single) ^ suites)
+    assert not [name for name in suites if suite_of(name) != name], suites
+
+
+def _cmake_function(name):
+    """The text of the CMake function ``name`` in platform/CMakeLists.txt."""
+    text = (PLATFORM / "CMakeLists.txt").read_text()
+    match = re.search(
+        rf"^function\({name} .*?^endfunction\(\)\n", text, re.MULTILINE | re.DOTALL
+    )
+    assert match, name
+    return match.group(0)
+
+
+# An entry that the installed CTestTestfile text holds before a suite; its
+# semicolons must stay as they are.
+_EARLIER_ENTRY = 'set_tests_properties(a PROPERTIES LABELS "x;y")\n'
+
+
+def rocke_pytest_suite_text(tmp_path, tiers=None):
+    """Run rocke_pytest_suite in a CMake script for the suite rocke_x_pytest and
+    return _ROCKE_INSTALLED_CTEST_ENTRIES after it, or the failed CMake run."""
+    script = tmp_path / "suite.cmake"
+    output = tmp_path / "suite.txt"
+    script.write_text(
+        "cmake_minimum_required(VERSION 3.16)\n"
+        + _cmake_function("rocke_pytest_suite")
+        + 'set(_ROCKE_PYTEST "python -m pytest -p rocke.tests.ctest_shard")\n'
+        + (f'set(_ROCKE_PYTEST_TIERS_rocke_x_pytest "{tiers}")\n' if tiers else "")
+        + 'set(_ROCKE_INSTALLED_CTEST_ENTRIES "'
+        + _EARLIER_ENTRY.replace('"', '\\"').replace("\n", "\\n")
+        + '")\n'
+        + "rocke_pytest_suite(rocke_x_pytest\n"
+        + '  ARGS " \\"./tests/a b.py\\" -k \\"not slow\\" -v"\n'
+        + "  LABELS ckc python quick\n"
+        + '  ENVIRONMENT "\\${_x_environment}"\n'
+        + "  TIMEOUT 300)\n"
+        + f'file(WRITE "{output.as_posix()}" "${{_ROCKE_INSTALLED_CTEST_ENTRIES}}")\n'
+    )
+    run = subprocess.run(
+        ["cmake", "-P", str(script)], check=False, capture_output=True, text=True
+    )
+    return output.read_text() if run.returncode == 0 else run
+
+
+def _suite_entry(name, options=""):
+    return (
+        f"add_test({name} python -m pytest -p rocke.tests.ctest_shard{options}"
+        ' "./tests/a b.py" -k "not slow" -v)\n'
+        f"set_tests_properties({name} PROPERTIES\n"
+        '  LABELS "ckc\\;python\\;quick"\n'
+        '  ENVIRONMENT "${_x_environment}"\n'
+        "  SKIP_RETURN_CODE 77\n"
+        "  TIMEOUT 300)\n"
+    )
+
+
+@requires_cmake
+def test_rocke_pytest_suite_writes_one_entry_per_tier(tmp_path):
+    """rocke_pytest_suite appends one entry for a suite with no tiers, and one
+    more entry per listed tier, after the entries already there."""
+    assert rocke_pytest_suite_text(tmp_path) == _EARLIER_ENTRY + _suite_entry(
+        "rocke_x_pytest"
+    )
+    options = " --rocke-tier {} --rocke-suite-tiers quick,standard,full"
+    assert rocke_pytest_suite_text(tmp_path, "full;standard;full") == (
+        _EARLIER_ENTRY
+        + _suite_entry("rocke_x_pytest", options.format("quick"))
+        + _suite_entry("rocke_x_pytest-standard", options.format("standard"))
+        + _suite_entry("rocke_x_pytest-full", options.format("full"))
+    )
+    failed = rocke_pytest_suite_text(tmp_path, "standard;slow")
+    assert failed.returncode != 0
+    assert "_ROCKE_PYTEST_TIERS_rocke_x_pytest lists slow" in failed.stderr
 
 
 def split_ignored_files(selection):
@@ -439,16 +566,16 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         test
         for test in list_installed_ctests(ctest_dir)
         if test["name"].startswith("rocke_pytest_")
+        and suite_of(test["name"]) == test["name"]
     ]
     tests_root = ("./" if provider_subdir else "../") + "tests"
     suite_options = ["-m", "not integration", "-v", "-rs", "--timeout=60"]
     selection_by_part = {}
     for part in parts:
-        name, command = part["name"], part["command"]
-        assert command[1:5] == PYTEST_WITH_SHARD_PLUGIN, name
-        assert command[-len(suite_options) :] == suite_options, name
-        selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            5 : -len(suite_options)
+        name, arguments = part["name"], pytest_arguments(part["command"])
+        assert arguments[-len(suite_options) :] == suite_options, name
+        selection_by_part[name.removeprefix("rocke_pytest_")] = arguments[
+            : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # One label string, as the single entry had: the generated CTest text
@@ -506,6 +633,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         test["name"]
         for test in list_installed_ctests(ctest_dir)
         if test["name"].startswith("rocke_pytest_")
+        and suite_of(test["name"]) == test["name"]
     ]
     assert parts, "no rocke_pytest_ parts are registered"
     future_part = "rocke_pytest_fp8_group2"
