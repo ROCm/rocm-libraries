@@ -20,6 +20,7 @@ from ._rocm import (
     TensileLiteRuntimeError,
     ValidatedRocm,
     _canonical_rocm_version,
+    _expected_rocm_version,
     comparable_identity,
     validate_distribution,
 )
@@ -75,7 +76,10 @@ def client_executable() -> Path:
             f"{exc}\n"
             f"{selected}"
         ) from exc
-    check_client_build_rocm(identity.build_rocm, _installation, candidate.path)
+    # A +rocm/+devrocm package was released with a client for its ROCm, so any
+    # difference is an error; a +g development build only warns.
+    strict = _expected_rocm_version("tensilelite", package.version) is not None
+    check_client_build_rocm(identity.build_rocm, _installation, candidate.path, strict=strict)
     _client = candidate.path
     return _client
 
@@ -94,13 +98,16 @@ def _warn_once(key: str, message: str) -> None:
     warnings.warn(message, ClientRocmWarning, stacklevel=3)
 
 
-def check_client_build_rocm(build_rocm: str, rocm: ValidatedRocm, client: Path) -> None:
+def check_client_build_rocm(
+    build_rocm: str, rocm: ValidatedRocm, client: Path, *, strict: bool = False
+) -> None:
     """Compare the ROCm a client was compiled against with the selected ROCm.
 
     Full identities are compared in full, or base to base when either side
-    records only a base version. A different major version is an error (HIP's
-    soname changes across major versions); any other difference, or an unknown
-    identity on either side, warns once per process.
+    records only a base version. A different major version is always an error
+    (HIP's soname changes across major versions). Any other difference is an
+    error for a ``strict`` (``+rocm``/``+devrocm``) package and warns once per
+    process otherwise. An unknown identity on either side warns once.
     """
     details = (
         f"  client: {client}\n"
@@ -135,6 +142,13 @@ def check_client_build_rocm(build_rocm: str, rocm: ValidatedRocm, client: Path) 
             + details
             + "\nUse a client built against the selected ROCm, or select the ROCm it "
             "was built against."
+        )
+    if strict:
+        raise TensileLiteRuntimeError(
+            "The TensileLite client was built against a different ROCm than the one "
+            "selected, and this package was released for a specific ROCm.\n"
+            + details
+            + "\nUse the client shipped with the selected ROCm."
         )
     _warn_once(
         f"mismatch:{client_value}:{selected_value}",
