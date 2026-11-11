@@ -148,6 +148,22 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_VEC,
               CONV_K3_XCD,
               CONV_K3_ALIGN>(a);
+#elif CONV_K3_LOOP == 7
+    k3WrwRows<CONV_K3_T,
+              CONV_K3_ATOM,
+              CONV_K3_LAYOUT,
+              CONV_K3_BK,
+              CONV_K3_BC,
+              CONV_K3_BQ,
+              CONV_K3_FR,
+              CONV_K3_S,
+              CONV_K3_SW,
+              CONV_K3_DW,
+              CONV_K3_WK,
+              CONV_K3_WC,
+              CONV_K3_VEC,
+              CONV_K3_XCD,
+              1>(a);
 #else
     k3WrwRows<CONV_K3_T,
               CONV_K3_ATOM,

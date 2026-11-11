@@ -223,7 +223,7 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
             * v
             * e
         )
-    rows = fr if loop in (0, 6) else 1
+    rows = fr if loop in (0, 6, 7) else 1
     layout = (
         CF if loop == 6 else layout
     )  # small-C rows stage channels-last into the CF tiles
@@ -278,6 +278,12 @@ def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
             )
         return max(du(ag, waves), du(bg, waves))
     threads = waves * wave(c["atom"])
+    if c["loop"] == 7:  # K3PackTiles: dy and x one element a unit
+        win = (c["bq"] - 1) * c["sw"] + (c["s"] - 1) * c["dw"] + 1
+        span = du(win, vec) * vec
+        return max(
+            du(c["bk"] * c["bq"], threads), du(c["fr"] * c["bc"] * span, threads)
+        )
     if c["loop"] == 6 and c["layout"] == CL:  # K3SmallClTiles: x one element a unit
         kv = 4 // e
         win = (c["bq"] - 1) * c["sw"] + (c["s"] - 1) * c["dw"] + 1
@@ -408,10 +414,12 @@ def valid(c, dtype, fma16=False):
         ok = ok and c["loop"] == 1 and c["layout"] == CF and c["sw"] == 1
     if c["xcd"]:  # admitted on gfx942 / gfx950 only (one XCD elsewhere)
         ok = ok and bool({"gfx942", "gfx950"} & set(archs_of(c)))
+    if c["loop"] == 7:  # packed rows: channels-first, a dy position per thread
+        ok = ok and c["layout"] == CF and threads % c["bq"] == 0 and c["ns"] == 0
     return (
         ok
         and 1 <= threads <= 1024
-        and passes(c, e) <= 32
+        and passes(c, e) <= (64 if c["loop"] == 7 else 32)
         and lds_bytes(c, e) <= lds_limit(c)
     )
 
@@ -465,6 +473,16 @@ EXTRA_TILES = {
             "3x3d36r1",
         ),
     ): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32), (128, 64, 4, 2, 32)],
+    # Measured on gfx1201 (fp16, n128 / n16): inception 5x5 on the ring, deeplab 1x1 on the rows.
+    ("wmma12", ("5x5",)): [(64, 32, 4, 2, 32)],
+    ("wmma12", ("1x1r0",)): [(128, 64, 4, 2, 32)],
+    # Packed rows, measured (fp16, n128): gfx950 resnet50 c512 7^2 / 14^2 s2, inception c288
+    # 35^2 s2; gfx1201 the same and resnet50 c256 14^2 (its 128 x 32 tile at 64 positions ran
+    # within 1% of the 64 x 64 one: not shipped).
+    ("mfma32x16", ("3x3pk",)): [(128, 64, 4, 2, 64), (64, 128, 2, 4, 64)],
+    ("mfma32x16", ("3x3s2pk",)): [(128, 64, 4, 2, 64), (128, 64, 4, 2, 32)],
+    ("wmma12", ("3x3pk",)): [(64, 64, 4, 2, 64), (128, 32, 4, 2, 32)],
+    ("wmma12", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
 }
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
@@ -517,7 +535,24 @@ FILTERS = [
     ("3x3s2ph", 3, 2, 1, 2, 1, [0, 1], [0], None),
     ("2x2s2ph", 2, 2, 1, 1, 1, [0, 1], [0], None),
     ("1x1s2", 1, 2, 1, 1, 0, [0, 1], [0], None),
+    # Inception's asymmetric and 5x5 rows (channels-first), from the tiles measured best on
+    # gfx950 and gfx1201 (n128 fp16): 7x1 and 3x1 on the ring with the 64 x 64 tile, 5x5 on the
+    # output rows with the 64 x 64 tile (gfx950) and on the ring with RDNA's 64 x 32 tile
+    # (EXTRA_TILES, gfx1201).
+    ("7x1", 1, 1, 1, 7, 1, [1], [0, 1], [CF]),
+    ("3x1", 1, 1, 1, 3, 1, [1], [0, 1], [CF]),
+    ("5x5r1", 5, 1, 1, 1, 0, [1], [0], [CF]),
+    ("5x5", 5, 1, 1, 5, 1, [], [0], [CF]),
+    # Pointwise on RDNA's output rows (EXTRA_TILES): deeplab's 1x1 at 128^2 runs 1.5x faster
+    # there than on the ring's tiles (gfx1201).
+    ("1x1r0", 1, 1, 1, 1, 0, [], [0], [CF]),
+    # Packed output rows (loop 7) for narrow outputs (ResNet / Inception 7^2, 14^2 s2, 35^2 s2
+    # layers), on the tiles measured best on gfx950 and gfx1201 (EXTRA_TILES).
+    ("3x3pk", 3, 1, 1, 1, 7, [], [0], [CF]),
+    ("3x3s2pk", 3, 2, 1, 1, 7, [], [0], [CF]),
 ]
+# Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
+MATRIX16_ONLY = {"7x1", "3x1", "5x5r1", "5x5", "1x1r0", "3x3pk", "3x3s2pk"}
 BASE = {
     "3x3",
     "1x1",
@@ -630,8 +665,8 @@ def D(atom, tile, s, dw, fr, ns):
 
 
 def with_bpu(c):
-    """The planner's blocks per dispatch unit: for the gfx942 / gfx950 row rings on matrix cores,
-    1, 2 and 4 with the 16 x 16 fp32 atom (3-D fp32 layers want 4) and 1 and 2 otherwise
+    """The planner's blocks per dispatch unit: for the gfx942 / gfx950 row rings and packed rows
+    on matrix cores, 1, 2 and 4 with the 16 x 16 fp32 atom (3-D fp32 layers want 4) and 1 and 2 otherwise
     (autotune picks); the FMA output rows 2 and 4; elsewhere one value, 1 for blocks of 512
     threads or more, else 2."""
     if c["loop"] == 5:
@@ -641,7 +676,7 @@ def with_bpu(c):
     else:
         threads = c["wk"] * c["wc"] * wave(c["atom"])
     if (
-        c["loop"] in (1, 2)
+        c["loop"] in (1, 2, 7)
         and c["atom"] != "fma"
         and {"gfx942", "gfx950"} & set(archs_of(c))
     ):
@@ -833,6 +868,8 @@ def build_fma906():
     for dtype in CATALOG906:
         vec = 16 // eb(dtype)
         for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
+            if tag in MATRIX16_ONLY:
+                continue
             # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
             tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
             tiles = tiles + (FMA906_SMALLC if tag in SMALLC906 else [])
@@ -918,6 +955,8 @@ def build():
             vec = 16 // eb(dtype)
             for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
                 if only is not None and tag not in only:
+                    continue
+                if tag in MATRIX16_ONLY and dtype == "FLOAT":
                     continue
                 picked = (
                     tiles

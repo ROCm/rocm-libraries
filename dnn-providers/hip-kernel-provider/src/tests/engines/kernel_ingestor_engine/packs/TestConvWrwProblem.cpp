@@ -697,6 +697,16 @@ ConfigFields smallcFields()
     return f;
 }
 
+/// Packed rows (loop 7) on gfx942's 32 x 32 fp16 atom: 64 x 64 on 4 waves, one filter row a
+/// block, 32 positions a step (baseShape's 12-column rows: virtual rows of 14, 2 a step).
+ConfigFields packedFields()
+{
+    ConfigFields f;
+    f.loop = 7;
+    f.fr = 1;
+    return f;
+}
+
 /// Channels-last with 3 output channels (a VAE's output layer): not whole vectors of 8.
 ConvShape unalignedKShape()
 {
@@ -774,7 +784,12 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 7; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 8; }},
+        // Packed rows: bq dividing the block (256 threads; 48 is whole atom steps and
+        // vectors), and two virtual rows of wo + 2 = 14 columns within bq.
+        {"PackedBqNotDividingTheBlock", [](ConfigFields& f) { f.bq = 48; }, packedFields},
+        {"PackedFewerThanTwoRows", [](ConfigFields& f) { f.bq = 16; }, packedFields},
+        {"PackedAlignOne", [](ConfigFields& f) { f.align = 1; }, packedFields},
         {"SmallCWcTwo", [](ConfigFields& f) { f.wc = 2; }, smallcFields, "gfx942", stemShape},
         {"SmallCBc32", [](ConfigFields& f) { f.bc = 32; }, smallcFields, "gfx942", stemShape},
         {"WqOffTheDirectLoop", [](ConfigFields& f) { f.wq = 1; }},
@@ -1092,6 +1107,42 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(trFields(), "gfx950", channelsLastShape()));
     EXPECT_TRUE(admits(fmaFields(), "gfx1100", floatShape()));
     EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
+}
+
+TEST(TestConvWrwKernelMatch, PackedRowsServeNarrowChannelsFirstOutputsOnly)
+{
+    // Virtual rows of wo + (s - 1) dw / sw columns, two within bq = 32: wo up to 14 at unit
+    // width stride (3 taps), up to 15 at stride 2.
+    auto shape = baseShape();
+    EXPECT_TRUE(admits(packedFields(), "gfx942", shape)); // wo 12
+    shape.input = {10, 14};
+    EXPECT_TRUE(admits(packedFields(), "gfx942", shape)); // wo 14: 2 x 16 = 32
+    shape.input = {10, 15};
+    EXPECT_FALSE(admits(packedFields(), "gfx942", shape)); // wo 15: 2 x 17 = 34
+    auto s2 = baseShape();
+    s2.stride = {2, 2};
+    auto f = packedFields();
+    f.sw = 2;
+    s2.input = {10, 29}; // wo 15: 2 x 16
+    EXPECT_TRUE(admits(f, "gfx942", s2));
+    s2.input = {10, 31}; // wo 16: 2 x 17
+    EXPECT_FALSE(admits(f, "gfx942", s2));
+    // Channels-first only: channels-last graph and config.
+    auto cl = baseShape();
+    cl.channelsLast = true;
+    f = packedFields();
+    f.layout = 1;
+    EXPECT_FALSE(admits(f, "gfx942", cl));
+    // Element units carry no pass mask: up to 64 passes (gfx950's LDS takes the tall x tiles).
+    // 4 filter rows of 64 channels by 40 positions over 256 threads: 40 passes; 7: 70.
+    f = packedFields();
+    f.atom = "mfma32x16_f16";
+    f.atomId = 10;
+    f.xcd = 1;
+    f.fr = 4;
+    EXPECT_TRUE(admits(f, "gfx950", baseShape()));
+    f.fr = 7;
+    EXPECT_FALSE(admits(f, "gfx950", baseShape()));
 }
 
 TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
@@ -2063,6 +2114,48 @@ TEST(TestConvWrwLoadPasses, SmallCChannelsLastStagesXAnElementAUnit)
     EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 2, 64), 4);
 }
 
+TEST(TestConvWrwLoadPasses, PackedRowsStageAnElementAUnit)
+{
+    // 64 x 64 tile, 32 positions, fp16, 256 threads: dy 64 x 32 elements (8 passes); x one
+    // filter row of 64 channels by the window's 40 positions (34 rounded to vectors): 10.
+    auto f = packedFields();
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 2, 64), 10);
+    f.fr = 3;
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 2, 64), 30);
+}
+
+TEST(TestConvWrwLaunch, PackedRowsStepOverRowGroupsOfAPlane)
+{
+    // wo 12 (+ 2 taps' reach): virtual rows of 14, 2 a step; 10 output rows in 5 groups.
+    auto shape = baseShape();
+    shape.n = 3;
+    const auto launch = launchOf(packedFields(), shape);
+    ASSERT_TRUE(launch.has_value());
+    const auto& a = launch->args;
+    EXPECT_EQ(a.segs, 14);
+    EXPECT_EQ(a.segRows, 2);
+    EXPECT_EQ(a.chunks, 5);
+    EXPECT_EQ(a.steps, 3 * 1 * 5);
+    EXPECT_EQ(launch->gridY, 3u); // 3 filter rows, one a block
+    // Width stride 2: wo 6, virtual rows of 6 + 1 (the taps' reach in output columns), 4 a
+    // step; 5 output rows in 2 groups.
+    auto s2 = baseShape();
+    s2.stride = {2, 2};
+    auto f = packedFields();
+    f.sw = 2;
+    const auto strided = launchOf(f, s2);
+    ASSERT_TRUE(strided.has_value());
+    EXPECT_EQ(strided->args.segs, 7);
+    EXPECT_EQ(strided->args.segRows, 4);
+    EXPECT_EQ(strided->args.chunks, 2);
+    EXPECT_EQ(strided->args.steps, 2 * 1 * 2);
+    // Other loops leave the fields zero.
+    const auto rows = launchOf(rowsFields(), shape);
+    ASSERT_TRUE(rows.has_value());
+    EXPECT_EQ(rows->args.segs, 0);
+    EXPECT_EQ(rows->args.segRows, 0);
+}
+
 TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 {
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
@@ -2083,6 +2176,12 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     rows.loop = 0;
     rows.sw = 2;
     EXPECT_EQ(conv_wrw::ldsBytesOf(rows, 2), 2 * (64 * 40 + 3 * 2 * 64 * 48) * 2);
+    // Packed rows: loop 0's tiles, fr filter rows.
+    auto packed = rows;
+    packed.loop = 7;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(packed, 2), 2 * (64 * 40 + 3 * 2 * 64 * 48) * 2);
+    packed.fr = 1;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(packed, 2), 2 * (64 * 40 + 2 * 64 * 48) * 2);
     // fp32, 64 x 64 x 16, 4-element vectors: window 18 = 5 vectors (20), LDA 20, LDB
     // ceil(22 / 4) x 4 + 4 = 28.
     auto fp32 = configOf(floatFields());

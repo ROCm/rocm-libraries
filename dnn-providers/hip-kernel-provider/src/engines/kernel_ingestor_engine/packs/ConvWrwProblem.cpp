@@ -36,6 +36,8 @@ constexpr int64_t MAX_GRID_YZ = 65535;
 constexpr int64_t MAX_BLOCK = 1024;
 /// The kernel tracks each thread's load passes in a 32-bit mask.
 constexpr int64_t MAX_PASSES = 32;
+/// Packed rows' element units carry no pass mask; their registers bound them.
+constexpr int64_t MAX_PACK_PASSES = 64;
 /// Positions past an output row a block's chunk may reach (bq at most 512).
 constexpr int64_t CHUNK_MARGIN = 512;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
@@ -331,6 +333,15 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
         return std::max(divUp(aGroups, waves), divUp(bGroups, waves));
     }
     const int64_t threads = waves * wave;
+    if(config.loop == LOOP_ROWS_PACKED)
+    {
+        // K3PackTiles: dy units one element of the bk x bq tile; x units one element of the
+        // channels-first tiles' window (fr rows, bc channels, nbv vectors of positions).
+        const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
+        const int64_t span = divUp(win, vec) * vec;
+        return std::max(divUp(config.bk * config.bq, threads),
+                        divUp(config.fr * config.bc * span, threads));
+    }
     if(config.loop == LOOP_ROWS_SMALLC && config.layout == LAYOUT_CHANNELS_LAST)
     {
         // K3SmallClTiles: dy units KV positions by a vector of output channels; x units one
@@ -477,7 +488,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
-    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc;
+    const bool packed = config.loop == LOOP_ROWS_PACKED;
+    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -500,7 +512,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_SMALLC)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_PACKED)
     {
         return std::nullopt;
     }
@@ -590,6 +602,20 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // Packed rows: channels-first, a dy position per thread (bq dividing the block), and narrow
+    // outputs only: two virtual rows of wv = wo + (s - 1) dw / sw columns within bq (so at least
+    // two rows a step).
+    int64_t packWidth = 0;
+    int64_t packRows = 0;
+    if(packed)
+    {
+        packWidth = a.outSpatial[2] + (config.s - 1) * config.dw / config.sw;
+        packRows = config.bq / packWidth;
+        if(!cf || threads % config.bq != 0 || 2 * packWidth > config.bq)
+        {
+            return std::nullopt;
+        }
+    }
     // The row rings: height stride 1, the whole filter height per block; or (the matrix ring,
     // loop 1) height stride sh > 1 at unit height dilation, phases of ceil(fr / sh) rows.
     const bool phased = config.loop == LOOP_RING && a.stride[1] > 1 && a.dilation[1] == 1
@@ -673,7 +699,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // The block, its load passes and its LDS.
-    if(threads > MAX_BLOCK || loadPassesOf(config, eb, info->wave) > MAX_PASSES
+    if(threads > MAX_BLOCK
+       || loadPassesOf(config, eb, info->wave) > (packed ? MAX_PACK_PASSES : MAX_PASSES)
        || ldsBytesOf(config, eb) > ldsLimitOf(arch))
     {
         return std::nullopt;
@@ -738,10 +765,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
         gridY = a.groups
                 * (rows ? divUp(frows, config.fr) : a.filter[0] * (phased ? a.stride[1] : 1));
-        chunks = divUp(a.outSpatial[2], config.bq);
+        // Packed rows: a plane's chunks are its groups of packRows rows.
+        chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
         trackLen = phased ? a.outSpatial[1] + config.fr - 1
                           : divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
-        steps = rows
+        steps = packed ? pack_features::checkedProduct({a.n, a.outSpatial[0], chunks})
+                : rows
                     ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
                     : pack_features::checkedProduct(
                           {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
@@ -821,8 +850,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.steps = *steps;
     k3.stepsPerSplit = stepsPerSplit;
     k3.trackLen = rows || direct ? 0 : static_cast<int>(trackLen);
-    k3.segs = direct ? static_cast<int>(plan.segs) : 0;
-    k3.segRows = direct ? static_cast<int>(plan.segRows) : 0;
+    k3.segs = direct ? static_cast<int>(plan.segs) : static_cast<int>(packWidth);
+    k3.segRows = direct ? static_cast<int>(plan.segRows) : static_cast<int>(packRows);
     k3.walk = direct ? static_cast<int>(plan.walk) : 0;
     const bool channelsLast = !cf;
     packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);

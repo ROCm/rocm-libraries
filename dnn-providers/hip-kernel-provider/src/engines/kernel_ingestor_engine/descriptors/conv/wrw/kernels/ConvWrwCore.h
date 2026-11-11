@@ -794,6 +794,157 @@ struct K3Tiles
     }
 };
 
+/// Packed output rows (loop 7, channels-first): one step's BQ positions hold several output
+/// rows of one (image, depth) plane, row r of the step at positions r WV .. r WV + wo - 1 of a
+/// virtual row of WV = a.segs >= wo + (S - 1) DW / SW columns, a.segRows = floor(BQ / WV) rows a
+/// step. The x tile holds, per filter row, each step row's input row at window positions
+/// r WV SW + pw + iw, so window position j SW + s DW is x for position j and tap s as on one row
+/// and the LDS tiles and multiply are K3Tiles' channels-first ones. Positions past a row's wo
+/// (and rows past the plane) hold zero dy; every staged position is written each step (zero
+/// outside the image), so stale LDS never meets a product. Units are elements, the position
+/// fastest. A dy unit's position is the thread's own (THREADS a multiple of BQ), its row and
+/// column computed once; an x unit's step row and input column (runtime divisors) are computed
+/// once per pass and kept packed in one register.
+template <class T, int BK, int BC, int BQ, int FR, int S, int SW, int DW, int VEC, int THREADS>
+struct K3PackTiles
+{
+    typedef K3Tiles<T, K3_NCHW, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS> Geo;
+    typedef typename K1Raw<sizeof(T)>::type RawE;
+    static constexpr bool TR = false;
+    static constexpr int LDA = Geo::LDA, LDB = Geo::LDB, PH = Geo::PH;
+    static constexpr int A_ELEMS = Geo::A_ELEMS, B_ELEMS = Geo::B_ELEMS;
+    static constexpr int SPAN = Geo::SPAN;
+    static constexpr int A_PASSES = BK * BQ / THREADS;
+    static constexpr int B_UNITS = FR * BC * SPAN;
+    static constexpr int B_PASSES = (B_UNITS + THREADS - 1) / THREADS;
+    static_assert(THREADS % BQ == 0 && A_PASSES * THREADS == BK * BQ,
+                  "K3 packed rows: a thread keeps one dy position");
+    RawE ra[A_PASSES], rb[B_PASSES];
+    /// An x unit's step row (low 16 bits) and input column (high 16 bits, below SPAN), or -1
+    /// where it stages zero (past the step's rows or outside the input row).
+    int bInfo[B_PASSES];
+    int jA, rA, colA; ///< the thread's dy position: step row and column
+    int kA0;
+
+    __device__ static void unitOf(int u, int& f, int& pos, int& c)
+    {
+        pos = u % SPAN;
+        const int rest = u / SPAN;
+        c = rest % BC;
+        f = rest / BC;
+    }
+
+    __device__ void init(const K3Args& a, int tid, int /*g*/, int /*k0*/, int /*c0*/, int, int)
+    {
+        const int wv = a.segs, rows = a.segRows;
+        jA = tid % BQ;
+        rA = jA / wv;
+        colA = jA - rA * wv;
+        if(rA >= rows)
+            colA = a.wo; // past every row: zero dy
+        kA0 = tid / BQ;
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            int f, pos, c;
+            unitOf(tid + p * THREADS, f, pos, c);
+            const int r = pos / (wv * SW);
+            const int iw = pos - r * wv * SW - a.pw;
+            const bool ok = r < rows && iw >= 0 && iw < a.wi && tid + p * THREADS < B_UNITS;
+            bInfo[p] = ok ? r | (iw << 16) : -1;
+        }
+    }
+
+    /// The global loads of one step: rows oh0 .. oh0 + segRows - 1 of plane (n, od). Filter row
+    /// f: fOk[f] (the row exists and its depth tap is in the image), xBase[f] its depth offset,
+    /// ihOf[f] its height offset (oh sh + ihOf[f] is the input row).
+    __device__ void load(const K3Args& a,
+                         int n,
+                         int g,
+                         int k0,
+                         int c0,
+                         int od,
+                         int oh0,
+                         bool live,
+                         const bool (&fOk)[FR],
+                         const int (&xBase)[FR],
+                         const int (&ihOf)[FR])
+    {
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage, a.yImage * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage, a.xImage * sizeof(T));
+        const int kg = a.k / a.groups, cg = a.c / a.groups;
+        const int ys1 = static_cast<int>(a.ys[1]), ys2 = static_cast<int>(a.ys[2]),
+                  ys3 = static_cast<int>(a.ys[3]);
+        const int xs1 = static_cast<int>(a.xs[1]), xs3 = static_cast<int>(a.xs[3]);
+        const int ohA = oh0 + rA;
+        const bool rowA = live && colA < a.wo && ohA < a.ho;
+        const int yBase = od * ys2 + ohA * ys3 + colA;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int k = k0 + kA0 + p * (THREADS / BQ);
+            const bool ok = rowA && k < kg;
+            const int off = (g * kg + k) * ys1 + yBase;
+            k3Load(ra[p], yr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+        }
+        const int tid = threadIdx.x;
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            int f, pos, c;
+            unitOf(tid + p * THREADS, f, pos, c);
+            const int r = bInfo[p] & 0xffff;
+            const int iw = bInfo[p] >> 16;
+            bool fok = false;
+            int base = 0, ihOff = 0;
+#pragma unroll
+            for(int ff = 0; ff < FR; ++ff)
+                if(ff == f)
+                {
+                    fok = fOk[ff];
+                    base = xBase[ff];
+                    ihOff = ihOf[ff];
+                }
+            const int oh = oh0 + r;
+            const int ih = oh * a.sh + ihOff;
+            const bool ok
+                = live && bInfo[p] >= 0 && oh < a.ho && fok && c0 + c < cg && ih >= 0 && ih < a.hi;
+            const int off = (g * cg + c0 + c) * xs1 + base + ih * xs3 + iw;
+            k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+        }
+    }
+
+    template <int P, int N>
+    __device__ void wait()
+    {
+        k3WaitLoads<N>();
+#pragma unroll
+        for(int i = 0; i < A_PASSES; ++i)
+            k3Pin(ra[i]);
+#pragma unroll
+        for(int i = 0; i < B_PASSES; ++i)
+            k3Pin(rb[i]);
+    }
+
+    template <int P = 0>
+    __device__ void store(const K3Args& /*a*/, T* As, T* Bs, int tid) const
+    {
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+            As[(kA0 + p * (THREADS / BQ)) * LDA + jA] = __builtin_bit_cast(T, ra[p]);
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            if(B_UNITS % THREADS != 0 && u >= B_UNITS)
+                continue;
+            int f, pos, c;
+            unitOf(u, f, pos, c);
+            Bs[((f * SW + pos % SW) * BC + c) * LDB + pos / SW] = __builtin_bit_cast(T, rb[p]);
+        }
+    }
+};
+
 /// The block's (tile, row set, split) indices. XCD 1: logical blocks run contiguously per XCD
 /// (gfx942 / gfx950 dispatch round-robin over 8), so the channel tiles of one split, which
 /// read the same rows, share an L2.
@@ -1065,7 +1216,8 @@ template <class T,
           int WK,
           int WC,
           int VEC,
-          int XCD = 0>
+          int XCD = 0,
+          int PACK = 0>
 __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1075,7 +1227,10 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
     constexpr int FK = WTK / DIM, FC = WTC / DIM;
     constexpr int KK = BQ / KA;
     static_assert(FK * DIM * WK == BK && FC * DIM * WC == BC && BQ % KA == 0, "K3 tile");
-    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS> Tiles;
+    static_assert(PACK == 0 || LAYOUT == K3_NCHW, "K3 packed rows are channels-first");
+    typedef typename K1If<PACK != 0,
+                          K3PackTiles<T, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS>,
+                          K3Tiles<T, LAYOUT, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS>>::type Tiles;
     static_assert(
         k3LdsBytes(0, LAYOUT, sizeof(T), BK, BC, BQ, FR, S, SW, DW, WK, WC, 0, 0, VEC, 0, 0)
             == 2 * (Tiles::A_ELEMS + Tiles::B_ELEMS) * sizeof(T),
@@ -1120,14 +1275,17 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
     }
     const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
     const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
-    // Cursor: (n, od, oh, chunk), chunk fastest.
+    // Cursor: (n, od, oh, chunk), chunk fastest. Packed rows: (n, od, chunk), chunk the plane's
+    // group of segRows rows, oh unused.
+    constexpr int ROWS_HO = PACK != 0 ? 0 : 1;
     int n = 0, od = 0, oh = 0, chunk = 0;
     if(begin < end)
     {
         const long long row = begin / a.chunks;
         chunk = static_cast<int>(begin - row * a.chunks);
-        oh = static_cast<int>(row % a.ho);
-        const long long r2 = row / a.ho;
+        const long long r2 = ROWS_HO ? row / a.ho : row;
+        if constexpr(ROWS_HO != 0)
+            oh = static_cast<int>(row % a.ho);
         od = static_cast<int>(r2 % a.dout);
         n = static_cast<int>(r2 / a.dout);
     }
@@ -1135,23 +1293,40 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
     tiles.init(a, tid, g, k0, c0, kg, cg);
     auto issue = [&](bool live) {
         live = live && n < a.n;
-        bool xOk[FR];
-        int xRow[FR];
-#pragma unroll
-        for(int f = 0; f < FR; ++f)
+        if constexpr(PACK != 0)
         {
-            const int id = od * a.sd + ft[f] * a.dd - a.pd;
-            const int ih = oh * a.sh + frr[f] * a.dh - a.ph;
-            xOk[f] = live && fr0 + f < frows && id >= 0 && id < a.di && ih >= 0 && ih < a.hi;
-            xRow[f] = id * xs2 + ih * xs3;
+            bool fOk[FR];
+            int xBase[FR], ihOf[FR];
+#pragma unroll
+            for(int f = 0; f < FR; ++f)
+            {
+                const int id = od * a.sd + ft[f] * a.dd - a.pd;
+                fOk[f] = fr0 + f < frows && id >= 0 && id < a.di;
+                xBase[f] = id * xs2;
+                ihOf[f] = frr[f] * a.dh - a.ph;
+            }
+            tiles.load(a, live ? n : 0, g, k0, c0, od, chunk * a.segRows, live, fOk, xBase, ihOf);
         }
-        tiles.load(a, live ? n : 0, chunk * BQ, live, od * ys2 + oh * ys3, xOk, xRow);
+        else
+        {
+            bool xOk[FR];
+            int xRow[FR];
+#pragma unroll
+            for(int f = 0; f < FR; ++f)
+            {
+                const int id = od * a.sd + ft[f] * a.dd - a.pd;
+                const int ih = oh * a.sh + frr[f] * a.dh - a.ph;
+                xOk[f] = live && fr0 + f < frows && id >= 0 && id < a.di && ih >= 0 && ih < a.hi;
+                xRow[f] = id * xs2 + ih * xs3;
+            }
+            tiles.load(a, live ? n : 0, chunk * BQ, live, od * ys2 + oh * ys3, xOk, xRow);
+        }
     };
     auto advance = [&]() {
         if(++chunk == a.chunks)
         {
             chunk = 0;
-            if(++oh == a.ho)
+            if(ROWS_HO == 0 || ++oh == a.ho)
             {
                 oh = 0;
                 if(++od == a.dout)
