@@ -1212,9 +1212,10 @@ fn assign_best_meanwhile(
     let checkpoint = spiller.checkpoint();
     let stop = AtomicBool::new(false);
     let fits = |used: &Used| used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs;
+    let levers = super::kernel_levers();
     let (assigned, ahead) = std::thread::scope(|s| {
         let helper = s.spawn(|| {
-            let assigned = assign_fitting(&before, live, groups, hard, threads - 1);
+            let assigned = super::with_kernel_levers(levers, || assign_fitting(&before, live, groups, hard, threads - 1));
             // Outcomes after which the next round asks for other targets.
             let elsewhere = match &assigned {
                 Ok((_, used, _)) => fits(used) || used.sgprs > hard.sgprs || used.vgprs != hard.vgprs + 2,
@@ -1304,8 +1305,11 @@ fn assign_best(
     };
     let (mut best, packed) = if threads > 1 && live.slots() >= 2 * PARALLEL_MIN_INSTS {
         let stop = AtomicBool::new(false);
+        let levers = super::kernel_levers();
         std::thread::scope(|s| {
-            let packed = s.spawn(|| assign(f, live, &groups, hard, Order::BigFirst, Some(&stop), clauses));
+            let packed = s.spawn(|| {
+                super::with_kernel_levers(levers, || assign(f, live, &groups, hard, Order::BigFirst, Some(&stop), clauses))
+            });
             let best = assign(f, live, &groups, hard, Order::Preferred, None, clauses);
             if fits(&best) || !near(&best) {
                 stop.store(true, Ordering::Relaxed);

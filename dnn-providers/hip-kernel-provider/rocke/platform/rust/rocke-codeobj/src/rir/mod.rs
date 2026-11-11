@@ -155,6 +155,9 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 /// - `litshare`: one register per literal and block before scheduling
 ///   (`target::gfx9::lits`; the debug flag `litshare` too).
 ///
+/// A kernel's own `dlevers` string attribute (the same syntax) decides each
+/// lever it names for that kernel, over `ROCKE_DIRECT_LEVERS` ([`kernel_lever`]).
+///
 /// A lever can also be scoped to a part of the kernel: an op's `dlevers`
 /// string attribute (`"nofence,-loadorder"`: names to turn on, `-name` to
 /// turn off) overrides the kernel's levers for that op, every op nested in
@@ -168,13 +171,43 @@ pub(crate) fn lever(name: &str) -> bool {
     kernel_lever(name)
 }
 
-/// The kernel's lever `name` (`ROCKE_DIRECT_LEVERS`), whatever the scope.
+/// The kernel's lever `name`, whatever the scope: its `dlevers` kernel
+/// attribute when that names the lever, else `ROCKE_DIRECT_LEVERS`.
 pub(crate) fn kernel_lever(name: &str) -> bool {
     #[cfg(test)]
     if TEST_LEVERS.with(|l| l.borrow().iter().any(|f| f == name)) {
         return true;
     }
+    if let Some(on) = KERNEL_LEVERS.with(|k| k.borrow().as_ref().and_then(|d| d.get(name))) {
+        return on;
+    }
     std::env::var("ROCKE_DIRECT_LEVERS").is_ok_and(|v| v.split([',', '+']).any(|f| f.trim() == name))
+}
+
+thread_local! {
+    /// The levers of the kernel being compiled: its `dlevers` kernel attribute (an op scope's syntax),
+    /// which decides each lever it names over `ROCKE_DIRECT_LEVERS`. Set by the parser; a compile's
+    /// helper threads take it over through [`with_kernel_levers`].
+    static KERNEL_LEVERS: std::cell::RefCell<Option<std::sync::Arc<LeverDelta>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Records the levers of the kernel being compiled (see `KERNEL_LEVERS`).
+pub(crate) fn set_kernel_levers(levers: Option<std::sync::Arc<LeverDelta>>) {
+    KERNEL_LEVERS.with(|k| *k.borrow_mut() = levers);
+}
+
+/// The levers of the kernel being compiled on this thread, for a helper thread.
+pub(crate) fn kernel_levers() -> Option<std::sync::Arc<LeverDelta>> {
+    KERNEL_LEVERS.with(|k| k.borrow().clone())
+}
+
+/// Runs `f` with `levers` as the kernel's levers on this thread: a compile's
+/// helper threads read the same levers as the thread that parsed the kernel.
+pub(crate) fn with_kernel_levers<T>(levers: Option<std::sync::Arc<LeverDelta>>, f: impl FnOnce() -> T) -> T {
+    let prev = KERNEL_LEVERS.with(|k| std::mem::replace(&mut *k.borrow_mut(), levers));
+    let out = f();
+    KERNEL_LEVERS.with(|k| *k.borrow_mut() = prev);
+    out
 }
 
 /// Every lever name the compiler reads (`ROCKE_DIRECT_LEVERS` and `dlevers`
@@ -836,8 +869,9 @@ fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + 
         }
     };
     let mut slots: Vec<Option<R>> = items.iter().map(|_| None).collect();
+    let levers = kernel_levers();
     std::thread::scope(|s| {
-        let helpers: Vec<_> = (1..threads).map(|_| s.spawn(work)).collect();
+        let helpers: Vec<_> = (1..threads).map(|_| s.spawn(|| with_kernel_levers(levers.clone(), work))).collect();
         let mut finished = vec![work()];
         for helper in helpers {
             finished.push(helper.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
