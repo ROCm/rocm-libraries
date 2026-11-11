@@ -545,6 +545,93 @@ __device__ void col2imDisjointChannels(const Col2ImArgs& args)
     storeRun<Bits, V>(x + target, values, count, count == V);
 }
 
+/// im2col of a filter whose taps never overlap into channels-first columns: each input element
+/// feeds at most one column entry, so there is no reuse to stage in LDS. One thread per run of
+/// V entries of a column along its (flattened) output positions, 32-bit indices (the host checks
+/// every offset fits); the input position steps with the output without dividing, and the run is
+/// stored as one vector when aligned. Moves bytes: the generic kernel's result bit for bit.
+template <typename Bits, int V>
+__device__ void im2colDisjointOutputs(const Im2ColArgs& args)
+{
+    const ConvColumnGeometry& g = args.geometry;
+    const auto* x = static_cast<const Bits*>(args.x);
+    auto* col = static_cast<Bits*>(args.col);
+    const int cg = static_cast<int>(g.cPerGroup);
+    const int taps = static_cast<int>(g.filter[0] * g.filter[1] * g.filter[2]);
+    const int columns = static_cast<int>(g.groups) * cg * taps;
+    const int od = static_cast<int>(g.output[0]);
+    const int oh = static_cast<int>(g.output[1]);
+    const int ow = static_cast<int>(g.output[2]);
+    const int outputs = od * oh * ow;
+    const int runs = (outputs + V - 1) / V;
+    const int total = static_cast<int>(g.n) * columns * runs;
+    const int index = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x)
+                      + static_cast<int>(threadIdx.x);
+    if(index >= total)
+    {
+        return;
+    }
+    const int run = index % runs;
+    const int line = index / runs; // n * columns + column
+    const int column = line % columns;
+    const int n = line / columns;
+    const int group = column / (cg * taps);
+    const int inGroup = column - group * cg * taps;
+    const int channel = g.channelsInner != 0 ? inGroup % cg : inGroup / taps;
+    const int element = g.channelsInner != 0 ? inGroup / cg : inGroup % taps;
+    const int kh = static_cast<int>(g.filter[1]);
+    const int kw = static_cast<int>(g.filter[2]);
+    const int ez = element / (kh * kw);
+    const int ey = element / kw - ez * kh;
+    const int ex = element - (ez * kh + ey) * kw;
+    // Input position of output 0 along each axis, and its step per output.
+    const int sz = static_cast<int>(g.stride[0]);
+    const int sy = static_cast<int>(g.stride[1]);
+    const int sx = static_cast<int>(g.stride[2]);
+    const int z0 = static_cast<int>(tapOf(g, 0, ez) * g.dilation[0] - g.prePadding[0]);
+    const int y0 = static_cast<int>(tapOf(g, 1, ey) * g.dilation[1] - g.prePadding[1]);
+    const int x0 = static_cast<int>(tapOf(g, 2, ex) * g.dilation[2] - g.prePadding[2]);
+    const int id = static_cast<int>(g.input[0]);
+    const int ih = static_cast<int>(g.input[1]);
+    const int iw = static_cast<int>(g.input[2]);
+    const int xsz = static_cast<int>(g.xStrides[2]);
+    const int xsy = static_cast<int>(g.xStrides[3]);
+    const int xsx = static_cast<int>(g.xStrides[4]);
+    const int base = n * static_cast<int>(g.xStrides[0])
+                     + (group * cg + channel) * static_cast<int>(g.xStrides[1]);
+
+    const int f0 = run * V;
+    const int count = outputs - f0 < V ? outputs - f0 : V;
+    int oz = f0 / (oh * ow);
+    int oy = f0 / ow - oz * oh;
+    int ox = f0 - (oz * oh + oy) * ow;
+    int iz = z0 + oz * sz;
+    int iy = y0 + oy * sy;
+    int ix = x0 + ox * sx;
+    Bits values[V];
+#pragma unroll
+    for(int j = 0; j < V; ++j)
+    {
+        const bool inside
+            = j < count && iz >= 0 && iz < id && iy >= 0 && iy < ih && ix >= 0 && ix < iw;
+        values[j] = inside ? x[base + iz * xsz + iy * xsy + ix * xsx] : Bits(0);
+        ix += sx;
+        if(++ox == ow)
+        {
+            ox = 0;
+            ix = x0;
+            iy += sy;
+            if(++oy == oh)
+            {
+                oy = 0;
+                iy = y0;
+                iz += sz;
+            }
+        }
+    }
+    storeRun<Bits, V>(col + line * outputs + f0, values, count, count == V);
+}
+
 template <typename OutputType>
 __device__ void col2im(const Col2ImArgs& args)
 {
@@ -1354,6 +1441,41 @@ extern "C" __global__ void __launch_bounds__(256) Col2ImDisjointChannels4V2(Col2
 extern "C" __global__ void __launch_bounds__(256) Col2ImDisjointChannels4V4(Col2ImArgs args)
 {
     col2imDisjointChannels<unsigned int, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs2V1(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned short, 1>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs2V2(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned short, 2>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs2V4(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned short, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs2V8(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned short, 8>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs4V1(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned int, 1>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs4V2(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned int, 2>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs4V4(Im2ColArgs args)
+{
+    im2colDisjointOutputs<unsigned int, 4>(args);
 }
 
 extern "C" __global__ void __launch_bounds__(256) StridedTranspose2(StridedCopyArgs args)

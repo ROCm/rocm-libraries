@@ -26,7 +26,7 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 53> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 60> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
@@ -35,6 +35,13 @@ constexpr std::array<const char*, 53> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCastFloatToBfloat16",
                                                       "Im2Col2",
                                                       "Im2Col4",
+                                                      "Im2ColDisjointOutputs2V1",
+                                                      "Im2ColDisjointOutputs2V2",
+                                                      "Im2ColDisjointOutputs2V4",
+                                                      "Im2ColDisjointOutputs2V8",
+                                                      "Im2ColDisjointOutputs4V1",
+                                                      "Im2ColDisjointOutputs4V2",
+                                                      "Im2ColDisjointOutputs4V4",
                                                       "Im2ColRows2V1",
                                                       "Im2ColRows2V8",
                                                       "Im2ColRows4V1",
@@ -219,7 +226,8 @@ std::string RepackProgram::entryName(const RepackStep& step)
 void RepackProgram::launch(const RepackStep& step,
                            const void* src,
                            void* dst,
-                           hipStream_t stream) const
+                           hipStream_t stream,
+                           long long minRunThreads) const
 {
     // The kernels take their argument block by value; fill in its pointers, then let the launch
     // rules (kernels/ConvRepackLaunch.hpp) pick im2col's and col2im's specialized kernels.
@@ -244,7 +252,8 @@ void RepackProgram::launch(const RepackStep& step,
         im2col->x = src;
         im2col->col = dst;
         total = im2col->total;
-        launch = im2colLaunch(*im2col, static_cast<int>(elementBytes(step.dataType)));
+        launch
+            = im2colLaunch(*im2col, static_cast<int>(elementBytes(step.dataType)), minRunThreads);
     }
     else if(auto* col2im = std::get_if<Col2ImArgs>(&args))
     {
@@ -254,7 +263,8 @@ void RepackProgram::launch(const RepackStep& step,
         const auto generic = entryName(step); // Col2Im<Type>
         launch = col2imLaunch(*col2im,
                               generic.substr(std::string("Col2Im").size()),
-                              static_cast<int>(elementBytes(step.dataType)));
+                              static_cast<int>(elementBytes(step.dataType)),
+                              minRunThreads);
     }
     if(total <= 0)
     {
