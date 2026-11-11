@@ -253,7 +253,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True)
     ap.add_argument("--run", required=True)
-    ap.add_argument("--prefix", required=True, help="e.g. users/alvasile/")
+    ap.add_argument("--prefix", required=True, help="e.g. users/jdoe/")
     ap.add_argument("--refs", choices=["none", "create", "update"], default="none")
     ap.add_argument(
         "--allow-published",
