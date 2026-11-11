@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import builtins
+import json
 import os
 import sys
 from pathlib import Path
@@ -34,6 +35,20 @@ def _python_core(path: Path, version: str):
 def _set_tensilelite_version(monkeypatch, version: str) -> None:
     monkeypatch.setattr(tensilelite, "__version__", version)
 
+
+_SHA = "0123456789abcdef0123456789abcdef01234567"
+_OTHER = "89abcdef0123456789abcdef0123456789abcdef"
+
+
+def _manifest(root: Path, value) -> None:
+    path = root / "share" / "therock" / "therock_manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"rocm_package_version": value}), encoding="utf-8")
+
+
+def _package(tmp_path: Path, version: str = "5.0.0+rocm7.2.4", revision: str = _SHA):
+    return client_binding.Installation(tmp_path / "package", "id", version, revision, False)
+
 @pytest.mark.parametrize(
     ("distribution_version", "expected"),
     [
@@ -43,20 +58,53 @@ def _set_tensilelite_version(monkeypatch, version: str) -> None:
 )
 def test_expected_rocm_version_parses_valid_rocm_tags(distribution_version, expected):
     assert _rocm._expected_rocm_version("tensilelite", distribution_version) == expected
-@pytest.mark.parametrize("version", ["5.0.0", "5.0.0+cuda12.0.0"])
+@pytest.mark.parametrize("version", ["5.0.0+cuda12.0.0", "5.0.0+gnothex"])
 def test_expected_rocm_version_rejects_unmatched_distribution(version):
     with pytest.raises(_rocm.TensileLiteRuntimeError):
         _rocm._expected_rocm_version("tensilelite", version)
 
-def test_validate_distribution_uses_therock_ci_before_other_installations(
-    tmp_path, monkeypatch
-):
+
+@pytest.mark.parametrize("version", ["5.0.0", f"5.0.0+g{_SHA}", f"5.0.0+g{_SHA}.dirty"])
+def test_development_builds_make_no_rocm_claim(version):
+    assert _rocm._expected_rocm_version("tensilelite", version) is None
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "base_only", "matches"),
+    [
+        ("7.12.0", "7.12.0", False, True),
+        ("7.12.0", "7.12.0rc1", False, False),
+        ("7.12.0a20261110", "7.12.0a20261111", False, False),
+        ("7.12.0+bkc.20261110", "7.12.0+bkc.20261111", False, False),
+        # TheRock dev identities: the run's commit token is ignored, variants are not.
+        (f"7.12.0.dev0+{_SHA}", f"7.12.0.dev0+{_OTHER}", False, True),
+        (f"7.12.0.dev0+{_SHA}.asan", f"7.12.0.dev0+{_OTHER}.asan", False, True),
+        (f"7.12.0.dev0+{_SHA}.asan", f"7.12.0.dev0+{_OTHER}", False, False),
+        (f"7.12.0.dev0+{_SHA}", "7.12.0", False, False),
+        (f"7.12.0.dev0+{_SHA}", "7.12.0.dev1+" + _SHA, False, False),
+        # Base-only installations compare X.Y.Z only.
+        ("7.12.0rc1", "7.12.0", True, True),
+        (f"7.12.0.dev0+{_SHA}", "7.12.0", True, True),
+        ("7.12.0", "7.13.0", True, False),
+    ],
+)
+def test_identity_comparison_rules(expected, actual, base_only, matches):
+    canonical = _rocm._canonical_rocm_version
+    assert (
+        _rocm.identities_match(canonical(expected), canonical(actual), base_only=base_only)
+        is matches
+    )
+
+def _graph_path(tmp_path, monkeypatch):
     graph_bin = tmp_path / "graph" / "bin"
     llvm_bin = tmp_path / "graph" / "lib" / "llvm" / "bin"
     graph_bin.mkdir(parents=True)
     llvm_bin.mkdir(parents=True)
-    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", "10.1.0.dev0+abcdef")
     monkeypatch.setenv("PATH", os.pathsep.join((str(graph_bin), str(llvm_bin))))
+    return graph_bin, llvm_bin
+
+
+def _forbid_installed_adapters(monkeypatch):
     monkeypatch.setattr(
         _rocm,
         "_python_sdk_version",
@@ -68,6 +116,13 @@ def test_validate_distribution_uses_therock_ci_before_other_installations(
         lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
     )
 
+
+def test_marker_selects_therock_ci_before_other_installations(tmp_path, monkeypatch):
+    graph_bin, llvm_bin = _graph_path(tmp_path, monkeypatch)
+    monkeypatch.setenv("TENSILELITE_ROCM_ADAPTER", "therock-ci")
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", "10.1.0.dev0+abcdef")
+    _forbid_installed_adapters(monkeypatch)
+
     result = _rocm.validate_distribution(
         "tensilelite", "5.0.0+devrocm10.1.0.dev0.abcdef"
     )
@@ -76,18 +131,149 @@ def test_validate_distribution_uses_therock_ci_before_other_installations(
     assert isinstance(result, _rocm.ValidatedRocm)
     assert result.path == graph_bin.resolve()
     assert result.version == "10.1.0.dev0.abcdef"
+    assert result.identity_kind == "full"
     assert result.source == "TheRock CI build"
     assert result.executable_search_paths == (graph_bin.resolve(), llvm_bin.resolve())
 
-@pytest.mark.parametrize("value", ["", "git"])
-def test_therock_ci_rejects_non_release_package_identity(monkeypatch, value):
-    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", value)
 
-    with pytest.raises(
-        _rocm.TensileLiteRuntimeError,
-        match="TheRock CI requires a release THEROCK_PACKAGE_VERSION",
-    ):
+@pytest.mark.parametrize("value", [None, "", "git"])
+def test_marker_without_a_real_version_is_a_development_build(tmp_path, monkeypatch, value):
+    _graph_path(tmp_path, monkeypatch)
+    monkeypatch.setenv("TENSILELITE_ROCM_ADAPTER", "therock-ci")
+    if value is None:
+        monkeypatch.delenv("THEROCK_PACKAGE_VERSION", raising=False)
+    else:
+        monkeypatch.setenv("THEROCK_PACKAGE_VERSION", value)
+    _forbid_installed_adapters(monkeypatch)
+
+    result = _rocm.validate_distribution("tensilelite", f"5.0.0+g{_SHA}")
+
+    assert isinstance(result, _rocm.TheRockCIRocm)
+    assert result.version is None
+    assert result.identity_kind is None
+
+
+def test_marker_cross_checks_a_labelled_wheel_against_the_passed_version(tmp_path, monkeypatch):
+    _graph_path(tmp_path, monkeypatch)
+    monkeypatch.setenv("TENSILELITE_ROCM_ADAPTER", "therock-ci")
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", "7.12.0rc1")
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="release mismatch"):
+        _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0rc2")
+    assert _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0rc1").version == "7.12.0rc1"
+
+
+@pytest.mark.parametrize("value", ["", "git", "7.12.0"])
+def test_therock_version_alone_never_selects_the_build_adapter(tmp_path, monkeypatch, value):
+    """An installed wheel in a shell that happens to set THEROCK_PACKAGE_VERSION."""
+    root = _root(tmp_path, "7.12.0")
+    monkeypatch.delenv("TENSILELITE_ROCM_ADAPTER", raising=False)
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", value)
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    result = _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0")
+
+    assert isinstance(result, _rocm.SystemRocm)
+
+
+def test_therock_version_alone_leaves_the_python_sdk_selected(tmp_path, monkeypatch):
+    monkeypatch.delenv("TENSILELITE_ROCM_ADAPTER", raising=False)
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", "7.12.0")
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: "7.12.0")
+    monkeypatch.setattr(_rocm, "_python_sdk_location", lambda: tmp_path)
+    monkeypatch.setattr(_rocm, "_python_sdk_executable_search_paths", lambda: (tmp_path,))
+
+    result = _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0")
+
+    assert isinstance(result, _rocm.PythonRocm)
+
+
+@pytest.mark.parametrize("value", ["", "TheRock", "therock", "system"])
+def test_unknown_adapter_marker_fails(monkeypatch, value):
+    monkeypatch.setenv("TENSILELITE_ROCM_ADAPTER", value)
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="is not a TensileLite ROCm adapter"):
         _rocm.validate_distribution("tensilelite", "5.0.0+rocm10.1.0")
+
+
+@pytest.mark.parametrize(
+    ("manifest", "info", "version", "kind"),
+    [
+        ("7.12.0", "7.12.0", "7.12.0", "full"),
+        ("7.12.0rc1", "7.12.0", "7.12.0rc1", "full"),
+        ("7.12.0a20261110", "7.12.0", "7.12.0a20261110", "full"),
+        (f"7.12.0.dev0+{_SHA}.asan", "7.12.0", f"7.12.0.dev0.{_SHA}.asan", "full"),
+        ("git", "7.12.0", "7.12.0", "base"),
+        (7, "7.12.0", "7.12.0", "base"),
+        (None, "7.12.0-43", "7.12.0", "base"),
+    ],
+)
+def test_system_rocm_identity_prefers_the_therock_manifest(
+    tmp_path, monkeypatch, manifest, info, version, kind
+):
+    root = _root(tmp_path, info)
+    if manifest is not None:
+        _manifest(root, manifest)
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    result = _rocm.validate_distribution("tensilelite", f"5.0.0+g{_SHA}")
+
+    assert (result.version, result.identity_kind) == (version, kind)
+
+
+def test_system_rocm_malformed_manifest_falls_back_to_info_version(tmp_path, monkeypatch):
+    root = _root(tmp_path, "7.12.0")
+    path = root / "share" / "therock" / "therock_manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    result = _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0rc1")
+
+    assert (result.version, result.identity_kind) == ("7.12.0", "base")
+
+
+def test_system_rocm_rejects_disagreeing_version_records(tmp_path, monkeypatch):
+    root = _root(tmp_path, "7.11.0")
+    _manifest(root, "7.12.0")
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="Inconsistent ROCm installation") as error:
+        _rocm.validate_distribution("tensilelite", f"5.0.0+g{_SHA}")
+    assert "therock_manifest.json: 7.12.0" in str(error.value)
+    assert ".info/version: 7.11.0" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("wheel", "manifest", "ok"),
+    [
+        ("5.0.0+rocm7.12.0", "7.12.0", True),
+        ("5.0.0+rocm7.12.0", "7.12.0a20261110", False),  # release wheel on a nightly
+        ("5.0.0+rocm7.12.0a20261110", "7.12.0", False),  # nightly wheel on a release
+        (f"5.0.0+devrocm7.12.0.dev0.{_SHA}", f"7.12.0.dev0+{_OTHER}", True),  # reused stage
+        (f"5.0.0+devrocm7.12.0.dev0.{_SHA}", "7.12.0", False),
+        (f"5.0.0+g{_SHA}", "7.99.0", True),  # no claim
+    ],
+)
+def test_system_rocm_compares_full_identities_on_therock_roots(
+    tmp_path, monkeypatch, wheel, manifest, ok
+):
+    root = _root(tmp_path, manifest.split("a")[0].split(".dev")[0].split("+")[0])
+    _manifest(root, manifest)
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    if ok:
+        _rocm.validate_distribution("tensilelite", wheel)
+    else:
+        with pytest.raises(_rocm.TensileLiteRuntimeError, match="release mismatch"):
+            _rocm.validate_distribution("tensilelite", wheel)
+
+
 def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
     root = _root(tmp_path, "10.1.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
@@ -337,18 +523,24 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
             executable_search_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
         ),
     )
+    package = _package(tmp_path)
+    monkeypatch.setattr(_runtime, "current_installation", lambda: package)
     monkeypatch.setattr(
         _runtime,
         "default_client_candidate",
-        lambda paths, source: client_requests.append((paths, source))
+        lambda installation, paths, source: client_requests.append((paths, source))
         or client_binding.ClientCandidate(client, "test client"),
     )
     monkeypatch.setattr(
         _runtime,
         "selected_client",
-        lambda default_client: default_client(),
+        lambda default_client, installation: default_client(),
     )
-    monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
+    monkeypatch.setattr(
+        _runtime,
+        "validate_client",
+        lambda path, installation: client_binding.ClientIdentity(_SHA, "7.2.4 base"),
+    )
 
     _runtime.initialize()
 
@@ -387,6 +579,7 @@ def test_python_sdk_client_request_fails_when_no_client_script_is_published(tmp_
         ),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: None)
+    monkeypatch.setattr(_runtime, "current_installation", lambda: _package(tmp_path))
 
     _runtime.initialize()
 
@@ -418,17 +611,20 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
         "default_client_candidate",
         lambda *args: (_ for _ in ()).throw(AssertionError("default client was probed")),
     )
+    package = _package(tmp_path, "5.0.0+rocm10.1.0a20260813")
+    monkeypatch.setattr(_runtime, "current_installation", lambda: package)
     validated = []
     monkeypatch.setattr(
         _runtime,
         "validate_client",
-        lambda path, version: validated.append((path, version)),
+        lambda path, installation: validated.append((path, installation))
+        or client_binding.ClientIdentity(_SHA, "10.1.0a20260813 full"),
     )
 
     _runtime.initialize()
 
     assert _runtime.client_executable() == configured
-    assert validated == [(configured, "5.0.0+rocm10.1.0a20260813")]
+    assert validated == [(configured, package)]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
@@ -437,10 +633,24 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
     client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
     client.parent.mkdir(parents=True)
     client.write_text(
-        "#!/bin/sh\nprintf '5.0.0+rocm7.2.4\\n'\n",
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        f"  --source-revision) echo {_SHA} ;;\n"
+        "  --build-rocm) echo '7.2.4 base' ;;\n"
+        "esac\n",
         encoding="utf-8",
     )
     client.chmod(0o755)
+    package_dir = tmp_path / "package" / "tensilelite"
+    package_dir.mkdir(parents=True)
+    (package_dir / "_source_revision.py").write_text(
+        Path(_rocm.__file__).with_name("_source_revision.py").read_text(encoding="utf-8")
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "current_installation",
+        lambda: client_binding.Installation(package_dir, "id", "5.0.0+rocm7.2.4", _SHA, False),
+    )
 
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
@@ -458,3 +668,66 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
 def enable_runtime_validation(monkeypatch):
     monkeypatch.setattr(_rocm, "_ENABLE_ROCM_VERSION_VALIDATION", True)
     monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
+
+
+def _validated(version, kind="full"):
+    return _rocm.SystemRocm(
+        path=Path("/rocm"),
+        version=version,
+        source="test",
+        executable_search_paths=(),
+        identity_kind=kind,
+    )
+
+
+@pytest.fixture
+def fresh_warnings(monkeypatch):
+    monkeypatch.setattr(_runtime, "_warned", set())
+
+
+@pytest.mark.parametrize(
+    ("build_rocm", "selected", "kind"),
+    [
+        ("7.12.0 full", "7.12.0", "full"),
+        ("7.12.0rc1 full", "7.12.0rc1", "full"),
+        ("7.12.0 base", "7.12.0rc1", "full"),  # base client: base to base
+        ("7.12.0rc1 full", "7.12.0", "base"),  # base installation: base to base
+        (f"7.12.0.dev0+{_SHA} full", f"7.12.0.dev0.{_OTHER}", "full"),
+    ],
+)
+def test_client_build_rocm_matching_identity_is_silent(fresh_warnings, build_rocm, selected, kind):
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _runtime.check_client_build_rocm(build_rocm, _validated(selected, kind), Path("/c"))
+
+
+def test_client_build_rocm_minor_mismatch_warns_once(fresh_warnings):
+    import warnings
+
+    with pytest.warns(_runtime.ClientRocmWarning, match="different ROCm"):
+        _runtime.check_client_build_rocm("7.11.0 full", _validated("7.12.0"), Path("/c"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _runtime.check_client_build_rocm("7.11.0 full", _validated("7.12.0"), Path("/c"))
+
+
+@pytest.mark.parametrize(("build_rocm", "selected", "kind"), [
+    ("6.4.0 full", "7.12.0", "full"),
+    ("6.4.0 base", "7.12.0rc1", "full"),
+    ("8.0.0 full", "7.2.4", "base"),
+])
+def test_client_build_rocm_major_mismatch_fails(fresh_warnings, build_rocm, selected, kind):
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="different major ROCm version"):
+        _runtime.check_client_build_rocm(build_rocm, _validated(selected, kind), Path("/c"))
+
+
+@pytest.mark.parametrize(("build_rocm", "selected"), [
+    ("unknown unknown", "7.12.0"),
+    ("garbage", "7.12.0"),
+    ("7.12.0 full", None),
+])
+def test_client_build_rocm_unknown_warns_once(fresh_warnings, build_rocm, selected):
+    with pytest.warns(_runtime.ClientRocmWarning, match="could not be checked"):
+        _runtime.check_client_build_rocm(build_rocm, _validated(selected), Path("/c"))
