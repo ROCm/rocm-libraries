@@ -6,6 +6,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -118,7 +119,8 @@ requires_cmake = pytest.mark.skipif(
 def configure_installed_ctest(tmp_path, *cmake_arguments):
     """Configure the platform with BUILD_TESTING and return the build directory
     and a directory holding its installed CTestTestfile, as an install lays it
-    out."""
+    out. A -D in cmake_arguments overrides the default
+    ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
     build = tmp_path / "build"
     subprocess.run(
         [
@@ -307,6 +309,77 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         )
 
 
+# How every installed pytest entry starts its command, after the interpreter.
+PYTEST_WITH_SHARD_PLUGIN = ["-m", "pytest", "-p", "rocke.tests.ctest_shard"]
+
+
+def runs_pytest(test):
+    """True when the installed CTest entry ``test`` runs ``python -m pytest``.
+    CTest omits the command of an entry whose program is not built."""
+    return test.get("command", [])[1:3] == ["-m", "pytest"]
+
+
+def reference_archives_missing():
+    """True when a GPU reference archive is not pulled from DVC, so a configure
+    with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON fails."""
+    bundles = PLATFORM.parent / "library/tests/reference_bundles"
+    pointers = list(bundles.glob("*/*/*.tar.gz.dvc"))
+    return not pointers or any(
+        not pointer.with_suffix("").is_file() for pointer in pointers
+    )
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    ("provider_subdir", "gpu_references"),
+    [
+        ("", False),
+        ("hip_kernel_provider", False),
+        pytest.param(
+            "hip_kernel_provider",
+            True,
+            marks=pytest.mark.skipif(
+                reference_archives_missing(),
+                reason="GPU reference archives need dvc pull",
+            ),
+        ),
+    ],
+    ids=["standalone", "provider", "provider-gpu-references"],
+)
+def test_installed_pytest_entries_load_the_ctest_shard_plugin(
+    tmp_path, provider_subdir, gpu_references
+):
+    """TheRock CI runs every installed entry on every hipkernelprovider shard.
+    Each pytest entry loads rocke.tests.ctest_shard, so it runs only this
+    shard's share of its tests. When all tests of the entry fall in other
+    shards, the plugin exits with 77, so each pytest entry must skip on 77.
+    The GPU reference entries exist only when the references install."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        f"-DROCKE_INSTALL_TEST_GPU_REFERENCES={'ON' if gpu_references else 'OFF'}",
+    )
+    tests = list_installed_ctests(ctest_dir)
+    pytest_entries = [test for test in tests if runs_pytest(test)]
+    names = {test["name"] for test in pytest_entries}
+    assert {"rocke_pytest_other", "rocke_library_sdpa_pytest"} <= names, names
+    gpu_reference_names = {
+        name
+        for name in names
+        if re.fullmatch(r"rocke_[a-z0-9]+_gpu_gfx[0-9a-z]+_pytest", name)
+    }
+    assert bool(gpu_reference_names) == gpu_references, gpu_reference_names
+    assert names == {
+        test["name"]
+        for test in tests
+        if test["name"].endswith("_pytest") or test["name"].startswith("rocke_pytest_")
+    }
+    for test in pytest_entries:
+        assert test["command"][1:5] == PYTEST_WITH_SHARD_PLUGIN, test["name"]
+        properties = {prop["name"]: prop["value"] for prop in test["properties"]}
+        assert properties.get("SKIP_RETURN_CODE") == 77, test["name"]
+
+
 def split_ignored_files(selection):
     """Split a part's pytest selection into its leading paths and the files its
     trailing ``--ignore`` pairs name."""
@@ -357,10 +430,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     selection_by_part = {}
     for part in parts:
         name, command = part["name"], part["command"]
-        assert command[1:3] == ["-m", "pytest"], name
+        assert command[1:5] == PYTEST_WITH_SHARD_PLUGIN, name
         assert command[-len(suite_options) :] == suite_options, name
         selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            3 : -len(suite_options)
+            5 : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # One label string, as the single entry had: the generated CTest text

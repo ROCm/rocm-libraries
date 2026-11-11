@@ -668,6 +668,37 @@ ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'
 checks that the parts split `tests/` by directory with no directory in two
 parts.
 
+**Sharding.** TheRock runs every hipkernelprovider entry on every CI shard and
+sets the 0-based `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS`. Each installed
+pytest entry runs `python -m pytest -p rocke.tests.ctest_shard`, so it runs only
+this shard's share of its tests. The plugin hashes the test name to find the
+shard of each test. The tests of one parameter set stay in one shard. A
+non-empty `ROCKE_TEST_SHARD` (`i/n`, 0-based) overrides the `GTEST_*` pair. With
+no shard variables, or with one shard, the entry runs all its tests. The quick
+tier runs on one shard, so it runs every test. A local run that sets
+`GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` also shards these entries.
+
+The pytest header shows the shard and its source, or `rocke-ctest-shard: off`.
+The summary shows the split for every shard, for example
+`rocke-ctest-shard 1/4: split 3/2/4/3 of 12; kept 2`. This line must be the same
+in the logs of all shards, and its counts add up to the tests of the entry. When
+the entry has tests but no test falls in this shard, pytest exits with 77. Every
+installed pytest entry sets `SKIP_RETURN_CODE 77`, so CTest shows the entry as
+Skipped. When the selection is empty before the split (for example, a `-k`
+typo), the entry fails on every shard. A run with no shard keeps its pytest exit
+code.
+
+The split relies on TheRock running every entry on every shard. If TheRock also
+divides the entries between the shards, about 3/4 of the tests do not run. The
+header line on each shard shows this. To see one shard's share locally:
+
+```text
+GTEST_SHARD_INDEX=1 GTEST_TOTAL_SHARDS=4 ctest --test-dir build/bin/hip_kernel_provider -V -R '^rocke_library_sdpa_pytest$'
+```
+
+`platform/tests/test_engine_linkage.py::test_installed_pytest_entries_load_the_ctest_shard_plugin`
+checks that every installed pytest entry loads the plugin and skips on 77.
+
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
 that `rocke.__file__` is under the relocated artifact and `rocke_engine` is absent.
