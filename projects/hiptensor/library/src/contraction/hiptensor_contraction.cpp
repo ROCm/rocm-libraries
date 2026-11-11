@@ -426,6 +426,21 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         return errorCode;
     }
 
+    // With C and D in one buffer, each element must be read and written at the
+    // same position, so every mode needs the same stride in both. Otherwise the
+    // kernel reads elements of C that it has already overwritten.
+    if(C == D
+       && !matchesPerMode(hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
+                          plan->mOpDesc->mModeC,
+                          hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
+                          plan->mOpDesc->mModeD))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "In-place contraction needs C and D to have the same strides");
+        logger->logError("hiptensorContraction", msg);
+        return errorCode;
+    }
+
     auto*             cSolution = (hiptensor::ContractionSolution*)(plan->mPref->mSolution);
     hiptensorStatus_t errorCode = HIPTENSOR_STATUS_SUCCESS;
     float             time      = 0.0f;
