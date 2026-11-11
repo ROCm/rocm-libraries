@@ -4,9 +4,10 @@
 
 A solution is rejected when an operand's local-read width is below the matrix
 instruction's input size per thread, except for 8-bit float operands with
-MFMA K 64 or 128. The exemption must follow each operand's own type: with
-MXFP4 A and MXFP8 B, DataType is A's type, and testing it for B rejected every
-mixed kernel that reads B through LDS without DirectToLds.
+MFMA K 64 or 128. The exemption applies when DataType or the operand's own
+type is 8-bit: with MXFP4 A and MXFP8 B, DataType is A's type, so testing only
+DataType rejected every mixed kernel that reads B through LDS without
+DirectToLds, while FP16 inputs with 8-bit compute (HH_B8F8HS) rely on DataType.
 """
 
 import copy
@@ -47,7 +48,7 @@ def _gp_gfx950(gfx950_iim):
 _MI = [16, 16, 128, 1, 1, 2, 2, 4, 1]
 
 
-def _derive(gfx950_iim, assembler, capsys, typeA, typeB):
+def _derive(gfx950_iim, assembler, capsys, typeA, typeB, dataType=None, **overrides):
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
@@ -56,12 +57,12 @@ def _derive(gfx950_iim, assembler, capsys, typeA, typeB):
     isa = gfxToIsa("gfx950")
     problem_type = {
         "OperationType": "GEMM",
-        "DataType": typeA,
+        "DataType": dataType or typeA,
         "DataTypeA": typeA,
         "DataTypeB": typeB,
-        "MacDataTypeA": typeA,
-        "MacDataTypeB": typeB,
-        "DestDataType": "b",
+        "MacDataTypeA": dataType or typeA,
+        "MacDataTypeB": dataType or typeB,
+        "DestDataType": "b" if dataType is None else typeA,
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
         "TransposeA": True,
@@ -69,9 +70,9 @@ def _derive(gfx950_iim, assembler, capsys, typeA, typeB):
         "UseBeta": True,
         "Batched": True,
         "StridedBatched": True,
-        "MXBlockA": 32,
-        "MXBlockB": 32,
     }
+    if dataType is None:
+        problem_type.update({"MXBlockA": 32, "MXBlockB": 32})
     params = {
         "ProblemType": problem_type,
         "ISA": isa,
@@ -110,6 +111,7 @@ def _derive(gfx950_iim, assembler, capsys, typeA, typeB):
         "DirectToVgprSparseMetadata": False,
         "WorkGroupMapping": 4,
     }
+    params.update(overrides)
     params.update(matrixInstructionToMIParameters(
         _MI, isa, params["WavefrontSize"], problem_type, params["WorkGroup"], gfx950_iim
     ))
@@ -121,5 +123,14 @@ def _derive(gfx950_iim, assembler, capsys, typeA, typeB):
 def test_mixed_mx_without_direct_to_lds_is_accepted(_gp_gfx950, gfx950_iim, assembler,
                                                      capsys, typeA, typeB):
     sol, out = _derive(gfx950_iim, assembler, capsys, typeA, typeB)
+    assert "is less than MIInput" not in out
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+
+def test_8bit_compute_with_16bit_inputs_keeps_exemption(_gp_gfx950, gfx950_iim, assembler,
+                                                         capsys):
+    # FP16 A/B computed with BF8 x F8 MFMA (HH_B8F8HS): DataType is the 8-bit type.
+    sol, out = _derive(gfx950_iim, assembler, capsys, "h", "h", dataType=18,
+                       LocalReadVectorWidth=1)
     assert "is less than MIInput" not in out
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
