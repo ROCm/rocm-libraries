@@ -207,7 +207,7 @@ def cmd_ids(a):
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
     status. Fails when a report is nested below `r<k>/`, holds a finding block it cannot
-    parse (reviewlib.unparsed_blocks), cites a provisional ID in its Findings section that
+    parse (reviewlib.unparsed_blocks), has `ID:` lines but no Findings section, cites a provisional ID in its Findings section that
     no report of the round parsed (a merged agent's other lanes included; cite earlier
     rounds by final ID), reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>`
     is capitals and an optional number) or a finding whose Tier is missing or not one of
@@ -244,7 +244,15 @@ def cmd_ids(a):
         text = path.read_text(encoding="utf-8")
         if rl.unparsed_blocks(text):
             unparsed.append(path.name)
-        findings = rl.split_sections(text).get("Findings", "")
+        sections = rl.split_sections(text)
+        if "Findings" not in sections and any(
+            rl.ID_LINE.match(line) for line in text.splitlines()
+        ):
+            raise rl.Fail(
+                f"{path.name}: has `ID:` lines but no Findings section: put the "
+                "findings under a `## Findings` heading"
+            )
+        findings = sections.get("Findings", "")
         tokens += [
             (path.name, t) for t in set(partition.PROVISIONAL_ID.findall(findings))
         ]
