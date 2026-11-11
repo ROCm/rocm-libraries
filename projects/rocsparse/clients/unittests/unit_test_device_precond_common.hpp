@@ -1080,6 +1080,7 @@ namespace precond_ut
         bool   boost_device                 = false; // boost tolerance and value in device memory
         bool   set_boost_tol = true; // false: the boost is enabled without a tolerance
         bool   set_boost_val = true; // false: the boost is enabled without a value
+        bool   set_boost_late = false; // set the unset boost inputs after a compute, compute again
         bool   set_sing_tol  = false;
         double sing_tol      = 0.0;
         bool   tol_after     = false; // set the tolerance after the analysis
@@ -1092,6 +1093,9 @@ namespace precond_ut
         rocsparse_status                   analysis_status = rocsparse_status_internal_error;
         rocsparse_status                   compute_status  = rocsparse_status_internal_error;
         std::vector<T>                     values;
+        // With set_boost_late: the status and the values of the compute before.
+        rocsparse_status                   early_compute_status = rocsparse_status_internal_error;
+        std::vector<T>                     early_values;
         std::vector<rocsparse_singularity> singularity;
         std::vector<int64_t>               position;
     };
@@ -1167,14 +1171,34 @@ namespace precond_ut
         device_vector<double>          d_boost_tol;
         device_vector<float_tol_bytes> d_boost_tol_f;
         device_vector<T>               d_boost_val;
+        const void* tol_ptr = opt.boost_tol_float ? static_cast<const void*>(&host_tol_f.f)
+                                                  : static_cast<const void*>(&boost_tol);
+        const void* val_ptr = &boost_val;
+        // The pointer mode of the handle at set_input time is the mode of the scalar.
+        const auto set_boost = [&](bool tol, bool val) {
+            ScopedOverride<rocsparse_pointer_mode> mode(
+                handle->pointer_mode,
+                opt.boost_device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
+            if(tol)
+            {
+                ASSERT_EQ((set_value<K>(handle,
+                                        descr,
+                                        In::boost_tol,
+                                        tol_ptr,
+                                        opt.boost_tol_float ? sizeof(float) : sizeof(double))),
+                          rocsparse_status_success);
+            }
+            if(val)
+            {
+                ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, val_ptr, sizeof(void*))),
+                          rocsparse_status_success);
+            }
+        };
         if(opt.boost)
         {
             ASSERT_EQ(
                 (set_value<K>(handle, descr, In::boost_enable, &boost_enable, sizeof(int32_t))),
                 rocsparse_status_success);
-            const void* tol_ptr = opt.boost_tol_float ? static_cast<const void*>(&host_tol_f.f)
-                                                      : static_cast<const void*>(&boost_tol);
-            const void* val_ptr = &boost_val;
             if(opt.boost_device)
             {
                 upload(d_boost_tol, std::vector<double>{boost_tol});
@@ -1185,24 +1209,7 @@ namespace precond_ut
                                               : static_cast<const void*>(d_boost_tol.ptr);
                 val_ptr = d_boost_val.ptr;
             }
-            // The pointer mode of the handle at set_input time is the mode of the scalar.
-            ScopedOverride<rocsparse_pointer_mode> mode(
-                handle->pointer_mode,
-                opt.boost_device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
-            if(opt.set_boost_tol)
-            {
-                ASSERT_EQ((set_value<K>(handle,
-                                        descr,
-                                        In::boost_tol,
-                                        tol_ptr,
-                                        opt.boost_tol_float ? sizeof(float) : sizeof(double))),
-                          rocsparse_status_success);
-            }
-            if(opt.set_boost_val)
-            {
-                ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, val_ptr, sizeof(void*))),
-                          rocsparse_status_success);
-            }
+            ASSERT_NO_FATAL_FAILURE(set_boost(opt.set_boost_tol, opt.set_boost_val));
         }
         if(opt.set_sing_tol && !opt.tol_after)
         {
@@ -1238,15 +1245,25 @@ namespace precond_ut
         device_vector<char> compute_buffer{compute_size ? compute_size : size_t{1}};
         ASSERT_TRUE(compute_buffer.ptr);
 
-        out.compute_status = api<K>::run(handle,
-                                         descr,
-                                         A,
-                                         A,
-                                         api<K>::stage(Stage::compute),
-                                         compute_size,
-                                         compute_size ? compute_buffer.ptr : nullptr);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        out.values = to_host(val);
+        const auto compute = [&] {
+            out.compute_status = api<K>::run(handle,
+                                             descr,
+                                             A,
+                                             A,
+                                             api<K>::stage(Stage::compute),
+                                             compute_size,
+                                             compute_size ? compute_buffer.ptr : nullptr);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            out.values = to_host(val);
+        };
+        ASSERT_NO_FATAL_FAILURE(compute());
+        if(opt.boost && opt.set_boost_late)
+        {
+            out.early_compute_status = out.compute_status;
+            out.early_values         = out.values;
+            ASSERT_NO_FATAL_FAILURE(set_boost(!opt.set_boost_tol, !opt.set_boost_val));
+            ASSERT_NO_FATAL_FAILURE(compute());
+        }
 
         // The header makes each output an array of batch_count elements, but does not say
         // whether the data size covers the array or one element: the array size is tried

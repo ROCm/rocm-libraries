@@ -424,6 +424,54 @@ namespace
             }
         }
     }
+
+    // The boost enabled without a boost tolerance, without a boost value, or without both:
+    // the analysis succeeds, and the compute stage returns rocsparse_status_invalid_pointer
+    // without touching the values. Once the missing inputs are set, the same descriptor
+    // computes the factor with every pivot boosted.
+    template <Kind K, typename M>
+    void check_boost_unset(rocsparse_handle handle, const M& m)
+    {
+        constexpr bool bsr = std::is_same_v<M, bsr_matrix<double>>;
+        using D = std::conditional_t<bsr, dev_bsr<double>, dev_csr<double, int32_t, int32_t>>;
+        const auto scalar = [&](const std::vector<double>& val) {
+            M f   = m;
+            f.val = val;
+            if constexpr(bsr)
+                return expand_bsr(f);
+            else
+                return f;
+        };
+        for(const bool set_tol : {false, true})
+        {
+            for(const bool set_val : {false, true})
+            {
+                if(set_tol && set_val)
+                    continue;
+                SCOPED_TRACE(::testing::Message()
+                             << "set_tol " << set_tol << " set_val " << set_val);
+                D d;
+                if constexpr(bsr)
+                    d.init(m);
+                else
+                    d.init(m, 1, true);
+                ASSERT_NE(d.A, nullptr);
+                run_options opt;
+                opt.boost          = true;
+                opt.boost_tol      = 1.0e3;
+                opt.boost_val      = 7.0;
+                opt.set_boost_tol  = set_tol;
+                opt.set_boost_val  = set_val;
+                opt.set_boost_late = true;
+                run_result<double> out;
+                run_factorization<K, double>(handle, d.A, d.val, 1, opt, out);
+                EXPECT_EQ(out.early_compute_status, rocsparse_status_invalid_pointer);
+                EXPECT_EQ(out.early_values, m.val);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                check_factor<K>(scalar(m.val), scalar(out.values).val, opt, "missing inputs set");
+            }
+        }
+    }
 }
 
 TEST_F(PrecondGeneric, spilu0_numeric_boost)
@@ -469,33 +517,11 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost_float_tolerance)
     }
 }
 
-// The boost enabled without a tolerance, without a value, or without both:
-// analysis succeeds, and compute returns invalid_pointer without writing the values.
 TEST_F(PrecondGeneric, spilu0_numeric_boost_unset)
 {
-    const auto a = make_grid_matrix<double>(4, true);
-    for(const bool set_tol : {false, true})
-    {
-        for(const bool set_val : {false, true})
-        {
-            if(set_tol && set_val)
-                continue;
-            SCOPED_TRACE(::testing::Message() << "set_tol " << set_tol << " set_val " << set_val);
-            dev_csr<double, int32_t, int32_t> d;
-            d.init(a, 1, true);
-            ASSERT_NE(d.A, nullptr);
-            run_options opt;
-            opt.boost         = true;
-            opt.boost_tol     = 1.0;
-            opt.boost_val     = 7.0;
-            opt.set_boost_tol = set_tol;
-            opt.set_boost_val = set_val;
-            run_result<double> out;
-            run_factorization<Kind::ilu, double>(handle, d.A, d.val, 1, opt, out);
-            EXPECT_EQ(out.compute_status, rocsparse_status_invalid_pointer);
-            EXPECT_EQ(out.values, a.val);
-        }
-    }
+    check_boost_unset<Kind::ilu>(handle, make_grid_matrix<double>(4, true));
+    check_boost_unset<Kind::ilu>(handle,
+                                 make_block_matrix<double>(3, 3, rocsparse_direction_row, true));
 }
 
 TEST_F(PrecondGeneric, spildlt0_numeric_boost)
@@ -524,34 +550,9 @@ TEST_F(PrecondGeneric, numeric_boost_and_singularity_tolerance)
         handle, make_grid_matrix<double>(4, true), opt, rocsparse_singularity_none, -1);
 }
 
-// The boost enabled without a boost tolerance, without a boost value, or without both:
-// the analysis succeeds, and the compute stage returns rocsparse_status_invalid_pointer
-// without touching the values.
 TEST_F(PrecondGeneric, spildlt0_numeric_boost_unset)
 {
-    const auto a = make_grid_matrix<double>(4, false);
-    for(const bool set_tol : {false, true})
-    {
-        for(const bool set_val : {false, true})
-        {
-            if(set_tol && set_val)
-                continue;
-            SCOPED_TRACE(::testing::Message() << "set_tol " << set_tol << " set_val " << set_val);
-            dev_csr<double, int32_t, int32_t> d;
-            d.init(a, 1, true);
-            ASSERT_NE(d.A, nullptr);
-            run_options opt;
-            opt.boost         = true;
-            opt.boost_tol     = 1.0;
-            opt.boost_val     = 7.0;
-            opt.set_boost_tol = set_tol;
-            opt.set_boost_val = set_val;
-            run_result<double> out;
-            run_factorization<Kind::ildlt, double>(handle, d.A, d.val, 1, opt, out);
-            EXPECT_EQ(out.compute_status, rocsparse_status_invalid_pointer);
-            EXPECT_EQ(out.values, a.val);
-        }
-    }
+    check_boost_unset<Kind::ildlt>(handle, make_grid_matrix<double>(4, false));
 }
 
 // ---------------------------------------------------------------------------
