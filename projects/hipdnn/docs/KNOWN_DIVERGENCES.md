@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` and of hipDNN's SDPA engines (seeded dropout) that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. It also lists where hipDNN's SDPA engines (seeded dropout) differ from cuDNN, outside the shim. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -111,7 +111,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 
 Seeded dropout (`dropout_probability`, seed, offset) in every hipDNN SDPA engine that serves it, forward and backward, draws hipDNN's Philox mask, not cuDNN's random stream. Forward and backward must use the same contract: a gradient is correct only when the forward drew its mask under it. The contract is [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
 
-A `dropout_probability` of 0 is the graph without dropout, forward and backward: seed and offset may be given or absent and are not read. cuDNN frontend v1.24.0's backward builds its random-number node from seed and offset whatever the probability. See [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+A `dropout_probability` of 0 is the graph without dropout, forward and backward: seed and offset may be given or absent and are not read. cuDNN frontend v1.24.0's backward builds its random-number node from seed and offset whatever the probability, so a cuDNN backward graph at probability 0 needs them. hipDNN treats probability 0 as the graph without dropout in both directions, following the forward, so seed and offset are optional; graphs cuDNN accepts still work. See [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
 
 ## hipDNN extensions
 

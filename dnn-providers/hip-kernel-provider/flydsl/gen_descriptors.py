@@ -139,7 +139,7 @@ SDK_VERSION_BY_OP: dict[str, str] = {
 # zero-bias and by-value-seed memsets included -- with no allocation, no synchronization
 # and no host read of device data. The SDPA backward engines (sdpa_bwd_merged,
 # sdpa_bwd_split) enqueue only kernels and async seed-word memsets on the handle's stream;
-# the integration graph-capture lanes verify them on gfx950 (merged, split) and gfx11
+# the integration graph-capture lanes verify them on gfx950 (merged, split) and gfx1101
 # (split).
 GRAPH_CAPTURE_OPS: tuple[str, ...] = (
     "rmsnorm",

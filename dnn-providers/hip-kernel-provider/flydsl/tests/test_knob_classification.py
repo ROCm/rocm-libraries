@@ -182,7 +182,7 @@ def test_a_field_in_two_sets_is_refused(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 ROCKE_DESCRIPTORS = DESCRIPTORS.parent / "rocKE"
-# Verified on gfx950 (CDNA engines, SDPA backward merged and split), gfx11 (SDPA backward
+# Verified on gfx950 (CDNA engines, SDPA backward merged and split), gfx1101 (SDPA backward
 # split), gfx1152 and gfx1201 (RDNA engines). The note is
 # engine-level (the host dispatch path is arch-independent), so it covers every target an
 # engine ships for.

@@ -281,19 +281,22 @@ batch when `seq_len_q/kv` are set).
   - The references run a packed graph as its dense padded rewrite with the dump as the mask
     (`TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump`,
     `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`).
-- **Probability 0 (Aligned, without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
+- **Probability 0 (forward Aligned, backward Diverges; without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
   explicit mask or `dropout_scale` drops nothing, so the CPU and GPU forward references compute it as no dropout
   (`isSdpaZeroProbabilityDropout`): bit-identical to the graph without dropout fields. A seed and an offset may be
   given or absent; they are not read, but a named one must be in the graph. Being no dropout, it also combines with
   cuDNN's sdpa_fp8 softmax / output scaling (SEM-024), which declines every other dropout form: O and the amax
-  outputs are bit-identical to the scaled graph without dropout. cudnn-frontend v1.24.0 does the same: a
+  outputs are bit-identical to the scaled graph without dropout. The forward matches cudnn-frontend v1.24.0: a
   probability of 0 builds no dropout (`scaled_dot_product_flash_attention.h:839-842`, backend 8.9.3 and later; the
   unified node sets dropout only for a probability other than 0, `:2449`). Pinned by
   `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references treat the same form as no
   dropout (`isSdpaZeroProbabilityDropout` on the backward attributes, which also requires `dropout_scale_inv` absent):
   dQ, dK and dV are bit-identical to the graph without dropout fields. The decline of `dropout_probability`, seed and
   offset in "hipDNN today" applies to a probability above 0 and to a seed or offset named without a probability.
-  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropout`.
+  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropout`. The backward diverges from
+  cudnn-frontend v1.24.0, whose backward builds its RNG node from seed and offset whatever the probability
+  (`scaled_dot_product_flash_attention.h:1496-1512`), where hipDNN's backward reads neither at probability 0; it is
+  listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream).
 
 ## Score modifiers (extensions and conventions)
 

@@ -1024,8 +1024,9 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
   without a claim; fp16 cases at Skv ≤ 2 are probes until DEF-03 is fixed.
 - **Rows.** The generator owns 12 anchored `[[tolerance_overrides]]` rows,
   `*_SdpaBackward_*.*_<dtype>_*_<token>`, in each claiming engine TOML: each id matches one row,
-  forward halves none, and `_fp16_` never matches `_bfp16_` (lint HG10). They replace the two
-  dtype-only SdpaBackward rows of today's engine TOML. The measured run confirms the classes with
+  forward halves none, and `_fp16_` never matches `_bfp16_` (lint HG10). The engine
+  TOML (one file shared by the merged and split engines) holds two narrowed flat SdpaBackward rows
+  before the generated class block and the hand class-U bf16 row after it. The measured run confirms the classes with
   device fill (HG14). Long term, a per-tensor validator `|out − ref| ≤ c·max|ref|`
   (c = 2.5e-2 bf16, 6e-3 fp16) replaces tokens and rows (HG6).
 
