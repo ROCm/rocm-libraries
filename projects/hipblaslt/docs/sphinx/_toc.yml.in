@@ -35,6 +35,8 @@ subtrees:
     title: Use Stream-K with hipBLASLt
   - file: how-to/how-to-use-high-density-mesh-selection
     title: Use High-Density Mesh (HDM) solution selection
+  - file: how-to/fp-emulation
+    title: Use FP32/FP64 fixed-point emulation
   - file: how-to/how-to-detect-nan
     title: Detect NaN in GEMM output
   - file: how-to/how-to-general-batched-gemm

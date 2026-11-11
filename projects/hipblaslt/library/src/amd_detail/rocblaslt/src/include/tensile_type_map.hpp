@@ -76,8 +76,10 @@ inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type ty
     case rocblaslt_compute_f32_fast_bf8:
     case rocblaslt_compute_f32_fast_f8bf8:
     case rocblaslt_compute_f32_fast_bf8f8:
+    case rocblaslt_compute_f32_emulated_fixedpoint: // native fallback path
         return rocisa::DataType::Float;
     case rocblaslt_compute_f64:
+    case rocblaslt_compute_f64_emulated_fixedpoint: // native fallback path
         return rocisa::DataType::Double;
     case rocblaslt_compute_i32:
         return rocisa::DataType::Int32;

@@ -10,7 +10,21 @@ include(dependencies)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(VERSION_STRING "1.4.0")
+# The version lives in the header (HIPBLAS_COMMON_VERSION_*) so that consumers can test it
+# with the preprocessor; read it from there so the two cannot drift.
+set(_hipblas_common_header
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblas-common/hipblas-common.h")
+foreach(_part MAJOR MINOR PATCH)
+    file(STRINGS "${_hipblas_common_header}" _line
+         REGEX "^#define HIPBLAS_COMMON_VERSION_${_part} +[0-9]+$")
+    if(NOT _line)
+        message(FATAL_ERROR "HIPBLAS_COMMON_VERSION_${_part} not found in ${_hipblas_common_header}")
+    endif()
+    string(REGEX REPLACE "^#define HIPBLAS_COMMON_VERSION_${_part} +([0-9]+)$" "\\1"
+                         _hipblas_common_version_${_part} "${_line}")
+endforeach()
+set(VERSION_STRING
+    "${_hipblas_common_version_MAJOR}.${_hipblas_common_version_MINOR}.${_hipblas_common_version_PATCH}")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

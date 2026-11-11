@@ -83,7 +83,12 @@ inline hipDataType computeTypeToRealDataType(hipblasComputeType_t ctype)
         {HIPBLAS_COMPUTE_64F, HIP_R_64F},
         {HIPBLAS_COMPUTE_64F_PEDANTIC, HIP_R_64F},
         {HIPBLAS_COMPUTE_32I, HIP_R_32I},
-        {HIPBLAS_COMPUTE_32I_PEDANTIC, HIP_R_32I}};
+        {HIPBLAS_COMPUTE_32I_PEDANTIC, HIP_R_32I},
+#if HIPBLASLT_HAS_HIPBLAS_EMULATION_TYPES
+        {HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F},
+        {HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT, HIP_R_32F},
+#endif
+    };
 
     return ctypeMap.at(ctype);
 }
