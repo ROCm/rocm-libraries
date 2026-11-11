@@ -1455,6 +1455,13 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     rocke_implicit_gemm_conv_spec_t s = rocke_implicit_gemm_conv_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
         fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+    /* An explicit pipeline=None / epilogue=None is a malformed spec (Python
+     * rejects it), not a request for the "mem" / "default" defaults: pass
+     * NULL so the engine rejects it. Only an absent key keeps the default. */
+    if(d.contains("pipeline") && d["pipeline"].is_none())
+        s.pipeline = NULL;
+    if(d.contains("epilogue") && d["epilogue"].is_none())
+        s.epilogue = NULL;
 
     {
         std::string v;
