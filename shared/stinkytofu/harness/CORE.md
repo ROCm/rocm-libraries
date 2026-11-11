@@ -50,6 +50,10 @@ handle. Do not remove several components at once.
   labels is not a real difference.
 - list exactly what is normalized (labels, and anything else such as paths or timestamps), and show a
   diff proving nothing else was removed or changed.
+- `tools/ab-compare.py` (next to this file) does the label-normalized compare:
+  `python3 tools/ab-compare.py <baseline dir> <candidate dir>`. Exit 0 means identical after
+  normalization, 1 means a difference or a file missing on one side, and 2 means an error. Use it, or
+  do the same by hand. Run it on two runs of the same build for the baseline-against-itself check.
 - prove that only labels changed: replace every label token with one fixed token in both versions of
   a file. The two texts must then be equal.
 - as a check, compare the baseline against a second run of itself for one YAML. After normalizing, it
