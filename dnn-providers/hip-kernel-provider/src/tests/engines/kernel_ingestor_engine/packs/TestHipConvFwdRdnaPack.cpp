@@ -300,7 +300,7 @@ TEST(TestHipConvFwdRdnaBinding, BindsTheOperandsAndTheGroupedFlops)
     EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_RDNA.outputToken), Y_UID);
     // 2 x N x K x (D x H x W out) x (C / groups) x taps; padding 1 keeps the output size.
     EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"),
-              int64_t{2} * 2 * 32 * (4 * 9 * 11) * (8 / 2) * 27);
+              int64_t{2} * 2 * 32 * 4 * 9 * 11 * (8 / 2) * 27);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +415,7 @@ TEST(TestHipConvFwdRdnaLaunchValues, SavesTheV1ValueNames)
 
 TEST(TestHipConvFwdRdnaLaunchValues, RefusesMalformedValues)
 {
-    const auto refused = [](SavedLaunchInputs inputs, const char* what) {
+    const auto refused = [](const SavedLaunchInputs& inputs, const char* what) {
         EXPECT_THROW(readHipConvFwdRdnaLaunchInputs(inputs),
                      hipdnn_plugin_sdk::HipdnnPluginException)
             << what;
