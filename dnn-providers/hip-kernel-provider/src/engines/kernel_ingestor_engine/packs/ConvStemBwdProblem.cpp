@@ -318,9 +318,12 @@ std::optional<StemBwdLaunch>
     }
     else if(config.layout == LAYOUT_CHANNELS_FIRST)
     {
-        // Vectors of aligned columns: dy rows whole vectors.
+        // Vectors of aligned columns: dy rows whole vectors. Space-to-depth reads them as
+        // vectors wherever it can (1.07-1.19x over single elements, gfx1201): its scalar configs
+        // serve only rows that are not whole vectors.
+        const bool wholeRows = a.outSpatial[2] % ev == 0;
         if(!problem.dyChannelsFirst || (config.vec != 1 && config.vec != ev)
-           || (config.vec == ev && a.outSpatial[2] % ev != 0))
+           || (config.vec == ev && !wholeRows) || (config.sd != 0 && config.vec == 1 && wholeRows))
         {
             return std::nullopt;
         }

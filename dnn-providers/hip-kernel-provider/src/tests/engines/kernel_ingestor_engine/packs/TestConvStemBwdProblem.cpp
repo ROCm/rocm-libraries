@@ -202,10 +202,12 @@ ConvShape threeDStem(int64_t taps)
     return shape;
 }
 
-/// Stride 1: 3 x 5, padding (1, 2) (the space-to-depth windows 2 x 3).
+/// Stride 1: 3 x 5, padding (1, 2) (the space-to-depth windows 2 x 3), dx 29 x 30 (dy rows not
+/// whole vectors).
 ConvShape stride1Shape()
 {
     auto shape = baseShape();
+    shape.input = {29, 30};
     shape.filter = {3, 5};
     shape.prePadding = shape.postPadding = {1, 2};
     shape.stride = {1, 1};
@@ -814,6 +816,20 @@ std::vector<ConfigRefusal> configRefusals()
          },
          "gfx942",
          stride1Shape},
+        // Space-to-depth reads whole-vector rows as vectors only (dy rows of 32).
+        {"SpaceToDepthScalarsOnWholeVectorRows",
+         [](ConfigFields& f) { f.vec = 1; },
+         [] {
+             auto f = spaceToDepthFields();
+             f.vec = 8;
+             return f;
+         },
+         "gfx942",
+         [] {
+             auto shape = stride1Shape();
+             shape.input = {29, 32};
+             return shape;
+         }},
         {"SpaceToDepthColumnsBelowThePhases",
          [](ConfigFields& f) { f.nb = 11; },
          [] {
@@ -1166,7 +1182,7 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
 {
     const auto launch = launchOf(spaceToDepthFields(), stride1Shape());
     ASSERT_TRUE(launch.has_value());
-    // dx 29 x 64: 15 x 32 super-pixels of 2 x 2.
+    // dx 29 x 30: 15 x 15 super-pixels of 2 x 2.
     EXPECT_EQ(launch->gridX, 1u);
     EXPECT_EQ(launch->gridY, 4u);
     EXPECT_EQ(launch->gridZ, 2u);
@@ -1176,7 +1192,7 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
     EXPECT_EQ(a.kp, 4 * 32);
     EXPECT_EQ(a.kpr, 32);
     EXPECT_EQ(a.ho, 29);
-    EXPECT_EQ(a.wo, 64);
+    EXPECT_EQ(a.wo, 30);
     EXPECT_EQ(a.oh, 0);
     EXPECT_EQ(a.ow, 1);
     EXPECT_EQ(a.sdh, 1);
