@@ -781,6 +781,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_mma_operand_roles.py"
         "tests/library/tests/test_wgrad_cached_candidate_filter.py"
         "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -801,6 +802,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
+        "tests/library/tests/test_direct_wgrad_refusals.py"
+        "tests/library/tests/test_direct_depthwise_wgrad_cachepolicy.py"
+        "tests/library/tests/test_conv_tr_lane_map.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_direct_grouped_backend_parity.py"
         "tests/library/tests/test_direct_wgrad_specs.py"
@@ -1075,6 +1079,8 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_sdpa_pytest python -m pytest"
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
            "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
@@ -1232,6 +1238,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
+        "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
+        "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
