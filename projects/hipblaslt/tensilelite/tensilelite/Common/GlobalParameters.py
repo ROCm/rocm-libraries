@@ -253,6 +253,10 @@ globalParameters["CMakeCFlags"] = ""  # pass flags to cmake
 globalParameters["AsanBuild"] = False  # build with asan
 #globalParameters["SaveTemps"] = False  # Generate intermediate results of hip kernels
 globalParameters["KeepBuildTmp"] = False  # If true, do not remove artifacts in build_tmp
+globalParameters["OutputLoopIR"] = False  # If true, also dump the LoopModel θ-IR to a sibling ir/ dir
+globalParameters["LoopModelIRVerify"] = False  # Set True for verifying LoopModel IR.
+globalParameters["GIRScheduleDumpPath"] = ""  # Directory for editable per-kernel GIR schedules.
+globalParameters["GIRScheduleLoadPath"] = ""  # Directory containing edited GIR schedules.
 
 # debug for assembly
 #globalParameters["SplitGSU"] = False  # Split GSU kernel into GSU1 and GSUM
@@ -550,6 +554,14 @@ defaultBenchmarkCommonParameters = [
     {"PrefetchLocalRead": [1]},
     {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
+    {"PrefetchLocalReadA": [-1]},
+    {"PrefetchLocalReadB": [-1]},
+    {"ClusterLocalReadA": [-1]},
+    {"ClusterLocalReadB": [-1]},
+    {"VgprGroupA": [-1]},
+    {"VgprGroupB": [-1]},
+    {"VgprAllocA": [-1]},
+    {"VgprAllocB": [-1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
     {"ScheduleGlobalRead": [1]},
@@ -665,6 +677,12 @@ defaultBenchmarkCommonParameters = [
     {"PrefetchAcrossPersistent": [0]},
     {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
+    {"UseLoopModel": [False]},
+    {"WmmaInnerOrder": [1]},
+    {"WmmaOuterOrder": [-1]},
+    {"WmmaFactorM": [-1]},
+    {"WmmaFactorN": [-1]},
+    {"WmmaFactorK": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
@@ -682,6 +700,8 @@ defaultBenchmarkCommonParameters = [
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMSplitA": [0]},
+    {"TDMSplitB": [0]},
     {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
@@ -1001,6 +1021,22 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     if "KeepBuildTmp" in config:
         globalParameters["KeepBuildTmp"] = config["KeepBuildTmp"]
+
+    if "OutputLoopIR" in config:
+        globalParameters["OutputLoopIR"] = config["OutputLoopIR"]
+
+    if "LoopModelIRVerify" in config:
+        globalParameters["LoopModelIRVerify"] = config["LoopModelIRVerify"]
+
+    dumpSchedule = config.get("GIRScheduleDumpPath", "")
+    loadSchedule = config.get("GIRScheduleLoadPath", "")
+    if dumpSchedule and loadSchedule:
+        raise RuntimeError(
+            "GIRScheduleDumpPath and GIRScheduleLoadPath are mutually exclusive")
+    globalParameters["GIRScheduleDumpPath"] = (
+        os.path.abspath(os.path.expanduser(str(dumpSchedule))) if dumpSchedule else "")
+    globalParameters["GIRScheduleLoadPath"] = (
+        os.path.abspath(os.path.expanduser(str(loadSchedule))) if loadSchedule else "")
 
     if "CodeObjectVersion" in config:
         globalParameters["CodeObjectVersion"] = config["CodeObjectVersion"]

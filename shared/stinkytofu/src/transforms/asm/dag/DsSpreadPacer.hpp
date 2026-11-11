@@ -60,6 +60,17 @@ class DsSpreadPacer {
     const std::vector<RateLimited>& rateLimited() const {
         return rateLimited_;
     }
+    // One line per planned stage: the window it spreads over, its loads, and the batches it got.
+    // `batches == 1` is the collapsed case -- every load of that stage is released at once.
+    std::string planSummary() const {
+        std::ostringstream os;
+        for (const Stage& st : stages_)
+            os << "  stage [" << st.start << ", " << st.end << ") loads=" << st.total
+               << " batches=" << st.batches << " lastDs=" << st.lastDs
+               << " perBatch=" << (st.batches > 0 ? (st.total + st.batches - 1) / st.batches : 0)
+               << (st.batches <= 1 ? "  <<< COLLAPSED (all at once)" : "") << "\n";
+        return os.str();
+    }
     // The debug warning for a rate-limited stage, at the rate the stage was planned with.
     static std::string rateLimitedMessage(const RateLimited& r, int cyclesPerLoad) {
         std::ostringstream os;
