@@ -889,9 +889,9 @@ class AssemblerCheckTest(unittest.TestCase):
         # The fused scale-and-convert links for gfx942 once its flag operand is
         # a constant, and the object then holds a gfx950-only instruction. Use
         # the combined-module builder so this pins the optimized batch path.
-        from check_ir_validity import _llvm_tool
+        from check_ir_validity import llvm_tool
 
-        clang = _llvm_tool("clang")
+        clang = llvm_tool("clang")
         if clang is None or not G._llvm_mc_beside(clang).is_file():
             self.skipTest("no clang with an llvm-mc beside it on this host")
         decl = G._decl_table(_resolve_llvm_flavor())["amdgcn.cvt.scalef32.pk.f32.fp8"]
@@ -1236,7 +1236,7 @@ for line in open(src):
             *extra_args,
         ]
         with (
-            mock.patch.object(V, "_llvm_tool", lambda n: tools.get(n)),
+            mock.patch.object(V, "llvm_tool", lambda n: tools.get(n)),
             mock.patch.object(sys, "argv", argv),
         ):
             return G.main()
@@ -1760,7 +1760,7 @@ class PartialSweepTest(unittest.TestCase):
         import check_ir_validity as V
 
         with (
-            mock.patch.object(V, "_llvm_tool", lambda _n: None),
+            mock.patch.object(V, "llvm_tool", lambda _n: None),
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 0, "the guard swallowed a well-formed probe")
@@ -1778,7 +1778,7 @@ class CTestExitTest(unittest.TestCase):
 
         argv = [str(_TOOL), "--check", "--unvalidated-exit-code", "77"]
         with (
-            mock.patch.object(V, "_llvm_tool", return_value=None),
+            mock.patch.object(V, "llvm_tool", return_value=None),
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 77)
@@ -1850,7 +1850,7 @@ class ValidityGateTest(unittest.TestCase):
                     return_value=str(fake_comgr),
                 ),
             ):
-                found = V._llvm_tool("clang")
+                found = V.llvm_tool("clang")
         self.assertIsNotNone(found)
         self.assertTrue(
             any(
@@ -1871,7 +1871,7 @@ class ValidityGateTest(unittest.TestCase):
         import check_ir_validity as V
 
         self.assertTrue(
-            V._target_unsupported("clang: error: invalid target ID 'gfx1250'")
+            V.target_unsupported("clang: error: invalid target ID 'gfx1250'")
         )
         # The same wording routes to `target_unsupported` in the generator.
         self.assertEqual(
@@ -1885,7 +1885,7 @@ class ValidityGateTest(unittest.TestCase):
             "error: invalid use of a non-immediate operand",
         ):
             with self.subTest(diag=diag):
-                self.assertFalse(V._target_unsupported(diag))
+                self.assertFalse(V.target_unsupported(diag))
 
     def test_an_instance_gated_on_a_newer_llvm_is_not_a_lowering_failure(self):
         """The corpus is flavor-wide; a host is not.

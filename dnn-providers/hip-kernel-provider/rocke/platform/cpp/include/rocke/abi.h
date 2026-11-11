@@ -120,11 +120,14 @@ extern "C" {
  *     and size.
  * 15: rocke_direct_conv_wgrad_spec_t gained image_per_block through
  *     uniform_wave at its end, which changes its size.
- * 16: rocke_attention_tiled_2d_spec_t gained lse_head_major and
+ * 16: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_global_regs in
+ *     its old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset.
+ * 17: rocke_attention_tiled_2d_spec_t gained lse_head_major and
  *     rocke_unified_attention_3d_tiled_spec_t gained emit_lse, each a bool in
  *     its old tail padding: sizes unchanged, but an old caller leaves that byte
  *     unset. */
-#define ROCKE_ABI_VERSION 16
+#define ROCKE_ABI_VERSION 17
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

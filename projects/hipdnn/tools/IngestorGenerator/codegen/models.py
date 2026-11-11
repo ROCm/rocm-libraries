@@ -93,7 +93,7 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
 )
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
-BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
+BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
 
 #: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
 #: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.
@@ -452,7 +452,8 @@ class EngineSpec:
     #: (``Unified2D``) would come out as ``unified2_d``.
     slug_override: str | None = None
     #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
-    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
+    #: arch (or `default`) -> UHD ids, in config order: a list per key for every role, as
+    #: promote writes it. Empty emits nothing.
     heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     #: ``engine.trained_catalog_sha256``: arch -> `tools/catalog_fingerprint.py`'s hash of the
     #: catalog the ``heuristics.sort_kernel_catalog`` models bound under that arch were
