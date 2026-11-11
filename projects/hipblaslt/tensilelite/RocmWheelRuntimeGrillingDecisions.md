@@ -66,10 +66,21 @@ installed wheel against that prefix contract, but it does not prove the active
 
 ### F5 — TheRock source builds pass an explicit ROCm identity
 
-TheRock passes `THEROCK_PACKAGE_VERSION` to the hipBLASLt subproject. The build
-frontend requires that value to contain a release identity and rejects missing,
-empty, or `git` values instead of falling back to `THEROCK_ROCM_VERSION`.
-Standalone builds read the selected conventional root's `.info/version`.
+*Updated 2026-11-11 (decisions 1, 6 and 7 of the packaging identity review;
+PythonBuildGrillingDecisions Q121, Q126, Q127).*
+
+TheRock passes `THEROCK_PACKAGE_VERSION` to the hipBLASLt subproject (TheRock
+T1). A real value is stamped into the wheel as `+rocm<identity>` or, for a
+development identity, `+devrocm<identity>`. `"git"`, the placeholder of local
+TheRock builds, gives a development build (`+g<sha>`). A missing value is a
+development build below #11030 and a configure error from #11030 on. There is no
+`THEROCK_ROCM_VERSION` fallback. Standalone builds stamp no ROCm identity and
+never read `.info/version` for the wheel; the client records the ROCm it was
+built against instead (`--build-rocm`, Q134).
+
+At code-generation time, hipBLASLt's CMake sets the internal marker
+`TENSILELITE_ROCM_ADAPTER=therock-ci`, which alone selects the TheRock build
+adapter, and passes `THEROCK_PACKAGE_VERSION` only when it is a real version.
 
 ## Decisions
 
@@ -111,23 +122,38 @@ need a general CMake/HIP development prefix.
 ### G004 — How is compatibility identity validated?
 
 **Decision: Accepted — validate through the selected adapter's native identity.**
+*Updated 2026-11-11 (decisions 4, 5 and 7; Q124, Q125, Q127).*
 
-The Python-SDK adapter compares the wheel's ROCm identity with the active
-`rocm_sdk_core.__version__`, including a supported nightly, RC, or development
-publication suffix. The conventional-prefix adapter compares only the base
-`X.Y.Z` value from the selected root's `.info/version`.
+Only `+rocm…`/`+devrocm…` wheels make a ROCm claim, and it must match:
 
-This preserves exact package identity where TheRock exposes it while keeping
-the conventional-prefix compatibility boundary explicit.
+- the Python-SDK adapter compares it with the active `rocm_sdk_core.__version__`;
+- the conventional-prefix adapter compares it with the full
+  `rocm_package_version` from a TheRock-built root's
+  `share/therock/therock_manifest.json` (release identities only; `"git"` is
+  ignored), falling back to the base `X.Y.Z` of `.info/version`, which is
+  compared base to base. If both exist and their base versions differ, the
+  installation is reported as inconsistent;
+- the TheRock build adapter compares it with the forwarded
+  `THEROCK_PACKAGE_VERSION` when one was passed.
+
+TheRock development identities ignore their commit token (stage reuse brings a
+baseline run's manifest); variant tokens still count. A `+g<sha>` development
+wheel makes no claim and warns once per process. The client's build ROCm is
+compared the same way (Q134).
 
 ### G005 — How does a TheRock source build receive the ROCm identity?
 
 **Decision: Accepted — the build frontend passes one explicit value.**
+*Updated 2026-11-11 (decisions 1, 6, 7 and 13; Q121, Q126, Q127, Q133).*
 
-TheRock's graph-owned input is passed into hipBLASLt and then to
-`release_metadata.py` as `TENSILELITE_ROCM_VERSION`. The metadata helper
-composes the canonical and compatibility-wheel versions, and CMake uses the same
-result for the native-client version header when that client is enabled.
+TheRock's `THEROCK_PACKAGE_VERSION` is passed into hipBLASLt and then to
+`release_metadata.py` (`version --rocm-identity`) and the wheel build
+(`TENSILELITE_ROCM_VERSION`) only when it is a real version; a missing or
+`"git"` value gives a development identity (missing is a configure error from
+#11030 on). The metadata helper composes the one wheel's version, and CMake uses
+the same result for the native-client version header when that client is
+enabled. The client and the wheel are paired by source commit, not by this
+version (Q122).
 
 No installed-wheel runtime resolver participates in this source-build flow.
 

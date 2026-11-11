@@ -3,6 +3,12 @@
 
 # Proposal: Package TensileLite as `tensilelite`
 
+> This is the original proposal, kept as written. The current decisions are in
+> [`PythonBuildGrillingDecisions.md`](../PythonBuildGrillingDecisions.md)
+> (Q121–Q134 for versioning, ROCm identity, client pairing and the removed
+> compatibility package) and
+> [`RocmWheelRuntimeGrillingDecisions.md`](../RocmWheelRuntimeGrillingDecisions.md).
+
 ## Summary
 
 Package the TensileLite Python generator as `tensilelite`, with `import tensilelite` and `python -m tensilelite`/`tensilelite` as the supported public interface.
