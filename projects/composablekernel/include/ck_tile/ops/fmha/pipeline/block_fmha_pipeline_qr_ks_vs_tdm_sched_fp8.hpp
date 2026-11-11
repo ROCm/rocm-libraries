@@ -917,7 +917,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     k_su0_tile,
                     pinned(k_lds_su0_read_window, number<kNextKBase>{}, number<1>{}));
                 if constexpr(kNormalizeQuantizedP)
-                    QuantScale::template AccumulateQuantizedMass<decltype(gemm_1), SplitSoftmax>(
+                    QuantScale::template AccumulateQuantizedMass<decltype(gemm_1)>(
                         p_tile,
                         kQuantizedRowSum ? l : l_quant,
                         pv_output_scale_m0,

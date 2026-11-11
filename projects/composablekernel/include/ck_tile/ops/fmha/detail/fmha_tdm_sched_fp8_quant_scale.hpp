@@ -307,39 +307,54 @@ struct FmhaTdmSchedFp8QuantScale
         return static_cast<int32_t>(fmha_tdm_sched_fp8_lds_offset(p));
     }
 
-    // Unscaled fp8x8 as fp32; a literal scale is uniform, so one convert serves every lane.
-    CK_TILE_DEVICE static fp32x8_t Dequantize(const fp8x8_t& q)
-    {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-        return __builtin_amdgcn_cvt_scale_pk8_f32_fp8(bit_cast<uint32x2_t>(q), 0x7f7f7f7fu, 0);
-#else
-        return fp8x8_to_fp32x8(q, 1.0f);
-#endif
-    }
-
-    // Rescales row_sum like l and adds the lane rows' sum of the fp8 P that gemm_1 consumes.
-    template <typename Gemm1, typename Softmax, typename PTile, typename RowTile>
+    // Rescales row_sum like l and adds the row sums of the fp8 P that gemm_1 consumes.
+    // WMMAs against all-ones fp8 sum them exactly: each partial sum of q(256 P) is a multiple of
+    // 2^-9 below 2^15. K64 halves keep the ones operand at eight VGPRs.
+    template <typename Gemm1, typename PTile, typename RowTile>
     CK_TILE_DEVICE static void
     AccumulateQuantizedMass(const PTile& p_tile, RowTile& row_sum, float scale_m0, float scale_m1)
     {
-        constexpr index_t kVec  = 8;
-        constexpr index_t kPMI  = Geometry::kPvMIter;
-        constexpr index_t kBuf  = PTile::get_thread_buffer_size();
-        constexpr index_t kPKI  = kN0 / Gemm1::WarpGemm::kK;
-        constexpr index_t kPSub = kBuf / (kPMI * kPKI);
-        static_assert(kPMI == 2 && kPSub % kVec == 0);
-        array<fp32x8_t, 4> acc{};
-        static_for<0, kBuf / kVec, 1>{}([&](auto i) {
-            constexpr index_t row = (decltype(i)::value * kVec / kPSub) % kPMI;
-            constexpr index_t a   = row * 2 + decltype(i)::value % 2;
-            acc(number<a>{}) += Dequantize(p_tile.get_thread_buffer().template get_as<fp8x8_t>(i));
-        });
-        auto& lq = row_sum.get_thread_buffer();
-        static_for<0, 2, 1>{}([&](auto row) {
-            const fp32x8_t v = acc[number<row * 2>{}] + acc[number<row * 2 + 1>{}];
-            float s          = ((v[0] + v[1]) + (v[2] + v[3])) + ((v[4] + v[5]) + (v[6] + v[7]));
-            s += Softmax::PermuteLaneX16(s);
-            lq(row) = __builtin_fmaf(decltype(row)::value == 0 ? scale_m0 : scale_m1, lq[row], s);
+        using WarpGemm    = typename Gemm1::WarpGemm;
+        using AWarpDstr   = typename WarpGemm::AWarpDstr;
+        using AWarpTensor = typename WarpGemm::AWarpTensor;
+        static_assert(Gemm1::KIterPerWarp == 1 && Gemm1::MIterPerWarp == Geometry::kPvMIter &&
+                      AWarpTensor::get_thread_buffer_size() == 64);
+        constexpr auto a_warp_y_lengths =
+            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        // Four fp8 1.0 bytes per dword.
+        const int32x8_t ones = int32x8_t{} + 0x38383838;
+        auto& lq             = row_sum.get_thread_buffer();
+        static_for<0, Geometry::kPvMIter, 1>{}([&](auto m_iter) {
+            AWarpTensor a_warp_tensor;
+            a_warp_tensor.get_thread_buffer() = p_tile.get_y_sliced_thread_data(
+                merge_sequences(sequence<0, m_iter>{}, a_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            // gemm_1 runs P as WMMA source B, so each lane's sums belong to its query row.
+            const auto p = bit_cast<int32x16_t>(a_warp_tensor.get_thread_buffer());
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+            fp32x8_t c = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
+                ones,
+                __builtin_shufflevector(p, p, 0, 1, 2, 3, 4, 5, 6, 7),
+                0,
+                fp32x8_t{},
+                false,
+                false);
+            c = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
+                ones,
+                __builtin_shufflevector(p, p, 8, 9, 10, 11, 12, 13, 14, 15),
+                0,
+                c,
+                false,
+                false);
+            const float s = c[0];
+#else
+            ignore        = p;
+            ignore        = ones;
+            const float s = 0.f;
+#endif
+            lq(m_iter) =
+                __builtin_fmaf(decltype(m_iter)::value == 0 ? scale_m0 : scale_m1, lq[m_iter], s);
         });
     }
 };
