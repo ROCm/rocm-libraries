@@ -913,20 +913,20 @@ if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
 
-# Install ROCm-versioned wheels and installed tests for artifact-based testing.
+# Install the tensilelite wheel and installed tests for artifact-based testing.
 # Also stages, for FFM gfx1250 codegen:
 #   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
 #   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
-    # TheRock runs pytest with this artifact root on PYTHONPATH. Extract the
-    # validated pure-Python wheel so its packages are importable there while
-    # retaining the wheel file for installation tests.
+    # The artifact contains the selected wheel and tests. Keep the package
+    # unextracted so the artifact root cannot shadow the installed wheel.
     install(CODE "
         execute_process(
             COMMAND \"${Python3_EXECUTABLE}\"
                 \"${_tensilelite_src}/scripts/install_release_wheels.py\"
                 --destination \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}\"
+                --copy-only
                 --manifest \"${TENSILELITE_CANONICAL_WHEEL_MANIFEST}\"
                 --copy-wheels \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}/wheels\"
             RESULT_VARIABLE _tensilelite_wheel_install_result
