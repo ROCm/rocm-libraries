@@ -410,11 +410,12 @@ def build_st1():
                             if valid_mma(c, dtype):
                                 CATALOG[dtype].append(c)
             # FMA: a one-vector halo is the register window (taps within the vector, unit
-            # dilation); a wider one reads each tap's window from LDS (fp32 only: HIPRTC 7.18
-            # fails to select the 16-bit form on gfx942, "Cannot select f32 = Constant<-1>";
-            # reproducer in ~/old-asic-hipdnn/k7/ice).
+            # dilation); a wider one reads each tap's window from LDS (not _Float16: HIPRTC 7.18
+            # fails to select its form on gfx942, "Cannot select f32 = Constant<-1>"; reproducer in
+            # ~/old-asic-hipdnn/k7/ice. bf16, converted to fp32 explicitly, compiles: it is the
+            # only 16-bit path for these shapes where no matrix core takes bf16, gfx908).
             for halo in sorted({small, -(-(taps - 1) * 5 // vec) * vec}):
-                if (halo == vec and taps > vec) or (halo > vec and dtype != "FLOAT"):
+                if (halo == vec and taps > vec) or (halo > vec and dtype == "HALF"):
                     continue
                 # HIPRTC 7.18 also fails the fp16 register window at S 5 and 7 (k7/ice).
                 if dtype == "HALF" and taps != 3:
