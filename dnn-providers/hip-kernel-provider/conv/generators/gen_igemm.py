@@ -202,6 +202,10 @@ def mfma(dt, atoms32, atoms16, wide32=None, wide16=None):
             C(atoms32, 256, 128, 32, vec=v, xcd=1),
             C(atoms32, 256, 256, 32, 2, 4, vec=v, xcd=1),
             C(atoms32, 256, 256, 32, 2, 4, vec=v),
+            # EXPERIMENT (gfx90a dense backward data A/B): wide-N and deep-k tiles.
+            C(atoms32, 128, 256, 32, 2, 4, vec=v),
+            C(atoms32, 256, 128, 64, 4, 2, vec=v),
+            C(atoms32, 128, 256, 32, 2, 4, vec=v, swz=1),
         ]
     if wide32:
         cfgs += [
