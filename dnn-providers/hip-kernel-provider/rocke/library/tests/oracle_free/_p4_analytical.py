@@ -500,9 +500,11 @@ def ordered_distance(
 
 # ---------------------------------------------------------------------------
 # P4 fixtures. Every row has two logit classes: the distinguished keys, with
-# logit ``c``, and the background keys, with logit 0. Each head carries its own
-# ``c = a_h b_h / sqrt(D)`` (``8 a_h b_h`` times a row sign for the Walsh
-# contraction), so a kernel that reads the wrong Q or K head changes a logit.
+# logit ``c``, and the background keys, with logit 0. Query head ``h`` reads KV
+# head ``g(h) = h // (Hq / Hkv)`` and carries its own
+# ``c_h = a_h b_g(h) / sqrt(D)`` (``8 a_h b_g(h)`` times a row sign for the Walsh
+# contraction), so a kernel that reads the wrong Q head, the wrong K head or
+# the wrong KV group changes a logit.
 # ---------------------------------------------------------------------------
 
 P4_PERIOD = 64
@@ -556,9 +558,12 @@ def _scale_token(value: Fraction) -> str:
 class P4Case:
     """One P4 launch configuration: shape, fixture, per-head scales, KV tiling.
 
-    ``q_scales[h]`` and ``k_scales[h]`` are ``a_h`` and ``b_h``: zero or signed
-    powers of two, exact in FP16 and BF16. ``block_m``/``block_n`` are the
-    subject's tile sizes, which fix the KV tiles each row visits."""
+    ``q_scales[h]`` is ``a_h`` for query head ``h`` and ``k_scales[g]`` is ``b_g``
+    for KV head ``g``: zero or signed powers of two, exact in FP16 and BF16.
+    Query head ``h`` reads KV head ``g(h) = h // (Hq / Hkv)``, the kernel's
+    group divisor, so its logit is ``a_h b_g(h) / sqrt(D)``. ``block_m`` and
+    ``block_n`` are the subject's tile sizes, which fix the KV tiles each row
+    visits."""
 
     base: UniformCase
     fixture: P4Fixture
@@ -576,10 +581,8 @@ class P4Case:
         base = self.base
         if base.head_dim != P4_PERIOD:
             raise ValueError(f"P4 requires head_dim == {P4_PERIOD}")
-        if base.nhead_q != base.nhead_k:
-            raise ValueError("P4 requires Hq == Hkv: each head carries its own logit")
         if len(self.q_scales) != base.nhead_q or len(self.k_scales) != base.nhead_k:
-            raise ValueError("one Q and one K scale per head")
+            raise ValueError("one Q scale per query head and one K scale per KV head")
         for value in (*self.q_scales, *self.k_scales):
             if value != 0 and not _is_signed_power_of_two(value):
                 raise ValueError(f"scale {value} is not zero or a signed power of two")
@@ -617,11 +620,9 @@ class P4Case:
             detail += f"-r{self.shift}"
         if self.fixture is P4Fixture.LATE_MAX:
             detail += f"-l{self.late}"
-        scales = ",".join(
-            f"{_scale_token(a)}x{_scale_token(b)}"
-            for a, b in zip(self.q_scales, self.k_scales)
-        )
-        return f"{self.base.case_id}-p4{detail}-{scales}"
+        q_tokens = ",".join(_scale_token(a) for a in self.q_scales)
+        k_tokens = ",".join(_scale_token(b) for b in self.k_scales)
+        return f"{self.base.case_id}-p4{detail}-q{q_tokens}-k{k_tokens}"
 
 
 class P4Mutation(str, Enum):
@@ -639,7 +640,9 @@ class P4Mutation(str, Enum):
     OMIT_WALSH_BLOCK_3 = "omit_walsh_block_3"  # QK skips dimensions 48..63
     WALSH_SIGN = "walsh_sign"  # the (-1)**k K row sign is lost
     Q_HEAD_ROTATE = "q_head_rotate"  # output head h reads Q head h + 1
-    K_HEAD_ROTATE = "k_head_rotate"  # output head h reads K head h + 1
+    K_HEAD_ROTATE = "k_head_rotate"  # output head h reads K of KV head g(h) + 1
+    # GQA map h % Hkv instead of h // (Hq / Hkv): K and V of the wrong KV head.
+    KV_GROUP_INTERLEAVE = "kv_group_interleave"
     INCLUDE_FUTURE_KEY = "include_future_key"
     EXCLUDE_LAST_KEY = "exclude_last_key"
     INCLUDE_OLD_WINDOW_KEY = "include_old_window_key"
@@ -674,6 +677,31 @@ def is_distinguished(case: P4Case, query: int, key: int) -> bool:
     return not (case.fixture is P4Fixture.LATE_MAX and key < case.late)
 
 
+def kv_head(case: P4Case, head: int, mutation: P4Mutation | None = None) -> int:
+    """The KV head whose K query head ``head`` reads: ``head // (Hq / Hkv)``,
+    the kernel's group divisor; the next KV head under ``K_HEAD_ROTATE``; or
+    ``head % Hkv`` under ``KV_GROUP_INTERLEAVE`` (the divisor replaced by a
+    modulus, which differs from the correct map at ``Hq - Hkv`` heads when
+    ``Hkv >= 2``)."""
+    groups = case.base.nhead_k
+    if mutation is P4Mutation.KV_GROUP_INTERLEAVE:
+        return head % groups
+    group = head // (case.base.nhead_q // groups)
+    if mutation is P4Mutation.K_HEAD_ROTATE:
+        return (group + 1) % groups
+    return group
+
+
+def v_exponent(case: P4Case, head: int, mutation: P4Mutation | None = None) -> int:
+    """The exponent of the V scale ``2**g`` that output head ``head`` receives.
+
+    Only the interleaved group map changes it: ``K_HEAD_ROTATE`` is a wrong K
+    index alone, and the wrong-V-head reads are the uniform lane's."""
+    if mutation is P4Mutation.KV_GROUP_INTERLEAVE:
+        return kv_head(case, head, mutation)
+    return case.head_scale_exponents[head]
+
+
 def score_numerator(
     case: P4Case,
     head: int,
@@ -690,8 +718,7 @@ def score_numerator(
     ``16 (-1)**popcount(z & 16 b)`` when ``z % 16 == 0`` and zero otherwise."""
     heads = case.base.nhead_q
     q_head = (head + 1) % heads if mutation is P4Mutation.Q_HEAD_ROTATE else head
-    k_head = (head + 1) % heads if mutation is P4Mutation.K_HEAD_ROTATE else head
-    product = case.q_scales[q_head] * case.k_scales[k_head]
+    product = case.q_scales[q_head] * case.k_scales[kv_head(case, head, mutation)]
     row = key + _K_ROW_OFFSET.get(mutation, 0)
     if case.fixture is P4Fixture.WALSH:
         overlap = (query % P4_PERIOD) ^ ((row + 1) % P4_PERIOD)
@@ -951,7 +978,7 @@ def tier_b_row(
     under the correct or a ``mutation``'s semantics. The epilogue is the A-F
     hull for both, so a mutant is judged with the same compiler latitude."""
     trace = row_trace(case, head, query, mutation, e_ulps)
-    exponent = case.head_scale_exponents[head]
+    exponent = v_exponent(case, head, mutation)
     low = np.zeros(case.base.head_dim, dtype=np.uint16)
     high = np.zeros(case.base.head_dim, dtype=np.uint16)
     for dim in range(case.base.head_dim):
@@ -1233,7 +1260,7 @@ def _emulate_path(
     Without ``rng``: the documented lane order, ``E = RN(2**x)`` and an RN MFMA
     accumulate. With ``rng``: a random summation tree per tile, an ``E``
     candidate per call and a directed rounding per MFMA addition."""
-    exponent = case.head_scale_exponents[head]
+    exponent = v_exponent(case, head, mutation)
     scale = np.float32(2.0**exponent)
 
     def exp2(argument: np.float32) -> np.float32:
@@ -1308,13 +1335,38 @@ def _emulate_path(
 # Per-head scales chosen by separation in output space.
 # ---------------------------------------------------------------------------
 
-# Head logits per fixture family. Periodic fixtures (identity, cyclic, late
-# max) cover large and moderate logits of both signs; the Walsh row sign
-# alternates, so its magnitudes cover both signs on their own.
+# Head logits per fixture family, one per query head (eight over two KV heads).
+# The first KV group, query heads 0-3, keeps the single-group logits. For the
+# periodic fixtures the second group takes the four remaining power-of-two
+# magnitudes, so every launched logit is distinct; for Walsh, whose row sign
+# already alternates, the second group repeats the four magnitudes and the
+# search separates the groups through ``b_1 = -b_0`` (margin 188 versus 53 for
+# negated logits). No two heads of one group share a logit, so a swap of two
+# query heads inside a group, invisible to the uniform lane because they share
+# a V scale, changes a logit here. Every |c| <= 8 keeps the unmasked weights
+# above 2**-12 (T1).
 P4_HEAD_LOGITS: Mapping[str, tuple[Fraction, ...]] = MappingProxyType(
     {
-        "periodic": (Fraction(8), Fraction(-8), Fraction(2), Fraction(-1, 2)),
-        "walsh": (Fraction(8), Fraction(2), Fraction(1, 2), Fraction(4)),
+        "periodic": (
+            Fraction(8),
+            Fraction(-8),
+            Fraction(2),
+            Fraction(-1, 2),
+            Fraction(4),
+            Fraction(-4),
+            Fraction(1),
+            Fraction(-1, 4),
+        ),
+        "walsh": (
+            Fraction(8),
+            Fraction(2),
+            Fraction(1, 2),
+            Fraction(4),
+            Fraction(8),
+            Fraction(2),
+            Fraction(1, 2),
+            Fraction(4),
+        ),
     }
 )
 # Rows sampled for head-separation gaps: block, tile and window edges.
@@ -1326,34 +1378,45 @@ def fixture_family(fixture: P4Fixture) -> str:
 
 
 def _logit_case(base: UniformCase, block_m: int, family: str, logits: Sequence[Fraction]) -> P4Case:
-    """A case whose head ``h`` has logit ``logits[h]`` with ``b_h = 1``."""
+    """A case whose query head ``h`` has logit ``logits[h]`` with every ``b_g = 1``."""
     fixture = P4Fixture.WALSH if family == "walsh" else P4Fixture.IDENTITY
     factor = Fraction(1, 8) if family == "walsh" else Fraction(8)
     return P4Case(
         base,
         fixture,
         tuple(value * factor for value in logits),
-        tuple(Fraction(1) for _ in logits),
+        tuple(Fraction(1) for _ in range(base.nhead_k)),
         block_m=block_m,
     )
 
 
 @cache
 def logit_gap(
-    base: UniformCase, block_m: int, family: str, head: int, logit: Fraction, other: Fraction
+    base: UniformCase,
+    block_m: int,
+    family: str,
+    head: int,
+    logit: Fraction,
+    other: Fraction,
+    other_head: int | None = None,
 ) -> int:
     """Largest Tier B separation, over the sampled rows and every exposure, of
-    head ``head`` computed with logit ``logit`` versus ``other``."""
+    head ``head`` computed with logit ``logit`` versus logit ``other`` carried
+    by ``other_head``: ``head`` itself by default, or a head of another KV group
+    when the wrong read also changes the V scale (the interleaved GQA map)."""
+    if other_head is None:
+        other_head = head
     logits = [Fraction(1)] * base.nhead_q
     logits[head] = logit
     correct = _logit_case(base, block_m, family, logits)
-    logits[head] = other
+    logits = [Fraction(1)] * base.nhead_q
+    logits[other_head] = other
     mutated = _logit_case(base, block_m, family, logits)
     gap = 0
     for exposure in P4_EXPOSURES:
         for query in _GAP_ROWS:
             first = tier_b_row(correct, exposure, query, head)
-            second = tier_b_row(mutated, exposure, query, head)
+            second = tier_b_row(mutated, exposure, query, other_head)
             for dim in range(base.head_dim):
                 gap = max(
                     gap,
@@ -1371,26 +1434,51 @@ def head_scale_margin(
     q_scales: Sequence[Fraction],
     k_scales: Sequence[Fraction],
 ) -> int:
-    """Worst separation over every single wrong Q-head or K-head read.
+    """Worst separation over every single wrong Q-head read, every single wrong
+    K-head read and, under GQA, the interleaved group map.
 
-    Output head ``h`` reading Q head ``g`` has logit ``c_h a_g / a_h``; reading
-    K head ``g``, ``c_h b_g / b_h``. A map that changes several heads is
-    separated at least as well as its best single change, so single changes
-    bound every wrong map."""
+    Output head ``h`` (KV group ``g``) reading Q head ``h'`` has logit
+    ``c_h a_h' / a_h``; reading K of KV head ``g'``, ``c_h b_g' / b_g`` with
+    its own V scale. The interleaved map ``h % Hkv`` changes K and V together
+    at every head where it differs from ``h // (Hq / Hkv)``: the logit ratio is
+    the K-read one and the V exponent becomes ``h % Hkv``. A map that changes
+    several heads is separated at least as well as its best single change, so
+    single changes bound every wrong map."""
     worst: int | None = None
     heads = len(q_scales)
+    groups = len(k_scales)
+    group = heads // groups
+
+    def consider(gap: int) -> None:
+        nonlocal worst
+        worst = gap if worst is None else min(worst, gap)
+
     for base, block_m in bases:
         for head in range(heads):
             logit = P4_HEAD_LOGITS[family][head]
+            own = head // group
             for other_head in range(heads):
-                if other_head == head:
-                    continue
-                for ratio in (
-                    q_scales[other_head] / q_scales[head],
-                    k_scales[other_head] / k_scales[head],
-                ):
-                    gap = logit_gap(base, block_m, family, head, logit, logit * ratio)
-                    worst = gap if worst is None else min(worst, gap)
+                if other_head != head:
+                    ratio = q_scales[other_head] / q_scales[head]
+                    consider(logit_gap(base, block_m, family, head, logit, logit * ratio))
+            for other_group in range(groups):
+                if other_group != own:
+                    ratio = k_scales[other_group] / k_scales[own]
+                    consider(logit_gap(base, block_m, family, head, logit, logit * ratio))
+            interleaved = head % groups
+            if interleaved != own:
+                ratio = k_scales[interleaved] / k_scales[own]
+                consider(
+                    logit_gap(
+                        base,
+                        block_m,
+                        family,
+                        head,
+                        logit,
+                        logit * ratio,
+                        other_head=interleaved * group,
+                    )
+                )
     return 0 if worst is None else worst
 
 
@@ -1399,28 +1487,42 @@ def search_head_scales(
     family: str,
     exponents: Sequence[int] = (-2, -1, 0, 1, 2, 3),
 ) -> tuple[tuple[Fraction, ...], tuple[Fraction, ...], int]:
-    """Maximize :func:`head_scale_margin` over signed power-of-two ``a_h``;
-    ``b_h`` follows from the head logit. Ties prefer scales nearest one."""
+    """Maximize :func:`head_scale_margin` over signed power-of-two ``b_g`` per
+    KV head with ``1/64 <= |b_g| <= 64``; each ``a_h`` follows from the head
+    logit and must be a signed power of two with exponent in ``exponents``.
+    Every ``a_h`` and every ``b_g`` must be distinct. Ties prefer scales
+    nearest one. With ``Hq == Hkv`` this is the single-group search."""
     logits = P4_HEAD_LOGITS[family]
-    choices = [Fraction(sign) * Fraction(2) ** power for power in exponents for sign in (1, -1)]
+    heads = bases[0][0].nhead_q
+    groups = bases[0][0].nhead_k
+    if len(logits) != heads or any(
+        base.nhead_q != heads or base.nhead_k != groups for base, _ in bases
+    ):
+        raise ValueError("every base must have one committed logit per query head")
+    group = heads // groups
+    k_choices = [
+        Fraction(sign) * Fraction(2) ** power for power in range(-6, 7) for sign in (1, -1)
+    ]
     product_of = (lambda c: c / 8) if family == "walsh" else (lambda c: c * 8)
 
-    def k_scale(head: int, a: Fraction) -> Fraction | None:
-        b = product_of(logits[head]) / a
-        return b if _is_signed_power_of_two(b) and Fraction(1, 64) <= abs(b) <= 64 else None
+    def q_scale(head: int, b: Fraction) -> Fraction | None:
+        a = product_of(logits[head]) / b
+        if not _is_signed_power_of_two(a) or floor_log2(abs(a)) not in exponents:
+            return None
+        return a
 
     best: tuple[int, int, tuple, tuple] | None = None
-    for combination in itertools.product(choices, repeat=len(logits)):
-        k_scales = [k_scale(head, a) for head, a in enumerate(combination)]
-        if any(value is None for value in k_scales):
+    for k_scales in itertools.product(k_choices, repeat=groups):
+        if len(set(k_scales)) < groups:
             continue
-        if len(set(combination)) < len(logits) or len(set(k_scales)) < len(logits):
+        q_scales = [q_scale(head, k_scales[head // group]) for head in range(heads)]
+        if any(value is None for value in q_scales) or len(set(q_scales)) < heads:
             continue
-        margin = head_scale_margin(bases, family, combination, k_scales)
-        size = sum(abs(floor_log2(abs(v))) for v in (*combination, *k_scales))
+        margin = head_scale_margin(bases, family, q_scales, k_scales)
+        size = sum(abs(floor_log2(abs(v))) for v in (*q_scales, *k_scales))
         key = (margin, -size)
         if best is None or key > best[:2]:
-            best = (margin, -size, tuple(combination), tuple(k_scales))
+            best = (margin, -size, tuple(q_scales), tuple(k_scales))
     if best is None:
         raise ValueError("no admissible head scales")
     return best[2], best[3], best[0]
@@ -1437,20 +1539,38 @@ P4_HEAD_SCALES: Mapping[str, tuple[tuple[Fraction, ...], tuple[Fraction, ...]]] 
     MappingProxyType(
         {
             "periodic": (
-                (Fraction(1), Fraction(2), Fraction(-4), Fraction(-1)),
-                (Fraction(64), Fraction(-32), Fraction(-4), Fraction(4)),
+                (
+                    Fraction(8),
+                    Fraction(-8),
+                    Fraction(2),
+                    Fraction(-1, 2),
+                    Fraction(-4),
+                    Fraction(4),
+                    Fraction(-1),
+                    Fraction(1, 4),
+                ),
+                (Fraction(8), Fraction(-8)),
             ),
             "walsh": (
-                (Fraction(1), Fraction(-1, 4), Fraction(1, 4), Fraction(-1)),
-                (Fraction(1), Fraction(-1), Fraction(1, 4), Fraction(-1, 2)),
+                (
+                    Fraction(4),
+                    Fraction(1),
+                    Fraction(1, 4),
+                    Fraction(2),
+                    Fraction(-4),
+                    Fraction(-1),
+                    Fraction(-1, 4),
+                    Fraction(-2),
+                ),
+                (Fraction(1, 4), Fraction(-1, 4)),
             ),
         }
     )
 )
-P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType({"periodic": 181, "walsh": 181})
+P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType({"periodic": 94, "walsh": 188})
 P4_CYCLIC_SHIFT = 37
 P4_LATE_KEYS = 64
-# Tile sizes of the calibrated P3 quick specs (the same dispatch identities).
+# Tile sizes of the quick specs' dispatch identities (128x64 for both dtypes).
 _QUICK_BLOCK_M = {
     dtype: entry.spec.block_m for (_, _, dtype), entry in UNIFORM_CALIBRATION.items()
 }
@@ -1534,10 +1654,13 @@ _MASK_MUTATIONS = {
 
 def applicable_mutations(case: P4Case) -> tuple[P4Mutation, ...]:
     """The mutations ``case`` can express: transposing K is a shift only for the
-    cyclic fixture, Walsh blocks and signs exist only in the Walsh fixture, and
-    each mask has its own one-key boundary."""
+    cyclic fixture, Walsh blocks and signs exist only in the Walsh fixture, each
+    mask has its own one-key boundary, and the interleaved group map differs
+    from the correct one only under GQA."""
+    gqa = (P4Mutation.KV_GROUP_INTERLEAVE,) if case.base.nhead_q != case.base.nhead_k else ()
     return (
         *_EVERY_FIXTURE,
+        *gqa,
         *_FIXTURE_MUTATIONS.get(case.fixture, ()),
         *_MASK_MUTATIONS[case.mask],
     )
@@ -2171,19 +2294,23 @@ class P4CalibrationEntry:
         return tuple(problems)
 
 
-# Ratified on gfx942. Case ids are literal, so changing a fixture, its head
-# scales or the quick shapes fails closed instead of following silently. The
-# dispatch fingerprint is the ratified uniform (P3) one; a contract checks it.
+# PROVISIONAL (GQA re-derivation, 2026-11-10): these entries name the GQA quick
+# matrix and its dispatch-resolved 128x64 identity, but no gfx942 capture of
+# this matrix has been audited yet. Ratification is the Phase 5 step of
+# P4errGQA.tex; until then the entries only keep the CPU contracts consistent.
+# Case ids are literal, so changing a fixture, its head scales or the quick
+# shapes fails closed instead of following silently. The dispatch fingerprint
+# is the uniform (P3) one; a contract checks it.
 P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType(
     {
         ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
             policy=P4_POLICY,
             assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
             case_ids=(
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+                "fp16-window64-b1-sq256-sk256-hq8-hk2-d64-p4identity-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
+                "fp16-window64-b1-sq256-sk256-hq8-hk2-d64-p4cyclic-r37-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
+                "fp16-window64-b1-sq256-sk256-hq8-hk2-d64-p4walsh-qp2,p0,p-2,p1,n2,n0,n-2,n1-kp-2,n-2",
+                "fp16-window64-b1-sq256-sk256-hq8-hk2-d64-p4late_max-l64-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
             ),
             spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].spec,
         ),
@@ -2191,10 +2318,10 @@ P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxy
             policy=P4_POLICY,
             assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
             case_ids=(
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+                "bf16-causal-b1-sq256-sk256-hq8-hk2-d64-p4identity-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
+                "bf16-causal-b1-sq256-sk256-hq8-hk2-d64-p4cyclic-r37-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
+                "bf16-causal-b1-sq256-sk256-hq8-hk2-d64-p4walsh-qp2,p0,p-2,p1,n2,n0,n-2,n1-kp-2,n-2",
+                "bf16-causal-b1-sq256-sk256-hq8-hk2-d64-p4late_max-l64-qp3,n3,p1,n-1,n2,p2,n0,p-2-kp3,n3",
             ),
             spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].spec,
         ),

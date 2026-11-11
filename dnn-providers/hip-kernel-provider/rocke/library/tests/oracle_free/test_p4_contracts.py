@@ -459,11 +459,10 @@ def _lowered_quick_case(case: UniformCase) -> str:
 
 
 # Per tile body: 64 keys over two lane halves give one 32-term lane chain, one
-# shuffle, one rescale combine and one alpha. The FP16 causal kernel has one KV
-# loop; the BF16 window-64 kernel splits it into three phases.
+# shuffle, one rescale combine and one alpha. The causal kernel has one KV
+# loop; the window-64 kernel splits it into three phases.
 _TILE_BODIES: Mapping[str, int] = {
-    UNIFORM_QUICK_CASES[0].case_id: 1,
-    UNIFORM_QUICK_CASES[1].case_id: 3,
+    case.case_id: 3 if case.mask == "window" else 1 for case in UNIFORM_QUICK_CASES
 }
 _LANE_CHAIN = 32
 _OUTPUT_CASTS = 32  # D = 64 over two 32-wide output tiles, 16 per lane
@@ -1281,14 +1280,18 @@ def test_quick_matrix_covers_every_fixture_on_both_kernels() -> None:
         family = "walsh" if case.fixture is P4Fixture.WALSH else "periodic"
         # The distinguished key of this row is 64 (even): the Walsh sign is +1.
         query = case.residue_shift + 64
-        logits = tuple(row_logit(case, head, query) for head in range(4))
+        logits = tuple(
+            row_logit(case, head, query) for head in range(case.base.nhead_q)
+        )
         assert logits == P4_HEAD_LOGITS[family]
 
 
 @pytest.mark.parametrize(
     "kwargs,match",
     [
-        ({"q_scales": (3, 1, 1, 1)}, "power of two"),
+        ({"q_scales": (3, 1, 1, 1, 1, 1, 1, 1)}, "power of two"),
+        ({"q_scales": (1, 1, 1, 1)}, "one Q scale per query head"),
+        ({"k_scales": (1, 1, 1, 1)}, "one K scale per KV head"),
         ({"fixture": "cyclic", "shift": 0}, "0 < shift"),
         ({"shift": 5}, "cyclic fixture only"),
         ({"fixture": "late_max"}, "0 < late"),
@@ -1299,8 +1302,8 @@ def test_p4_case_rejects_inexact_or_unsupported_configurations(kwargs, match) ->
     arguments = {
         "base": UNIFORM_QUICK_CASES[0],
         "fixture": "identity",
-        "q_scales": (1, 1, 1, 1),
-        "k_scales": (1, 1, 1, 1),
+        "q_scales": (1,) * UNIFORM_QUICK_CASES[0].nhead_q,
+        "k_scales": (1,) * UNIFORM_QUICK_CASES[0].nhead_k,
     }
     arguments.update(kwargs)
     with pytest.raises(ValueError, match=match):
@@ -1524,7 +1527,13 @@ def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
 def test_zero_logits_reproduce_the_uniform_targets(base: UniformCase) -> None:
     """DT5: with every logit zero, P4's targets are P3's, and Tier B holds them."""
     quick = next(case for case in P4_QUICK_CASES if case.base == base)
-    zero = P4Case(base, "identity", (0,) * 4, (0,) * 4, block_m=quick.block_m)
+    zero = P4Case(
+        base,
+        "identity",
+        (0,) * base.nhead_q,
+        (0,) * base.nhead_k,
+        block_m=quick.block_m,
+    )
     for exposure in P4_EXPOSURES:
         center = tier_a_exposure(zero, exposure)[0]
         np.testing.assert_array_equal(center, uniform_expected_bits(base, exposure))
@@ -1600,8 +1609,9 @@ def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
 
 @pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
 def test_head_scales_keep_their_committed_separation(family: str) -> None:
-    """DT10: every wrong single Q-head or K-head read moves some coordinate by
-    at least the committed margin in target ULPs, on both quick kernels."""
+    """DT10: every wrong single Q-head read, wrong K-head read and the
+    interleaved GQA group map moves some coordinate by at least the committed
+    margin in target ULPs, on both quick kernels."""
     q_scales, k_scales = P4_HEAD_SCALES[family]
     margin = head_scale_margin(P4_SEARCH_BASES, family, q_scales, k_scales)
     assert margin == P4_HEAD_SCALE_MARGIN[family] > 0
@@ -1913,7 +1923,7 @@ def _find(
     low, high = tier_b_exposure(_LABEL_CASE, exposure)
     center, radius, _ = tier_a_exposure(_LABEL_CASE, exposure)
     for query in rows:
-        for head in range(4):
+        for head in range(_LABEL_CASE.base.nhead_q):
             for dim in range(64):
                 values = tuple(
                     int(array[0, query, head, dim])
@@ -2153,7 +2163,9 @@ def test_capture_audit_explains_an_artifact_capture(tmp_path) -> None:
     print(format_audit(audit))
     assert audit.explained and not audit.problems
     (item,) = audit.cases.values()
-    assert item.coordinates == len(_AUDIT_ROWS) * len(P4_EXPOSURES) * 4 * 64
+    assert item.coordinates == (
+        len(_AUDIT_ROWS) * len(P4_EXPOSURES) * _AUDIT_CASE.base.nhead_q * 64
+    )
     assert set(item.ir_mismatches) == {
         ("folded", 207, 0, dim) for dim in range(16, 64) if dim % 4 in (0, 1)
     }

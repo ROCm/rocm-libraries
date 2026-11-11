@@ -119,11 +119,14 @@ class UniformCase:
         )
 
 
-UNIFORM_CAUSAL_FP16 = UniformCase(1, 256, 256, 4, 4, 64, "fp16", "causal")
-UNIFORM_WINDOW_BF16 = UniformCase(1, 256, 256, 4, 4, 64, "bf16", "window", 64)
+# The reviewed quick matrix (PR #14884): GQA with four query heads per KV head,
+# so the group divisor ``h_kv = h_q // 4`` is exercised, and the dtype/mask
+# pairing complements the pinned SDPA cohort (FP16 causal already runs there).
+UNIFORM_WINDOW_FP16 = UniformCase(1, 256, 256, 8, 2, 64, "fp16", "window", 64)
+UNIFORM_CAUSAL_BF16 = UniformCase(1, 256, 256, 8, 2, 64, "bf16", "causal")
 # The GPU lane's parameter list. A CPU contract pins it to the calibrated case set,
 # so a calibrated case cannot silently stop executing.
-UNIFORM_QUICK_CASES = (UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16)
+UNIFORM_QUICK_CASES = (UNIFORM_WINDOW_FP16, UNIFORM_CAUSAL_BF16)
 
 
 @dataclass(frozen=True)
@@ -199,7 +202,7 @@ _DENSE_QUICK_SPEC_BF16 = UniformSpecFingerprint(
     persistent=False,
     runtime_shape=True,
     head_dim=64,
-    block_m=64,
+    block_m=128,
     block_n=64,
     use_exp2_fast=True,
     use_sinks=False,
@@ -207,7 +210,8 @@ _DENSE_QUICK_SPEC_BF16 = UniformSpecFingerprint(
 )
 
 
-# Ratified on gfx942 against the exact quick cases below. A future shape or
+# The dispatch-resolved identity of the quick cases below (both resolve to the
+# non-persistent 128x64 dense candidate with the fast exp2). A future shape or
 # resolved-spec change is uncalibrated even when candidate name and dtype match.
 UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyType(
     {
@@ -217,7 +221,7 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "fp16",
         ): CalibrationEntry(
             ulp_budget=0,
-            case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
+            case_ids=(UNIFORM_WINDOW_FP16.case_id,),
             spec=_DENSE_QUICK_SPEC_FP16,
         ),
         (
@@ -226,7 +230,7 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "bf16",
         ): CalibrationEntry(
             ulp_budget=0,
-            case_ids=(UNIFORM_WINDOW_BF16.case_id,),
+            case_ids=(UNIFORM_CAUSAL_BF16.case_id,),
             spec=_DENSE_QUICK_SPEC_BF16,
         ),
     }

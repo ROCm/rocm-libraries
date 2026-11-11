@@ -217,8 +217,8 @@ def _validate_supported_case(case: DenseCase) -> None:
     shape = _shape(case)
     if shape.batch != 1:
         raise ValueError("gfx942 uniform-probability cases require batch 1")
-    if shape.nhead_q != 4 or shape.nhead_k != 4:
-        raise ValueError("gfx942 uniform-probability cases require Hq=Hkv=4")
+    if shape.nhead_q != 8 or shape.nhead_k != 2:
+        raise ValueError("gfx942 uniform-probability cases require Hq=8 over Hkv=2")
     if shape.head_dim != 64:
         raise ValueError("gfx942 uniform-probability cases require D64")
     if shape.seqlen_q != 256:

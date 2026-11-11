@@ -113,8 +113,8 @@ entry keyed by `(arch, candidate_name, dtype)`:
 
 | Dtype | Case | Resolved tile | `ulp_budget` |
 |---|---|---|---:|
-| FP16 | `B1,Sq256,Sk256,H4/4,D64`, top-left causal | `128x64` | 0 |
-| BF16 | `B1,Sq256,Sk256,H4/4,D64`, sliding window 64 | `64x64` | 0 |
+| FP16 | `B1,Sq256,Sk256,H8/2,D64`, sliding window 64 | `128x64` | 0 |
+| BF16 | `B1,Sq256,Sk256,H8/2,D64`, top-left causal | `128x64` | 0 |
 
 Each entry closes its scope with the exact case IDs and a `UniformSpecFingerprint`
 of the dispatch-resolved spec. The fingerprint records path, persistence,
@@ -210,20 +210,30 @@ All inputs are zero or signed powers of two, so `encode_bits` accepts them
 exactly. `D = 64` is also the period `P`; key `k` is distinguished for row `q`
 when `k + r = q (mod 64)`.
 
-| Fixture | Q[q,h,:] | K[k,h,:] | `r` | Logit `c` |
+| Fixture | Q[q,h,:] | K[k,g,:] | `r` | Logit `c` |
 |---|---|---|---:|---|
-| `identity` | `a_h` one-hot at `q mod 64` | `b_h` one-hot at `k mod 64` | 0 | `a_h b_h / 8` |
-| `cyclic` | as `identity` | one-hot at `(k + 37) mod 64` | 37 | `a_h b_h / 8` |
-| `walsh` | `a_h` times Walsh row `q mod 64` | `b_h (-1)^k` times Walsh row `(k + 1) mod 64` | 1 | `8 a_h b_h`, signed by row parity |
+| `identity` | `a_h` one-hot at `q mod 64` | `b_g` one-hot at `k mod 64` | 0 | `a_h b_g(h) / 8` |
+| `cyclic` | as `identity` | one-hot at `(k + 37) mod 64` | 37 | `a_h b_g(h) / 8` |
+| `walsh` | `a_h` times Walsh row `q mod 64` | `b_g (-1)^k` times Walsh row `(k + 1) mod 64` | 1 | `8 a_h b_g(h)`, signed by row parity |
 | `late_max` | as `identity` | as `identity`, rows `k < 64` zeroed | 0 | as `identity`, keys `k >= 64` only |
 
-The head scales `(a_h, b_h)` give each head its own logit (periodic fixtures
-`8, -8, 2, -1/2`; Walsh magnitudes `8, 2, 1/2, 4`). They were chosen by a
-maximin search so that every wrong Q-head or K-head read changes some stored
-value; a CPU contract recomputes the committed margin. Causal rows contain
-masked distinguished keys (`k = q + 64j`), so any mask leak is visible.
-Window-64 rows straddle two KV tiles, and `late_max` moves the row maximum
-into a later tile; both exercise the online rescale.
+Query head `h` reads KV head `g(h) = h // (Hq / Hkv)`, the kernel's group
+divisor, so `a_h` is per query head and `b_g` per KV head. The quick matrix is
+GQA (`Hq=8`, `Hkv=2`): query heads 0-3 read KV head 0 and heads 4-7 KV head 1.
+The head logits are, per query head, `8, -8, 2, -1/2, 4, -4, 1, -1/4` for the
+periodic fixtures and the magnitudes `8, 2, 1/2, 4` in both groups for Walsh,
+realised by `a = 8, -8, 2, -1/2, -4, 4, -1, 1/4` with `b = 8, -8` (periodic)
+and `a = 4, 1, 1/4, 2, -4, -1, -1/4, -2` with `b = 1/4, -1/4` (Walsh). The
+scales were chosen by a maximin search so that every wrong Q-head read, every
+wrong K-head read and the interleaved GQA map (`h mod Hkv` instead of
+`h // (Hq/Hkv)`, which moves K and V together) changes some stored value by at
+least 94 (periodic) or 188 (Walsh) target ULPs; a CPU contract recomputes the
+committed margin. No two heads of one KV group share a logit, so a swap of two
+query heads inside a group, invisible to the uniform lane because they share a
+V scale, is visible here. Causal rows contain masked distinguished keys
+(`k = q + 64j`), so any mask leak is visible. Window-64 rows straddle two KV
+tiles, and `late_max` moves the row maximum into a later tile; both exercise
+the online rescale.
 
 ### Prediction: Tier B
 
