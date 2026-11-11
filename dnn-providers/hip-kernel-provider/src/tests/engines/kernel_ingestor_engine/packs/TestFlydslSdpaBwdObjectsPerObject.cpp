@@ -451,10 +451,8 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
 /// `mfma_rows = -1`, so a policy-picked 16-row object that is not packed cannot be told from a
 /// 32-row one by its descriptor and is not selected here: the `*NanBiasD128*` cases select it by
 /// graph. The `*NanBiasDropout*` cases cover the dropout objects.
-constexpr bool isSixteenRowBias(int64_t hasBias,
-                                int64_t mfmaRows,
-                                int64_t gqaPack,
-                                int64_t hasDropout)
+constexpr bool
+    isSixteenRowBias(int64_t hasBias, int64_t mfmaRows, int64_t gqaPack, int64_t hasDropout)
 {
     return hasBias == 1 && (mfmaRows == 16 || gqaPack == 1) && hasDropout != 1;
 }
@@ -502,11 +500,11 @@ void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool n
     }
     if(nanBias)
     {
-        staged.erase(std::remove_if(
-                         staged.begin(),
-                         staged.end(),
-                         [](const auto& kernel) { return !isSixteenRowBiasObject(kernel); }),
-                     staged.end());
+        staged.erase(
+            std::remove_if(staged.begin(),
+                           staged.end(),
+                           [](const auto& kernel) { return !isSixteenRowBiasObject(kernel); }),
+            staged.end());
         if(staged.empty())
         {
             reportNoSixteenRowObjects(std::string("biased ") + traits.label);

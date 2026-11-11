@@ -33,7 +33,10 @@ ENGINE_TOML = (
     SCRIPTS.parents[1] / "hip-kernel-provider" / "config" / "ASM_SDPA_ENGINE.toml"
 )
 FLYDSL_TOML = (
-    SCRIPTS.parents[1] / "hip-kernel-provider" / "config" / "hipkernel_flydsl_sdpa_bwd.toml"
+    SCRIPTS.parents[1]
+    / "hip-kernel-provider"
+    / "config"
+    / "hipkernel_flydsl_sdpa_bwd.toml"
 )
 ENGINE_TIER_YAML = (
     SCRIPTS.parents[1]
