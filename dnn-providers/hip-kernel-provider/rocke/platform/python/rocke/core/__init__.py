@@ -11,10 +11,21 @@ passes in this package.
 Modules:
 
   - ``dtypes``     : target-independent dtype names and alias normalization.
+  - ``facts``      : `stated_facts_of(value)`, the facts a kernel parameter's
+                     declaration or a range marker states for a Value.
+  - ``intexpr``    : the integer-expression tree, its evaluator
+                     (`eval_intexpr`) and the host-bound constructors
+                     (`sum_of`, `product_of`, `quotient_of`, `difference_of`).
   - ``ir``         : `IRBuilder`, `KernelDef`, `Value`, `Op`, `Region`,
                      plus type system (`F16`, `F32`, `I32`, `I64`,
                      `VectorType`, `PtrType`, `SmemType`).
+  - ``param_facts``: the facts a kernel parameter's declaration may state
+                     (`FACT_WORDS`, `FACT_INT_TYPES`,
+                     `int_type_limits`), their rules
+                     (`declaration_errors`) and their resolved intervals.
   - ``ir_print``   : MLIR-style textual dump (`print_ir(kernel)`); human-only.
+  - ``value_sources``: who can see a Value and whether an unchecked load reaches
+                     it, the two walks `IRBuilder.gpu_checked_value` refuses by.
   - ``ir_serialize``: round-trippable ``ck.dsl.ir/v1`` machine format
                      (`serialize` / `parse`) with explicit SSA ids, plus
                      `canonicalize` / `canonical_equal` for semantic diff.
@@ -23,7 +34,11 @@ Modules:
   - ``lower_llvm`` : `lower_kernel_to_llvm(kernel, *, arch) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
   - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
-                     flavor-keyed IR sha256 golden fixtures.
+                     flavor-keyed IR sha256 golden fixtures, and the shared
+                     writer / CLI (`write_golden_shards`, `golden_main`).
+  - ``backend``    : python/cpp/both lowering selection
+                     (`lower_universal_gemm`, `lower_family`, `import_engine`,
+                     `name_of`, `GemmLowerResult`, `Backend*` errors).
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).
@@ -82,9 +97,14 @@ from .backend import (
     BackendCoverageGap,
     BackendError,
     BackendMismatch,
+    GemmLowerResult,
+    import_engine,
+    lower_family,
     lower_universal_gemm,
+    name_of,
     resolve_backend,
 )
+from .facts import StatedFacts, stated_facts_of
 from .ir_print import print_ir
 from .ir_serialize import (
     canonical_equal,
@@ -147,9 +167,15 @@ __all__ = [
     "BackendCoverageGap",
     "BackendError",
     "BackendMismatch",
+    "GemmLowerResult",
+    "import_engine",
+    "lower_family",
     "lower_universal_gemm",
+    "name_of",
     "resolve_backend",
     "print_ir",
+    "StatedFacts",
+    "stated_facts_of",
     "serialize",
     "parse",
     "canonicalize",

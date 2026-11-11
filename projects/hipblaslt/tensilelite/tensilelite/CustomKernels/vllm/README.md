@@ -57,6 +57,11 @@ gfx950 only: the kernels size their LDS stage for its 160 KB per CU.
 Predicated in `custom.config`: `batch == 1`, `n == N`, `m > 8`, `K % 8 == 0`,
 and unit strides on all four tensors. K needs no bound.
 
+Each row of D is reduced by one wave with the same split of K over its lanes,
+the same loop and the same reduction, whichever wave and tile it falls in, and
+StaggerU is 0. The kernels therefore declare `uniformSummationOrder: true` in
+`custom.config`, so hipBLASLt can select them under uniform summation order.
+
 ## Kernarg preload
 
 The kernels take the arguments of the rocBLAS wvSpltK kernels, in the same

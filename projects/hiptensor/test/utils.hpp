@@ -365,6 +365,10 @@ __host__ static inline void
         (fillValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, value);
 }
 
+// Relative tolerance for R_64F results: tight enough that a float
+// rounding (~1e-8) fails
+static const double fp64Tolerance = 1e-12;
+
 template <typename DDataType>
 std::pair<bool, double> compareEqual(DDataType const*             deviceD,
                                      DDataType const*             hostD,
@@ -516,7 +520,7 @@ std::pair<bool, double> compareEqualLaunchKernel(DDataType*                   de
         gridDim       = dim3(ceilDiv(i, maxElements), 1, 1);
         auto elements = i > maxElements ? maxElements : i;
 
-        hipLaunchKernelGGL((maxReduceKernel),
+        hipLaunchKernelGGL((maxReduceKernel<double>),
                            gridDim,
                            blockDim,
                            0,

@@ -46,7 +46,7 @@
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -180,7 +180,6 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.TensorLoadWmmaSpace;
                 passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                     moduleOptions.TensorLoadDsLoadGapCycles;
-                passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
                 passFeatureConfig.dagFeatures.wmmaRefillMode =
@@ -188,6 +187,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaBatchSize =
                     std::max(1, moduleOptions.WmmaBatchSize);
                 passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
+                passFeatureConfig.dagFeatures.queueFillSafetyMarginCycles =
+                    resolvedKnobs.queueFillSafetyMarginCycles;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
@@ -231,8 +232,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
                 // A deep WMMA queue issues WMMAs back-to-back: one wait before the first.
-                waitCntOptions.mergeWaitsInWmmaRuns =
-                    moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles != 0;
+                waitCntOptions.mergeWaitsInWmmaRuns = moduleOptions.WmmaQueueCoverCycles != 0;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
@@ -345,7 +345,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // covers final per-function code, while SW-prefetch owns its hints' XCnt
     // waits.
     constexpr bool kEnableXcntDrainProfile = false;
-    mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
+    mpm.addPass(createGfx1250XnackHazardModulePass(kEnableXcntDrainProfile));
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {

@@ -74,18 +74,6 @@ from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
-from kernels.common.conv_direct_grouped import (
-    DirectConv4cSpec,
-    DirectConv16cSpec,
-    DirectConvProblem,
-    build_direct_conv_4c,
-    build_direct_conv_16c,
-)
-from kernels.common.conv_implicit_gemm import (
-    ConvProblem,
-    ImplicitGemmConvSpec,
-    build_implicit_gemm_conv,
-)
 from rocke.instances import (
     TileSpec,
     TraitSpec,
@@ -111,6 +99,26 @@ except Exception:  # pragma: no cover - depends on the environment
     _HAVE_TORCH = False
 
 _requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
+
+
+def _have_library_conv() -> bool:
+    """True when the rocke library (``library/kernels``) is importable.
+
+    A platform-only copy has no library tree; the conv lowering cases below
+    then skip instead of failing with ``ModuleNotFoundError: kernels``.
+    """
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("kernels.common.conv_implicit_gemm") is not None
+    except ImportError:
+        return False
+
+
+_requires_library_conv = unittest.skipUnless(
+    _have_library_conv(),
+    "requires the rocke library (kernels.common.conv_implicit_gemm)",
+)
 
 # ---------------------------------------------------------------------
 # Core IR
@@ -583,7 +591,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(loads[0].attrs["vec"], 16)
         self.assertEqual(loads[0].attrs["align"], 32)
 
-        # store_wmma_acc scatters c_per_lane scalars via the c_layout map.
+        # store_wmma_acc scatters c_per_lane scalars via the destination map.
         b3 = IRBuilder("wmma_store")
         o = b3.param("O", PtrType(F16, "global"))
         so = b3.param("so", I32)
@@ -659,7 +667,7 @@ class TestHelpers(unittest.TestCase):
         muls = [o for o in self._kernel_ops(b3.kernel) if o.name == "vector.mul"]
         self.assertEqual(len(muls), 1)
 
-        # store_wmma_tile -> c_per_lane scalar stores via the c_layout map.
+        # store_wmma_tile -> c_per_lane scalar stores via the destination map.
         b4 = IRBuilder("wmma_tile_store")
         o = b4.param("O", PtrType(F16, "global"))
         so = b4.param("so", I32)
@@ -790,59 +798,6 @@ class TestHelpers(unittest.TestCase):
             LdsLayout.padded_k(64, 8).validate_for_async()
         with self.assertRaises(ValueError):
             LdsLayout(logical_cols=64, swizzle="xor").validate_for_async()
-
-    def test_wgrad_async_rejects_non_packed_lds_layout(self):
-        """An explicit lds_layout must reach validate_for_async() for wgrad too.
-
-        The scalar ``lds_k_pad`` guard cannot stand in for this: an explicit
-        ``lds_layout`` object beats the scalar in ``effective_lds_layout()``, and
-        the xor swizzle has no scalar analogue at all. Without the call these
-        specs build and only fail deep inside the emitter, which the sweep
-        drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
-        """
-        from kernels.common._conv_implicit_gemm_common import ConvProblem
-        from kernels.common.conv_implicit_gemm import ConvDataSpec
-        from kernels.common.conv_implicit_gemm_wgrad import (
-            WgradConvSpec,
-            is_valid_wgrad_spec,
-        )
-
-        def _spec(**over):
-            return WgradConvSpec(
-                problem=ConvProblem(N=1, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
-                name="wgrad_async_guard",
-                data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-                tile_m=64,
-                tile_n=64,
-                tile_k=64,
-                warp_m=2,
-                warp_n=2,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=16,
-                wave_size=64,
-                pipeline="mem",
-                epilogue="cshuffle",
-                split_k=1,
-                lds_k_outer=True,
-                async_dma=True,
-                **over,
-            )
-
-        # The packed layout the async intrinsic actually writes is accepted.
-        _spec(lds_layout=LdsLayout.packed_async(64)).validate()
-
-        for bad in (
-            LdsLayout.padded_k(64, 8),
-            LdsLayout(logical_cols=64, swizzle="xor"),
-        ):
-            spec = _spec(lds_layout=bad)
-            with self.assertRaises(ValueError):
-                spec.validate()
-            # And the soft validator reports it rather than skipping silently.
-            ok, why = is_valid_wgrad_spec(spec, "gfx950")
-            self.assertFalse(ok)
-            self.assertTrue(why)
 
     def test_schedule_policy_emits_expected_hints(self):
         b = IRBuilder("sched_smoke")
@@ -985,134 +940,6 @@ class TestInstances(unittest.TestCase):
         # 256 threads in a block, max_workgroup_size attribute set.
         self.assertIn("define amdgpu_kernel void", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
-
-    def test_implicit_gemm_conv_builds(self):
-        prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=prob,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-        )
-        kernel = build_implicit_gemm_conv(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
-        # The buffer rsrc DW3 flag-word must be 0x00027000, not 0 — the
-        # critical correctness fix from the bake-off debugging session.
-        self.assertIn("159744", ll)  # 0x27000 = 159744
-
-    def test_implicit_gemm_async_rejects_padded_lds(self):
-        prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=prob,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-            async_dma=True,
-            lds_k_pad=8,
-        )
-        with self.assertRaises(ValueError):
-            build_implicit_gemm_conv(spec)
-
-    def test_implicit_gemm_async_emits_pingpong_artifacts(self):
-        """Async-DMA conv must emit the ping-pong scaffolding.
-
-        We sanity-check that the async-DMA path produces:
-          * ``raw_ptr_buffer_load_lds`` intrinsics (the actual async DMA).
-          * ``s_setprio`` bookends from the interwave scheduler (the
-            high-prio / low-prio pair around each MFMA group).
-          * ``s_waitcnt`` with a partial ``vmcnt`` (overlap of the
-            next iter's load with this iter's compute), encoded as
-            anything other than the all-zero drain.
-          * The ``s_barrier`` count is at least 2 per K-iter (one
-            ``sync_lds_only`` before each issue + one after the wait),
-            confirming the pong-hazard guard is in place.
-        """
-        prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=prob,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-            async_dma=True,
-        )
-        kernel = build_implicit_gemm_conv(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        # 1) The async DMA intrinsic itself is emitted.
-        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
-        # 2) Interwave ping-pong: setprio bookends. We expect *both*
-        # the high (1) and low (0) prio settings from the interwave
-        # SchedulePolicy.
-        self.assertIn("@llvm.amdgcn.s.setprio(i16 1)", ll)
-        self.assertIn("@llvm.amdgcn.s.setprio(i16 0)", ll)
-        # 3) At least one barrier per K-iter for the ABA-hazard guard
-        # (K_iters = 576 / 64 = 9 in this shape, but counting exactly
-        # is brittle; require >= 8 barriers as a lower bound).
-        barrier_count = ll.count("@llvm.amdgcn.s.barrier")
-        self.assertGreaterEqual(
-            barrier_count,
-            8,
-            msg=f"expected >= 8 s_barriers for ping-pong, found {barrier_count}",
-        )
-
-    def test_direct_conv_16c_builds(self):
-        prob = DirectConvProblem(
-            N=32, H=200, W=200, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
-        )
-        spec = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=True)
-        kernel = build_direct_conv_16c(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        # K32-folded hot loop emits ONLY the wide 16x16x32 MFMA: S=0/1 fold
-        # into one wide atom and the S=2 residual is promoted to a SECOND
-        # wide atom (zero-padded upper K) so both atoms on the accumulator
-        # are the same width. Mixing a 16x16x16 residual into the same
-        # accumulator triggered a cross-width MFMA accumulator hazard that
-        # both comgr and hipcc miscompiled at the H-edges; the all-wide fold
-        # is bit-correct.
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
-        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
-        # The unfolded (gfx942-capable) path still uses only 16x16x16.
-        spec_nf = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=False)
-        ll_nf = lower_kernel_to_llvm(build_direct_conv_16c(spec_nf), arch="gfx950")
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll_nf)
-        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll_nf)
-
-    def test_direct_conv_4c_builds(self):
-        prob = DirectConvProblem(
-            N=32, H=200, W=200, groups=64, cpg=4, kpg=4, KH=3, KW=3, PAD=1, stride=1
-        )
-        spec = DirectConv4cSpec(problem=prob, block_q=8, block_groups=16)
-        kernel = build_direct_conv_4c(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        # 4x4x4 atom emits one MFMA per (r, s) tile (9 per output row).
-        self.assertIn("@llvm.amdgcn.mfma.f32.4x4x4f16", ll)
 
 
 # ---------------------------------------------------------------------
@@ -1972,9 +1799,9 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             (),
             {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
         )()
-        orig = backend_mod._import_engine
-        backend_mod._import_engine = lambda: engine
-        try:
+        with patch.object(
+            backend_mod, "import_engine", lambda module="rocke_engine": engine
+        ):
             for flavor in LLVM_FLAVORS:
                 with self.subTest(flavor=flavor):
                     self.assertEqual(
@@ -1987,8 +1814,6 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
                 backend_mod._lower_via_cpp_engine(
                     "ir", arch="gfx950", llvm_flavor="not-a-real-flavor"
                 )
-        finally:
-            backend_mod._import_engine = orig
 
     def test_comgr_guard_compares_datalayout_generation_not_flavor(self):
         """The comgr mismatch guard keys on generation, so llvm22/llvm23 mix.
@@ -3427,98 +3252,6 @@ class TestCdnaPrimitives(unittest.TestCase):
         ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
-    def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
-        from kernels.common.conv_implicit_gemm import (
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-
-        prob = ConvProblem(
-            N=4,
-            Hi=14,
-            Wi=14,
-            C=128,
-            K=128,
-            Y=3,
-            X=3,
-            sH=1,
-            sW=1,
-            pH=1,
-            pW=1,
-            dH=1,
-            dW=1,
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=prob,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-            chiplet_swizzle=True,
-            chiplet_wgm=4,
-            waves_per_eu=2,
-        )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx950")
-        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
-        self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
-        # The chiplet swizzle takes both blockIdx.x and blockIdx.y.
-        self.assertIn("@llvm.amdgcn.workgroup.id.x", ll)
-        self.assertIn("@llvm.amdgcn.workgroup.id.y", ll)
-
-    def test_implicit_gemm_conv_async_uses_sgpr_pinned_lds_base(self):
-        """The async-DMA conv must hoist the per-wave LDS base into
-        an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
-        """
-        from kernels.common.conv_implicit_gemm import (
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-
-        prob = ConvProblem(
-            N=8,
-            Hi=56,
-            Wi=56,
-            C=64,
-            K=64,
-            Y=3,
-            X=3,
-            sH=1,
-            sW=1,
-            pH=1,
-            pW=1,
-            dH=1,
-            dW=1,
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=prob,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-            async_dma=True,
-        )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx950")
-        # readfirstlane for wave-uniform LDS offset.
-        self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
-        # SGPR-pin asm constraint.
-        self.assertIn('asm "", "=s,0"(i32', ll)
-        # CACHE_STREAM coherency on the async loads (aux i32 = 2).
-        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
-
     def test_universal_gemm_bf16_spec_drives_ir(self):
         """Universal GEMM should use DataSpec dtype fields in params,
         LDS allocation, global loads/stores and MFMA dispatch.
@@ -4688,12 +4421,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.av_load_b128(p)
         # Permissive C++ mode falls back even when the native engine rejects IR.
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"av_load_b128: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4793,12 +4526,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4907,7 +4640,7 @@ def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
         error_type, message = BackendError, "rocke_engine.*not importable"
     else:
         error_type, message = (
-            ValueError,
+            TypeError,
             rf"{op}: pointer operand is ptr addrspace\(3\)",
         )
     with pytest.raises(error_type, match=message):
@@ -6323,44 +6056,6 @@ class TestValidationHarness(unittest.TestCase):
         self.assertEqual(as_dict["shape"], [128])
 
 
-class TestConvDirectGroupedTransforms(unittest.TestCase):
-    """The transform-descriptor migration must keep the kernels building."""
-
-    def test_16c_kernel_lowers_to_llvm(self):
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from kernels.common.conv_direct_grouped import (
-            DirectConv16cSpec,
-            DirectConvProblem,
-            build_direct_conv_16c,
-        )
-
-        spec = DirectConv16cSpec(
-            problem=DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16)
-        )
-        kernel = build_direct_conv_16c(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        # Smoke check: the generated LLVM IR mentions amdgpu and the
-        # kernel name (proves the body got emitted).
-        self.assertIn("amdgpu", ll)
-        self.assertIn(kernel.name, ll)
-
-    def test_4c_kernel_lowers_to_llvm(self):
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from kernels.common.conv_direct_grouped import (
-            DirectConv4cSpec,
-            DirectConvProblem,
-            build_direct_conv_4c,
-        )
-
-        spec = DirectConv4cSpec(
-            problem=DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4)
-        )
-        kernel = build_direct_conv_4c(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        self.assertIn("amdgpu", ll)
-        self.assertIn(kernel.name, ll)
-
-
 class TestTransformsRuntimeAware(unittest.TestCase):
     """The new runtime-aware transforms must respect their contracts.
 
@@ -6576,6 +6271,7 @@ class TestCkTileLowering(unittest.TestCase):
         ):
             self.assertIn(line, src)
 
+    @_requires_library_conv
     def test_conv_source_references_grouped_convolution_kernel(self):
         from kernels.common.conv_implicit_gemm import (
             ConvProblem,
@@ -6690,6 +6386,7 @@ class TestCkTileLowering(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             lower_universal_gemm_to_cktile(bad_pipeline)
 
+    @_requires_library_conv
     def test_dispatcher_handles_both_spec_types(self):
         """``lower_spec_to_cktile`` must dispatch to gemm vs conv emitters
         based on the spec type without the caller knowing about them.
@@ -6751,6 +6448,7 @@ class TestCkTileLowering(unittest.TestCase):
         self.assertIn("ck_tile::GroupedConvolutionForwardKernel<", conv_src)
         self.assertNotIn("ck_tile::GemmKernel<", conv_src)
 
+    @_requires_library_conv
     def test_dispatcher_rejects_unknown_spec(self):
         from rocke.core import lower_spec_to_cktile
 
@@ -6830,51 +6528,6 @@ class TestHipLoweringCoverage(unittest.TestCase):
         self._lower_and_check(
             build_universal_gemm(spec),
             must_contain=["__builtin_amdgcn_mfma_f32_32x32x16_f16", "__shared__"],
-        )
-
-    def test_implicit_gemm_conv_lowers(self):
-        from kernels.common.conv_implicit_gemm import (
-            ConvProblem,
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        p = ConvProblem(
-            N=8,
-            Hi=56,
-            Wi=56,
-            C=64,
-            K=64,
-            Y=3,
-            X=3,
-            sH=1,
-            sW=1,
-            pH=1,
-            pW=1,
-            dH=1,
-            dW=1,
-        )
-        spec = ImplicitGemmConvSpec(
-            problem=p,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-        )
-        self._lower_and_check(
-            build_implicit_gemm_conv(spec),
-            must_contain=[
-                "__builtin_amdgcn_make_buffer_rsrc",
-                "__builtin_amdgcn_raw_buffer_load",
-                "__builtin_amdgcn_raw_buffer_store",
-                "__builtin_amdgcn_mfma_f32_32x32x16_f16",
-            ],
         )
 
     def test_layernorm2d_lowers(self):
@@ -6989,7 +6642,9 @@ class TestLauncherBind(unittest.TestCase):
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._kernel_name = "k"
         launcher._cluster_dims = None
+        launcher._contract = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):
@@ -7653,6 +7308,49 @@ class TestResolveStream(unittest.TestCase):
             self.assertEqual(resolve_stream(0), 99)
 
 
+class TestTorchDtypeAndDeviceTensor(unittest.TestCase):
+    """``torch_interop.torch_dtype`` / ``device_tensor``: the torch glue a
+    library binding uses instead of importing torch itself."""
+
+    def test_torch_dtype_resolves_by_name(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import torch_dtype
+
+        fake = SimpleNamespace(int32="i32", float16="f16")
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertEqual(torch_dtype("int32"), "i32")
+            self.assertEqual(torch_dtype("float16"), "f16")
+            with self.assertRaisesRegex(ValueError, "no dtype 'int31'"):
+                torch_dtype("int31")
+
+    def test_device_tensor_passes_values_dtype_and_device(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor
+
+        fake = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            out = device_tensor(range(3), dtype="i32", device="dev")
+        fake.tensor.assert_called_once_with([0, 1, 2], dtype="i32", device="dev")
+        self.assertIs(out, fake.tensor.return_value)
+
+    def test_both_raise_when_torch_absent(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor, torch_dtype
+
+        with mock.patch.dict(sys.modules, {"torch": None}):
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                torch_dtype("int32")
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                device_tensor([1], dtype=None, device=None)
+
+
 class TestPackArgsKernargABI(unittest.TestCase):
     """``pack_args`` / ``pack_args_kernelparams`` -- AMDGPU kernarg ABI.
 
@@ -7741,7 +7439,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
 
-    def test_as_ptr_accepts_devicemem_ptr_method(self):
+    def test_device_pointer_accepts_devicemem_ptr_method(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7757,7 +7455,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         )
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xDEAD)
 
-    def test_as_ptr_prefers_data_ptr_over_ptr(self):
+    def test_device_pointer_prefers_data_ptr_over_ptr(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7774,7 +7472,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": _Both()})
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xAAAA)
 
-    def test_as_ptr_none_encodes_null(self):
+    def test_device_pointer_none_encodes_null(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7782,7 +7480,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": None})
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0)
 
-    def test_as_ptr_rejects_unconvertible(self):
+    def test_device_pointer_rejects_unconvertible(self):
         from rocke.runtime.packing import pack_args
 
         # A non-callable ptr attribute is not a device pointer -- the callable()

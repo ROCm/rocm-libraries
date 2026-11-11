@@ -24,6 +24,7 @@
 
 import os
 import re
+from copy import deepcopy
 from textwrap import dedent, indent
 
 import pytest
@@ -31,7 +32,7 @@ import yaml
 
 import tensilelite
 import tensilelite.CustomKernels as ck_mod
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+import tensilelite.logic.handle_custom_kernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
@@ -59,8 +60,11 @@ from tensilelite.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
+from tensilelite.SolutionStructs.Problem import ProblemType
 from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
 from tensilelite.ValidateMetadata import validate_all
+
+from logic_corpus import needs_logic_corpus, require_logic_file
 
 pytestmark = pytest.mark.unit
 
@@ -105,6 +109,34 @@ def test_validate_external_requires_full_custom_kernel_fields(tmp_path):
 
     assert not valid
     assert "CustomKernel.grid" in msg
+
+
+@pytest.mark.parametrize("value,ok", [("true", True), ("false", True), ("yes_please", False), ("1", False)])
+def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
+    """hipBLASLt reads CustomKernel.uniformSummationOrder as a bool, so anything
+    else would silently leave the kernel refused under uniform summation order."""
+    write_kernel(tmp_path / "external.s", f"""\
+          Source:
+            Origin: test
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [ComputeUnits, One, One]
+            uniformSummationOrder: {value}
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert valid is ok, msg
+    if not ok:
+        assert "CustomKernel.uniformSummationOrder" in msg
 
 
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
@@ -249,6 +281,30 @@ def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
 
     assert config["AssertFree0ElementMultiple"] == 256
     assert config["AssertFree1ElementMultiple"] == 256
+
+
+@pytest.mark.parametrize("layout", [None, "Auto"])
+def test_get_custom_kernel_config_requires_mx_scale_layout(tmp_path, layout):
+    lines = ["InternalSupportParams:", "  KernArgsVersion: 0"]
+    if layout:
+        lines.append(f"MXScaleFormat: {layout}")
+    lines += ["ProblemType: {MXBlockA: 32, MXBlockB: 32}", "MatrixInstruction: [16, 16, 16, 1]"]
+    write_kernel(tmp_path / "mx_kernel.s", "\n".join(lines))
+
+    with pytest.raises(RuntimeError, match="MXScaleFormat"):
+        getCustomKernelConfig("mx_kernel", {}, str(tmp_path))
+
+
+def test_get_custom_kernel_config_keeps_declared_mx_scale_layout(tmp_path):
+    write_kernel(tmp_path / "mx_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          MXScaleFormat: HostPreSwizzle
+          ProblemType: {MXBlockA: 32, MXBlockB: 32}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    assert getCustomKernelConfig("mx_kernel", {}, str(tmp_path))["MXScaleFormat"] == "HostPreSwizzle"
 
 
 def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
@@ -1457,6 +1513,9 @@ def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGr
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
     assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+    # Each wave reduces whole rows, every row with the same lanes, loop and
+    # reduction, so hipBLASLt can run these under uniform summation order.
+    assert ck["uniformSummationOrder"] is True
 
 
 @pytest.mark.parametrize(
@@ -1482,23 +1541,27 @@ def test_vllm_wvsplitk_shipped_config(dt, n, tile):
     _check_skinny_tn_config(f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1})
 
 
-_LOGIC_ROOT = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        *([".."] * 4),
-        "library",
-        "src",
-        "amd_detail",
-        "rocblaslt",
-        "src",
-        "Tensile",
-        "Logic",
-        "asm_full",
-    )
-)
-
-_PLAIN_BF16_LOGIC = "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
 _HALF = 4
+_GFX950_HEADER = {
+    "ScheduleName": "gfx950",
+    "ArchitectureName": "gfx950",
+}
+
+
+def _plain_tn_problem_type(dataType):
+    """Plain TN GEMM, with every unlisted field at its TensileLite default."""
+    return {
+        "OperationType": "GEMM",
+        "DataType": dataType,
+        "DestDataType": dataType,
+        "ComputeDataType": 0,
+        "HighPrecisionAccumulate": True,
+        "TransposeA": True,
+        "TransposeB": False,
+        "UseBeta": True,
+        "Batched": True,
+        "SupportUserArgs": True,
+    }
 
 
 def _boxes_overlap(a, b):
@@ -1510,6 +1573,7 @@ def _boxes_overlap(a, b):
     return True
 
 
+@needs_logic_corpus
 @pytest.mark.parametrize(
     "rel,dataType,kernels",
     [
@@ -1528,31 +1592,24 @@ def _boxes_overlap(a, b):
 def test_skinny_tn_range_logic(rel, dataType, kernels):
     """hipBLASLt reaches the skinny TN kernels through these Range files. A custom
     kernel takes the logic file's problem type, and these kernels support no bias,
-    activation or scale vector, so the type must be plain GEMM. The BF16 file
-    must match the header and type of the shipped plain-GEMM logic to share its
-    placeholder; gfx950 ships no plain-GEMM FP16 TN logic, so the FP16 file
-    differs from it only in the data types. Keys are [m_min, m_max, n_min, n_max,
-    batch_min, batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes the first
-    row containing the problem, so the rows must not overlap, and each must sit
-    inside its kernel's predicates."""
-    path = os.path.join(_LOGIC_ROOT, rel)
-    if not os.path.exists(path):
-        pytest.skip(f"tuning logic tree not present: {rel}")
-    with open(path) as f:
+    activation or scale vector, so the type must be plain GEMM in the kernels'
+    data type. Types are compared after TensileLite fills in defaults, since a
+    logic file may write a default out or leave it implicit. Keys are [m_min,
+    m_max, n_min, n_max, batch_min, batch_max, K_min, K_max], -1 unbounded.
+    hipBLASLt takes the first row containing the problem, so the rows must not
+    overlap, and each must sit inside its kernel's predicates.
+
+    The BF16 file must also share the placeholder of the shipped plain-GEMM
+    Equality file beside it. That is a fact about two corpus files, so
+    ``TensileLogic --check-all`` checks it
+    (``valid_corpus_consistency.find_range_sibling_violations``), not this test."""
+    with open(require_logic_file(rel)) as f:
         doc = yaml.safe_load(f)
     assert doc["LibraryType"] == "Range"
-    pt = doc["ProblemType"]
-    assert pt.get("ActivationType", "none") == "none"
-    assert pt.get("UseScaleAB", "") == ""
-    for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
-        assert not pt.get(key), key
-
-    with open(os.path.join(_LOGIC_ROOT, _PLAIN_BF16_LOGIC)) as f:
-        plain = yaml.safe_load(f)
-    plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
-    assert {k: doc[k] for k in plainHeader} == plainHeader
-    typeFields = ("DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType")
-    assert pt == {**plain["ProblemType"], **{k: dataType for k in typeFields}}
+    assert {k: doc[k] for k in _GFX950_HEADER} == _GFX950_HEADER
+    actualType = ProblemType(deepcopy(doc["ProblemType"]), False).state
+    expectedType = ProblemType(_plain_tn_problem_type(dataType), False).state
+    assert actualType == expectedType
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     rows = [(key, names[index]) for key, (index, _) in doc["ExactLogic"]]

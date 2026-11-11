@@ -1440,6 +1440,33 @@ rocke_status_t lower_expect_error(const char* name,
     return st;
 }
 
+/* The HIP-source counterpart of lower_expect_error: the HIP lowerer leaves its
+ * message on the builder's error channel. */
+template <typename BuildFn>
+rocke_status_t
+    lower_hip_expect_error(const char* name, BuildFn build, const char* arch, std::string* err_out)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return ROCKE_OK;
+    }
+    build(&b);
+    rocke_b_ret(&b);
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = arch;
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    const char* msg = rocke_ir_builder_error(&b);
+    err_out->assign(msg ? msg : "");
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
 rocke_value_t* private_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
 {
     return rocke_b_param(b, name, rocke_ptr_type(b, elem, "private"), nullptr);
@@ -1704,11 +1731,13 @@ void case_gfx1250_data_prefetch_lowerer_rechecks()
 {
     struct Recheck
     {
+        rocke_status_t status;
         const char* want;
         void (*build)(rocke_ir_builder_t*);
     };
     static const Recheck rechecks[] = {
-        {"global_prefetch cachepolicy must be in 0..31, got 40",
+        {ROCKE_ERR_VALUE,
+         "global_prefetch cachepolicy must be in 0..31, got 40",
          [](rocke_ir_builder_t* b) {
              emit_raw_op(b,
                          ROCKE_OP_TILE_GLOBAL_PREFETCH,
@@ -1716,7 +1745,8 @@ void case_gfx1250_data_prefetch_lowerer_rechecks()
                          "cachepolicy",
                          40);
          }},
-        {"flat_prefetch cachepolicy must be in 0..31, got -1",
+        {ROCKE_ERR_VALUE,
+         "flat_prefetch cachepolicy must be in 0..31, got -1",
          [](rocke_ir_builder_t* b) {
              emit_raw_op(b,
                          ROCKE_OP_TILE_FLAT_PREFETCH,
@@ -1724,14 +1754,18 @@ void case_gfx1250_data_prefetch_lowerer_rechecks()
                          "cachepolicy",
                          -1);
          }},
-        {"s_setreg simm16 must fit an unsigned i16",
+        {ROCKE_ERR_VALUE,
+         "s_setreg simm16 must fit an unsigned i16",
          [](rocke_ir_builder_t* b) {
              emit_raw_op(b, ROCKE_OP_TILE_S_SETREG, rocke_b_const_i32(b, 1), "simm16", 70000);
          }},
         /* The builder sees a global PtrType, but the param ABI moved it to
          * constant space: the header says ptr addrspace(4), which
-         * global.prefetch cannot take. */
-        {"global_prefetch ptr must be a global pointer, got ptr addrspace(4)",
+         * global.prefetch cannot take: a type error, as for every op that
+         * names its pointer ptr addrspace(1). */
+        {ROCKE_ERR_TYPE,
+         "global_prefetch ptr must be a global pointer, got ptr addrspace(4) "
+         "(its parameter's addr_space)",
          [](rocke_ir_builder_t* b) {
              rocke_param_opts_t constant{};
              constant.addr_space = "constant";
@@ -1746,7 +1780,7 @@ void case_gfx1250_data_prefetch_lowerer_rechecks()
         std::string err;
         const rocke_status_t st
             = lower_expect_error("recheck", r.build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, &err);
-        if(st != ROCKE_ERR_VALUE || err.find(r.want) == std::string::npos)
+        if(st != r.status || err.find(r.want) == std::string::npos)
         {
             char msg[ROCKE_ERR_MSG_CAP + 128];
             snprintf(msg,
@@ -2589,6 +2623,80 @@ void case_gfx1250_tdm_i32_lds_address()
     expect_arg(tdm_readfirstlane_args(ir), 1, "%lds", __LINE__);
 }
 
+/* Mirrors test_i64_global_address_used_directly: an i64 address (from
+ * rocke_b_global_addr_of) is packed as is, with no ptrtoint. */
+void case_gfx1250_tdm_i64_global_address()
+{
+    const std::string ir = lower_one(
+        "i64_gaddr",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* gaddr = rocke_b_param(b, "gaddr", rocke_i64(), nullptr);
+            rocke_value_t* lds = i32_param(b, "lds");
+            rocke_value_t* n = rocke_b_const_i32(b, 64);
+            rocke_value_t* g[5];
+            rocke_b_tdm_descriptor_2d(b, gaddr, lds, 4, n, n, n, 64, 1, 0, -1, 0, g);
+            rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_NO_IR(ir, "ptrtoint");
+    EXPECT_IR(ir, "lshr i64 %gaddr, 32");
+    const std::string trunc = " = trunc i64 %gaddr to i32";
+    const size_t at = ir.find(trunc);
+    if(at == std::string::npos)
+    {
+        fail("no trunc of %gaddr", __LINE__);
+        return;
+    }
+    const size_t name = ir.rfind('%', at);
+    expect_arg(tdm_readfirstlane_args(ir), 2, ir.substr(name, at - name).c_str(), __LINE__);
+}
+
+/* Mirrors TestTdmPaddingEncode in test_gfx1250_tdm.py. */
+void case_gfx1250_tdm_encode_padding()
+{
+    struct Good
+    {
+        int interval_bytes, pad_bytes, interval, amount;
+    };
+    static const Good good[] = {
+        {8, 4, 0, 0},
+        {64, 4, 3, 0},
+        {1024, 4, 7, 0},
+        {64, 32, 3, 7},
+        {1024, 512, ROCKE_TDM_PAD_INTERVAL_MAX, ROCKE_TDM_PAD_AMOUNT_MAX},
+    };
+    for(const Good& g : good)
+    {
+        int interval = -1, amount = -1;
+        if(!rocke_encode_tdm_padding(g.interval_bytes, g.pad_bytes, &interval, &amount, nullptr, 0)
+           || interval != g.interval || amount != g.amount)
+            fail("encode_tdm_padding fields", __LINE__);
+    }
+    struct Bad
+    {
+        int interval_bytes, pad_bytes;
+        const char* message;
+    };
+    static const Bad bad[] = {
+        {64, 0, "needs a positive pad"},
+        {64, 2, "dword-granular"},
+        {12, 16, "power-of-two dword count"},
+        {2048, 16, "pad_interval 8 exceeds 7"},
+        {64, 1024, "pad_amount 255 exceeds 127"},
+    };
+    for(const Bad& c : bad)
+    {
+        char why[256] = {0};
+        int interval = 0, amount = 0;
+        if(rocke_encode_tdm_padding(
+               c.interval_bytes, c.pad_bytes, &interval, &amount, why, sizeof(why)))
+            fail("encode_tdm_padding accepted an inexpressible pad", __LINE__);
+        else if(strstr(why, c.message) == nullptr)
+            fail(why, __LINE__);
+    }
+}
+
 void case_gfx1250_tdm_group_types()
 {
     rocke_ir_builder_t b;
@@ -3296,6 +3404,253 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
+/* ---- buffer_rsrc: pointer address space and num_bytes width ---- */
+
+/* A buffer_rsrc over `X` with a `num_bytes` parameter of type `nb_type`;
+ * `X` is declared addr_space="constant" when `constant` is set. */
+static void build_buffer_rsrc(rocke_ir_builder_t* b, bool constant, const rocke_type_t* nb_type)
+{
+    rocke_param_opts_t opts{};
+    if(constant)
+        opts.addr_space = "constant";
+    rocke_value_t* X = rocke_b_param(b, "X", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    rocke_value_t* n = rocke_b_param(b, "n", nb_type, nullptr);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, n);
+    rocke_b_buffer_load_vN(
+        b, rsrc, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 0), rocke_f32(), 1);
+}
+
+void case_buffer_rsrc_refusals()
+{
+    /* The make.buffer.rsrc overload names ptr addrspace(1); a constant-space
+     * parameter is ptr addrspace(4) in the header, at every flavor. */
+    const rocke_llvm_flavor_t flavors[] = {ROCKE_LLVM_FLAVOR_LLVM20,
+                                           ROCKE_LLVM_FLAVOR_LLVM22,
+                                           ROCKE_LLVM_FLAVOR_LLVM23,
+                                           ROCKE_LLVM_FLAVOR_LLVM24};
+    for(const rocke_llvm_flavor_t flavor : flavors)
+    {
+        std::string err;
+        const rocke_status_t st = lower_expect_error(
+            "rsrc_constant",
+            [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, true, rocke_i32()); },
+            "gfx942",
+            flavor,
+            &err);
+        if(st != ROCKE_ERR_TYPE
+           || err.find("buffer_rsrc ptr must be a global pointer, got ptr addrspace(4) "
+                       "(its parameter's addr_space)")
+                  == std::string::npos)
+            fail(("constant-space buffer_rsrc: " + err).c_str(), __LINE__);
+    }
+
+    /* llvm20's make.buffer.rsrc.p1 takes an i32 num_records. */
+    std::string err;
+    const rocke_status_t st = lower_expect_error(
+        "rsrc_i64_llvm20",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM20,
+        &err);
+    if(st != ROCKE_ERR_VALUE
+       || err.find("buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
+                   "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32")
+              == std::string::npos)
+        fail(("i64 num_bytes at llvm20: " + err).c_str(), __LINE__);
+
+    /* The accepted forms still lower: i32 at llvm20, i64 (as is) at llvm22. */
+    const std::string ir20 = lower_one(
+        "rsrc_i32_llvm20",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i32()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM20);
+    EXPECT_IR(ir20, "@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) %X, i16 0, i32 %n, ");
+    const std::string ir22 = lower_one(
+        "rsrc_i64_llvm22",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM22);
+    EXPECT_IR(ir22, "@llvm.amdgcn.make.buffer.rsrc.p8.p1(ptr addrspace(1) %X, i16 0, i64 %n, ");
+
+    /* The HIP lowering casts num_records to (int), so it refuses an i64
+     * num_bytes whatever the LLVM version. */
+    std::string hip_err;
+    const rocke_status_t hip_st = lower_hip_expect_error(
+        "rsrc_i64_hip",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        &hip_err);
+    if(hip_st != ROCKE_ERR_VALUE
+       || hip_err.find("buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
+                       "the HIP lowering casts num_records to (int), so a wider byte count "
+                       "would be truncated; pass it as i32")
+              == std::string::npos)
+        fail(("i64 num_bytes in HIP: " + hip_err).c_str(), __LINE__);
+
+    /* The HIP signature declares a constant-space pointer like any other, and
+     * the builtin takes a void*, so the HIP lowering keeps it. */
+    const std::string hip = lower_one_hip(
+        "rsrc_constant_hip",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, true, rocke_i32()); },
+        "gfx942");
+    EXPECT_IR(hip, "void rsrc_constant_hip(float* __restrict__ X, int n)");
+    EXPECT_IR(hip,
+              "__builtin_amdgcn_make_buffer_rsrc((void*)X, /*stride=*/(short)0, "
+              "/*num_records=*/(int)n, ");
+}
+
+/* ---- global-memory ops on a parameter declared addr_space="constant" ---- */
+
+/* A C++ sample of tests/core/test_constant_space_global_ops.py, for the lanes
+ * that do not build the Python binding. Such a parameter keeps its global IR
+ * type, but the kernel header types it ptr addrspace(4). */
+static rocke_value_t* constant_space_param(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    rocke_param_opts_t constant{};
+    constant.addr_space = "constant";
+    return rocke_b_param(b, "X", rocke_ptr_type(b, elem, "global"), &constant);
+}
+
+void case_constant_space_global_ops()
+{
+    /* The global loads name the pointer's own type, so they read through it. */
+    struct Load
+    {
+        const char* name;
+        void (*build)(rocke_ir_builder_t*);
+        const char* gep;
+        const char* load;
+    };
+    static const Load loads[] = {
+        {"global_load_f16_constant",
+         [](rocke_ir_builder_t* b) {
+             rocke_value_t* x = constant_space_param(b, rocke_f16());
+             rocke_value_t* y = global_ptr_param(b, "Y", rocke_f16());
+             rocke_b_store_f16(b,
+                               y,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_global_load_f16(b, x, rocke_b_const_i32(b, 1), 2));
+         },
+         "getelementptr inbounds half, ptr addrspace(4) %X, i32 ",
+         "= load half, ptr addrspace(4) %gep"},
+        {"global_load_constant",
+         [](rocke_ir_builder_t* b) {
+             rocke_value_t* x = constant_space_param(b, rocke_f32());
+             rocke_value_t* y = global_ptr_param(b, "Y", rocke_f32());
+             rocke_b_global_store(
+                 b,
+                 y,
+                 rocke_b_const_i32(b, 0),
+                 rocke_b_global_load(b, x, rocke_b_const_i32(b, 1), rocke_f32(), 4),
+                 4);
+         },
+         "getelementptr inbounds float, ptr addrspace(4) %X, i32 ",
+         "= load float, ptr addrspace(4) %gep"},
+        {"global_load_vN_constant",
+         [](rocke_ir_builder_t* b) {
+             rocke_value_t* x = constant_space_param(b, rocke_f16());
+             rocke_value_t* y = global_ptr_param(b, "Y", rocke_f16());
+             rocke_b_global_store_vN(
+                 b,
+                 y,
+                 rocke_b_const_i32(b, 0),
+                 rocke_b_global_load_vN(b, x, rocke_b_const_i32(b, 4), rocke_f16(), 4, 0),
+                 4,
+                 0);
+         },
+         "getelementptr inbounds half, ptr addrspace(4) %X, i32 ",
+         "= load <4 x half>, ptr addrspace(4) %gep"},
+    };
+    for(const Load& load : loads)
+    {
+        const std::string ir = lower_one(load.name, load.build, "gfx942", ROCKE_LLVM_FLAVOR_LLVM20);
+        expect_contains(ir, "(ptr addrspace(4) nocapture %X, ", __LINE__);
+        expect_contains(ir, load.gep, __LINE__);
+        expect_contains(ir, load.load, __LINE__);
+        EXPECT_NO_IR(ir, "ptr addrspace(1) %X");
+    }
+
+    /* Every refusal is a type error. A load names the spaces it accepts; an
+     * op that names ptr addrspace(1) blames the parameter's addr_space only
+     * when the parameter declares one. */
+    struct Refusal
+    {
+        void (*build)(rocke_ir_builder_t*);
+        const char* want;
+    };
+    static const Refusal refusals[] = {
+        {[](rocke_ir_builder_t* b) {
+             rocke_value_t* x = constant_space_param(b, rocke_f16());
+             rocke_b_store_f16(b,
+                               x,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_global_load_f16(b, x, rocke_b_const_i32(b, 1), 2));
+         },
+         "store_f16 ptr must be a global pointer, got ptr addrspace(4) "
+         "(its parameter's addr_space)"},
+        {[](rocke_ir_builder_t* b) {
+             rocke_b_global_store(b,
+                                  constant_space_param(b, rocke_f32()),
+                                  rocke_b_const_i32(b, 0),
+                                  rocke_b_const_f32(b, 1.0),
+                                  1);
+         },
+         "global_store ptr must be a global pointer, got ptr addrspace(4) "
+         "(its parameter's addr_space)"},
+        {[](rocke_ir_builder_t* b) {
+             rocke_b_global_atomic_add(b,
+                                       constant_space_param(b, rocke_i32()),
+                                       rocke_b_const_i32(b, 0),
+                                       rocke_b_const_i32(b, 1),
+                                       nullptr);
+         },
+         "global_atomic_add ptr must be a global pointer, got ptr addrspace(4) "
+         "(its parameter's addr_space)"},
+        {[](rocke_ir_builder_t* b) {
+             rocke_value_t* x
+                 = rocke_b_param(b, "X", rocke_ptr_type(b, rocke_f32(), "lds"), nullptr);
+             rocke_b_global_store(b, x, rocke_b_const_i32(b, 0), rocke_b_const_f32(b, 1.0), 1);
+         },
+         "global_store ptr must be a global pointer, got ptr addrspace(3)"},
+        {[](rocke_ir_builder_t* b) {
+             rocke_value_t* x
+                 = rocke_b_param(b, "X", rocke_ptr_type(b, rocke_f32(), "lds"), nullptr);
+             rocke_value_t* y = global_ptr_param(b, "Y", rocke_f32());
+             rocke_b_global_store(
+                 b,
+                 y,
+                 rocke_b_const_i32(b, 0),
+                 rocke_b_global_load(b, x, rocke_b_const_i32(b, 1), rocke_f32(), 4),
+                 4);
+         },
+         "global_load: pointer operand is ptr addrspace(3), but the op accepts only "
+         "ptr addrspace(1), ptr addrspace(4)"},
+    };
+    for(const Refusal& refusal : refusals)
+    {
+        std::string err;
+        const rocke_status_t st = lower_expect_error(
+            "refusal", refusal.build, "gfx942", ROCKE_LLVM_FLAVOR_LLVM20, &err);
+        /* The message must end with the text: no " (its parameter's
+         * addr_space)" may follow a refusal that does not expect it. */
+        const std::string want(refusal.want);
+        const bool ends_with_want
+            = err.size() >= want.size()
+              && err.compare(err.size() - want.size(), want.size(), want) == 0;
+        if(st != ROCKE_ERR_TYPE || !ends_with_want)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 256];
+            snprintf(msg,
+                     sizeof(msg),
+                     "want ROCKE_ERR_TYPE \"%s\", status %d, err \"%s\"",
+                     refusal.want,
+                     (int)st,
+                     err.c_str());
+            fail(msg, __LINE__);
+        }
+    }
+}
+
 /* ---- dtype-generic buffer_load_vN / buffer_store_vN (Python IRBuilder) ---- */
 
 /* Run `build` on a fresh builder; return the refusal text, or "" when the
@@ -3917,11 +4272,18 @@ void case_wmma_result_count()
             }
             else
             {
+                /* Integer WMMA uses the named matrix-call diagnostic; the
+                 * float emitter retains its fixed-ABI preflight diagnostic. */
                 char expected[80];
-                snprintf(expected,
-                         sizeof(expected),
-                         "tile.mma: expected exactly one result, got %d",
-                         count);
+                if(integer)
+                    snprintf(expected,
+                             sizeof(expected),
+                             "tile.wmma_i32_16x16x16_iu8: expected exactly one result, got %d",
+                             count);
+                else
+                    snprintf(expected,
+                             sizeof(expected),
+                             "unscaled WMMA expects 3 operands and 1 result");
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);
             }
@@ -3954,6 +4316,15 @@ void case_lowbit_dtype_aliases()
                &arch->mma, "mfma_scaled", pair[0], pair[1], "fp32", 32, 32, 64, &e8m0_k32))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
+    /* gfx950 has no fp6 16x16x96 MFMA instruction; its unscaled fp4 16x16x128
+     * MFMA is the f8f6f4 instruction, reached through the short name too. */
+    const auto* gfx950 = rocke_arch_target_from_gfx("gfx950");
+    if(rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp6", "fp6", "fp32", 16, 16, 96))
+        fail("gfx950 must not list an fp6 16x16x96 MFMA", __LINE__);
+    const rocke_mma_op_t* fp4
+        = rocke_mma_catalog_op_for_shape(&gfx950->mma, "mma", "fp4", "fp4", "fp32", 16, 16, 128);
+    if(!fp4 || strcmp(fp4->op_id, "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1") != 0)
+        fail("gfx950 fp4 16x16x128 must select the f8f6f4 MFMA", __LINE__);
 }
 
 /* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but
@@ -4054,6 +4425,8 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_round_trip", case_gfx1250_tdm_round_trip},
     {"gfx1250_tdm_flag_words", case_gfx1250_tdm_flag_words},
     {"gfx1250_tdm_i32_lds_address", case_gfx1250_tdm_i32_lds_address},
+    {"gfx1250_tdm_i64_global_address", case_gfx1250_tdm_i64_global_address},
+    {"gfx1250_tdm_encode_padding", case_gfx1250_tdm_encode_padding},
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
     {"global_ptr_offset", case_global_ptr_offset},
@@ -4066,6 +4439,8 @@ const TestCase k_cases[] = {
     {"memory_caps", case_memory_caps},
     {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
+    {"buffer_rsrc_refusals", case_buffer_rsrc_refusals},
+    {"constant_space_global_ops", case_constant_space_global_ops},
     {"buffer_load_vN_generic", case_buffer_load_vN_generic},
     {"buffer_store_vN_generic", case_buffer_store_vN_generic},
     {"buffer_vN_verify", case_buffer_vN_verify},

@@ -174,7 +174,7 @@ def fmha_fp8_func(
     Dequantized values are ``input.float() * descale``. Supports forward only,
     MHA/GQA/MQA and causal/local masks. LSE has shape [batch, nheads, seqlen_q].
     Use float8_e4m3fnuz on gfx94x and float8_e4m3fn on gfx950/gfx12. Per-head
-    requires gfx1250. All FP8 modes on gfx1250 require head dimension <= 128.
+    requires gfx1250. All FP8 modes on gfx1250 require head dimension <= 128 or 256.
     On gfx942/gfx950, no_scale/pertensor/blockscale support head dimensions <= 256;
     LSE requires gfx950, no_scale/pertensor, head dimension 128 and no/causal mask.
     Other modes, block sizes and LSE availability depend on the target's CK kernels.
@@ -366,7 +366,7 @@ def fmha_varlen_fp8_func(
     qscale supports no_scale (no descales), pertensor (one FP32 scale per
     packed tensor), and perhead (FP32 [batch, heads], K/V using nheads_kv).
     Dequantization is input.float() * descale. Per-head scaling requires
-    gfx1250 and head dimension <= 128. Other dtype, head dimension and LSE
+    gfx1250. Other dtype, head dimension and LSE
     restrictions match fmha_fp8_func. Optional LSE has shape [nheads, total_q].
     Supports MHA/GQA/MQA and causal/local masks; paged KV is not supported.
     """
@@ -1258,9 +1258,8 @@ def fmha_qkvpacked_func(
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (batch_size, nheads, seqlen, seqlen).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaQKVPackedFunc.apply(
         qkv,
@@ -1341,9 +1340,8 @@ def fmha_kvpacked_func(
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (batch_size, nheads, seqlen_q, seqlen_k).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaKVPackedFunc.apply(
         q,
@@ -1423,9 +1421,8 @@ def fmha_func(
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (batch_size, nheads, seqlen_q, seqlen_k).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaFunc.apply(
         q,
@@ -1490,9 +1487,8 @@ def fmha_varlen_qkvpacked_func(
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (nheads, total_q, max_seqlen_k).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaVarlenQKVPackedFunc.apply(
         qkv,
@@ -1579,9 +1575,8 @@ def fmha_varlen_kvpacked_func(
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (nheads, total_q, max_seqlen_k).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaVarlenKVPackedFunc.apply(
         q,
@@ -1671,9 +1666,8 @@ def fmha_varlen_func(
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
-        S_dmask [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen, seqlen).
-            The output of softmax (possibly with different scaling). It also encodes the dropout
-            pattern (negative means that location was dropped, nonnegative means it was kept).
+        S_dmask [optional, if return_attn_probs=True]: uint8 (nheads, total_q, max_seqlen_k).
+            Dropout random values; values <= floor(255 * (1 - dropout_p)) are kept.
     """
     return FmhaVarlenFunc.apply(
         q,
@@ -1763,7 +1757,7 @@ def fmha_with_kvcache(
         q: (batch_size, seqlen, nheads, headdim)
         k_cache: (batch_size_cache, seqlen_cache, nheads_k, headdim) if there's no block_table,
             or (num_blocks, page_block_size, nheads_k, headdim) if there's a block_table (i.e. paged KV cache)
-            page_block_size must be a multiple of 256.
+            page_block_size must be a multiple of 128.
         v_cache: (batch_size_cache, seqlen_cache, nheads_k, headdim) if there's no block_table,
             or (num_blocks, page_block_size, nheads_k, headdim) if there's a block_table (i.e. paged KV cache)
         k [optional]: (batch_size, seqlen_new, nheads_k, headdim). If not None, we concatenate
@@ -1778,7 +1772,7 @@ def fmha_with_kvcache(
             If None, we assume that the batch indices are [0, 1, 2, ..., batch_size - 1].
             If the indices are not distinct, and k and v are provided, the values updated in the cache
                  might come from any of the duplicate indices.
-        cache_leftpad: (batch_size,), dtype torch.int32. The index that the KV cache starts. If None, assume 0.
+        cache_leftpad: Unsupported; must be None.
         block_table [optional]: (batch_size, max_num_blocks_per_seq), dtype torch.int32.
         softmax_scale: float. The scaling of QK^T before applying softmax.
             Default to 1 / sqrt(headdim).

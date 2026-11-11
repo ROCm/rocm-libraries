@@ -47,12 +47,10 @@ namespace TensileLite
             return true;
         }
 
-        SynchronizerValidator::SynchronizerValidator(
-            po::variables_map const& args, std::vector<std::shared_ptr<DeviceContext>> devices)
+        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
             : m_enabled(args["check-synchronizer"].as<bool>())
             , m_validateAfterEnqueues(args.count("validate-after-enqueues")
                                       && args["validate-after-enqueues"].as<bool>())
-            , m_devices(std::move(devices))
         {
         }
 
@@ -111,7 +109,7 @@ namespace TensileLite
         {
             try
             {
-                for(auto const& device : m_devices)
+                for(auto const& device : *m_devices)
                     if(active() && device->commFlags != nullptr
                        && !checkRegion(device->deviceId,
                                        device->commFlags,
@@ -159,7 +157,7 @@ namespace TensileLite
         {
             try
             {
-                for(auto const& device : m_devices)
+                for(auto const& device : *m_devices)
                     for(size_t slot : slots)
                         checkInputs(device->deviceId, device->inputArr[slot], stage);
             }

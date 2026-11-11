@@ -252,6 +252,15 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
+   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
+   * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
+   * ``HIPBLASLT_ORDER_ROW``. Swizzled orders apply to A and B only: those APIs,
+   * ``hipblasLtMatmul``, and ``hipblasLtMatmulAlgoGetHeuristic`` return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
   HIPBLASLT_MATRIX_LAYOUT_ORDER = 3,
@@ -353,6 +362,7 @@ typedef enum {
     HIPBLASLT_POINTER_MODE_HOST = 0,                          /**<Targets host memory. */
     HIPBLASLT_POINTER_MODE_DEVICE = 1,                        /**<Targets device memory. */
     HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST = 4, /**<Alpha pointer targets a device memory vector of length equal to the number of rows of matrix D. Beta is a single value in host memory. */
+    HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT = 1000, /**<Alpha pointer targets a single FP32 value in device memory. Requires scaleType HIP_R_32F. Beta is a single value in host memory. */
 } hipblasLtPointerMode_t;
 
 /*! \ingroup types_module
@@ -480,6 +490,22 @@ typedef enum {
   /** Row-major.
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
+   *
+   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. For the supported combinations, the library
+   * rewrites internal copies of the layouts and transpose operations into an equivalent
+   * column-major problem. This rewrite does not copy or reorder matrix data and does not launch
+   * a separate transpose kernel. The heuristic and matmul use the same rewritten problem.
+   *
+   * Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or D, and for a row-major
+   * A or B combined with an operation other than ``HIPBLAS_OP_N`` or
+   * ``HIPBLAS_OP_T``, a block or vector scale mode, or an ``HIP_R_4I`` matrix. With a fused
+   * all-to-all epilogue, a row-major D returns ``HIPBLAS_STATUS_INVALID_VALUE`` instead, because
+   * the epilogue's own check runs first.
+   *
+   * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
+   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
@@ -578,6 +604,7 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *
  *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
  *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *
  *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
@@ -585,6 +612,9 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
+ *
+ *  Distinct handles may be used at the same time from different threads, for example one handle per stream.
+ *  Handles in one process share the loaded solution libraries, code-object adapters, and heuristic caches.
  */
 typedef void* hipblasLtHandle_t;
 /*! \ingroup types_module
