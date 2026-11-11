@@ -191,13 +191,8 @@ bool dec_post_init_ok(const rocke_wmma_fmha_decode_spec_t* s, char* reason, size
         return false;
     }
     if(!eq(s->scheduler_strategy, "auto") && !eq(s->scheduler_strategy, "default")
-       && !rocke_scheduler_strategy_is_valid(s->scheduler_strategy))
-    {
-        snprintf(
-            msg, sizeof(msg), "unsupported scheduler_strategy '%s'", sz(s->scheduler_strategy));
-        rocke_spec_set_reason(reason, cap, msg);
+       && rocke_scheduler_strategy_reason(s->scheduler_strategy, reason, cap))
         return false;
-    }
     if(!tri_ok(s->v_store_early) || !tri_ok(s->prefetch) || !tri_ok(s->lockstep)
        || !tri_ok(s->fp8_cvt) || !tri_ok(s->tanh_fast))
     {
@@ -646,6 +641,7 @@ void dec_split_merge(const Em& e,
         Val* st = loop.iter_vars;
         Vals lses;
         std::vector<Vals> parts;
+        Val zero = rocke_b_zero_vec_f32(b, DEC_MERGE_COLS);
         for(int i = 0; i < U; ++i)
         {
             Val s;
@@ -666,11 +662,14 @@ void dec_split_merge(const Em& e,
                 lses.push_back(e.sel(ok, gl, ninf));
             }
             Val base = e.mul(prow, dv);
+            /* A padded slot (s >= ns) re-reads split 0's partial, which may be Inf; its
+               zero weight would then give Inf * 0 = NaN, so it contributes zero. */
             Vals pr;
             for(Val cv : cols)
             {
                 Val a = e.add(base, cv);
-                pr.push_back(rocke_b_global_load_vN(b, ws_o, a, rocke_f32(), DEC_MERGE_COLS, 16));
+                Val ld = rocke_b_global_load_vN(b, ws_o, a, rocke_f32(), DEC_MERGE_COLS, 16);
+                pr.push_back(e.sel(ok, ld, zero));
             }
             parts.push_back(pr);
         }

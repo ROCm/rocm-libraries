@@ -43,7 +43,7 @@ from .common import (
     ATTENTION_ABI_VERSION,
     AttentionRequest,
     AttentionTuningSpec,
-    _problem,
+    attention_problem,
 )
 from .tuning_specs import (
     ExplicitAttention2DConfig,
@@ -516,7 +516,7 @@ def iter_tuning_specs(
     """Specs for one geometry at ``level``: ``production`` walks the curated
     stacks (no dead-end knobs); ``full`` walks every kernel knob -- consume it
     through :func:`sample_tuning_specs` unless the space is known to be small."""
-    return unified_space(variant).stream(_problem(req), level)
+    return unified_space(variant).stream(attention_problem(req), level)
 
 
 def sample_tuning_specs(
@@ -527,4 +527,4 @@ def sample_tuning_specs(
 ) -> Iterable[AttentionTuningSpec]:
     """Up to ``n`` distinct random legal specs from the full knob space, dead
     ends included; ``KNOWN_WRONG_KNOBS`` never."""
-    return unified_space(variant).sample(_problem(req), n, seed)
+    return unified_space(variant).sample(attention_problem(req), n, seed)

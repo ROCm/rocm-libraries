@@ -7,15 +7,18 @@
 binaries, named by their lossless labels, forward and dgrad. These tests pin
 down that:
 
-* each registry is exactly its lists, in list order, and every instance has
+* each registry is exactly its lists, as a set, and every instance has
   the AOT build job ``--compile-all`` makes its binary from;
-* the list files are canonical and their loader refuses a broken one;
+* dgrad's list file is canonical (sorted by label) and the loader refuses a
+  broken one; fwd keeps its own hand-tuned on-disk priority order instead
+  (``gc._SET_SEMANTICS_DIRECTIONS``);
 * nothing outside the lists (another arch, another direction) dispatches;
 * the dispatcher admits a shape exactly when the AOT cache's run path would
   launch that binary on it, with the same kernels, grids, blocks, signatures,
   buffers, kernarg values and scratch -- the binaries were built and verified
   through that path;
-* pins and the priority order behave.
+* pins behave, and the default-pick order is deterministic: sorted-label for
+  dgrad, on-disk file order for fwd.
 
 CPU only: nothing is compiled or launched.
 """
@@ -23,6 +26,7 @@ CPU only: nothing is compiled or launched.
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import json
 from pathlib import Path
 
@@ -32,7 +36,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
-from kernels.conv.direct_variants import DIRECT_WAVE_PARAMETRIC
+from kernels.conv.direct_variants import direct_spec_takes_target_wave
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -161,11 +165,14 @@ def _case_req(arch: str, direction: str, shape: str) -> gc.ConvGroupedRequest:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_is_exactly_the_instance_lists_in_order():
+def test_registry_is_exactly_the_instance_lists():
+    """A registered list is a set: the registry holds exactly its names, with
+    no dependence on their on-disk order."""
     for (arch, direction), path in _LISTS.items():
         names = _listed_names(path)
         got = gc.registered_conv_grouped_instances(arch, direction=direction)
-        assert [s.name for s in got] == names
+        assert {s.name for s in got} == set(names)
+        assert len(got) == len(names)
     for direction in ("fwd", "dgrad"):
         for candidate in gc.conv_grouped_candidates(direction):
             assert candidate.spec_id == candidate.name
@@ -414,7 +421,8 @@ def _direct_plan(spec, req):
     # The meta a fresh --compile-all entry carries: a wave-parametric build
     # records the wave size it was built at, the identity's.
     meta = {"kernel_name": "k"}
-    if spec.algorithm in DIRECT_WAVE_PARAMETRIC:
+    knobs = json.loads(spec.identity.knobs) if spec.identity.knobs else {}
+    if direct_spec_takes_target_wave(spec.algorithm, knobs):
         meta["spec_wave_size"] = spec.identity.wave_size
     plan, why = dks.plan_for(
         cache,
@@ -639,6 +647,45 @@ def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
     assert dict(plan.workspaces) == workspaces
 
 
+def test_launch_plan_of_an_fprop_single_instance_with_cpg_ne_kpg():
+    """Every registered fused/4c row has cpg == kpg (direct_grouped_dgrad_4c
+    fixes cpg == kpg == 4 by construction), where the transposed problem
+    equals the original -- not enough to catch a launch plan reading the
+    wrong one. Pin a fused instance with cpg != kpg against the AOT run path,
+    which is unambiguous about which problem is transposed."""
+    (base,) = [
+        i.identity
+        for i in gc.registered_conv_grouped_instances("gfx950", direction="dgrad")
+        if i.identity.algorithm == "direct_grouped_dgrad_fused" and i.identity.cpg == 8
+    ][:1]
+    identity = dataclasses.replace(base, cpg=8, kpg=16)
+    spec = gc.ConvInstanceSpec(
+        name=identity.label(),
+        identity=identity,
+        block=gc._instance_block(identity),
+        helpers=gc._instance_helpers(identity),
+    )
+    req = _req(arch="gfx950", direction="dgrad", N=2, C=32, K=64, G=4, Hi=56, Wi=56)
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert not spec.helpers
+    plan = gc.launch_plan_for(req, spec)
+    got = [
+        (
+            s.identity,
+            s.grid,
+            s.block,
+            [a["name"] for a in s.signature],
+            s.buffers,
+            plan.values(s, _PTRS, _SIZES),
+        )
+        for s in plan.steps
+    ]
+    want, workspaces, _ = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert got == want
+    assert dict(plan.workspaces) == workspaces
+
+
 @pytest.mark.parametrize(
     "direction,shape",
     [
@@ -712,8 +759,30 @@ def test_launch_plan_of_the_patch_dgrad():
 # ---------------------------------------------------------------------------
 
 
-def test_default_pick_is_the_first_admitted_instance_in_list_order():
-    order = {name: i for i, name in enumerate(_listed_names())}
+def test_default_pick_is_the_first_admitted_instance_by_label_order():
+    """With no ranker, dgrad's default pick is deterministic (sorted by
+    label), not dependent on the list file's on-disk order (a list is a
+    set) -- see ``gc._SET_SEMANTICS_DIRECTIONS``. fwd is scoped out: its
+    on-disk order is a hand-tuned family preference, exercised below."""
+    order = {
+        name: i
+        for i, name in enumerate(sorted(_listed_names(_LISTS[(_ARCH, "dgrad")])))
+    }
+    for kw in _DGRAD_SHAPES.values():
+        req = _req(direction="dgrad", **kw)
+        admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
+        assert admitted == sorted(admitted, key=order.__getitem__)
+        assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
+        assert [s.name for s in gc.conv_grouped_sweep_space(req)] == admitted
+
+
+def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
+    """fwd is not in ``gc._SET_SEMANTICS_DIRECTIONS``: its default (no
+    ``ranker``) pick is the first admitted instance in ``gfx950_fwd.json``'s
+    own on-disk order, a hand-tuned family preference (e.g. the windowed
+    depthwise kernel sorting first in its catalog) that label order does not
+    reproduce."""
+    order = {name: i for i, name in enumerate(_listed_names(_LISTS[(_ARCH, "fwd")]))}
     for kw in _SHAPES.values():
         req = _req(**kw)
         admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
@@ -728,11 +797,15 @@ def test_default_pick_is_the_first_admitted_instance_in_list_order():
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile
-    just because it happens to sort earlier in the list -- the direct depthwise
-    candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
-    they are listed ahead of implicit_gemm so they win whenever both are admitted.
-    The windowed MFMA forward (direct_depthwise_win: stride 1, "same" padding,
-    channels a multiple of 8) leads; the tiled kernel takes the rest.
+    just because it happens to come earlier in the list -- the direct
+    depthwise candidates are admitted only for genuinely depthwise shapes
+    (cpg=kpg=1), so they are listed ahead of implicit_gemm so they win
+    whenever both are admitted. The windowed MFMA forward
+    (direct_depthwise_win: stride 1, "same" padding, channels a multiple of 8)
+    leads; the tiled kernel takes the rest. This pins fwd's hand-tuned
+    priority order (gfx950_fwd.json's own file order): moving the tiled
+    records ahead of the windowed ones changes the default pick and fails
+    here.
     """
     kw = _SHAPES[shape]
     req = _req(**kw)
@@ -773,9 +846,17 @@ def test_algorithm_pin_keeps_one_family():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", sorted(_LISTS.values()), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "path",
+    sorted(_LISTS.values()),
+    ids=lambda p: p.name,
+)
 def test_instance_list_file_is_canonical(path):
-    """Fix with ``instance_list.py format``."""
+    """Fix with ``instance_list.py format``. Every direction is covered:
+    ``format_instance_list`` sorts by label only for a set-semantics
+    direction (dgrad) and otherwise preserves ``lst.identities``'s on-disk
+    order, so running this (or ``format``) on fwd cannot destroy its
+    hand-tuned priority order."""
     lst = gc.load_instance_list(path)
     assert path.read_text(encoding="utf-8") == gc.format_instance_list(lst)
 
@@ -887,17 +968,58 @@ def test_registered_list_must_declare_its_arch_and_direction(tmp_path, monkeypat
 
 
 def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
+    """fwd's list is a priority order: ``new`` keeps the labels' order, ``add``
+    appends (lowest priority) or inserts at ``--at N``, and ``labels`` prints
+    the file's order -- every write keeps it."""
+    assert not gc.instance_list_is_set("fwd")
     names = _listed_names()
     labels = tmp_path / "labels.txt"
-    labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
+    labels.write_text(
+        "# picked\n" + "\n".join(reversed(names[:3])) + "\n", encoding="utf-8"
+    )
     path = tmp_path / "new.json"
     instance_list.main(["new", str(path), "--from", str(labels)])
     instance_list.main(["add", str(path), names[3], "--at", "1"])
+    instance_list.main(["add", str(path), names[4]])
+    instance_list.main(["add", str(path), names[5], "--at", "0"])
     with pytest.raises(SystemExit, match="already listed"):
         instance_list.main(["add", str(path), names[0]])
+    with pytest.raises(SystemExit, match="already listed"):
+        instance_list.main(["add", str(path), names[6], names[6]])
+    with pytest.raises(SystemExit, match="not in 0..6"):
+        instance_list.main(["add", str(path), names[6], "--at", "7"])
     capsys.readouterr()
     instance_list.main(["labels", str(path)])
-    assert capsys.readouterr().out.split() == [names[0], names[3], *names[1:3]]
+    want = [names[5], names[2], names[3], names[1], names[0], names[4]]
+    assert capsys.readouterr().out.split() == want
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == want
     assert lst.defaults == gc.load_instance_list(_LIST).defaults
+
+
+def test_instance_list_tool_prints_fwd_labels_in_file_order(capsys):
+    """``labels`` on the registered fwd list prints its priority order, not
+    its labels sorted."""
+    names = _listed_names(_LISTS[(_ARCH, "fwd")])
+    assert names != sorted(names)
+    capsys.readouterr()
+    instance_list.main(["labels", str(_LISTS[(_ARCH, "fwd")])])
+    assert capsys.readouterr().out.split() == names
+
+
+def test_instance_list_tool_keeps_a_dgrad_list_sorted(tmp_path, capsys):
+    """dgrad's list is a set: add order never matters, the written file and
+    ``labels`` are sorted by label, and ``--at`` (a position) is refused."""
+    assert gc.instance_list_is_set("dgrad")
+    names = _listed_names(_LISTS[(_ARCH, "dgrad")])[:4]
+    path = tmp_path / "dgrad.json"
+    instance_list.main(["new", str(path), *reversed(names[:3])])
+    instance_list.main(["add", str(path), names[3]])
+    with pytest.raises(SystemExit, match="is a set"):
+        instance_list.main(["add", str(path), names[0], "--at", "0"])
+    capsys.readouterr()
+    instance_list.main(["labels", str(path)])
+    assert capsys.readouterr().out.split() == sorted(names)
+    lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == sorted(names)

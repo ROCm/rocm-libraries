@@ -17,7 +17,7 @@ hand-plumb three coupled changes and get them all consistent:
 
 ```python
 # today (awkward) — the "ab_swap" crossed path, hand-wired in build_crc_gemm:
-mma = TileMma((warp_n, warp_m, tile_k), a="f16", b="f16", c="f32", target=arch)  # 1. swap M<->N in the shape
+mma = TileMma((warp_n, warp_m, tile_k), a=F16, b=F16, c=F32, target=arch)  # 1. swap M<->N in the shape
 ...
 acc = mma(b_frag, a_frag, acc)          # 2. feed B into the A-slot, A into the B-slot (M<->N relabel)
 ...
@@ -39,7 +39,7 @@ transform (register-identity), not cross-lane.
 
 ```python
 # proposed API
-mma = TileMma((M, N, K), a="f16", b="f16", c="f32", target=arch, c_transpose=True)
+mma = TileMma((M, N, K), a=F16, b=F16, c=F32, target=arch, c_transpose=True)
 acc = mma(a_frag, b_frag, acc)                 # normal call; object handles the crossed feed
 store_fragment(b, c_ptr, make_window(mma.c_desc, (m0, n0)), acc, lane)   # c_desc already (N,M)-oriented
 ```

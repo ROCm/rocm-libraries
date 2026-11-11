@@ -10,6 +10,7 @@ This document describes the environment variables and runtime configuration opti
   - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+  - [Ingestor Shortlist Limit](#ingestor-shortlist-limit)
   - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
@@ -284,6 +285,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 ```
 
 **Notes:**
+- With benchmarking on, the first `execute()` of a plan cannot be captured into a hipGraph: the plan times its candidates and synchronizes streams and events, which breaks the capture. Run the plan once eagerly before the capture. Later executes use the chosen candidate and can be captured. See [Capture hipDNN graphs in a hipGraph](./user-guides/how-to/capture-hipgraph.rst).
 - With benchmarking on, the kernel ingestor prepares every candidate kernel left after the knob filter and `global.workspace_size_limit` at plan build and samples them on the plan's first `execute()`, so plan-build cost grows with the candidate count and the first `execute()` is slower than subsequent calls. With `HIPDNN_LOG_LEVEL=info` it logs the count as `ingestor: engine '<name>' will benchmark N candidate(s) (M before knob filtering), ranked front <id>`, where N is counted after both filters. The line is absent when a benchmarked record is served. The ingestor memoizes the ranking (a benchmarked record) per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
 - A benchmarked record is served only when it covers every kernel that applies to the graph on that device, before any filtering. A run records only the candidates it measured that sampled successfully, and the write-back appends that record without merging it into an earlier one. When the knob filter or workspace limit removes a kernel, or a candidate cannot be built or fails sampling, the record misses that kernel: it is written but never served, and every later plan build for that graph and device benchmarks again.
 - A covering record is served whether or not benchmarking is on. The build prepares only the highest-ranked entry that passes the current filters, moving to the next ranked entry if that kernel cannot be built, and falls back to normal selection if none can. Without a covering record and with benchmarking off, the build stops at the first buildable candidate.
@@ -294,6 +296,43 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent. `Graph::autotune()` also runs its winner last, after every timed pass, and waits for that run to finish, so on success the buffers you passed hold the winner's output, with the same in-place caveat.
+
+### Ingestor Shortlist Limit
+
+#### HIPDNN_INGESTOR_SHORTLIST_LIMIT
+
+A process-wide cap on how many of the best-ranked candidates the generic kernel ingestor
+(`GenericPlanBuilder`) builds a plan from. Only kernel-ingestor engines consult it; it has no
+effect on the MIOpen provider or any other engine kind. It is read fresh on every plan build
+and every prediction query -- there is no process-wide cache of the parsed value.
+
+| Value        | Description                                                |
+|--------------|------------------------------------------------------------|
+| (unset)      | No limit: every candidate left after knob and workspace filtering is eligible (default) |
+| `<n>`, n > 0 | Keep only the best-ranked `n` candidates of the filtered set |
+| `0`, a negative value, non-numeric text, or a value past `size_t` | Ignored; logged as a warning naming the variable and the value, treated as unset |
+
+**Example:**
+```bash
+export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
+```
+
+**Notes:**
+- Primarily a tuning/test knob: an engine with thousands of applicable kernels otherwise
+  loads and benchmarks every one of them on a cold plan build. It is not meant to be left set
+  in a normal deployment.
+- With benchmarking off, a build whose entire shortlist fails to prepare throws
+  `throwNoBuildableKernel` even when a lower-ranked kernel outside the limit would have built;
+  without a limit the same graph falls through to that lower-ranked candidate instead.
+- Setting any limit, even one larger than the knob-filtered candidate set, changes winner-cache
+  behavior: a benchmarked record that covers only that (possibly smaller) set is trusted and
+  serves the build, where without a limit the same record would be ignored as partial coverage
+  and the candidates re-benchmarked.
+- `predictConfiguration` (the `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` query path) applies
+  the same limit to the candidates it predicts over, so its answer names a configuration plan
+  build could actually shortlist.
+- A slotted engine's `slotCandidates` path ignores this limit entirely: every slot keeps its
+  full knob- and workspace-filtered catalog regardless of the value set here.
 
 ### Engine Applicability Threading
 

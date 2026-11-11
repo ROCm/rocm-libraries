@@ -367,6 +367,19 @@ validParameters = { # we need to make sure this matches develop
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
+    # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
+    # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
+    # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
+    # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2Inc64Bit": [False, True],
+    # Address form of the PrefetchGL2 global_prefetch_b8.
+    # False: a 64-bit vgpr pair address per load (vaddr, saddr=off).
+    # True: a 64-bit sgpr pair base per tensor (GL2PrefetchBase{A,B,...}) plus a
+    # 32-bit vgpr offset per load. Halves the address vgprs and advances the
+    # address with scalar instead of vector adds, but each lane's byte offset
+    # from the base (within one prefetch tile) must fit in 32 bits.
+    # Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2SAddr": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -1241,7 +1254,7 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
@@ -1272,10 +1285,34 @@ validParameters = { # we need to make sure this matches develop
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
     #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
-    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
-    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}. With both scales on 4 waves a 2/1/1 split:
+    #      A on waves 0-1, MXSA on wave 2, MXSB on wave 3, B on every wave;
+    #      on 2 waves A on wave 0, MXSA (on A's set) and MXSB (on a set of
+    #      its own) on wave 1, B on both.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both. The three then issue the same
+    #   loads and differ only in the name, so a sweep need carry just one.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set.
+    #   Solution rejects, naming the limit and what to use instead:
+    #   - a value outside this list;
+    #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
+    #     with UseSubtileImpl;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
+    #     divergent decoupled pair;
+    #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
+    #     live scale shares a data tensor's set and PAP refreshes the scale
+    #     descriptors only as a pair;
+    #   - ReuseAcrossPersistent on 1-3 with MX scales, whose null silences
+    #     one tensor by wave parity;
+    #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
+    #     UseSubtileImpl, with PrefetchAcrossPersistent or
+    #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
+    #     decoupled pair on more than one wave;
+    #   - TDMSplit, which is disabled for every row.
     #
     # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
     # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
@@ -1316,7 +1353,6 @@ validParameters = { # we need to make sure this matches develop
     # one operand once and only the other operand is duplicated across GL2s.
     # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
     # -1: Disabled
-    # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
     "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
