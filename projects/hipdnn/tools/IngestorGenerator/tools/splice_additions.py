@@ -4,9 +4,10 @@
 
 """Addition-only splice of a scratch descriptor render into a live engine directory.
 
-The generator mints fresh UUIDs on every run, so copying a regenerated descriptor
-directory over a live one replaces every retained identity, which extend.md forbids.
-This tool applies only the additions:
+A scratch render holds engine-level files too, and carries fresh UUIDs whenever it was
+made without the installed ids (`--new-ids`, or no installed bundle), so copying a
+regenerated descriptor directory over a live one replaces retained objects, which
+extend.md forbids. This tool applies only the additions:
 
     splice_additions.py --scratch "$GENERATED/descriptors/<producer>/<bundle>" \\
                         --live "$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>" \\

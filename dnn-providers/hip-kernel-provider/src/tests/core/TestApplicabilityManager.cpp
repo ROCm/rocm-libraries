@@ -1029,15 +1029,15 @@ TEST_F(TestApplicabilityManager, RunsTheLargestPendingEngineOnTheCaller)
     EXPECT_EQ(budget.available(), 8u);
 }
 
-TEST_F(TestApplicabilityManager, RethrowsTheLowestIndexFailureThreadedOrNot)
+TEST_F(TestApplicabilityManager, SkipsEnginesThatThrowInFinishThreadedOrNot)
 {
     if(lacksASecondCpu())
     {
         GTEST_SKIP() << "offloading needs a second CPU";
     }
 
-    // Two throwers in finish, and each in turn the largest, so "lowest index" cannot be
-    // passed by "whichever ran on the caller" or "whichever finished first".
+    // Two throwers in finish, and each in turn the largest, so the outcome cannot depend on
+    // "whichever ran on the caller" or "whichever finished first".
     for(const bool lowerIsLargest : {true, false})
     {
         SCOPED_TRACE(lowerIsLargest ? "lower index is the largest" : "higher index is the largest");
@@ -1074,20 +1074,24 @@ TEST_F(TestApplicabilityManager, RethrowsTheLowestIndexFailureThreadedOrNot)
         largest->awaitSibling = true;
         const auto threaded = run(manager, "0");
 
+        // Neither failure aborts the query: both engines drop out, the healthy ones stay, in
+        // the manager's order.
+        const auto expected = inIterationOrder(manager, {HAND_YES, PENDING_C});
         for(const auto* outcome : {&sequential, &threaded})
         {
-            ASSERT_TRUE(outcome->threw);
-            EXPECT_TRUE(outcome->threwPluginException);
-            EXPECT_EQ(outcome->thrown.message, "lower index failed");
-            EXPECT_EQ(outcome->thrown.status, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+            ASSERT_FALSE(outcome->threw) << outcome->thrown.message;
+            EXPECT_EQ(outcome->ids, expected);
         }
+        EXPECT_EQ(threaded.ids, sequential.ids);
+        EXPECT_EQ(_journal.finishCount(PENDING_A), 2u);
+        EXPECT_EQ(_journal.finishCount(PENDING_B), 2u);
         EXPECT_TRUE(_journal.anyFinishOffCaller());
-        // A failed call still returns its workers' slots.
+        // The call returns its workers' slots.
         EXPECT_EQ(budget.available(), 8u);
     }
 }
 
-TEST_F(TestApplicabilityManager, LowerIndexFinishFailureBeatsHigherIndexBeginFailure)
+TEST_F(TestApplicabilityManager, SkipsEnginesThatThrowInBeginOrFinishThreadedOrNot)
 {
     WorkerBudget budget{8};
     ApplicabilityPool pool{budget};
@@ -1104,8 +1108,8 @@ TEST_F(TestApplicabilityManager, LowerIndexFinishFailureBeatsHigherIndexBeginFai
     const auto& higher = order[0] == PENDING_A ? specB : specA;
 
     // The lower index fails late, in its variant stage; the higher index fails early, in
-    // begin on the caller. Sequentially the lower one is reached first, so it must win
-    // even though the higher one's failure is raised before any finish runs.
+    // begin on the caller. Both are inapplicable and the two healthy engines are reported,
+    // whichever stage the failure came from.
     lower->failure = Failure::IN_FINISH;
     lower->failureStatus = HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
     lower->failureMessage = "variant stage failed";
@@ -1116,13 +1120,13 @@ TEST_F(TestApplicabilityManager, LowerIndexFinishFailureBeatsHigherIndexBeginFai
     const auto sequential = runSequential(manager);
     const auto threaded = run(manager, "0");
 
+    const auto expected = inIterationOrder(manager, {PENDING_C, PENDING_D});
     for(const auto* outcome : {&sequential, &threaded})
     {
-        ASSERT_TRUE(outcome->threw);
-        EXPECT_TRUE(outcome->threwPluginException);
-        EXPECT_EQ(outcome->thrown.message, "variant stage failed");
-        EXPECT_EQ(outcome->thrown.status, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        ASSERT_FALSE(outcome->threw) << outcome->thrown.message;
+        EXPECT_EQ(outcome->ids, expected);
     }
+    EXPECT_EQ(threaded.ids, sequential.ids);
     EXPECT_EQ(budget.available(), 8u);
 }
 

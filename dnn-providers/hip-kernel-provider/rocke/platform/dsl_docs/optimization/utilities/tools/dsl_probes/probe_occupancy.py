@@ -37,6 +37,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -68,6 +69,7 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
+from rocke.core.lower_llvm import ArchDomainWarning
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
@@ -297,10 +299,11 @@ def probe_occupancy(
     print_header: bool = True,
     waves_per_eu_hint: int | None = None,
 ) -> list[dict]:
-    """Compile each entry and report occupancy.
+    """Compile each entry for ``arch.name`` and report occupancy.
 
     Each ``entries`` item is ``(label, kernel_def, waves_per_workgroup)``.
-    Returns a list of dicts with the parsed numbers, one per entry.
+    Returns a list of dicts with the parsed numbers, one per entry. Caps exist
+    for CDNA targets only (``ARCH_BY_NAME``).
     """
     rows: list[dict] = []
     if print_header:
@@ -311,7 +314,11 @@ def probe_occupancy(
         print("-" * 96)
     for label, kdef, waves_per_wg in entries:
         try:
-            artifact = compile_kernel(kdef)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # would otherwise abort the process inside LLVM; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                artifact = compile_kernel(kdef, arch=arch.name)
         except Exception as e:  # noqa: BLE001
             print(f"{label:<28}  BUILD-FAIL: {type(e).__name__}: {e}")
             continue

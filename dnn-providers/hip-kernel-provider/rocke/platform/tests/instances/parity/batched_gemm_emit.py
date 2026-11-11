@@ -103,6 +103,27 @@ def _spec(idx: int) -> BatchedGemmSpec:
             dtype="fp16",
             wave_size=64,
         )
+    if idx == 5:
+        # fp64 on gfx942: batched universal body with the cshuffle epilogue.
+        return (
+            BatchedGemmSpec(
+                name="bgm_f64_64x64x16_2x2",
+                tile=TileSpec(
+                    64,
+                    64,
+                    16,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=4,
+                ),
+                trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
+                dtype="fp64",
+                wave_size=64,
+            ),
+            "gfx942",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -110,7 +131,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_batched_gemm,
-        usage="usage: batched_gemm_emit.py <config_index 0..4> [ll|ir|verify]\n",
+        usage="usage: batched_gemm_emit.py <config_index 0..5> [ll|ir|verify]\n",
     )
 
 

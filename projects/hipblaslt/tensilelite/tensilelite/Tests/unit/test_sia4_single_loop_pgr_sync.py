@@ -21,7 +21,7 @@ import pytest
 import yaml
 
 from config_harness import emit_kernels_from_config
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.KernelWriter import KernelWriter
 
 
 pytestmark = pytest.mark.unit

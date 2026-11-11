@@ -29,6 +29,7 @@ from .benchmark.perf import perfjson
 from .runtime.hip_module import Runtime
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
+    run_gemm_fp8_manifest_problem,
     run_gemm_iu8_manifest_problem,
     run_gemm_manifest_problem,
 )
@@ -166,6 +167,7 @@ def _register_builtin_runners() -> None:
         register_manifest_runner(kind, run_simple_op_manifest_problem)
     register_manifest_runner("gemm_fp16", run_gemm_manifest_problem)
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
+    register_manifest_runner("gemm_fp8", run_gemm_fp8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
     # deep_fused_conv_pool_* and conv_{fp16,bf16,fp32} runners live in the

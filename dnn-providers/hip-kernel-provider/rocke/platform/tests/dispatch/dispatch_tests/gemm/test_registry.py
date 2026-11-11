@@ -7,8 +7,9 @@ from __future__ import annotations
 import unittest
 
 from rocke.core.arch import known_arches
-from rocke.dispatch.core import Capability, CandidateRegistry, KernelCandidate
+from rocke.dispatch.core import CandidateRegistry, Capability, KernelCandidate
 from rocke.dispatch.gemm import GemmRequest, gemm_fp16_candidates
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:
@@ -47,11 +48,15 @@ class TestCandidateRegistry(unittest.TestCase):
         # A request carrying a real arch: the capability prefilter runs before
         # the ranker, so a bare OperatorRequest would be filtered out first and
         # the rogue-ranker path would never be exercised.
-        req = GemmRequest(M=128, N=128, K=32, arch="gfx950")
         rogue = _dummy_candidate("rogue")
 
-        with self.assertRaisesRegex(ValueError, "unsupported candidate"):
-            registry.select(req, ranker=lambda _req, _cands: (rogue,))
+        for arch in COVERED_ARCHES:
+            req = GemmRequest(M=128, N=128, K=32, arch=arch)
+            with (
+                self.subTest(arch=arch),
+                self.assertRaisesRegex(ValueError, "unsupported candidate"),
+            ):
+                registry.select(req, ranker=lambda _req, _cands: (rogue,))
 
     def test_gemm_registry_has_unique_names(self):
         candidates = gemm_fp16_candidates()
@@ -59,16 +64,18 @@ class TestCandidateRegistry(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_gemm_registered_candidates_support_expected_arch_classes(self):
-        cdna_req = GemmRequest(M=128, N=128, K=32, arch="gfx950")
         rdna_req = GemmRequest(M=64, N=32, K=16, arch="gfx1151")
-        supported_cdna = {
-            c.spec_id for c in gemm_fp16_candidates() if c.admits(cdna_req)[0]
-        }
+        for arch in COVERED_ARCHES:
+            cdna_req = GemmRequest(M=128, N=128, K=32, arch=arch)
+            supported_cdna = {
+                c.spec_id for c in gemm_fp16_candidates() if c.admits(cdna_req)[0]
+            }
+            with self.subTest(arch=arch):
+                self.assertIn("cdna_cshuffle_default", supported_cdna)
+                self.assertIn("cdna_mem_64x128", supported_cdna)
         supported_rdna = {
             c.spec_id for c in gemm_fp16_candidates() if c.admits(rdna_req)[0]
         }
-        self.assertIn("cdna_cshuffle_default", supported_cdna)
-        self.assertIn("cdna_mem_64x128", supported_cdna)
         self.assertIn("rdna_wmma_default", supported_rdna)
         self.assertIn("rdna_wmma_32x32", supported_rdna)
 

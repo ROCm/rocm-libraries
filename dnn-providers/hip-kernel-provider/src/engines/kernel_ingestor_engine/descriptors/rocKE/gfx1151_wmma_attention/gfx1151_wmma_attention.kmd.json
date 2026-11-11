@@ -8,7 +8,15 @@
       "type": "string"
     },
     {
+      "name": "kind",
+      "type": "string"
+    },
+    {
       "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "head_size_v",
       "type": "int"
     },
     {
@@ -16,44 +24,20 @@
       "type": "string"
     },
     {
-      "name": "transposed_qk",
-      "type": "int",
-      "default_value": 0
+      "name": "bias",
+      "type": "string"
     },
     {
-      "name": "query_tail",
-      "type": "int",
-      "default_value": 1
+      "name": "block_size",
+      "type": "int"
     },
     {
-      "name": "kv_tail",
-      "type": "int",
-      "default_value": 1
+      "name": "block_m",
+      "type": "int"
     },
     {
-      "name": "block_n",
-      "type": "int",
-      "default_value": 32
-    },
-    {
-      "name": "num_waves",
-      "type": "int",
-      "default_value": 1
-    },
-    {
-      "name": "runtime_head_dims",
-      "type": "int",
-      "default_value": 0
-    },
-    {
-      "name": "use_attn_bias",
-      "type": "int",
-      "default_value": 0
-    },
-    {
-      "name": "bias_dtype",
-      "type": "string",
-      "default_value": "f32"
+      "name": "dv_split",
+      "type": "int"
     }
   ]
 }

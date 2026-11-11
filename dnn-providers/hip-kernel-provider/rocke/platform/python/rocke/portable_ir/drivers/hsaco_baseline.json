@@ -4,14 +4,12 @@
     "compared": 32,
     "refused": [
       "gfx1151_deep_fused_conv_pool",
-      "gfx1151_wmma_fmha_fwd",
       "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",
       "gfx1151_wmma_gemm_iu8_dequant",
       "gfx1201_deep_fused_conv_pool",
-      "gfx1201_wmma_fmha_fwd",
       "gfx1201_wmma_gemm",
       "matmul_nbits"
     ],
@@ -36,14 +34,12 @@
     "compared": 45,
     "refused": [
       "gfx1151_deep_fused_conv_pool",
-      "gfx1151_wmma_fmha_fwd",
       "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",
       "gfx1151_wmma_gemm_iu8_dequant",
       "gfx1201_deep_fused_conv_pool",
-      "gfx1201_wmma_fmha_fwd",
       "gfx1201_wmma_gemm",
       "matmul_nbits"
     ],

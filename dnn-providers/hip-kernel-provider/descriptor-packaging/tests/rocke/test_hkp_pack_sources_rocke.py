@@ -17,7 +17,7 @@ from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from hkp_pack import agreement, desk_check
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
-from pack_helpers import GENERIC_TARGETS, _run_cli, read_shipped, run_pipeline
+from pack_helpers import GENERIC_TARGETS, _restamp, _run_cli, read_shipped, run_pipeline
 
 ARCH = "gfx1100"
 
@@ -314,12 +314,6 @@ def _reader_records(tmp_path, shipped, ukd):
     return agreement.canonical_records(
         [agreement.consumer_record(ukd, engine, kmd, header, ARCH, declaration)]
     )
-
-
-def _restamp(doc):
-    binding = agreement.descriptor_binding(doc)
-    for evidence in doc["provenance"]["effective_spec"].values():
-        evidence["descriptor_digest"] = binding
 
 
 def _module(tmp_path, name):
@@ -716,7 +710,7 @@ def test_a_failed_claim_leaves_no_shipped_descriptor(
                     "k1": {"kind": "hsaco", "file": "x.co", "symbol": "s"},
                 }
             },
-            "'k1' has kind 'hsaco'",
+            "mix kernel kinds",
         ),
         (
             lambda s: {
@@ -728,7 +722,7 @@ def test_a_failed_claim_leaves_no_shipped_descriptor(
             "invalid role",
         ),
     ],
-    ids=["neither", "both", "single", "bad-name", "hsaco-entry", "bad-role"],
+    ids=["neither", "both", "single", "bad-name", "mixed-kinds", "bad-role"],
 )
 def test_malformed_authored_sources_fail_the_pack(
     tmp_path, monkeypatch, rocke_importable, rocm_kpack_dir, kernel, diagnostic

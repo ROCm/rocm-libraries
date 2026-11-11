@@ -48,6 +48,7 @@ table SdpaBackwardAttributes {
     // Scalar attributes
     dropout_probability:       float = null;
     attn_scale_value:          float = null;
+    // Keys kept per query row, including the diagonal; -1 is unbounded, 0 is rejected.
     left_bound:                long = null;
     right_bound:               long = null;
 

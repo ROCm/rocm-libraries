@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * tests/portable_ir/dom_decoders.cpp -- unit tests for the portable-IR DOM
- * decoders (cpp/portable_ir/json_dom.cpp and cbor_dom.cpp).
+ * decoders (cpp/support/json_dom.cpp and cpp/portable_ir/cbor_dom.cpp).
  *
  * Pure data level, no kernels: builds CBOR blobs by hand, decodes them, and
  * checks the resulting jd_val_t tree. The load-bearing case is
@@ -19,9 +19,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
+#include <string>
 
+#include "malformed_param_attrs.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
+#include "rocke/ir_import.h"
 #include "rocke/json_dom.h"
 
 namespace
@@ -160,6 +164,139 @@ void test_json_cbor_equivalence(rocke_arena_t* a)
     check(jd_equal(cv, jv), "CBOR DOM == JSON DOM");
 }
 
+void test_nonfinite_json_numbers(rocke_arena_t* a)
+{
+    char err[128];
+    const jd_val_t* values = rocke_json_parse("[NaN, Infinity, -Infinity]", a, err, sizeof err);
+    check(values && values->kind == JD_ARR && values->arr_len == 3, "non-finite JSON number array");
+    if(values && values->kind == JD_ARR && values->arr_len == 3)
+    {
+        double nan = 0.0, pos_inf = 0.0, neg_inf = 0.0;
+        check(rocke_jnum(values->arr[0], &nan) && std::isnan(nan), "JSON NaN");
+        check(rocke_jnum(values->arr[1], &pos_inf) && std::isinf(pos_inf) && pos_inf > 0,
+              "JSON Infinity");
+        check(rocke_jnum(values->arr[2], &neg_inf) && std::isinf(neg_inf) && neg_inf < 0,
+              "JSON -Infinity");
+    }
+}
+
+void test_concrete_importer_preserves_nonfinite_float_attrs()
+{
+    const char* artifact = R"json({
+        "schema": "rocke.ir/v1",
+        "kernel": {
+            "name": "nonfinite_float_attrs",
+            "attrs": {
+                "nan": {"t": "f", "v": NaN},
+                "pos_inf": {"t": "f", "v": Infinity},
+                "neg_inf": {"t": "f", "v": -Infinity}
+            },
+            "params": [],
+            "body": {"label": "entry", "ops": []}
+        }
+    })json";
+    rocke_ir_builder_t builder;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[128];
+    const rocke_status_t status
+        = rocke_import_kernel_from_json(artifact, nullptr, &builder, &kernel, err, sizeof err);
+    check(status == ROCKE_OK && kernel != nullptr, "concrete non-finite attr import");
+    if(status == ROCKE_OK && kernel)
+    {
+        double nan = 0.0, pos_inf = 0.0, neg_inf = 0.0;
+        check(rocke_attr_get_float(&kernel->attrs, "nan", &nan) && std::isnan(nan),
+              "concrete attr NaN");
+        check(rocke_attr_get_float(&kernel->attrs, "pos_inf", &pos_inf) && std::isinf(pos_inf)
+                  && pos_inf > 0,
+              "concrete attr Infinity");
+        check(rocke_attr_get_float(&kernel->attrs, "neg_inf", &neg_inf) && std::isinf(neg_inf)
+                  && neg_inf < 0,
+              "concrete attr -Infinity");
+    }
+    if(status == ROCKE_OK)
+    {
+        rocke_ir_builder_free(&builder);
+    }
+}
+
+void test_concrete_importer_rejects_invalid_integer_attrs()
+{
+    for(const char* spelling : {"NaN", "Infinity", "-Infinity", "9007199254740993"})
+    {
+        char artifact[512];
+        std::snprintf(
+            artifact,
+            sizeof artifact,
+            R"json({"schema":"rocke.ir/v1","kernel":{"name":"bad_int_attr","attrs":{"bad":{"t":"i","v":%s}},"params":[],"body":{"label":"entry","ops":[]}}})json",
+            spelling);
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[128] = {};
+        const rocke_status_t status
+            = rocke_import_kernel_from_json(artifact, nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, "concrete invalid integer attr is rejected");
+        check(std::strstr(err, "not an integer") != nullptr,
+              "concrete invalid integer attr has a diagnostic");
+    }
+}
+
+// A concrete-IR artifact with one pointer param carrying `attrs_json`.
+std::string param_artifact(const char* attrs_json)
+{
+    return std::string(
+               R"json({"schema":"rocke.ir/v1","kernel":{"name":"param_probe","attrs":{},"params":[{"name":"P","type":{"kind":"ptr","pointee":"f32","space":"global"},"attrs":)json")
+           + attrs_json + R"json(}],"body":{"label":"entry","ops":[]}}})json";
+}
+
+// The importer carries every pointer attribute the lowerer emits, and refuses a
+// param attr it cannot read: dropping it would lower a different kernel than
+// the one exported.
+void test_concrete_importer_param_attrs()
+{
+    {
+        const std::string artifact
+            = param_artifact(R"json({"nonnull":true,"nocapture":false,"dereferenceable":64})json");
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact.c_str(), nullptr, &builder, &kernel, err, sizeof err);
+        check(status == ROCKE_OK && kernel != nullptr && kernel->num_params == 1,
+              "concrete nonnull / nocapture / dereferenceable import");
+        if(status == ROCKE_OK && kernel && kernel->num_params == 1)
+        {
+            const rocke_attr_map_t* attrs = &kernel->params[0]->attrs;
+            int64_t deref = 0;
+            check(rocke_attr_get_bool(attrs, "nonnull", false), "concrete nonnull is carried");
+            check(rocke_attr_get(attrs, "nocapture") != nullptr
+                      && !rocke_attr_get_bool(attrs, "nocapture", true),
+                  "concrete nocapture=false is carried");
+            check(rocke_attr_get_int(attrs, "dereferenceable", &deref) && deref == 64,
+                  "concrete dereferenceable is carried");
+        }
+        if(status == ROCKE_OK)
+        {
+            rocke_ir_builder_free(&builder);
+        }
+    }
+
+    for(const malformed_param_attr_t& c : kMalformedParamAttrs)
+    {
+        const std::string artifact = param_artifact(c.attrs);
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact.c_str(), nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, c.what);
+        if(std::strstr(err, c.message) == nullptr)
+        {
+            std::printf("  FAIL: %s does not name the defect (got: %s)\n", c.what, err);
+            ++g_fail;
+        }
+    }
+}
+
 void test_malformed_input_is_rejected(rocke_arena_t* a)
 {
     char err[128];
@@ -199,6 +336,67 @@ void test_recipe_shaped_map(rocke_arena_t* a)
 
 } // namespace
 
+// The importer reads an integer parameter's facts: an int, or a relation (the
+// canonical intexpr JSON string), and refuses a declaration the builder would
+// refuse, with the builder's text.
+void test_concrete_importer_param_facts()
+{
+    const auto artifact = [](const char* ldc_attrs) {
+        return std::string(
+                   R"json({"schema":"rocke.ir/v1","kernel":{"name":"fact_probe","attrs":{},"params":[{"name":"M","type":"i32","attrs":{"ge":1,"multiple_of":8}},{"name":"ldc","type":"i32","attrs":)json")
+               + ldc_attrs + R"json(}],"body":{"label":"entry","ops":[]}}})json";
+    };
+    {
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact(R"json({"ge":"{\"param\":\"M\"}","le":4096})json").c_str(),
+            nullptr,
+            &builder,
+            &kernel,
+            err,
+            sizeof err);
+        check(status == ROCKE_OK && kernel != nullptr && kernel->num_params == 2,
+              "concrete facts import");
+        if(status == ROCKE_OK && kernel && kernel->num_params == 2)
+        {
+            int64_t value = 0;
+            check(rocke_attr_get_int(&kernel->params[0]->attrs, "multiple_of", &value)
+                      && value == 8,
+                  "concrete multiple_of is carried");
+            const char* ge = rocke_attr_get_str(&kernel->params[1]->attrs, "ge");
+            check(ge && std::strcmp(ge, "{\"param\":\"M\"}") == 0, "concrete relation is carried");
+            check(rocke_attr_get_int(&kernel->params[1]->attrs, "le", &value) && value == 4096,
+                  "concrete int bound is carried");
+        }
+        if(status == ROCKE_OK)
+        {
+            rocke_ir_builder_free(&builder);
+        }
+    }
+    const char* const bad[][2] = {
+        {R"json({"ge":"{\"param\":\"K\"}"})json",
+         "ldc: the relation names K, which is not a parameter of this kernel"},
+        {R"json({"lt":4096,"le":4095})json",
+         "param ldc: states two upper bounds (le, lt) -- state one"},
+    };
+    for(const auto& c : bad)
+    {
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact(c[0]).c_str(), nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, c[0]);
+        if(std::strstr(err, c[1]) == nullptr)
+        {
+            std::printf("  FAIL: %s does not name the defect (got: %s)\n", c[0], err);
+            ++g_fail;
+        }
+    }
+}
+
 int main()
 {
     rocke_arena_t a;
@@ -211,6 +409,11 @@ int main()
     test_scalars(&a);
     test_array(&a);
     test_json_cbor_equivalence(&a);
+    test_nonfinite_json_numbers(&a);
+    test_concrete_importer_preserves_nonfinite_float_attrs();
+    test_concrete_importer_rejects_invalid_integer_attrs();
+    test_concrete_importer_param_attrs();
+    test_concrete_importer_param_facts();
     test_malformed_input_is_rejected(&a);
     test_recipe_shaped_map(&a);
     rocke_arena_destroy(&a);

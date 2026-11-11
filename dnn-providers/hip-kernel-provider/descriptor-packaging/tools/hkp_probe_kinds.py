@@ -43,6 +43,11 @@ class Kind:
     # the group is packed at least once (greedy, ties by sorted name); combinations of
     # values are not guaranteed. None keeps one UKD per group, the first by sorted name.
     sweep_field: str | None = None
+    # True when the packer records compiler evidence for each launch of a multi-launch
+    # (`sources`) UKD of this kind, in provenance.effective_spec, and binds each launch's
+    # symbol to its authored role (rocke). A kind without it has only the structural
+    # per-launch checks: kpack membership, sha256, symbol and signature.
+    launch_evidence: bool = False
 
 
 KINDS = {
@@ -50,6 +55,7 @@ KINDS = {
         group_by=("source", "builder"),
         provenance=("wheel", "comgr"),
         sweep_field="spec",
+        launch_evidence=True,
     ),
     "hip": Kind(group_by=("source", "build"), provenance=()),
     "hsaco": Kind(group_by=(), provenance=()),

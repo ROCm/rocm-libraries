@@ -29,6 +29,7 @@
 
 #include <miopen/tensor.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <iostream>
 

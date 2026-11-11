@@ -5,7 +5,6 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 
 #include <string>
 
@@ -43,8 +42,7 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(hi
     }
 
     int deviceId = 0;
-    const auto stream = handle->getStream();
-    const auto status = hipdnn_plugin_sdk::getDeviceFromStream(stream, &deviceId);
+    const auto status = handle->getDevice(&deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,

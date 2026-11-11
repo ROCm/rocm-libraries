@@ -103,7 +103,11 @@ namespace TensileLite
 
                     for(auto const& key : keys)
                     {
-                        auto keyStr = KeyConversion<key_type>::toString(key);
+                        // Bound to a reference, so a converted key lives until
+                        // mapRequired returns -- an output borrows the key it
+                        // is handed -- and a key that is already a string is
+                        // not copied at all.
+                        auto const& keyStr = KeyConversion<key_type>::toString(key);
                         iot::mapRequired(io, keyStr.c_str(), value.find(key)->second);
                     }
                 }
@@ -111,7 +115,7 @@ namespace TensileLite
                 {
                     for(auto& pair : value)
                     {
-                        auto keyStr = KeyConversion<key_type>::toString(pair.first);
+                        auto const& keyStr = KeyConversion<key_type>::toString(pair.first);
                         iot::mapRequired(io, keyStr.c_str(), pair.second);
                     }
                 }

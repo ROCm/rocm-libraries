@@ -124,18 +124,11 @@ fs::path GetSystemDbPath()
 #if MIOPEN_BUILD_DEV
     // Development builds read the databases straight out of the build tree.
     return "${MIOPEN_SYSTEM_DB_PATH}";
-#elif defined(_WIN32)
-    // On Windows the databases are installed alongside MIOpen.dll (DATABASE_INSTALL_DIR is "bin"),
-    // so resolve them relative to the loaded module. Falling back to the configured value would
-    // make the lookup relative to the current working directory, which only finds the databases
-    // when the process happens to be started from the install directory.
-    static const auto lib_path = GetLibPath();
-    if(lib_path.empty())
-        return "${MIOPEN_SYSTEM_DB_PATH}";
-    return lib_path;
 #else
-    // Get the module path and construct the db path
-    static const auto lib_path = GetLibPath().parent_path() / "share/miopen/db";
+    // Installed builds place the databases in share/miopen/db (DATABASE_INSTALL_DIR) under the
+    // prefix that holds the MIOpen library: lib/libMIOpen.so on Linux, bin/MIOpen.dll on Windows.
+    // Resolving them from the loaded module keeps the lookup independent of the working directory.
+    static const auto lib_path = GetLibPath().parent_path() / "share" / "miopen" / "db";
     return lib_path;
 #endif
 }

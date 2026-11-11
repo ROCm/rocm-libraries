@@ -73,6 +73,9 @@ double complex_planar_prob_factor;
 double callback_prob_factor;
 // Modifier for probability of running very large tests
 double very_large_prob_factor;
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
+bool quick_tests_only = false;
 // Number of random tests per suite
 size_t n_random_tests = 0;
 
@@ -361,7 +364,10 @@ int main(int argc, char* argv[])
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
-                   "Probability of running individual emulation/simulation tests")
+                   "Probability of running individual emulation/simulation tests. "
+                   "2D or 3D emulation test probabilities are scaled relative to test_prob: "
+                   "emulation_prob is used directly when test_prob is 1 and scaled down by the "
+                   "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
@@ -427,18 +433,20 @@ int main(int argc, char* argv[])
                 // Configuration specific for "quick simulation test" category, the whole test run
                 // should complete under 2 hours in the simulation environment (configuration parameters
                 // based on observations)
-                vramgb_limit   = 2;
-                emulation_prob = 0.002;
-                test_prob      = 0;
-                unittest_prob  = 0;
+                vramgb_limit     = 2;
+                emulation_prob   = 0.002;
+                test_prob        = 0;
+                unittest_prob    = 0;
+                quick_tests_only = true;
             }
             else if(emulationtype == emulation_smoke)
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
-                vramgb_limit   = 2;
-                emulation_prob = 0.005;
-                test_prob      = 0;
-                unittest_prob  = 0;
+                vramgb_limit     = 2;
+                emulation_prob   = 0.005;
+                test_prob        = 0;
+                unittest_prob    = 0;
+                quick_tests_only = true;
             }
             else if(emulationtype == emulation_regression)
             {
@@ -483,9 +491,10 @@ int main(int argc, char* argv[])
         ->each([&](const std::string&) {
             // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob      = 0.0005;
-            emulation_prob = 0.005;
-            unittest_prob  = 0.2;
+            test_prob        = 0.0005;
+            emulation_prob   = 0.005;
+            unittest_prob    = 0.2;
+            quick_tests_only = true;
 
             // Allow nrand to take precedence over this option:
             if(!opt_nrand->count())

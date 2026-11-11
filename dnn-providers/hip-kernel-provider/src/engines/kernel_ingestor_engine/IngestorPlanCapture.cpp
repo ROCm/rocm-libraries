@@ -39,8 +39,8 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     {
         serialization::refuseIngestorPlanSave(
             IngestorPlanRefusal::INCOMPATIBLE,
-            "this plan was loaded from a saved payload; re-saving is not supported; keep the "
-            "original bytes");
+            "this plan was loaded from a saved payload; hipDNN saves a loaded plan from its "
+            "original bytes and does not call the provider");
     }
 
     const auto* saveable = plan.saveablePlan();
@@ -60,12 +60,22 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     const auto& kernel = saveable->kernel();
     const std::string kernelName
         = hipdnn_plugin_sdk::ingestor::describeDescriptor("kernel", kernel.name, kernel.kernelId);
-    if(!serialization::isSerializableSourceKind(kernel.source.kind))
+    // A saved plan holds one code object, so a multi-launch kernel is refused here rather
+    // than read through its unused, default `source`.
+    const auto* source = hipdnn_plugin_sdk::ingestor::singleLaunchSource(kernel);
+    if(source == nullptr)
     {
         serialization::refuseIngestorPlanSave(
             IngestorPlanRefusal::INCOMPATIBLE,
-            kernelName + " has source kind '"
-                + hipdnn_plugin_sdk::ingestor::toString(kernel.source.kind)
+            kernelName
+                + " has several launches ('sources'); saving supports only a kernel "
+                  "with one launch");
+    }
+    if(!serialization::isSerializableSourceKind(source->kind))
+    {
+        serialization::refuseIngestorPlanSave(
+            IngestorPlanRefusal::INCOMPATIBLE,
+            kernelName + " has source kind '" + hipdnn_plugin_sdk::ingestor::toString(source->kind)
                 + "', which saving does not yet support");
     }
 
@@ -101,11 +111,11 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     payload.workspaceBytes = saveable->getWorkspaceSize(handle);
     payload.dispatchSymbol = std::move(inputs->dispatchSymbol);
     payload.launchValues = std::move(inputs->values);
-    payload.sourceKind = kernel.source.kind;
+    payload.sourceKind = source->kind;
     payload.symbol = std::move(code.symbol);
     payload.target = std::move(code.target);
     payload.sha256 = std::move(code.sha256);
-    payload.recordedSignature = kernel.source.signature;
+    payload.recordedSignature = source->signature;
     payload.codeObject = std::move(code.bytes);
     payload.providerVersion = HIP_KERNEL_PROVIDER_VERSION_STRING;
     return payload;

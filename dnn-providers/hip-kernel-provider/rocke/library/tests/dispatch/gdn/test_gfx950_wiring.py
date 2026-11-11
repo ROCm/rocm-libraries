@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import asdict
+from itertools import product
 
 import numpy as np
 
@@ -25,18 +26,21 @@ from dispatch.gdn import (
     gdn_sweep_space,
     request_errors,
 )
+from dispatch.gdn.axes import AUTO_DEFAULTS, AUTO_STATE_ROW
 from dispatch.gdn.gfx950 import (
     ARCH,
     CONFIGURED_TILES,
-    DEFAULT_TILE,
-    TUNED_SPEC_IDS,
-    tile_for_work,
+    CONFIGURED_TILES_BY_GATE,
+    KDA_CONFIGURED_TILES,
+    spec_id_for,
 )
 from kernels.gfx950.gdn_decode import (
+    STATE_DTYPES,
     gdn_decode_grid,
     gdn_decode_signature,
     is_valid_spec,
 )
+from rocke.dispatch.core import PinRefused
 
 _TILE = lambda s: (s.num_warps, s.warp_threads_k, s.blocks_per_v_dim)  # noqa: E731
 
@@ -46,72 +50,298 @@ def _req(batch: int, **kw) -> GdnDecodeRequest:
     return GdnDecodeRequest(batch=batch, **kw)
 
 
+def _candidates_of(gate_kind: str):
+    """The registered candidates of one gate kind, in registry order."""
+    ids = {spec_id_for(tile, gate_kind) for tile in CONFIGURED_TILES_BY_GATE[gate_kind]}
+    return [c for c in gdn_candidates() if c.spec_id in ids]
+
+
 class TestRegistration(unittest.TestCase):
     def test_every_configured_tile_is_registered(self):
-        names = {
-            c.spec_id for c in gdn_candidates() if not c.spec_id.startswith("kda_")
-        }
-        expected = {f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES}
-        self.assertEqual(names, expected)
+        # GDN's tiles first, then KDA's, each in its gate kind's fallback order.
+        ids = tuple(c.spec_id for c in gdn_candidates())
+        gdn = tuple(f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES)
+        self.assertEqual(ids[: len(gdn)], gdn)
+
+    def test_every_configured_tile_is_registered_for_kda_too(self):
+        ids = tuple(c.spec_id for c in gdn_candidates())[len(CONFIGURED_TILES) :]
+        self.assertEqual(
+            ids,
+            tuple(
+                f"kda_nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in KDA_CONFIGURED_TILES
+            ),
+        )
+        self.assertEqual(set(KDA_CONFIGURED_TILES), set(CONFIGURED_TILES))
 
     def test_registry_family_is_consistent(self):
         for cand in gdn_candidates():
             self.assertEqual(cand.family, GDN_REGISTRY.family)
 
 
-class TestStaticSelection(unittest.TestCase):
-    """Dispatcher auto must use one static default rather than batch winners.
+_NT = {"state_load_hint": "streaming", "state_store_hint": "streaming"}
+_DPP = {**_NT, "dpp_reduce": True}
+_FUSED_KNOBS = {"conv_once": True, "out_lds": True}
+# The shipped auto table, (gate_kind, fused, state row) -> (tile, knobs). A
+# default change edits this, AUTO_DEFAULTS and the ALGORITHM.md §4.6 table.
+_SHIPPED = {
+    ("gdn", False, "bf16"): ((2, 16, 8), _DPP),
+    ("gdn", False, "f32"): ((2, 16, 16), {**_DPP, "interleave_cols": True}),
+    ("gdn", True, "bf16"): (
+        (4, 16, 1),
+        {**_DPP, **_FUSED_KNOBS, "norm_gate_once": True, "stream_rows": True},
+    ),
+    ("gdn", True, "f32"): (
+        (8, 16, 1),
+        {
+            **_DPP,
+            **_FUSED_KNOBS,
+            "interleave_cols": True,
+            "stream_rows": True,
+            "waves_per_eu": 4,
+        },
+    ),
+    ("kda", False, "bf16"): ((1, 16, 8), {**_DPP, "waves_per_eu": 4}),
+    ("kda", False, "f32"): (
+        (1, 16, 16),
+        {**_DPP, "interleave_cols": True, "stream_rows": True},
+    ),
+    ("kda", True, "bf16"): ((4, 8, 1), {**_DPP, **_FUSED_KNOBS}),
+    ("kda", True, "f32"): (
+        (4, 8, 1),
+        {**_DPP, **_FUSED_KNOBS, "interleave_cols": True, "stream_rows": True},
+    ),
+}
+_BATCHES = (1, 2, 4, 5, 8, 16, 32, 33, 64, 128, 129, 256)
 
-    The shipped tile is pinned as a literal, not as ``DEFAULT_TILE``: a test
-    that follows the constant cannot notice the default moving. Changing a
-    pinned value here changes what every gfx950 GDN ``auto`` user runs, so it
-    needs GDN measurements (``tune.py --gate-kind gdn``) in the same change.
+
+def _case_req(batch, gate_kind, fused, state_dtype, heads=(16, 16), **kw):
+    return _req(
+        batch,
+        gate_kind=gate_kind,
+        num_k_heads=heads[0],
+        num_v_heads=heads[1],
+        state_dtype=state_dtype,
+        fuse_conv=fused,
+        fuse_out_norm=fused,
+        **kw,
+    )
+
+
+class TestStaticSelection(unittest.TestCase):
+    """``auto`` runs one static tile and knob stack per case (gate kind x
+    fused x state width), never a batch or work winner.
+
+    The shipped table is pinned as a literal, not as ``AUTO_DEFAULTS``: a test
+    that follows the constant cannot notice a default moving. Changing a value
+    here changes what every gfx950 ``auto`` user of that case runs, so it needs
+    a cold-memory measurement of the case in the same change.
     """
 
-    _SHIPPED_TILE = (2, 16, 8)
-    # Known limitation (see CONFIGURED_TILES): an illegal default falls back to
-    # the first legal tile in product order. Pinned so a change is deliberate.
+    # Known limitation (see CONFIGURED_TILES): an illegal case tile falls back
+    # to the first legal tile in priority order, at its base configuration.
+    # Pinned so a change is deliberate.
     _FALLBACK_TILE = (1, 1, 1)
 
-    def test_default_tile_is_the_shipped_tile(self):
-        self.assertEqual(DEFAULT_TILE, self._SHIPPED_TILE)
+    def test_auto_defaults_are_the_shipped_table(self):
+        self.assertEqual(
+            {case: (d.tile, dict(d.knobs)) for case, d in AUTO_DEFAULTS.items()},
+            _SHIPPED,
+        )
 
-    def test_selection_is_frozen_across_head_counts_and_batches(self):
+    def test_f16_state_runs_the_bf16_row(self):
+        self.assertEqual(set(AUTO_STATE_ROW), set(STATE_DTYPES))
+        self.assertEqual(AUTO_STATE_ROW["f16"], "bf16")
+        for (gate_kind, fused, row), _ in _SHIPPED.items():
+            if row != "bf16":
+                continue
+            with self.subTest(gate=gate_kind, fused=fused):
+                bf16 = dispatch_gdn_decode(_case_req(8, gate_kind, fused, "bf16"))
+                f16 = dispatch_gdn_decode(_case_req(8, gate_kind, fused, "f16"))
+                self.assertEqual(f16.candidate.spec_id, bf16.candidate.spec_id)
+                self.assertEqual(f16.spec.knobs, bf16.spec.knobs)
+                self.assertEqual(f16.spec.tuning_id, bf16.spec.tuning_id)
+                self.assertEqual(f16.spec.kernel_spec.state_dtype, "f16")
+
+    def test_every_case_runs_its_tile_and_knobs_at_every_batch(self):
         # Sharded-head deployments see head counts other than the default
-        # geometry, so cover them, including Hk == Hv.
-        for num_k_heads, num_v_heads in (
-            (2, 4),
-            (4, 8),
-            (8, 16),
-            (16, 32),
-            (32, 64),
-            (16, 16),
-        ):
-            for batch in (1, 4, 5, 16, 32, 33, 64, 128, 129, 256):
-                with self.subTest(hk=num_k_heads, hv=num_v_heads, batch=batch):
-                    result = dispatch_gdn_decode(
-                        _req(batch, num_k_heads=num_k_heads, num_v_heads=num_v_heads)
-                    )
-                    self.assertEqual(_TILE(result.spec), self._SHIPPED_TILE)
-                    self.assertEqual(result.spec.gate_kind, "gdn")
+        # geometry, so cover them; fuse_conv needs Hk == Hv.
+        plain_heads = ((2, 4), (4, 8), (8, 16), (16, 32), (32, 64), (16, 16))
+        fused_heads = ((4, 4), (8, 8), (16, 16), (32, 32))
+        for (gate_kind, fused, row), (tile, knobs) in _SHIPPED.items():
+            for heads in fused_heads if fused else plain_heads:
+                picks = set()
+                for batch in _BATCHES:
+                    with self.subTest(
+                        case=(gate_kind, fused, row), heads=heads, b=batch
+                    ):
+                        got = dispatch_gdn_decode(
+                            _case_req(batch, gate_kind, fused, row, heads)
+                        )
+                        kernel = got.spec.kernel_spec
+                        self.assertEqual(_TILE(kernel), tile)
+                        self.assertEqual(
+                            got.candidate.spec_id, spec_id_for(tile, gate_kind)
+                        )
+                        self.assertEqual(dict(got.spec.knobs), knobs)
+                        for name, value in knobs.items():
+                            self.assertEqual(getattr(kernel, name), value, name)
+                        self.assertEqual(kernel.gate_kind, gate_kind)
+                        ok, why = is_valid_spec(kernel, arch=ARCH)
+                        self.assertTrue(ok, why)
+                        # What ran replays from the request the result carries.
+                        self.assertEqual(
+                            dispatch_gdn_decode(got.request).spec, got.spec
+                        )
+                        picks.add(got.spec.tuning_id)
+                # No batch dependence: one configuration for every batch.
+                self.assertEqual(len(picks), 1, (gate_kind, fused, row, heads))
 
-    def test_selected_spec_is_always_buildable(self):
-        for batch in (1, 4, 5, 16, 33, 64, 129, 256, 8192):
-            with self.subTest(batch=batch):
-                ok, why = is_valid_spec(
-                    dispatch_gdn_decode(_req(batch)).spec, arch=ARCH
+    def test_waves_per_eu_is_dropped_off_the_measured_head_dims(self):
+        # The row's waves_per_eu was measured at DK = DV = 128 only; elsewhere
+        # it caps the registers below what the state needs and the kernel
+        # spills, so auto runs the rest of the row without it.
+        knobs = _SHIPPED[("gdn", True, "f32")][1]
+        self.assertIn("waves_per_eu", knobs)
+        want = {k: v for k, v in knobs.items() if k != "waves_per_eu"}
+        for dk, dv in ((256, 128), (256, 256), (128, 256)):
+            with self.subTest(dk=dk, dv=dv):
+                got = dispatch_gdn_decode(
+                    _case_req(8, "gdn", True, "f32", head_k_dim=dk, head_v_dim=dv)
                 )
-                self.assertTrue(ok, why)
+                self.assertEqual(dict(got.spec.knobs), want)
+                self.assertEqual(got.spec.kernel_spec.waves_per_eu, 0)
 
-    def test_supported_geometry_falls_back_when_default_is_invalid(self):
+    def test_one_fused_flag_drops_the_knobs_it_cannot_read(self):
+        for (gate_kind, fused, row), (tile, knobs) in _SHIPPED.items():
+            if not fused:
+                continue
+            for conv, norm in ((True, False), (False, True)):
+                with self.subTest(case=(gate_kind, row), conv=conv, norm=norm):
+                    got = dispatch_gdn_decode(
+                        _req(
+                            8,
+                            gate_kind=gate_kind,
+                            num_k_heads=16,
+                            num_v_heads=16,
+                            state_dtype=row,
+                            fuse_conv=conv,
+                            fuse_out_norm=norm,
+                        )
+                    )
+                    self.assertEqual(_TILE(got.spec.kernel_spec), tile)
+                    dropped = (
+                        {"norm_gate_once", "out_lds"}
+                        if conv
+                        else {"conv_once", "norm_gate_once"}
+                    )
+                    want = {k: v for k, v in knobs.items() if k not in dropped}
+                    self.assertEqual(dict(got.spec.knobs), want)
+
+    def test_a_spec_id_pin_of_the_auto_tile_runs_its_base(self):
+        """Pins keep their meaning: a bare ``spec_id`` is the tile's base
+        configuration (every knob off), not the case's stack."""
+        for (gate_kind, fused, row), (tile, _) in _SHIPPED.items():
+            with self.subTest(case=(gate_kind, fused, row)):
+                req = _case_req(8, gate_kind, fused, row)
+                pinned = dispatch_gdn_decode(
+                    _case_req(
+                        8, gate_kind, fused, row, spec_id=spec_id_for(tile, gate_kind)
+                    )
+                )
+                self.assertEqual(pinned.spec.knobs, ())
+                self.assertNotEqual(pinned.spec, dispatch_gdn_decode(req).spec)
+
+    def test_auto_is_the_case_stack_or_the_documented_fallback(self):
+        """Over a broad request domain: where the case's tile is legal, auto
+        runs it with the case's stack (the validator never refuses a stack;
+        the state hints are in scope everywhere, so knobs are never empty);
+        where it is not, auto runs the first legal tile of the gate kind's
+        priority order at its base configuration."""
+        from dispatch.gdn.gfx950 import CONFIGURED_TILES_BY_GATE, make_spec
+
+        fused_modes = ((False, False), (True, False), (False, True), (True, True))
+        gdn_dims = tuple((d, d) for d in (64, 96, 128, 192, 256)) + (
+            (128, 16),
+            (128, 32),
+            (128, 64),
+            (128, 256),
+            (256, 128),
+        )
+        for gate_kind, dims in (("gdn", gdn_dims), ("kda", ((128, 128),))):
+            for (dk, dv), state_dtype, (conv, norm), heads, batch in product(
+                dims,
+                ("bf16", "f16", "f32"),
+                fused_modes,
+                ((4, 4), (16, 16), (16, 32), (48, 96)),
+                (1, 64),
+            ):
+                req = _req(
+                    batch,
+                    gate_kind=gate_kind,
+                    num_k_heads=heads[0],
+                    num_v_heads=heads[1],
+                    head_k_dim=dk,
+                    head_v_dim=dv,
+                    state_dtype=state_dtype,
+                    fuse_conv=conv,
+                    fuse_out_norm=norm,
+                )
+                if request_errors(req):
+                    continue
+                case = (gate_kind, conv or norm, AUTO_STATE_ROW[state_dtype])
+                tile = _SHIPPED[case][0]
+                with self.subTest(req=req):
+                    got = dispatch_gdn_decode(req)
+                    if is_valid_spec(make_spec(req, tile), arch=ARCH)[0]:
+                        self.assertEqual(_TILE(got.spec.kernel_spec), tile)
+                        self.assertTrue(got.spec.knobs)
+                    else:
+                        first = next(
+                            t
+                            for t in CONFIGURED_TILES_BY_GATE[gate_kind]
+                            if is_valid_spec(make_spec(req, t), arch=ARCH)[0]
+                        )
+                        self.assertEqual(_TILE(got.spec.kernel_spec), first)
+                        self.assertEqual(got.spec.knobs, ())
+
+    def test_supported_geometry_falls_back_when_the_case_tile_is_invalid(self):
         for head_k_dim in (64, 192):
-            for batch in (1, 256):
-                with self.subTest(head_k_dim=head_k_dim, batch=batch):
-                    result = dispatch_gdn_decode(_req(batch, head_k_dim=head_k_dim))
-                    ok, why = is_valid_spec(result.spec, arch=ARCH)
-                    self.assertTrue(ok, why)
-                    self.assertEqual(result.spec.head_k_dim, head_k_dim)
-                    self.assertEqual(_TILE(result.spec), self._FALLBACK_TILE)
+            for state_dtype in ("bf16", "f32"):
+                for fused in (False, True):
+                    for batch in (1, 256):
+                        with self.subTest(
+                            head_k_dim=head_k_dim,
+                            state=state_dtype,
+                            fused=fused,
+                            batch=batch,
+                        ):
+                            result = dispatch_gdn_decode(
+                                _case_req(
+                                    batch,
+                                    "gdn",
+                                    fused,
+                                    state_dtype,
+                                    head_k_dim=head_k_dim,
+                                )
+                            )
+                            kernel = result.spec.kernel_spec
+                            ok, why = is_valid_spec(kernel, arch=ARCH)
+                            self.assertTrue(ok, why)
+                            self.assertEqual(kernel.head_k_dim, head_k_dim)
+                            self.assertEqual(_TILE(kernel), self._FALLBACK_TILE)
+                            self.assertEqual(result.spec.knobs, ())
+
+    def test_plain_gdn_with_a_narrow_value_dim_falls_back_to_the_fused_tile(self):
+        # (2,16,8) needs head_v_dim / 8 to be a multiple of 8, so DV 16 and 32
+        # are illegal; the first legal tile of the GDN priority order is then
+        # another case's auto tile.
+        for head_v_dim in (16, 32):
+            with self.subTest(head_v_dim=head_v_dim):
+                result = dispatch_gdn_decode(
+                    _case_req(8, "gdn", False, "bf16", head_v_dim=head_v_dim)
+                )
+                self.assertEqual(_TILE(result.spec.kernel_spec), (4, 16, 1))
+                self.assertEqual(result.spec.knobs, ())
 
 
 class TestRequestRejection(unittest.TestCase):
@@ -144,8 +374,11 @@ class TestRequestRejection(unittest.TestCase):
                 head_v_dim=128,
             )
         )
-        self.assertEqual(result.spec.gate_kind, "kda")
-        self.assertEqual((result.spec.head_k_dim, result.spec.head_v_dim), (128, 128))
+        self.assertEqual(result.spec.kernel_spec.gate_kind, "kda")
+        self.assertEqual(
+            (result.spec.kernel_spec.head_k_dim, result.spec.kernel_spec.head_v_dim),
+            (128, 128),
+        )
 
     def test_kda_non_d128_is_loudly_scoped_out(self):
         for head_k_dim, head_v_dim in ((64, 128), (128, 64)):
@@ -166,8 +399,8 @@ class TestRequestRejection(unittest.TestCase):
 
     def test_gdn_d64_remains_supported(self):
         result = dispatch_gdn_decode(_req(1, head_k_dim=64))
-        self.assertEqual(result.spec.gate_kind, "gdn")
-        self.assertEqual(result.spec.head_k_dim, 64)
+        self.assertEqual(result.spec.kernel_spec.gate_kind, "gdn")
+        self.assertEqual(result.spec.kernel_spec.head_k_dim, 64)
 
 
 class TestMalformedRequestFields(unittest.TestCase):
@@ -221,12 +454,10 @@ class TestSpecIdPin(unittest.TestCase):
             _req(256, algorithm="warp_tiled", spec_id="nw4_wtk16_bpv8")
         )
         self.assertEqual(result.candidate.spec_id, "nw4_wtk16_bpv8")
-        self.assertEqual(_TILE(result.spec), (4, 16, 8))
+        self.assertEqual(_TILE(result.spec.kernel_spec), (4, 16, 8))
 
     def test_every_legal_gdn_pin_is_reachable_at_any_batch(self):
-        for candidate in gdn_candidates():
-            if candidate.spec_id.startswith("kda_"):
-                continue
+        for candidate in _candidates_of("gdn"):
             req = _req(64, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
             if not candidate.admits(req)[0]:
                 continue
@@ -234,27 +465,28 @@ class TestSpecIdPin(unittest.TestCase):
                 got = dispatch_gdn_decode(req)
                 self.assertEqual(got.candidate.spec_id, candidate.spec_id)
 
-    def test_every_kda_pin_is_reachable_with_kda_gate(self):
-        for spec_id in TUNED_SPEC_IDS:
-            with self.subTest(spec_id=spec_id):
-                got = dispatch_gdn_decode(
-                    GdnDecodeRequest(
-                        batch=64,
-                        arch=ARCH,
-                        spec_id=spec_id,
-                        gate_kind="kda",
-                        num_k_heads=32,
-                        num_v_heads=32,
-                    )
-                )
-                self.assertEqual(got.candidate.spec_id, spec_id)
-                self.assertEqual(got.spec.gate_kind, "kda")
+    def test_every_legal_kda_pin_is_reachable_with_kda_gate(self):
+        for candidate in _candidates_of("kda"):
+            req = GdnDecodeRequest(
+                batch=64,
+                arch=ARCH,
+                spec_id=candidate.spec_id,
+                gate_kind="kda",
+                num_k_heads=32,
+                num_v_heads=32,
+            )
+            if not candidate.admits(req)[0]:
+                continue
+            with self.subTest(spec_id=candidate.spec_id):
+                got = dispatch_gdn_decode(req)
+                self.assertEqual(got.candidate.spec_id, candidate.spec_id)
+                self.assertEqual(got.spec.kernel_spec.gate_kind, "kda")
 
     def test_a_kda_pin_cannot_serve_gdn(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PinRefused):
             dispatch_gdn_decode(
                 GdnDecodeRequest(
-                    batch=64, arch=ARCH, spec_id="kda_w128", gate_kind="gdn"
+                    batch=64, arch=ARCH, spec_id="kda_nw4_wtk16_bpv4", gate_kind="gdn"
                 )
             )
 
@@ -300,7 +532,7 @@ class TestDtypeCoverage(unittest.TestCase):
         for dtype in GDN_DTYPES:
             with self.subTest(dtype=dtype):
                 got = dispatch_gdn_decode(_req(16, dtype=dtype))
-                self.assertEqual(got.spec.dtype, dtype)
+                self.assertEqual(got.spec.kernel_spec.dtype, dtype)
 
 
 class TestLaunchGeometry(unittest.TestCase):
@@ -308,13 +540,15 @@ class TestLaunchGeometry(unittest.TestCase):
         for batch in (1, 16, 64, 256):
             with self.subTest(batch=batch):
                 got = dispatch_gdn_decode(_req(batch))
-                self.assertEqual(got.grid, gdn_decode_grid(batch, got.spec))
-                self.assertEqual(got.block, (got.spec.block_size, 1, 1))
+                self.assertEqual(got.grid, gdn_decode_grid(batch, got.spec.kernel_spec))
+                self.assertEqual(got.block, (got.spec.kernel_spec.block_size, 1, 1))
 
     def test_dtype_aliases_normalize(self):
         a = dispatch_gdn_decode(_req(16, dtype="bfloat16"))
         b = dispatch_gdn_decode(_req(16, dtype="bf16"))
-        self.assertEqual(a.spec.kernel_name(), b.spec.kernel_name())
+        self.assertEqual(
+            a.spec.kernel_spec.kernel_name(), b.spec.kernel_spec.kernel_name()
+        )
 
 
 class TestKernelIdentity(unittest.TestCase):
@@ -338,10 +572,10 @@ class TestKernelIdentity(unittest.TestCase):
 
         a = dispatch_gdn_decode(
             _req(16, algorithm="warp_tiled", spec_id="nw1_wtk8_bpv1")
-        ).spec
+        ).spec.kernel_spec
         b = dispatch_gdn_decode(
             _req(16, algorithm="warp_tiled", spec_id="nw2_wtk8_bpv2")
-        ).spec
+        ).spec.kernel_spec
         self.assertNotEqual(
             stable_json_hash(asdict(a), n=16), stable_json_hash(asdict(b), n=16)
         )
@@ -352,7 +586,7 @@ class TestSweepSpace(unittest.TestCase):
         specs = gdn_sweep_space(_req(16))
         self.assertTrue(specs)
         for spec in specs:
-            ok, why = is_valid_spec(spec, arch=ARCH)
+            ok, why = is_valid_spec(spec.kernel_spec, arch=ARCH)
             self.assertTrue(ok, why)
 
     def test_sweep_space_of_a_bad_request_is_empty(self):
@@ -373,7 +607,7 @@ class TestDispatchResultContract(unittest.TestCase):
             with self.subTest(batch=batch):
                 result = dispatch_gdn_decode(_req(batch))
                 kernel = result.build()
-                self.assertEqual(kernel.name, result.spec.kernel_name())
+                self.assertEqual(kernel.name, result.spec.kernel_spec.kernel_name())
 
     def test_signature_matches_the_spec(self):
         for batch in (1, 16, 64, 256):
@@ -381,7 +615,7 @@ class TestDispatchResultContract(unittest.TestCase):
                 result = dispatch_gdn_decode(_req(batch))
                 self.assertEqual(
                     tuple(result.signature),
-                    tuple(gdn_decode_signature(result.spec)),
+                    tuple(gdn_decode_signature(result.spec.kernel_spec)),
                 )
 
     def test_compile_key_names_arch_and_abi(self):
@@ -399,11 +633,11 @@ class TestGateKindWiring(unittest.TestCase):
 
     def test_request_defaults_to_the_gdn_gate(self):
         self.assertEqual(_req(1).gate_kind, "gdn")
-        self.assertEqual(dispatch_gdn_decode(_req(1)).spec.gate_kind, "gdn")
+        self.assertEqual(dispatch_gdn_decode(_req(1)).spec.kernel_spec.gate_kind, "gdn")
 
     def test_kda_request_selects_a_kda_spec(self):
         req = GdnDecodeRequest(batch=4, arch=ARCH, gate_kind="kda")
-        spec = dispatch_gdn_decode(req).spec
+        spec = dispatch_gdn_decode(req).spec.kernel_spec
         self.assertEqual(spec.gate_kind, "kda")
         self.assertIn("kda", spec.kernel_name())
 
@@ -419,78 +653,22 @@ class TestGateKindWiring(unittest.TestCase):
         self.assertTrue(any("gate_kind" in e for e in errors), errors)
 
 
-class TestWorkKeyedTable(unittest.TestCase):
-    """The new KDA table is keyed on work = batch * num_v_heads."""
-
-    def test_equal_work_selects_the_same_kda_tile(self):
-        self.assertEqual(tile_for_work(8 * 32, "kda"), tile_for_work(32 * 8, "kda"))
-        self.assertEqual(tile_for_work(1 * 32, "kda"), tile_for_work(4 * 8, "kda"))
-
-    def test_kda_dispatch_uses_work_not_batch(self):
-        full = dispatch_gdn_decode(
-            GdnDecodeRequest(
-                batch=4,
-                arch=ARCH,
-                gate_kind="kda",
-                num_k_heads=32,
-                num_v_heads=32,
-            )
-        ).spec
-        sharded = dispatch_gdn_decode(
-            GdnDecodeRequest(
-                batch=4,
-                arch=ARCH,
-                gate_kind="kda",
-                num_k_heads=8,
-                num_v_heads=8,
-            )
-        ).spec
-        self.assertEqual(_TILE(full), tile_for_work(4 * 32, "kda"))
-        self.assertEqual(_TILE(sharded), tile_for_work(4 * 8, "kda"))
-
-    def test_tile_for_work_agrees_with_kda_dispatch(self):
-        for batch in (1, 8, 32, 128):
-            with self.subTest(batch=batch):
-                spec = dispatch_gdn_decode(
-                    GdnDecodeRequest(
-                        batch=batch,
-                        arch=ARCH,
-                        gate_kind="kda",
-                        num_k_heads=32,
-                        num_v_heads=32,
-                    )
-                ).spec
-                self.assertEqual(
-                    _TILE(spec),
-                    tile_for_work(batch * spec.num_v_heads, "kda"),
-                )
-
-    def test_kda_table_is_total_over_work(self):
-        for work in (1, 4, 5, 128, 129, 4096, 4097, 10**6):
-            self.assertIsNotNone(tile_for_work(work, "kda"))
-
-
 class TestGdnAndKdaTileNamespaces(unittest.TestCase):
     """The shared registry keeps GDN and KDA selectable identities disjoint."""
 
     def test_kda_spec_ids_cannot_collide_with_gdn_spec_ids(self):
-        gdn_ids = {
-            candidate.spec_id
-            for candidate in gdn_candidates()
-            if not candidate.spec_id.startswith("kda_")
-        }
-        kda_ids = {
-            candidate.spec_id
-            for candidate in gdn_candidates()
-            if candidate.spec_id.startswith("kda_")
-        }
+        gdn_ids = {spec_id_for(tile, "gdn") for tile in CONFIGURED_TILES}
+        kda_ids = {spec_id_for(tile, "kda") for tile in KDA_CONFIGURED_TILES}
         self.assertFalse(gdn_ids & kda_ids)
+        registered = [candidate.spec_id for candidate in gdn_candidates()]
+        self.assertEqual(len(registered), len(set(registered)))
+        self.assertEqual(set(registered), gdn_ids | kda_ids)
 
 
 class TestStateDtypeDispatch(unittest.TestCase):
     """An f32 recurrent state is reachable from the request for both gate
-    kinds, and it changes only the state: the tile ``auto`` picks is the
-    unfused one of the same request with a 16-bit state."""
+    kinds. Which tile and knobs it runs is the f32 row of its case
+    (``TestStaticSelection``)."""
 
     def test_every_f32_spelling_reaches_the_spec_for_both_gates(self):
         for gate_kind in ("gdn", "kda"):
@@ -499,25 +677,11 @@ class TestStateDtypeDispatch(unittest.TestCase):
                     got = dispatch_gdn_decode(
                         _req(16, gate_kind=gate_kind, state_dtype=spelling)
                     )
-                    self.assertEqual(got.spec.state_dtype, "f32")
-                    self.assertEqual(got.spec.dtype, "bf16")
-                    self.assertIn("_stf32_", got.spec.kernel_name())
+                    self.assertEqual(got.spec.kernel_spec.state_dtype, "f32")
+                    self.assertEqual(got.spec.kernel_spec.dtype, "bf16")
+                    self.assertIn("_stf32_", got.spec.kernel_spec.kernel_name())
                     self.assertIn(
                         ("state", "ptr<f32, global>"), _sig_types(got.signature)
-                    )
-
-    def test_f32_state_keeps_the_unfused_tile(self):
-        for gate_kind in ("gdn", "kda"):
-            for batch in (1, 4, 16, 64, 256):
-                with self.subTest(gate_kind=gate_kind, batch=batch):
-                    narrow = dispatch_gdn_decode(_req(batch, gate_kind=gate_kind))
-                    wide = dispatch_gdn_decode(
-                        _req(batch, gate_kind=gate_kind, state_dtype="f32")
-                    )
-                    self.assertEqual(_TILE(wide.spec), _TILE(narrow.spec))
-                    self.assertEqual(wide.candidate.spec_id, narrow.candidate.spec_id)
-                    self.assertNotEqual(
-                        wide.kernel_id.compile_key, narrow.kernel_id.compile_key
                     )
 
     def test_f32_is_a_state_dtype_only(self):
@@ -550,23 +714,13 @@ def _fused_req(batch: int = 8, **kw) -> GdnDecodeRequest:
 
 class TestFusedDispatch(unittest.TestCase):
     """fuse_conv / fuse_out_norm requests: the flags reach the spec and the
-    launch ABI, auto uses the interim fused tile, only BPV=1 tiles serve, and
-    unfused selection does not move.
-
-    The fused tile is pinned as a literal, not as ``FUSED_DEFAULT_TILE``, for
-    the reason ``TestStaticSelection`` gives.
+    launch ABI, auto runs the fused case's BPV=1 tile, and only BPV=1 tiles
+    serve. The fused tiles are pinned as literals in ``_SHIPPED``.
     """
 
-    _SHIPPED_FUSED_TILE = (4, 16, 1)
     _MODES = ((True, False), (False, True), (True, True))
 
-    def test_fused_default_is_the_shipped_tile(self):
-        from dispatch.gdn.gfx950 import FUSED_DEFAULT_TILE
-
-        self.assertEqual(FUSED_DEFAULT_TILE, self._SHIPPED_FUSED_TILE)
-
     def test_auto_selects_the_fused_tile_for_every_mode(self):
-        expected_id = {"gdn": "nw4_wtk16_bpv1", "kda": "kda_nw4_wtk16_bpv1"}
         for gate_kind in ("gdn", "kda"):
             for state_dtype in ("bf16", "f16", "f32"):
                 for conv, norm in self._MODES:
@@ -587,10 +741,12 @@ class TestFusedDispatch(unittest.TestCase):
                                     fuse_out_norm=norm,
                                 )
                             )
-                            spec = got.spec
-                            self.assertEqual(_TILE(spec), self._SHIPPED_FUSED_TILE)
+                            spec = got.spec.kernel_spec
+                            row = AUTO_STATE_ROW[state_dtype]
+                            tile = _SHIPPED[(gate_kind, True, row)][0]
+                            self.assertEqual(_TILE(spec), tile)
                             self.assertEqual(
-                                got.candidate.spec_id, expected_id[gate_kind]
+                                got.candidate.spec_id, spec_id_for(tile, gate_kind)
                             )
                             self.assertEqual(
                                 (spec.fuse_conv, spec.fuse_out_norm), (conv, norm)
@@ -614,7 +770,10 @@ class TestFusedDispatch(unittest.TestCase):
                             fuse_conv=False,
                         )
                     )
-                    self.assertEqual(_TILE(got.spec), self._SHIPPED_FUSED_TILE)
+                    self.assertEqual(
+                        _TILE(got.spec.kernel_spec),
+                        _SHIPPED[(gate_kind, True, "bf16")][0],
+                    )
 
     def test_fused_flags_reach_the_launch_abi(self):
         """The DispatchResult's signature is the fused kernel ABI, so a caller
@@ -634,10 +793,11 @@ class TestFusedDispatch(unittest.TestCase):
                     {"out_gate", "norm_weight", "og_stride", "norm_eps"} <= names, norm
                 )
                 self.assertEqual(
-                    tuple(got.signature), tuple(gdn_decode_signature(got.spec))
+                    tuple(got.signature),
+                    tuple(gdn_decode_signature(got.spec.kernel_spec)),
                 )
-                self.assertEqual(got.grid, gdn_decode_grid(8, got.spec))
-                self.assertEqual(got.build().name, got.spec.kernel_name())
+                self.assertEqual(got.grid, gdn_decode_grid(8, got.spec.kernel_spec))
+                self.assertEqual(got.build().name, got.spec.kernel_spec.kernel_name())
 
     def test_each_mode_has_its_own_compile_key(self):
         for gate_kind in ("gdn", "kda"):
@@ -665,8 +825,8 @@ class TestFusedDispatch(unittest.TestCase):
         for spec_id, gate_kind in (
             ("nw2_wtk16_bpv8", "gdn"),
             ("nw4_wtk16_bpv4", "gdn"),
-            ("kda_w128", "kda"),
-            ("kda_w512", "kda"),
+            ("kda_nw4_wtk16_bpv4", "kda"),
+            ("kda_nw1_wtk16_bpv4", "kda"),
         ):
             with self.subTest(spec_id=spec_id):
                 with self.assertRaises(ValueError) as ctx:
@@ -679,7 +839,7 @@ class TestFusedDispatch(unittest.TestCase):
         for spec_id, gate_kind, tile in (
             ("nw2_wtk16_bpv1", "gdn", (2, 16, 1)),
             ("nw8_wtk8_bpv1", "gdn", (8, 8, 1)),
-            ("kda_w_large", "kda", (2, 16, 1)),
+            ("kda_nw2_wtk16_bpv1", "kda", (2, 16, 1)),
             ("kda_nw4_wtk16_bpv1", "kda", (4, 16, 1)),
         ):
             with self.subTest(spec_id=spec_id):
@@ -687,13 +847,14 @@ class TestFusedDispatch(unittest.TestCase):
                     _fused_req(gate_kind=gate_kind, spec_id=spec_id)
                 )
                 self.assertEqual(got.candidate.spec_id, spec_id)
-                self.assertEqual(_TILE(got.spec), tile)
-                self.assertTrue(got.spec.fuse_conv and got.spec.fuse_out_norm)
+                self.assertEqual(_TILE(got.spec.kernel_spec), tile)
+                kernel = got.spec.kernel_spec
+                self.assertTrue(kernel.fuse_conv and kernel.fuse_out_norm)
 
     def test_fuse_conv_with_grouped_heads_is_a_request_error(self):
         """Dispatch and the kernel validator report one shared rule, so the
         request-level rejection cannot outlive the kernel limit."""
-        from dispatch.gdn.gfx950 import FUSED_DEFAULT_TILE, make_spec
+        from dispatch.gdn.gfx950 import make_spec
         from kernels.gfx950.gdn_decode import fuse_conv_heads_error
 
         rule = fuse_conv_heads_error(8, 16)
@@ -704,52 +865,19 @@ class TestFusedDispatch(unittest.TestCase):
             with self.subTest(gate=gate_kind):
                 self.assertIn(rule, request_errors(req))
                 self.assertEqual(
-                    is_valid_spec(make_spec(req, FUSED_DEFAULT_TILE), arch=ARCH),
+                    is_valid_spec(make_spec(req, (4, 16, 1)), arch=ARCH),
                     (False, rule),
                 )
                 with self.assertRaises(ValueError):
                     dispatch_gdn_decode(req)
                 self.assertEqual(dispatch_gdn_decode_all(req), ())
 
-    def test_unfused_selection_is_unchanged(self):
-        """The extra KDA candidate must never answer an unfused ``auto``: every
-        KDA band still selects its own tile, and GDN keeps its default."""
-        from dispatch.gdn.gfx950 import KDA_FUSED_SPEC_ID
-
-        for batch in (1, 4, 5, 16, 17, 64, 4096):
-            for num_v_heads in (8, 32):
-                with self.subTest(batch=batch, hv=num_v_heads):
-                    kda = dispatch_gdn_decode(
-                        _req(
-                            batch,
-                            gate_kind="kda",
-                            num_k_heads=num_v_heads,
-                            num_v_heads=num_v_heads,
-                        )
-                    )
-                    self.assertNotEqual(kda.candidate.spec_id, KDA_FUSED_SPEC_ID)
-                    self.assertEqual(
-                        _TILE(kda.spec), tile_for_work(batch * num_v_heads, "kda")
-                    )
-                    gdn = dispatch_gdn_decode(_req(batch))
-                    self.assertEqual(_TILE(gdn.spec), DEFAULT_TILE)
-                    self.assertFalse(gdn.spec.fuse_conv or gdn.spec.fuse_out_norm)
-
     def test_the_kda_fused_candidate_cannot_serve_gdn(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PinRefused) as raised:
             dispatch_gdn_decode(
                 _fused_req(gate_kind="gdn", spec_id="kda_nw4_wtk16_bpv1")
             )
-
-    def test_illegal_fused_default_falls_back_to_a_legal_bpv1_tile(self):
-        # Known limitation, as for the unfused default: head_k_dim 64 rejects
-        # the (4,16,1) key group, and the fallback is the first legal tile in
-        # product order. Pinned so a change is deliberate.
-        got = dispatch_gdn_decode(_fused_req(head_k_dim=64))
-        ok, why = is_valid_spec(got.spec, arch=ARCH)
-        self.assertTrue(ok, why)
-        self.assertEqual(_TILE(got.spec), (1, 1, 1))
-        self.assertTrue(got.spec.fuse_conv and got.spec.fuse_out_norm)
+        self.assertIn("serves the 'kda' gate", str(raised.exception))
 
 
 class TestRequestFieldTypes(unittest.TestCase):
@@ -792,16 +920,17 @@ class TestRequestFieldTypes(unittest.TestCase):
             with self.subTest(fused=fused):
                 self.assertEqual(request_errors(req), [])
                 got = dispatch_gdn_decode(req)
+                spec = got.spec.kernel_spec
                 self.assertEqual(
                     (
-                        got.spec.num_k_heads,
-                        got.spec.num_v_heads,
-                        got.spec.head_k_dim,
-                        got.spec.head_v_dim,
+                        spec.num_k_heads,
+                        spec.num_v_heads,
+                        spec.head_k_dim,
+                        spec.head_v_dim,
                     ),
                     (16, 16, 128, 64),
                 )
-                self.assertEqual(got.grid, gdn_decode_grid(3, got.spec))
+                self.assertEqual(got.grid, gdn_decode_grid(3, spec))
 
     def test_non_bool_flags_are_request_errors(self):
         for field in ("fuse_conv", "fuse_out_norm", "use_qk_l2norm"):
@@ -883,10 +1012,10 @@ class TestNumpyIntegralFields(unittest.TestCase):
         self.assertEqual(request_errors(req), [])
         got = dispatch_gdn_decode(req)
         for value in (
-            got.spec.num_k_heads,
-            got.spec.num_v_heads,
-            got.spec.head_k_dim,
-            got.spec.head_v_dim,
+            got.spec.kernel_spec.num_k_heads,
+            got.spec.kernel_spec.num_v_heads,
+            got.spec.kernel_spec.head_k_dim,
+            got.spec.kernel_spec.head_v_dim,
         ):
             self.assertIs(type(value), int)
 

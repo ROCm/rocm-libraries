@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack import agreement, pipeline, provenance_sidecar
 from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
@@ -47,6 +47,14 @@ def _read(path):
 
 def _silent(*_args, **_kwargs):
     pass
+
+
+def _restamp(doc):
+    """Re-publish every launch's descriptor digest over an edited shipped document,
+    so only the check under test can refuse it."""
+    binding = agreement.descriptor_binding(doc)
+    for evidence in doc["provenance"]["effective_spec"].values():
+        evidence["descriptor_digest"] = binding
 
 
 # --- Packing ------------------------------------------------------------------

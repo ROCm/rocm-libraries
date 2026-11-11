@@ -98,7 +98,7 @@ Two things to add:
    )
    ```
 
-   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples.
+   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples. Newer declaration ABI generations inherit older generations' overrides (`_decls_for_flavor` resolves the chain in `_LlvmDeclarationAbi` order), so an entry goes only in the table of the generation where the signature changed; mirror it in the C++ array of the same generation (`cpp/core/lower_llvm/data.cpp`).
 
 2. Add an `_op_<dotted_name>` handler in `_Lowerer`. For `math.my_op`:
 
@@ -393,6 +393,23 @@ if __name__ == "__main__":
 
 Add a new `mfma_f32_<m>x<n>x<k>_<dt>` method to `IRBuilder` and the corresponding op name. Wire it through `core/lower_llvm.py::_op_tile_mfma_f32_...` and `_INTRINSIC_DECLS`.
 
+An instruction whose call is plain data -- the A, B and C operands in fixed
+register types plus literal immediates -- needs no handler. Describe it as a
+`MatrixCall` in `MATRIX_CALLS` (`core/isa/matrix_calls.py`) and as the same row
+in the C++ table (`cpp/core/isa/matrix_calls.cpp`). Each operand and the result
+take one form (`core/isa/matrix_operand_forms.py`):
+
+| Form | The operand the kernel holds | What reaches the instruction |
+|---|---|---|
+| `AsIs(t)` | `t`, or the same bits in another shape | unchanged, or one `bitcast` |
+| `ZeroPadded(<m x i32>, n)` | exactly its `n` packed words as `<n x i32>`, or the whole `<m x i32>` register | the words, then m - n zero words; the register unchanged |
+| `EvenHalves(<2n x h>)` | n 16-bit values | the values in the even half-slots |
+
+A register type that changed at a newer LLVM flavor is a `FlavorType`. The
+`declare` line is derived from the forms and added to every flavor's
+declaration table, so no `_INTRINSIC_DECLS` entry is written; a `decl_key` that
+names an existing entry must derive exactly its text.
+
 ### 5.2 `helpers/atoms.py`
 
 Add a new `MfmaAtom` class method and register it in `MFMA_F16_ATOMS` (or a new `MFMA_BF16_ATOMS`, etc.). Critically, fill in `lane_to_output(b, lane, i)` — this is the per-atom mapping that the epilogue depends on. Bad lane mapping is the single most common atom-extension bug.
@@ -428,7 +445,8 @@ One fact, one home. Work through the list in order; a step that does not apply
 6. **Conversions** -- explicit `cvt_<src>_to_<dst>` primitives, each one
    instruction; no existing cast widens to the new type implicitly.
 7. **MMA** -- catalog rows in `core/arch/data/arch_specs.json` if an instruction
-   takes the type as an operand or accumulator.
+   takes the type as an operand or accumulator, and the tiling MMA catalog's
+   (section 5.5).
 8. **Manifest** -- `helpers/spec.py::ptr_type_str` canonicalization.
 9. **C++ engine** -- mirror the change in the same change (`cpp/core/dtypes.cpp`,
    `cpp/core/ir/core_types.cpp`, `cpp/core/lower_llvm/`, `cpp/core/lower_hip/`):
@@ -440,6 +458,27 @@ One fact, one home. Work through the list in order; a step that does not apply
     `lower_kernel_to_llvm`, so a `ROCKE_BACKEND=both ROCKE_CPP_STRICT=1` run
     compares the engines, and state a refusal with
     `rocke.tests.engines.assert_both_engines_reject`.
+
+### 5.5 The tiling MMA catalog and its backend coverage record
+
+The tiling package keeps its own MMA catalog
+(`helpers/tiling/traits/data/mma_traits.json`) and a record of which catalog
+instructions the backend issues on each target
+(`helpers/tiling/traits/data/backend_coverage.json`).
+`tests/helpers/tiling/traits/test_mma_backend_coverage.py` re-measures the record
+from `ArchTarget.mma.ops` and requires it to equal the committed file, so adding,
+removing or rewiring an MMA op in `core.arch` fails that test -- even for an op no
+catalog row uses, which the record lists under `backend_ops_without_row` -- until
+the record is regenerated in the same change. From `platform/`:
+
+```bash
+python -m rocke.tests.helpers.tiling.traits.test_mma_backend_coverage --write
+```
+
+It needs a clang that targets every catalog target (`ROCKE_LLVM_BIN=<llvm>/bin`
+picks one), and runs from a source checkout only. An instruction the catalog
+does not list yet gets a row first (`helpers/tiling/traits/README.md`, Editing
+the catalog).
 
 ## 6. Adding A New Optimization Lever To The Autotuner
 

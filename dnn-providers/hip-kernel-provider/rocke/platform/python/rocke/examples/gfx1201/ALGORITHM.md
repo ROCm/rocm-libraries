@@ -126,9 +126,13 @@ passes. The probe therefore uses **random, asymmetric** `A` and `B`:
 
 > With random asymmetric operands, `A · Bᵀ ≠ (A · Bᵀ)ᵀ` almost surely, so any
 > row/col swap in the lane map shows up as a large `max_abs_diff` against the
-> numpy reference `C = A @ B.T`. A **PASS at multiple tile counts**
-> (`16×16×16`, `64×64×64`) uniquely confirms the mapping — an identity×constant
-> input could not.
+> numpy reference `C = A @ B.T`. A **PASS at multiple tile counts, including a
+> non-square one** (`16×16×16`, `64×64×64`, `32×64×48`) uniquely confirms the
+> mapping — an identity×constant input could not.
+
+The non-square shape guards the launch, not the lane map: with `M = N` the M and
+N tile counts are equal, so a launch grid whose x/y order disagrees with the
+kernel's `block_id` mapping still covers every tile and passes.
 
 Because WMMA accumulates in f32 in a different order than numpy, the probe judges
 the result **within a tolerance** (`--tol`, default `1e-2`), not bit-exact — a

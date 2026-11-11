@@ -25,6 +25,30 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
+// near_check treats only NaN/Inf in its first argument as special. A non-finite
+// solution makes A*x non-finite, both tolerance comparisons are false, and the
+// test passes. Fail once, with the count and the first bad index.
+template <typename T>
+bool solution_is_finite(int64_t n, const T* x)
+{
+    int64_t count = 0;
+    int64_t first = -1;
+    for(int64_t i = 0; i < n; ++i)
+    {
+        if(rocsparse_isnan(x[i]) || rocsparse_isinf(x[i]))
+        {
+            if(first < 0)
+                first = i;
+            ++count;
+        }
+    }
+    if(count == 0)
+        return true;
+    std::cerr << "solution is not finite: " << count << " entries, first at index " << first
+              << std::endl;
+    return false;
+}
+
 template <typename T>
 void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
 {
@@ -111,14 +135,20 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     host_vector<T> hd(batch_stride * batch_count, static_cast<T>(7));
     host_vector<T> hdu(batch_stride * batch_count, static_cast<T>(7));
 
+    // A zero matrix selects the identity. Every other matrix is tridiagonal.
+    const bool diagonal = arg.matrix == rocsparse_matrix_zero;
+
     // initialize tri-diagonal matrix
     for(rocsparse_int j = 0; j < batch_count; ++j)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hdl[j * batch_stride + i] = random_cached_generator<T>(1, 8);
-            hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
-            hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
+            hdl[j * batch_stride + i]
+                = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
+            hd[j * batch_stride + i]
+                = diagonal ? static_cast<T>(1) : random_cached_generator<T>(17, 32);
+            hdu[j * batch_stride + i]
+                = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
         }
 
         hdl[j * batch_stride + 0]     = std::numeric_limits<T>::infinity();
@@ -184,6 +214,15 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
                                       + hd[offset + i] * hx[offset + i]
                                       + hdu[offset + i] * hx[offset + i + 1];
             }
+        }
+
+        if(!solution_is_finite<T>(batch_stride * batch_count, hx.data()))
+        {
+#ifdef GOOGLE_TEST
+            FAIL();
+#else
+            exit(EXIT_FAILURE);
+#endif
         }
 
         near_check_segments<T>(batch_stride * batch_count, hx_original.data(), hresult.data());

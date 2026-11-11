@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-flatbuffers = pytest.importorskip("flatbuffers")
+pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
 pytest.importorskip("pandas")
@@ -24,6 +24,7 @@ import pandas as pd  # noqa: E402
 import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
 from uhd_gen.evaluate import evaluate_corpus, load_model  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import convert  # noqa: E402
+from uhd_gen.tests.model_bin import write_model  # noqa: E402
 
 FEATURES = ["q.size", "kernel.group"]
 GROUPS = (0.0, 1.0)
@@ -258,8 +259,6 @@ def _single_tree_model(
     directory: Path, tree, *, score: dict | None = None, manifest: dict | None = None
 ) -> Path:
     """A hand-written one-tree, one-feature (`q.size`) artifact with its descriptor."""
-    import flatbuffers
-
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
     model = GbdtModelT()
@@ -269,12 +268,9 @@ def _single_tree_model(
     model.featuresHash = "sha256:strict_lt"
     model.groupByFeatureIndex = -1
 
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-
     objective = "min" if score else "max"
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "model.bin").write_bytes(bytes(builder.Output()))
+    write_model(model, directory / "model.bin")
     (directory / "train_manifest.json").write_text(
         json.dumps(
             {"features": ["q.size"], "target": "tflops", "objective": objective}

@@ -324,7 +324,7 @@ void testing_trsm(const Arguments& arg)
     double err_host                = 0.0;
     double err_device              = 0.0;
 
-    if(!ROCBLAS_REALLOC_ON_DEMAND)
+    if(arg.size_query)
     {
         // Compute size
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));

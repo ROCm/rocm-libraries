@@ -225,4 +225,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(Gpu::None), testing::Values(GetDeterministicConvCase())));
+    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
+                     testing::Values(GetDeterministicConvCase())));

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,23 @@ for line in sys.stdin:
 """
 )
 _ACTIVE = ContextVar("gpu_reference_worker_session", default=None)
+
+
+def _remove_worker_directory(directory: tempfile.TemporaryDirectory) -> None:
+    """Delete a reaped worker's directory, tolerating Windows' delayed handle release.
+
+    Windows releases a terminated process's handles asynchronously, and a scanner may
+    briefly hold a fresh log open, so deleting worker.log right after kill() can fail
+    with WinError 32. Retry for up to a second; past that, leave the directory to the
+    system's temporary-file cleanup rather than turn a reaped worker into an error.
+    """
+    for _ in range(20):
+        try:
+            directory.cleanup()
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    shutil.rmtree(directory.name, ignore_errors=True)
 
 
 class _Worker:
@@ -113,7 +131,7 @@ class _Worker:
                 self.process.wait()
         finally:
             self.log.close()
-            self.directory.cleanup()
+            _remove_worker_directory(self.directory)
 
 
 class WorkerSession:
@@ -131,6 +149,7 @@ class WorkerSession:
         env: dict[str, str],
         *,
         module: str | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Reuse only workers with the same role and selected import roots."""
         module = module or self.module
@@ -138,7 +157,9 @@ class WorkerSession:
         if key not in self.workers:
             self.workers[key] = _Worker(env, module, mode)
         try:
-            self.workers[key].execute(request, timeout=self.timeout)
+            self.workers[key].execute(
+                request, timeout=self.timeout if timeout is None else timeout
+            )
         except BaseException:
             self.workers.pop(key).close()
             raise

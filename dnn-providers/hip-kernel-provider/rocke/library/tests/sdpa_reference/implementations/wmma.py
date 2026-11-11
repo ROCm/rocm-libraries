@@ -9,6 +9,7 @@ This does not establish automatic unified-attention dispatch coverage.
 
 from __future__ import annotations
 
+import importlib
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -16,8 +17,14 @@ from typing import Any
 from ..contract import Case
 from ..architectures.common import validate_library_root
 
+# Frozen ABIs of the retired single-wave ``kernels.gfx1151.wmma_fmha_fwd``: v1 had the
+# head counts as specialization fields, v2 as runtime arguments. Archives qualified
+# against it replay under them, and an older source snapshot is prepared under them.
 LEGACY_ABI = "wmma-strided-v1"
-ABI = "wmma-strided-v2"
+RUNTIME_SHAPE_ABI = "wmma-strided-v2"
+# Current-source ABI: ``kernels.gfx1151.wmma_fmha_fwd_v2``, the multi-wave prefill.
+ABI = "wmma-strided-v3"
+_ABIS = (LEGACY_ABI, RUNTIME_SHAPE_ABI, ABI)
 CASES = tuple(
     Case("fp16", d, 4, kv, False, causal, batch=2, sequence_length=64)
     for d in (64, 128)
@@ -37,69 +44,96 @@ class Prepared:
     launcher: Any = None
 
 
+def _prefill_module():
+    """The multi-wave prefill module of the selected source tree, or None for an older
+    snapshot that predates it."""
+    try:
+        return importlib.import_module("kernels.gfx1151.wmma_fmha_fwd_v2")
+    except ModuleNotFoundError as error:
+        if error.name != "kernels.gfx1151.wmma_fmha_fwd_v2":
+            raise
+        return None
+
+
 def prepare(case: Case, library_root: str, architecture: str) -> Prepared:
     """Select the standalone WMMA path without importing another source tree."""
     validate_library_root(library_root)
     if case not in CASES:
         raise ValueError("case is outside the qualified WMMA cohort")
-    if architecture in ("gfx1151", "gfx12-generic"):
-        from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
-
-        # Qualification can select the published baseline's older source tree,
-        # where head counts are specialization fields instead of runtime args.
-        legacy = "num_query_heads" in WmmaFmhaFwdSpec.__dataclass_fields__
-        heads = (
-            dict(num_query_heads=case.query_heads, num_kv_heads=case.kv_heads)
-            if legacy
-            else {}
-        )
-        spec = WmmaFmhaFwdSpec(
-            head_size=case.head_dim,
-            dtype=case.dtype,
-            mask_mode="causal" if case.causal else "none",
-            **heads,
-        )
-    else:
+    if architecture not in ("gfx1151", "gfx12-generic"):
         raise ValueError(f"unsupported WMMA reference architecture: {architecture}")
-    return Prepared(architecture, case, spec, abi=LEGACY_ABI if legacy else ABI)
+    prefill = _prefill_module()
+    if prefill is not None:
+        # The "causal" class applies the runtime diagonal bound (see scalars()); an
+        # unmasked case compiles the "none" class.
+        spec = prefill.WmmaFmhaFwdV2Spec(
+            dtype=case.dtype,
+            head_dim=case.head_dim,
+            mask="causal" if case.causal else "none",
+        )
+        return Prepared(architecture, case, spec, abi=ABI)
+
+    from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
+
+    # Qualification can select the published baseline's older source tree,
+    # where head counts are specialization fields instead of runtime args.
+    legacy = "num_query_heads" in WmmaFmhaFwdSpec.__dataclass_fields__
+    heads = (
+        dict(num_query_heads=case.query_heads, num_kv_heads=case.kv_heads)
+        if legacy
+        else {}
+    )
+    spec = WmmaFmhaFwdSpec(
+        head_size=case.head_dim,
+        dtype=case.dtype,
+        mask_mode="causal" if case.causal else "none",
+        **heads,
+    )
+    return Prepared(
+        architecture, case, spec, abi=LEGACY_ABI if legacy else RUNTIME_SHAPE_ABI
+    )
 
 
 def signature(prepared: Prepared) -> tuple[dict, ...]:
     """Freeze the ABI declared by the production WMMA builder."""
     if prepared.abi == ABI:
+        arguments = _prefill_module().wmma_fmha_fwd_v2_signature(prepared.spec)
+    elif prepared.abi == RUNTIME_SHAPE_ABI:
         from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_signature
 
+        arguments = wmma_fmha_fwd_signature(prepared.spec)
+    else:
         return tuple(
-            dict(arg, size_bytes=8 if arg["type"].startswith("ptr<") else 4)
-            for arg in wmma_fmha_fwd_signature(prepared.spec)
+            {"name": name, "type": kind, "size_bytes": size}
+            for name, kind, size in (
+                *((name, "ptr<f16, global>", 8) for name in ("Q", "K", "V", "O")),
+                ("scale_log2", "f32", 4),
+                *(
+                    (name, "i32", 4)
+                    for name in (
+                        "seqlen_q",
+                        "seqlen_k",
+                        "stride_q_token",
+                        "stride_q_head",
+                        "stride_k_token",
+                        "stride_k_head",
+                        "stride_v_token",
+                        "stride_v_head",
+                        "stride_o_token",
+                        "stride_o_head",
+                    )
+                ),
+            )
         )
     return tuple(
-        {"name": name, "type": kind, "size_bytes": size}
-        for name, kind, size in (
-            *((name, "ptr<f16, global>", 8) for name in ("Q", "K", "V", "O")),
-            ("scale_log2", "f32", 4),
-            *(
-                (name, "i32", 4)
-                for name in (
-                    "seqlen_q",
-                    "seqlen_k",
-                    "stride_q_token",
-                    "stride_q_head",
-                    "stride_k_token",
-                    "stride_k_head",
-                    "stride_v_token",
-                    "stride_v_head",
-                    "stride_o_token",
-                    "stride_o_head",
-                )
-            ),
-        )
+        dict(arg, size_bytes=8 if arg["type"].startswith("ptr<") else 4)
+        for arg in arguments
     )
 
 
 def scalars(case: Case, scale: float, *, abi: str = ABI) -> dict:
     """Convert the SDPA scale to the WMMA exp2 ABI; strides are in elements."""
-    if abi not in (LEGACY_ABI, ABI):
+    if abi not in _ABIS:
         raise ValueError(f"unsupported WMMA reference ABI: {abi}")
     values = {
         "scale_log2": scale * math.log2(math.e),
@@ -114,11 +148,11 @@ def scalars(case: Case, scale: float, *, abi: str = ABI) -> dict:
     ):
         values[f"stride_{name}_token"] = heads * case.head_dim
         values[f"stride_{name}_head"] = case.head_dim
-        if abi == ABI:
+        if abi != LEGACY_ABI:
             values[f"stride_{name}_batch"] = (
                 case.sequence_length * heads * case.head_dim
             )
-    if abi == ABI:
+    if abi != LEGACY_ABI:
         values.update(
             num_query_heads=case.query_heads,
             num_kv_heads=case.kv_heads,
@@ -129,6 +163,17 @@ def scalars(case: Case, scale: float, *, abi: str = ABI) -> dict:
             stride_lse_batch=0,
             stride_lse_token=0,
             stride_lse_head=0,
+        )
+    if abi == ABI:
+        # The prefill kernel takes the batch, the V head count and both head widths at
+        # run time, and its "causal" class reads the diagonal from the window bounds
+        # (-1, 0 is causal from the top-left corner; -1, -1 would be unmasked).
+        values.update(
+            batch=case.batch,
+            num_v_heads=case.kv_heads,
+            head_dim_q=case.head_dim,
+            head_dim_v=case.head_dim,
+            window_right=0 if case.causal else -1,
         )
     return values
 
@@ -142,7 +187,7 @@ def replay_values(metadata: dict, buffers: dict) -> dict:
         V=buffers["v"],
         O=buffers["out"],
     )
-    if metadata["abi"] == ABI:
+    if metadata["abi"] in (RUNTIME_SHAPE_ABI, ABI):
         # This cohort never requests LSE; the runtime write_lse guard is off.
         values["LSE"] = 0
     elif metadata["abi"] != LEGACY_ABI:
@@ -150,8 +195,19 @@ def replay_values(metadata: dict, buffers: dict) -> dict:
     return values
 
 
+def _block(prepared: Prepared) -> tuple[int, int, int]:
+    """Threads per CTA of the selected kernel."""
+    if prepared.abi == ABI:
+        return (prepared.spec.threads, 1, 1)
+    return (prepared.spec.block_size, 1, 1)
+
+
 def build(prepared: Prepared):
     """Build through the selected architecture's existing production builder."""
+    if prepared.abi == ABI:
+        return _prefill_module().build_wmma_fmha_fwd_v2(
+            prepared.spec, arch=prepared.architecture
+        )
     from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
 
     return build_wmma_fmha_fwd(prepared.spec, arch=prepared.architecture)
@@ -159,10 +215,20 @@ def build(prepared: Prepared):
 
 def grid(prepared: Prepared) -> tuple[int, int, int]:
     """Use the production grid helper, including the nontrivial batch axis."""
+    if prepared.abi == ABI:
+        launch_grid, _ = _prefill_module().wmma_fmha_fwd_v2_grid(
+            prepared.spec,
+            batch=prepared.case.batch,
+            seqlen_q=prepared.case.sequence_length,
+            num_query_heads=prepared.case.query_heads,
+        )
+        return launch_grid
     from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid as helper
 
     heads = (
-        dict(num_query_heads=prepared.case.query_heads) if prepared.abi == ABI else {}
+        dict(num_query_heads=prepared.case.query_heads)
+        if prepared.abi == RUNTIME_SHAPE_ABI
+        else {}
     )
     return helper(
         prepared.spec,
@@ -197,9 +263,7 @@ def launch(prepared: Prepared, buffers: dict, scale: float) -> None:
             },
             buffers,
         ),
-        config=LaunchConfig(
-            grid=grid(prepared), block=(prepared.spec.block_size, 1, 1)
-        ),
+        config=LaunchConfig(grid=grid(prepared), block=_block(prepared)),
     )
 
 
@@ -214,7 +278,7 @@ def exported_kernel(prepared: Prepared) -> tuple[bytes, dict]:
         "name": launcher.kernel_name,
         "signature": launcher.signature,
         "grid": grid(prepared),
-        "block": (prepared.spec.block_size, 1, 1),
+        "block": _block(prepared),
         "runtime_shape": True,
         "scalars": scalars(prepared.case, prepared.case.scale, abi=prepared.abi),
     }

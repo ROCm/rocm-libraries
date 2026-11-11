@@ -108,7 +108,6 @@ typedef struct rocke_attn_unified_build_ctx
     const rocke_type_t* dtype; /* spec.dtype_ir (F16 / BF16)    */
     int num_segments; /* 3D/reduce; 0 for 2D           */
     int num_queries_per_kv; /* p->num_query_heads / kv       */
-    int max_blocks; /* ceil(max_seqlen_k/block_size) */
 
     /* ---------- kernel result + extra outputs ---------- */
     rocke_kernel_def_t* kernel; /* == b->kernel; returned by the driver          */
@@ -139,11 +138,12 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_value_t* abi_v_scale; /* "v_scale"              (F32)                */
 
     /* ---------- kernel-specific tail params (after the ABI prefix) ----------
-     * 2D appends out_scale, softcap, num_seqs. 3D appends softcap (unused) +
-     * num_seqs. reduce appends none. */
+     * 2D appends out_scale, softcap, num_seqs, block_table_stride. 3D appends
+     * softcap (unused), num_seqs, block_table_stride. reduce appends none. */
     rocke_value_t* out_scale; /* 2D "out_scale" (F32; unused by body)        */
     rocke_value_t* softcap; /* 2D/3D "softcap" (F32; 3D unused)            */
     rocke_value_t* num_seqs; /* 2D/3D "num_seqs" (I32)                       */
+    rocke_value_t* block_table_stride; /* 2D/3D "block_table_stride" (I32)  */
 
     /* ---------- grid ids + thread predicate (prologue) ---------- */
     rocke_value_t* q_tok; /* block_id_x()                                 */
@@ -209,9 +209,8 @@ typedef struct rocke_attn_unified_build_ctx
  * ============================================================ */
 
 /* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, sel_p,
- * dtype, num_segments) + derive num_queries_per_kv / max_blocks. On a non-
- * divisible head ratio or unsupported dtype, sets b's sticky error and returns
- * false. */
+ * dtype, num_segments) + derive num_queries_per_kv. On a non-divisible head
+ * ratio or unsupported dtype, sets b's sticky error and returns false. */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
                                  rocke_attn_unified_kind_t kind,
@@ -274,15 +273,20 @@ void rocke_attn_unified_emit_3d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
  * ctx->output / segm_* / abi_seq_lens / abi_cu_q + grid ids. */
 void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce max-pass over [0, num_segments): overall = max(segm_max[..,seg]).
+/* The reduce max-pass over [0, num_segments):
+ * overall = max over seg of segm_max. An empty segment already stores -inf
+ * there, so the pass does not read segm_expsum.
  * Writes ctx->overall. */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce combine-pass over [0, num_segments): den += l*exp2(m-overall);
- * acc += segm_output[..,seg,dim]*exp2(m-overall). Writes ctx->red_den/red_acc. */
+/* The reduce combine-pass over [0, num_segments), after one exponent reference
+ * ref = select(overall > -inf, overall, 0): factor = exp2(m - ref);
+ * den += l*factor; acc += segm_output[..,seg,dim]*factor. An empty segment
+ * (m = -inf) gets factor 0. Writes ctx->red_den/red_acc. */
 void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce guarded epilogue: result = acc * rcp(den); cast to dtype; store at
+/* The reduce guarded epilogue: result = select(den == 0, 0, acc * rcp(den));
+ * a NaN den still reaches the output. Cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under active. */
 void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx);
 

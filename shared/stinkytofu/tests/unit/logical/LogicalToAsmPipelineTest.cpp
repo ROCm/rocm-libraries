@@ -31,6 +31,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
@@ -113,6 +114,35 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
     EXPECT_EQ(asmInstCount, 2) << "All instructions should be StinkyInstruction";
 
     // TODO: Step 4: Emit assembly string and verify output
+}
+
+// gfx1250 FP4/FP4 scaled WMMA: ToStinkyAsmPass must bake the format cost
+// override onto the asm instruction. The descriptor default is latency 8;
+// Gfx1250Instructions.def overrides FP4/FP4 to latency 4 / co-issue 0x0008.
+TEST_F(IRToAsmPipelineTest, MXMFMAFP4BakesCostOverride) {
+    using namespace stinkytofu::test;
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
+    entryBB->appendIR(MXMFMA("f8f6f4", "f32", "e8", "e8", 16, 16, 128, 1, vgpr(0, 8), vgpr(8, 8),
+                             vgpr(16, 8), vgpr(0, 8), vgpr(24), vgpr(25), false, false,
+                             "MATRIX_FMT_FP4", "MATRIX_FMT_FP4"));
+
+    PassManager pm;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};
+    pm.setGemmTileConfig(config);
+    pm.addPass(createToStinkyAsmPass());
+    pm.run(func);
+
+    StinkyInstruction* asmInst = nullptr;
+    for (BasicBlock& bb : func)
+        for (IRBase& ir : bb)
+            if (ir.getType() == IRBase::IRType::StinkyTofu)
+                asmInst = static_cast<StinkyInstruction*>(&ir);
+    ASSERT_NE(asmInst, nullptr);
+    EXPECT_EQ(asmInst->issueCycles, 1);
+    EXPECT_EQ(asmInst->latencyCycles, 4);
+    EXPECT_EQ(asmInst->coIssueWindow, 0x0008);
 }
 
 /**

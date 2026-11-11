@@ -243,7 +243,7 @@ class TestArchAndTarget:
         )
 
     def test_shipped_wmma_catalog_compiles_only_generic_objects(
-        self, gfx1151_wmma_attention_config
+        self, gfx1151_wmma_attention_config, gfx1151_wmma_attention_decode_config
     ):
         """Gfx1151WmmaAttentionNative's scoreKernel ranks the 32-key single-wave
         transposed geometry above 64-key two-wave unconditionally. That holds for
@@ -251,9 +251,13 @@ class TestArchAndTarget:
         processor-specific gfx1151 objects at long sequences, and the matcher
         cannot see an object's compile target. A native kernel here needs that
         score keyed on the target first."""
-        kernels = [k for p in gfx1151_wmma_attention_config.packs for k in p.kernels]
-        assert kernels
-        assert {k.kernel_source.target for k in kernels} == {"generic"}
+        for config in (
+            gfx1151_wmma_attention_config,
+            gfx1151_wmma_attention_decode_config,
+        ):
+            kernels = [k for p in config.packs for k in p.kernels]
+            assert kernels
+            assert {k.kernel_source.target for k in kernels} == {"generic"}
 
     def test_a_kernel_without_target_emits_none(self, tmp_path):
         kernels = _kernels(tmp_path)
@@ -857,6 +861,21 @@ class TestLaunches:
         return kdp["kernelDescriptors"]
 
     @staticmethod
+    def _emitted_matcher_only(tmp_path, raw):
+        """`_emitted` for a hip or hsaco kernel, which binds no compiled
+        specialization: every metadata field is matcher-only."""
+        from codegen.generator import build_kdp, mint_ids
+
+        raw["specialization"] = {
+            "metadata_fields": [],
+            "matcher_only_fields": ["dtype", "seqlen_q", "block_m", "use_exp2_fast"],
+            "bindings": {},
+            "vocabulary": {},
+        }
+        config = _load(tmp_path, raw)
+        return build_kdp(config, config.packs[0], mint_ids(config))["kernelDescriptors"]
+
+    @staticmethod
     def _kernel(name: str, source: dict) -> dict:
         return {
             "name": name,
@@ -1167,26 +1186,145 @@ class TestLaunches:
         with pytest.raises(ConfigError, match=r"launches must be a mapping"):
             _load(tmp_path, self._with_launches(launches))
 
-    @pytest.mark.parametrize(
-        "source",
-        [
-            {"kind": "hip", "source": "k.hip", "entry": "k"},
-            {"kind": "hsaco", "file": "k.co", "symbol": "k"},
-            {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "k"},
-        ],
-        ids=["hip", "hsaco", "embedded_source"],
-    )
-    def test_launches_are_rejected_on_every_other_kind(self, tmp_path, source):
-        raw = self._hand_authored({**source, "launches": {"a": {}, "b": {"role": "b"}}})
-        with pytest.raises(ConfigError, match="only valid on a 'rocke'"):
-            _load(tmp_path, raw)
+    HIP = {
+        "kind": "hip",
+        "source": "k.hip",
+        "entry": "base",
+        "build": {"defines": {"A": 1}},
+    }
+    HSACO = {"kind": "hsaco", "file": "k.co", "symbol": "base"}
 
-    def test_launches_in_kernel_defaults_are_rejected_for_a_non_rocke_kernel(
+    def test_hip_launches_emit_sources_with_per_launch_entry_and_build(self, tmp_path):
+        raw = self._hand_authored(
+            {
+                **self.HIP,
+                "launches": {
+                    "decode": {"entry": "decode_k"},
+                    "merge": {
+                        "entry": "merge_k",
+                        "source": "m.hip",
+                        "build": {"defines": {"B": 2}},
+                    },
+                },
+            }
+        )
+        (entry,) = self._emitted_matcher_only(tmp_path, raw)
+        assert "kernel_source" not in entry
+        assert entry["version"] == "1.1"
+        assert entry["sources"] == {
+            "decode": {**self.HIP, "entry": "decode_k"},
+            "merge": {
+                "kind": "hip",
+                "source": "m.hip",
+                "entry": "merge_k",
+                "build": {"defines": {"B": 2}},
+            },
+        }
+        assert list(entry["sources"]["merge"]) == ["kind", "source", "entry", "build"]
+
+    def test_hsaco_launches_emit_sources_with_per_launch_file_and_symbol(
         self, tmp_path
     ):
+        raw = self._hand_authored(
+            {
+                **self.HSACO,
+                "launches": {
+                    "decode": {"symbol": "decode_k"},
+                    "merge": {"symbol": "merge_k", "file": "m.co"},
+                },
+            }
+        )
+        (entry,) = self._emitted_matcher_only(tmp_path, raw)
+        assert entry["version"] == "1.1"
+        assert entry["sources"] == {
+            "decode": {"kind": "hsaco", "file": "k.co", "symbol": "decode_k"},
+            "merge": {"kind": "hsaco", "file": "m.co", "symbol": "merge_k"},
+        }
+
+    def test_a_hip_launch_build_override_replaces_the_base_build(self, tmp_path):
+        raw = self._hand_authored(
+            {
+                **self.HIP,
+                "launches": {
+                    "a": {"entry": "a_k"},
+                    "b": {"entry": "b_k", "build": {"flags": ["-O2"]}},
+                },
+            }
+        )
+        (entry,) = self._emitted_matcher_only(tmp_path, raw)
+        assert entry["sources"]["a"]["build"] == {"defines": {"A": 1}}
+        assert entry["sources"]["b"]["build"] == {"flags": ["-O2"]}
+
+    def test_hip_launches_in_kernel_defaults_apply_to_the_kernel(self, tmp_path):
         raw = self._hand_authored({"kind": "hip", "source": "k.hip", "entry": "k"})
-        raw["packs"][0]["kernel_defaults"] = {"launches": {"a": {}, "b": {"role": "b"}}}
-        with pytest.raises(ConfigError, match="only valid on a 'rocke'"):
+        raw["packs"][0]["kernel_defaults"] = {
+            "launches": {"a": {"entry": "a_k"}, "b": {"entry": "b_k"}}
+        }
+        (entry,) = self._emitted_matcher_only(tmp_path, raw)
+        assert [s["entry"] for s in entry["sources"].values()] == ["a_k", "b_k"]
+
+    @pytest.mark.parametrize("base", ["HIP", "HSACO"])
+    def test_role_is_refused_on_a_hip_or_hsaco_launch(self, tmp_path, base):
+        raw = self._hand_authored(
+            {**getattr(self, base), "launches": {"a": {}, "b": {"role": "b"}}}
+        )
+        with pytest.raises(ConfigError, match=r"declares \['role'\]"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize(
+        "base, key",
+        [("HIP", "builder"), ("HIP", "spec"), ("HSACO", "entry"), ("HSACO", "build")],
+    )
+    def test_another_kinds_override_key_is_refused(self, tmp_path, base, key):
+        raw = self._hand_authored(
+            {**getattr(self, base), "launches": {"a": {}, "b": {key: {}}}}
+        )
+        with pytest.raises(ConfigError, match=rf"declares \['{key}'\]"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize("base", ["HIP", "HSACO"])
+    def test_a_launch_cannot_state_a_kind_so_kinds_never_mix(self, tmp_path, base):
+        raw = self._hand_authored(
+            {**getattr(self, base), "launches": {"a": {}, "b": {"kind": "rocke"}}}
+        )
+        with pytest.raises(ConfigError, match=r"declares \['kind'\]"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize("base, field", [("HIP", "entry"), ("HSACO", "symbol")])
+    def test_a_hip_or_hsaco_launch_without_its_required_field_is_refused(
+        self, tmp_path, base, field
+    ):
+        raw = self._hand_authored(
+            {**getattr(self, base), "launches": {"a": {}, "b": {field: ""}}}
+        )
+        with pytest.raises(ConfigError, match=rf"launches\['b'\].*no '{field}'"):
+            _load(tmp_path, raw)
+
+    def test_hsaco_launches_without_an_arch_are_refused(self, tmp_path):
+        from codegen.config_loader import _check_kernel_source_fields
+
+        raw = self._hand_authored({**self.HSACO, "launches": {"a": {}, "b": {}}})
+        config = _load(tmp_path, raw)
+        config.packs[0].arch = []
+        with pytest.raises(ConfigError, match="neither the kernel nor its pack"):
+            _check_kernel_source_fields(config)
+
+    def test_launches_are_rejected_on_an_embedded_source(self, tmp_path):
+        raw = self._hand_authored(
+            {
+                "kind": "embedded_source",
+                "source_file": "k.cpp",
+                "entry_point": "k",
+                "launches": {"a": {}, "b": {}},
+            }
+        )
+        with pytest.raises(ConfigError, match="only valid on a kernel_source"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize("kind", [["hip"], {"x": 1}], ids=["list", "mapping"])
+    def test_launches_on_a_kind_that_is_not_a_string_are_refused(self, tmp_path, kind):
+        raw = self._hand_authored({"kind": kind, "launches": {"a": {}, "b": {}}})
+        with pytest.raises(ConfigError, match="only valid on a kernel_source"):
             _load(tmp_path, raw)
 
     @pytest.mark.parametrize(
@@ -1199,10 +1337,12 @@ class TestLaunches:
             ({"builder": ""}, r"supplies no 'builder'"),
             ({"role": 3}, r"role must be a string"),
             ({"role": "Merge"}, r"role is 'Merge'"),
+            ({"role": ""}, r"role is ''"),
             ({"role": "merge\n"}, r"role is 'merge\\n'"),
             ({"spec": "oops"}, r"spec must be a mapping"),
             ({"spec": {}}, r"supplies no 'spec'"),
             ({"target": "gfx942"}, r"target is 'gfx942'"),
+            ({"target": ""}, r"target is ''"),
             ("oops", r"must be a mapping"),
             (None, r"must be a mapping"),
         ],

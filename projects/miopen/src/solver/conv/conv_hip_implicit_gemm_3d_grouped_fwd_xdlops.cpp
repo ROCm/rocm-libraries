@@ -518,8 +518,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(const ExecutionContext& c
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
+    // No deterministic gate: forward never uses split-K, so every instance is deterministic.
     if(problem.HasMixedDataTypes())
         return false;
     if(!problem.IsDirectionForward())
@@ -582,8 +581,7 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

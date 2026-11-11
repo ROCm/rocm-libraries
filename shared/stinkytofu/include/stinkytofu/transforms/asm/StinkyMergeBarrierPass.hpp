@@ -36,11 +36,11 @@ class Pass;
 /// exactly an adjacent s_barrier_signal / s_barrier_wait pair with the same
 /// non-empty memory-token set. Two consecutive legal groups may be fused only
 /// when Layer2BarrierOverlapAnalysis contains the final-order-validated,
-/// directional earlier-to-later pair, their token sets differ, and their
-/// modeled cycle-distance is below the merge threshold
-/// (PassFeatureConfig::DagFeatures::mergeBarrierThreshold, or the CDNA5 default
-/// when unset): the earlier pair absorbs the later tokens and the redundant
-/// second signal/wait pair is removed.
+/// directional earlier-to-later pair, their token sets differ, and no matrix
+/// instruction is issued between them. One issued WMMA occupies the WMMA queue
+/// long enough to hide the later barrier, so cycle distance is not a gate. The
+/// earlier pair absorbs the later tokens and the redundant second signal/wait
+/// pair is removed.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyMergeBarrierPass();
 
 }  // namespace stinkytofu

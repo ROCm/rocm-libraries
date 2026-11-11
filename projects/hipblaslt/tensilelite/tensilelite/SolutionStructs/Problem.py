@@ -32,6 +32,7 @@ from ..Activation import ActivationType
 from ..Common import fastdeepcopy as deepcopy
 from ..Common.Constants import INDEX_CHARS
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import VALID_SCALE_ALPHA_VEC_MODES, scaleAlphaVectorMode
 from ..Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
@@ -171,7 +172,7 @@ class ProblemSizeRange:
 
 class Problem:
   """ Problem sizes, strides, padding and other info"""
-  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None):
+  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None, world=None, a2aExtent=None):
     self.sizes = tuple(sizes) if sizes else None
     self.stridesA = tuple(stridesA) if stridesA else None
     self.stridesB = tuple(stridesB) if stridesB else None
@@ -180,19 +181,23 @@ class Problem:
     self.stridesGate = tuple(stridesGate) if stridesGate else None
 
     self.count = count
+    self.world = world
+    self.a2aExtent = a2aExtent
 
   def __str__(self):
-    rv= "{ sizes:" + str(list(self.sizes))
+    rv= "{ sizes: " + str(list(self.sizes))
     if self.stridesA:
-      rv += ", stridesA:" + str(list(self.stridesA))
+      rv += ", stridesA: " + str(list(self.stridesA))
     if self.stridesB:
-      rv += ", stridesB:" + str(list(self.stridesB))
+      rv += ", stridesB: " + str(list(self.stridesB))
     if self.stridesC:
-      rv += ", stridesC:" + str(list(self.stridesC))
+      rv += ", stridesC: " + str(list(self.stridesC))
     if self.stridesD:
-      rv += ", stridesD:" + str(list(self.stridesD))
+      rv += ", stridesD: " + str(list(self.stridesD))
     if self.stridesGate:
-      rv += ", stridesGate:" + str(list(self.stridesGate))
+      rv += ", stridesGate: " + str(list(self.stridesGate))
+    if self.world is not None:
+      rv += ", world: %d, a2aExtent: %d" % (self.world, self.a2aExtent)
     rv += " }"
     return rv
 
@@ -236,7 +241,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate' ]
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate', 'world', 'a2aExtent' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)
@@ -262,6 +267,21 @@ class ExactDict(Problem):
         raise RuntimeError ("specified size=%s does not have enough indices for problem (expected %d, got %d)" \
                 % (self.sizes, problemType["TotalIndices"], len(self.sizes)))
 
+    if problemType and isFusedA2A(problemType):
+      from ..Components.Signature import FUSED_A2A_MAX_RANKS
+      if self.world is None:
+        raise RuntimeError("FusedGemmA2A problem %s must set 'world'" % list(self.sizes))
+      if not 1 <= self.world <= FUSED_A2A_MAX_RANKS:
+        raise RuntimeError("world=%d must be in [1, %d]" % (self.world, FUSED_A2A_MAX_RANKS))
+      if self.a2aExtent is None:
+        self.a2aExtent = self.sizes[0]
+      if not 1 <= self.a2aExtent <= self.sizes[0]:
+        raise RuntimeError("a2aExtent=%d must be in [1, M=%d]" % (self.a2aExtent, self.sizes[0]))
+      if self.sizes[2] != 1:
+        raise RuntimeError("FusedGemmA2A problem %s has batch=%d; must be 1" % (list(self.sizes), self.sizes[2]))
+    elif self.world is not None or self.a2aExtent is not None:
+      raise RuntimeError("'world' and 'a2aExtent' apply only to FusedGemmA2A problems")
+
 
 ################################################################################
 # ProblemSizes
@@ -271,8 +291,14 @@ Adapter class for class `ProblemSizes`. It satisfies the implicit usage requirem
 of ClientWriter.writeClientConfig() by converting ExactLogic to list of `Problem` objects
 """
 class ProblemSizesMock:
-  def __init__(self, exactLogic):
-    self.problems = [Problem(problem) for problem, solution in exactLogic]
+  def __init__(self, exactLogic, problemType=None):
+    if isFusedA2A(problemType):
+      self.problems = []
+      for size, solution in exactLogic:
+        sizes, lds, (world, extent) = splitFusedA2ARow(size, problemType)
+        self.problems.append(Problem(sizes + lds, world=world, a2aExtent=extent))
+    else:
+      self.problems = [Problem(problem) for problem, solution in exactLogic]
 
 class ProblemSizesMockDummy:
   def __init__(self):
@@ -291,11 +317,15 @@ class ProblemSizes:
         for sizeTypeKey in dictionary:
           #print ("PROBLEM parsed:", sizeTypeKey, dictionary[sizeTypeKey])
           if sizeTypeKey == "Range":
+            if isFusedA2A(problemType):
+              raise RuntimeError("FusedGemmA2A problems must use Exact dicts, not Range")
             psr = ProblemSizeRange(problemType, dictionary[sizeTypeKey])
             self.ranges.append( psr )
           elif sizeTypeKey == "Exact":
             e= dictionary[sizeTypeKey]
             if isinstance(e,list):
+              if isFusedA2A(problemType):
+                raise RuntimeError("FusedGemmA2A problem %s must be an Exact dict with 'world'" % e)
               self.exacts.append(ExactList(e, problemType))
             elif isinstance(e,dict):
               self.exacts.append(ExactDict(e, problemType))
@@ -439,7 +469,9 @@ _defaultProblemType = {
     # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
     "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
-    "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
+    # 1/2/3 support M/N/MN vectors; gfx1250 may add 0x4 (5/6/7) for device scalar support.
+    # Scalar-only mode 4 is reserved; capable kernels retain the vector epilogue.
+    "UseScaleAlphaVec": 0,
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
@@ -514,12 +546,34 @@ _defaultProblemType = {
     "SwizzleTensorB": False,
     "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
     "MetadataLayout": 0,
-    # MX Block
+    # MX Block: extent of one MX scaling block along the bound (K) dimension.
+    # A config may also write it as a [free, k] list, which normalizeMXBlockTile
+    # splits into these keys.
     "MXBlockA": 0,
     "MXBlockB": 0,
+    # Extent of the same block along the *free* dimension (M for A, N for B),
+    # so the pair describes a MXBlockFree x MXBlock scaling tile. The 1 default
+    # is the 1xMXBlock shape: one scale per (row, K-block).
+    "MXBlockFreeA": 1,
+    "MXBlockFreeB": 1,
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
 }
+
+
+def isFusedA2A(problemType):
+  """problemType: a ProblemType or a raw logic ProblemType dict."""
+  return bool((problemType or {}).get("FusedGemmA2A", False))
+
+
+def splitFusedA2ARow(size, problemType):
+  """Returns (sizes, LDs, [world, a2aExtent]) of a fused logic row; LDs may be absent."""
+  numSizes = problemType["TotalIndices"]
+  numFields = (numSizes + 2, numSizes + problemType["NumIndicesLD"] + 2)
+  if len(size) not in numFields:
+    raise RuntimeError("fused GEMM+A2A logic row %s has %d fields; expected %d or %d"
+                       % (list(size), len(size), numFields[0], numFields[1]))
+  return list(size[:numSizes]), list(size[numSizes:-2]), list(size[-2:])
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
 # DataType (Ti)        = The data-type of the input matrices: A/B
@@ -776,6 +830,27 @@ _expectedProblemTypeParamTypes = {
 }
 
 
+def normalizeMXBlockTile(state, ab: str, srcFile: str = ""):
+  """Split the optional list form of ``MXBlock<ab>`` into its two int keys.
+
+  The scaling tile is written innermost (bound) extent last, so ``[k]`` -- or a
+  bare ``k`` -- is one scale per (row, k K-elements) and ``[free, k]`` shares
+  that scale across ``free`` free-dimension elements. Everything downstream
+  reads ``MXBlock<ab>`` as an int, so normalize before the type gate runs.
+  """
+  from ..Common.TypeValidationErrors import ConfigTypeError
+
+  key = "MXBlock" + ab
+  tile = state[key]
+  if not isinstance(tile, (list, tuple)):
+    return
+  if len(tile) not in (1, 2):
+    raise ConfigTypeError(
+        f"{srcFile}: ProblemType.{key} = {list(tile)}: expected [k] or [free, k]")
+  state[key] = tile[-1]
+  state["MXBlockFree" + ab] = tile[0] if len(tile) == 2 else 1
+
+
 def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
                                        keyPathPrefix: str = "ProblemType"):
   """Validate that every ProblemType parameter has the correct Python type.
@@ -854,12 +929,18 @@ class ProblemType(Mapping):
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
 
+    # Must precede the type gate, which only accepts the int form.
+    normalizeMXBlockTile(self.state, "A", srcFile)
+    normalizeMXBlockTile(self.state, "B", srcFile)
+
     # Validate parameter types against the _defaultProblemType registry
     validateProblemTypeParameterTypes(
         self.state,
         srcFile=srcFile,
         raiseOnMismatch=raiseOnTypeMismatch,
     )
+    if self["UseScaleAlphaVec"] not in VALID_SCALE_ALPHA_VEC_MODES:
+      printExit("UseScaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7; scalar-only mode 4 is not supported.")
 
     # adjusting all data types
     if "DataType" in config:
@@ -976,7 +1057,7 @@ class ProblemType(Mapping):
               raise Exception("SetConstStride%s=%s anchorDim=%u is not in IndexAssignments%s"%(tc, sc, anchorDim, tc))
 
     # Bias
-    # If compute data type is not equal to dest data type, tensile will run conversion kernel.
+    # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
     if "UseBias" in config:
       if self["ComputeDataType"] != self["DestDataType"]:
@@ -1085,6 +1166,21 @@ class ProblemType(Mapping):
         if (not self["Gradient"]):
           printWarning("ActivationNoGuard is set to False cause Gradient is off.")
           self["ActivationNoGuard"] = False
+
+    if self["FusedGemmA2A"]:
+      unsupported = [name for name, used in (
+          ("UseBias", self["UseBias"]),
+          ("UseE", self["UseE"]),
+          ("UseGateResidual", self["UseGateResidual"]),
+          ("UseScaleAB", self["UseScaleAB"]),
+          ("UseScaleCD", self["UseScaleCD"]),
+          ("UseScaleAlphaVec", self["UseScaleAlphaVec"]),
+          ("OutputAmaxD", self["OutputAmaxD"]),
+          ("Sparse", self["Sparse"]),
+          ("GroupedGemm", self["GroupedGemm"]),
+          ("Activation", self["ActivationType"] != 'none')) if used]
+      if unsupported:
+        raise Exception("FusedGemmA2A does not support %s" % ", ".join(unsupported))
 
   ################################################################################
    # Function checkIfSupportedGEMMType:
@@ -1195,7 +1291,7 @@ class ProblemType(Mapping):
     state["NumIndicesBatch"] = len(state["IndicesBatch"])
     state["NumIndicesSummation"] = len(state["IndicesSummation"])
     if not state["AllowNoFreeDims"] and state["NumIndicesFree"] < 2 :
-      raise Exception("Tensile requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
+      raise Exception("TensileLite requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
 
     # by default, unroll index will be the last/inner summation index
     state["IndexUnroll"] = state["IndicesSummation"][len(state["IndicesSummation"])-1]
@@ -1322,11 +1418,19 @@ class ProblemType(Mapping):
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
+    # "<free>x" is prefixed only for a 2D scaling tile, so every kernel name
+    # generated before MXBlockFree* existed is unchanged.
     if self["MXBlockA"]:
-      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+      tile = str(self["MXBlockA"])
+      if self["MXBlockFreeA"] != 1:
+        tile = str(self["MXBlockFreeA"]) + "x" + tile
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + tile)
 
     if self["MXBlockB"]:
-      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
+      tile = str(self["MXBlockB"])
+      if self["MXBlockFreeB"] != 1:
+        tile = str(self["MXBlockFreeB"]) + "x" + tile
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + tile)
 
     if self["SwizzleTensorA"]:
       name.append("STA")
@@ -1349,7 +1453,7 @@ class ProblemType(Mapping):
       if self["BiasSrc"] and self["Gradient"]: # Show bias src if gradient = True
         name.append(f"{self['BiasSrc']}")
 
-    factorDim = max(self["UseScaleAlphaVec"], self["UseBias"])
+    factorDim = max(scaleAlphaVectorMode(self["UseScaleAlphaVec"]), self["UseBias"])
     if factorDim > 1 :
         s = ("N" if factorDim == 2 else "MN")
         name.append(f"FD{s}")

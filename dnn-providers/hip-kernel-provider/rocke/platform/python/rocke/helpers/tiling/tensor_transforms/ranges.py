@@ -24,9 +24,9 @@ still computes an address from them. Whether an axis is checked follows from dat
 domains and bounds), never from a per-axis switch.
 
 The toolbox (on the package door) takes and returns plain ``(lo, hi)`` pairs, half-open, one per
-graph input in ``inputs(...)`` order: each end an int, a ``RuntimeValue`` (an upper end relative
-to a runtime length), or ``None`` (unbounded on that side). ``(None, None)`` is "not known" and is
-always checked; there is no "trusted" default.
+graph input in ``inputs(...)`` order: each end an int, a ``Value`` (an end at a runtime integer,
+such as a kernel parameter or a Value ``gpu_checked_value`` returned), or ``None`` (unbounded on
+that side). ``(None, None)`` is "not known" and is always checked; there is no "trusted" default.
 
 The internal sibling surface is the arithmetic itself: ``Interval`` and ``Congruence`` hold one
 value's range and residue, and their methods are the one home of every range-combining rule
@@ -37,9 +37,11 @@ with explicit ``AxisBound`` s. ``AffineCoord`` (with ``UniformPart``) is one coo
 constant, wave-uniform parts and a per-lane part, each with its range and residue: the IR range
 walk produces it, the emitters consume it.
 
-``RuntimeValue`` ends prove relations to a runtime length by IDENTITY: an upper side bounded by a
-runtime length is proven only by a computed end over the same IR value object (``length`` itself,
-or ``length`` shifted down). A length has one home (the tensor's), so no restated copy can break
+Runtime ends prove relations to a runtime length by IDENTITY: an upper side bounded by a runtime
+length is proven only by a computed end over the same IR value object (``length`` itself, or
+``length`` shifted down). Inside a range such an end is the private ``_RuntimeEnd(value, plus)``;
+it holds no facts and reads its numbers from ``stated_facts_of(value)``, so a length's facts have
+one home (its parameter declaration or the marker that produced it) and no restated copy can break
 the proof.
 """
 
@@ -50,11 +52,12 @@ from enum import Enum
 from math import gcd, prod
 from typing import TYPE_CHECKING
 
+from rocke.core.facts import stated_facts_of
+from rocke.core.ir import I32, Value
+
 from .graph import Node, TransformGraph, TransformType, _require_outputs_match_rank
 
 if TYPE_CHECKING:
-    from rocke.core.ir import Value
-
     from ..descriptors import TensorDesc
 
 __all__ = [
@@ -67,7 +70,6 @@ __all__ = [
     "Congruence",
     "End",
     "Interval",
-    "RuntimeValue",
     "Side",
     "UniformPart",
     "VectorRun",
@@ -145,80 +147,117 @@ class Congruence:
         return Congruence(modulus, self.residue)
 
 
+def _stated_interval(value: Value) -> Interval:
+    """The range ``value`` itself is stated to lie in (``None`` for a side no fact states),
+    read from ``stated_facts_of``: never derived, never restated."""
+    facts = stated_facts_of(value)
+    return Interval(facts.lower, None if facts.upper is None else facts.upper + 1)
+
+
 @dataclass(frozen=True, eq=False)
-class RuntimeValue:
-    """A runtime integer with its stated range and multiple-of fact.
+class _RuntimeEnd:
+    """A range end ``value + plus`` relative to a runtime integer: ``T`` or ``T - 63``.
 
-    Kernel authors receive one from the tiling layer's ``runtime_value`` and pass it on (as a
-    tensor length, a stride, a trip count) or read ``.value``, the i32 IR value, for arithmetic.
-    They never build one. ``str()`` states its facts in plain words.
-
-    Internal members: the object stands for "``value`` + ``_plus``", and ``_envelope`` /
-    ``_congruence`` describe ``value`` itself (its int range and its residue). ``value`` is always
-    the result of a range marker whose stated facts these are. An end relative to a length is
-    written ``length._shifted(k)``, never rebuilt with a retyped envelope: the facts are stated
-    once, by the length's producer.
+    Private to range arithmetic. Authors pass the plain ``Value`` (an end with ``plus == 0``);
+    a range keeps every runtime end in this form, so an end shifted by a constant keeps the
+    identity of its value. It holds no facts: its numbers come from ``stated_facts_of(value)``
+    whenever one is needed, so the facts keep their one home (the parameter's declaration or the
+    marker that produced the value). Two ends are equal exactly when they are over the same IR
+    value object with the same ``plus``: the identity a proof keys on.
     """
 
     value: Value
-    _plus: int
-    _envelope: Interval
-    _congruence: Congruence
+    plus: int = 0
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, RuntimeValue):
+        if not isinstance(other, _RuntimeEnd):
             return NotImplemented
-        return (
-            self.value is other.value
-            and self._plus == other._plus
-            and self._envelope == other._envelope
-            and self._congruence == other._congruence
-        )
+        return self.value is other.value and self.plus == other.plus
 
     def __hash__(self) -> int:
-        return hash((id(self.value), self._plus, self._envelope, self._congruence))
+        return hash((id(self.value), self.plus))
 
     def __str__(self) -> str:
-        lo, hi = self._envelope.lo, self._envelope.hi
-        if lo is not None and hi is not None:
-            facts = f"{lo} <= value <= {hi - 1}"
-        elif lo is not None:
-            facts = f"value >= {lo}"
-        elif hi is not None:
-            facts = f"value <= {hi - 1}"
-        else:
-            facts = "value unbounded"
-        modulus, residue = self._congruence.modulus, self._congruence.residue
-        if residue == 0:
-            facts += f", a multiple of {modulus}"
-        else:
-            facts += f", {residue} more than a multiple of {modulus}"
-        return f"{_runtime_text(self)}: {facts}"
+        """``L``, ``L + 3`` or ``L - 3``: the end in plain words, by its IR value's name."""
+        if self.plus > 0:
+            return f"{self.value.name} + {self.plus}"
+        if self.plus < 0:
+            return f"{self.value.name} - {-self.plus}"
+        return self.value.name
 
-    def _shifted(self, k: int) -> RuntimeValue:
-        """The same value, envelope and congruence, ``k`` further: ``value + plus + k``."""
-        return RuntimeValue(
-            self.value, self._plus + k, self._envelope, self._congruence
-        )
+    def shifted(self, k: int) -> _RuntimeEnd:
+        """The end ``k`` further: ``value + plus + k``."""
+        return _RuntimeEnd(self.value, self.plus + k)
+
+    @property
+    def envelope(self) -> Interval:
+        """The stated range of ``value`` itself (without ``plus``)."""
+        return _stated_interval(self.value)
+
+    @property
+    def congruence(self) -> Congruence:
+        """The stated residue of ``value`` itself (without ``plus``)."""
+        facts = stated_facts_of(self.value)
+        return Congruence(facts.multiple_of, facts.residue)
 
 
-End = int | RuntimeValue | None
+# A range end at the package door: an int, a Value (an end at a runtime integer) or None.
+End = int | Value | None
+# A range end inside a range: a Value end is kept as a ``_RuntimeEnd``.
+_End = int | _RuntimeEnd | None
+# Either form: the end rules below take both.
+_AnyEnd = int | Value | _RuntimeEnd | None
+
+
+def _require_i32_end(end: Value, what: str) -> None:
+    """Refuse a door end ``Value`` that is not an i32: a runtime length or end in this package
+    is an i32 integer (the type every range compare and fold is emitted in). ``what`` opens the
+    message and names the rule the caller states."""
+    if end.type != I32:
+        raise TypeError(f"{what}, got Value {end.name} of type {end.type.name}")
+
+
+def _runtime(end: object) -> _RuntimeEnd | None:
+    """``end`` as a runtime end (a plain ``Value`` is the end at it), or ``None`` for an int or
+    ``None`` end."""
+    if isinstance(end, _RuntimeEnd):
+        return end
+    if isinstance(end, Value):
+        return _RuntimeEnd(end)
+    return None
+
+
+def _door_end(end: _End, side: str) -> End:
+    """An end as the package door shows it: a runtime end with no shift is its ``Value``; a
+    shifted one (``T - 1``) is the number its value's stated facts give on that side, because
+    the shifted form is private to range arithmetic."""
+    if not isinstance(end, _RuntimeEnd):
+        return end
+    if end.plus == 0:
+        return end.value
+    return _numeric_lo(end) if side == "lo" else _numeric_hi(end)
 
 
 @dataclass(frozen=True)
 class Interval:
     """The half-open range ``[lo, hi)`` of one value; ``None`` is unbounded on that side.
 
-    Each end is an int, a ``RuntimeValue`` (an end relative to a runtime length) or ``None``.
-    Int ends need ``lo < hi``: an empty range states no fact. Every method is pure (no IR) and
-    returns a new value; the rules for ends that are not ints are in ``_numeric_lo`` /
-    ``_numeric_hi`` and the pair rules below them.
+    Each end is an int, a runtime end (an end relative to a runtime integer: a ``Value`` given
+    here is kept as the private ``_RuntimeEnd`` at it) or ``None``. Int ends need ``lo < hi``: an
+    empty range states no fact. Every method is pure (no IR) and returns a new value; the rules
+    for ends that are not ints are in ``_numeric_lo`` / ``_numeric_hi`` and the pair rules below
+    them.
     """
 
-    lo: End
-    hi: End
+    lo: _End
+    hi: _End
 
     def __post_init__(self) -> None:
+        for side in ("lo", "hi"):
+            end = getattr(self, side)
+            if isinstance(end, Value):
+                _require_i32_end(end, "a range end is an int, an i32 Value or None")
+                object.__setattr__(self, side, _RuntimeEnd(end))
         if isinstance(self.lo, int) and isinstance(self.hi, int) and self.lo >= self.hi:
             raise ValueError(
                 f"Interval [{self.lo}, {self.hi}) is empty -- int ends need lo < hi; an empty "
@@ -235,12 +274,13 @@ class Interval:
         return cls(lo, hi)
 
     def as_pair(self) -> tuple[End, End]:
-        """The public ``(lo, hi)`` pair: a public value never carries an ``Interval``."""
-        return (self.lo, self.hi)
+        """The public ``(lo, hi)`` pair: a public value never carries an ``Interval``. An end
+        relative to a runtime value is shown as that ``Value``, or, when shifted by a constant,
+        as the number its stated facts give (``_door_end``)."""
+        return (_door_end(self.lo, "lo"), _door_end(self.hi, "hi"))
 
     def plus(self, other: Interval) -> Interval:
         """Range of ``x + y``."""
-        _check_runtime_facts_agree([self.lo, self.hi, other.lo, other.hi])
         lo = _add_ends(self.lo, other.lo, "lo")
         hi = _add_ends(self.hi, other.hi, "hi")
         return Interval(lo, _shift_end(hi, -1))
@@ -280,10 +320,9 @@ class Interval:
         """Range of ``min(x, y)``; symmetric in its operands.
 
         The ``lo`` must bound both operands (the looser end when the two cannot be ordered); the
-        ``hi`` may come from either (the tighter end). A ``RuntimeValue`` end survives only when
-        both ends are over the same value, or the other side is unbounded.
+        ``hi`` may come from either (the tighter end). A runtime end survives only when both
+        ends are over the same value, or the other side is unbounded.
         """
-        _check_runtime_facts_agree([self.lo, self.hi, other.lo, other.hi])
         return Interval(
             _pick(self.lo, other.lo, "lo", take_max=False, both_bound=True),
             _pick(self.hi, other.hi, "hi", take_max=False, both_bound=False),
@@ -291,7 +330,6 @@ class Interval:
 
     def maximum(self, other: Interval) -> Interval:
         """Range of ``max(x, y)``; symmetric in its operands (``minimum`` mirrored)."""
-        _check_runtime_facts_agree([self.lo, self.hi, other.lo, other.hi])
         return Interval(
             _pick(self.lo, other.lo, "lo", take_max=True, both_bound=False),
             _pick(self.hi, other.hi, "hi", take_max=True, both_bound=True),
@@ -304,7 +342,6 @@ class Interval:
         a kept runtime ``hi`` gives up the int end's numeric fact, so the kept ends alone can look
         non-empty when the inputs are disjoint (``[0, 5)`` and ``[10, L)`` keep ``[10, L)``).
         """
-        _check_runtime_facts_agree([self.lo, self.hi, other.lo, other.hi])
         return not any(
             _pair_always_empty(lo, hi)
             for lo in (self.lo, other.lo)
@@ -314,8 +351,8 @@ class Interval:
     def intersect(self, other: Interval) -> Interval:
         """Range of a value known to lie in both; symmetric.
 
-        Each end is one of the two operands' ends of that side. On ``hi`` a ``RuntimeValue`` is
-        kept over an int (it can prove a runtime bound by identity); on ``lo`` the int is kept.
+        Each end is one of the two operands' ends of that side. On ``hi`` a runtime end is kept
+        over an int (it can prove a runtime bound by identity); on ``lo`` the int is kept.
         Raises when ``overlaps`` is ``False``: two facts about one value that cannot both hold.
         """
         if not self.overlaps(other):
@@ -331,24 +368,24 @@ class Interval:
     def snapped(self, congruence: Congruence) -> Interval:
         """The tightest range holding the same members of the residue class ``congruence``.
 
-        An int ``lo`` is raised and the last value lowered onto the class. A ``RuntimeValue`` end
-        moves only when its value's stated modulus is a multiple of ``congruence.modulus`` (its
-        residue is then known) and stays over the same value; otherwise it is kept as it is.
+        An int ``lo`` is raised and the last value lowered onto the class. A runtime end moves
+        only when its value's stated modulus is a multiple of ``congruence.modulus`` (its residue
+        is then known) and stays over the same value; otherwise it is kept as it is.
         """
         m, r = congruence.modulus, congruence.residue
         lo, hi = self.lo, self.hi
         if isinstance(lo, int):
             new_lo = lo + (r - lo) % m
-        elif isinstance(lo, RuntimeValue) and lo._congruence.modulus % m == 0:
-            rho = lo._congruence.residue % m
-            new_lo = lo._shifted((r - rho - lo._plus) % m)
+        elif isinstance(lo, _RuntimeEnd) and lo.congruence.modulus % m == 0:
+            rho = lo.congruence.residue % m
+            new_lo = lo.shifted((r - rho - lo.plus) % m)
         else:
             new_lo = lo
         if isinstance(hi, int):
             new_hi = hi - (hi - 1 - r) % m
-        elif isinstance(hi, RuntimeValue) and hi._congruence.modulus % m == 0:
-            rho = hi._congruence.residue % m
-            new_hi = hi._shifted(-((rho + hi._plus - 1 - r) % m))
+        elif isinstance(hi, _RuntimeEnd) and hi.congruence.modulus % m == 0:
+            rho = hi.congruence.residue % m
+            new_hi = hi.shifted(-((rho + hi.plus - 1 - r) % m))
         else:
             new_hi = hi
         if isinstance(new_lo, int) and isinstance(new_hi, int) and new_lo >= new_hi:
@@ -361,7 +398,7 @@ class Interval:
     def within(self, lo: int | None, hi: int | None) -> bool:
         """Every value of the range lies in ``[lo, hi)`` (``None``: no bound on that side).
 
-        Decided on the numeric ends: a runtime end counts with its envelope's extreme value.
+        Decided on the numeric ends: a runtime end counts with its stated extreme value.
         """
         return _lo_proven(self.lo, lo) and _hi_proven(self.hi, hi)
 
@@ -381,25 +418,29 @@ class VectorRun:
 class AxisBound:
     """The valid extent ``[lo, hi)`` of one tensor axis (the tensor side; emits nothing).
 
-    Each end is an int or a ``RuntimeValue`` with no shift: a bound is a length, not an
-    interval end. Built by ``AxisBound.of``; the toolbox builds ``AxisBound.of(0, length)`` per
-    axis from the tensor's lengths, the one home of a length.
+    Each end is an int or a ``Value`` (a runtime length): a bound is a length, not an interval
+    end. Built by ``AxisBound.of``; the toolbox builds ``AxisBound.of(0, length)`` per axis from
+    the tensor's lengths, the one home of a length.
     """
 
-    lo: int | RuntimeValue
-    hi: int | RuntimeValue
+    lo: int | Value
+    hi: int | Value
 
     def __post_init__(self) -> None:
-        for end in (self.lo, self.hi):
-            if isinstance(end, RuntimeValue) and end._plus != 0:
-                raise ValueError(
-                    f"AxisBound end {_runtime_text(end)} is RuntimeValue(..., plus={end._plus}) "
-                    "-- a bound is a length (plus 0); an end relative to a length belongs in an "
-                    "Interval: length.shifted(k)"
-                )
+        for side in ("lo", "hi"):
+            end = getattr(self, side)
+            if isinstance(end, Value):
+                _require_i32_end(end, "an AxisBound end is an int or an i32 Value")
+            if isinstance(end, _RuntimeEnd):
+                if end.plus != 0:
+                    raise ValueError(
+                        f"AxisBound end {end} is a length shifted by {end.plus} -- a bound is "
+                        "a length; an end relative to a length belongs in an Interval"
+                    )
+                object.__setattr__(self, side, end.value)
 
     @classmethod
-    def of(cls, lo: int | RuntimeValue, hi: int | RuntimeValue) -> AxisBound:
+    def of(cls, lo: int | Value, hi: int | Value) -> AxisBound:
         """The bound ``[lo, hi)`` of one tensor axis."""
         return cls(lo, hi)
 
@@ -527,12 +568,12 @@ class BoundCheck:
 
     ``coordinate`` is a name the graph was built with. A side is ``None`` when it is proven
     (nothing to check there), so the two sides can be enforced separately. Each end is an int or
-    a ``RuntimeValue``. ``reasons`` lists every reason a side was found failing.
+    a ``Value`` (a runtime length). ``reasons`` lists every reason a side was found failing.
     """
 
     coordinate: str
-    lo: int | RuntimeValue | None
-    hi: int | RuntimeValue | None
+    lo: int | Value | None
+    hi: int | Value | None
     reasons: tuple[CheckReason, ...]
 
 
@@ -544,109 +585,78 @@ def _require_divisor(owner: str, operation: str, k: int) -> None:
         raise ValueError(f"{owner}.{operation} needs a divisor >= 1, got {k}")
 
 
-def _runtime_text(end: RuntimeValue) -> str:
-    """``L``, ``L + 3`` or ``L - 3``: a runtime end in plain words, by its IR value's name."""
-    if end._plus > 0:
-        return f"{end.value.name} + {end._plus}"
-    if end._plus < 0:
-        return f"{end.value.name} - {-end._plus}"
-    return end.value.name
-
-
-def _end_text(end: End, side: str) -> str:
+def _end_text(end: _AnyEnd, side: str) -> str:
     if end is None:
         return "-inf" if side == "lo" else "+inf"
-    if isinstance(end, RuntimeValue):
-        return _runtime_text(end)
-    return str(end)
+    runtime = _runtime(end)
+    return str(end) if runtime is None else str(runtime)
 
 
-def _numeric_lo(end: End) -> int | None:
-    """The least value a lower end can take (a runtime end from its envelope)."""
-    if isinstance(end, RuntimeValue):
-        env_lo = end._envelope.lo
-        return None if env_lo is None else env_lo + end._plus
-    return end
+def _numeric_lo(end: _AnyEnd) -> int | None:
+    """The least value a lower end can take (a runtime end from its value's stated facts)."""
+    runtime = _runtime(end)
+    if runtime is None:
+        return end
+    least = stated_facts_of(runtime.value).lower
+    return None if least is None else least + runtime.plus
 
 
-def _numeric_hi(end: End) -> int | None:
-    """The largest value an exclusive upper end can take (``x < L + p <= (e_hi - 1) + p``)."""
-    if isinstance(end, RuntimeValue):
-        env_hi = end._envelope.hi
-        return None if env_hi is None else env_hi - 1 + end._plus
-    return end
+def _numeric_hi(end: _AnyEnd) -> int | None:
+    """The largest value an exclusive upper end can take (``x < L + p <= most(L) + p``)."""
+    runtime = _runtime(end)
+    if runtime is None:
+        return end
+    most = stated_facts_of(runtime.value).upper
+    return None if most is None else most + runtime.plus
 
 
-def _numeric_last(end: End) -> int | None:
+def _numeric_last(end: _AnyEnd) -> int | None:
     """The largest value below an exclusive upper end."""
     hi = _numeric_hi(end)
     return None if hi is None else hi - 1
 
 
-def _shift_end(end: End, k: int) -> End:
+def _shift_end(end: _End, k: int) -> _End:
     if end is None:
         return None
-    if isinstance(end, RuntimeValue):
-        return end._shifted(k)
-    return end + k
+    runtime = _runtime(end)
+    return end + k if runtime is None else runtime.shifted(k)
 
 
 def _mul(end: int | None, k: int) -> int | None:
     return None if end is None else end * k
 
 
-def _add_ends(a: End, b: End, side: str) -> End:
-    """``a + b`` for two ends of one side: ``RuntimeValue + int`` stays runtime, else numeric."""
+def _add_ends(a: _End, b: _End, side: str) -> _End:
+    """``a + b`` for two ends of one side: a runtime end plus an int stays runtime, else
+    numeric."""
     if a is None or b is None:
         return None
     if isinstance(a, int) and isinstance(b, int):
         return a + b
-    if isinstance(a, RuntimeValue) and isinstance(b, int):
-        return a._shifted(b)
-    if isinstance(b, RuntimeValue) and isinstance(a, int):
-        return b._shifted(a)
+    if isinstance(b, int):
+        return _shift_end(a, b)
+    if isinstance(a, int):
+        return _shift_end(b, a)
     numeric = _numeric_lo if side == "lo" else _numeric_hi
     na, nb = numeric(a), numeric(b)
     return None if na is None or nb is None else na + nb
 
 
-def _require_same_facts(a: RuntimeValue, b: RuntimeValue) -> None:
-    """Two runtime ends over one IR value must state the same envelope and congruence."""
-    if a._envelope != b._envelope or a._congruence != b._congruence:
-        raise ValueError(
-            f"two RuntimeValues over the same value {a.value.name} state different facts "
-            f"(envelope {a._envelope} vs {b._envelope}, congruence {a._congruence} vs "
-            f"{b._congruence}) -- write ends relative to a length as length.shifted(k), never "
-            "restate its envelope"
-        )
+def _same_value(a: _AnyEnd, b: _AnyEnd) -> bool:
+    """Both ends are runtime ends over one IR value object."""
+    ra, rb = _runtime(a), _runtime(b)
+    return ra is not None and rb is not None and ra.value is rb.value
 
 
-def _check_runtime_facts_agree(ends: list[End]) -> None:
-    """Every two runtime ends over one IR value met in one call state the same facts."""
-    first: dict[int, RuntimeValue] = {}
-    for end in ends:
-        if isinstance(end, RuntimeValue):
-            seen = first.setdefault(id(end.value), end)
-            _require_same_facts(seen, end)
+def _comparable_key(end: _AnyEnd) -> int:
+    runtime = _runtime(end)
+    return end if runtime is None else runtime.plus
 
 
-def _same_value(a: End, b: End) -> bool:
-    """Both ends are runtime ends over one IR value object (checked to state the same facts)."""
-    if (
-        isinstance(a, RuntimeValue)
-        and isinstance(b, RuntimeValue)
-        and a.value is b.value
-    ):
-        _require_same_facts(a, b)
-        return True
-    return False
-
-
-def _comparable_key(end: End) -> int:
-    return end._plus if isinstance(end, RuntimeValue) else end
-
-
-def _pick(a: End, b: End, side: str, *, take_max: bool, both_bound: bool) -> End:
+def _pick(
+    a: _AnyEnd, b: _AnyEnd, side: str, *, take_max: bool, both_bound: bool
+) -> _AnyEnd:
     """One end of ``min`` / ``max`` of two ranges (the symmetric rule).
 
     Comparable ends (two ints, or two runtime ends over one value) give the exact min / max.
@@ -677,7 +687,7 @@ def _pick(a: End, b: End, side: str, *, take_max: bool, both_bound: bool) -> End
     return choose(known) if known else None
 
 
-def _intersect_end(a: End, b: End, side: str) -> End:
+def _intersect_end(a: _AnyEnd, b: _AnyEnd, side: str) -> _AnyEnd:
     """One end of ``intersect``: which operand's end survives (both are sound)."""
     if a is None:
         return b
@@ -687,10 +697,10 @@ def _intersect_end(a: End, b: End, side: str) -> End:
         return max(a, b) if side == "lo" else min(a, b)
     if _same_value(a, b):
         if side == "lo":
-            return a if a._plus >= b._plus else b
-        return a if a._plus <= b._plus else b
+            return a if _comparable_key(a) >= _comparable_key(b) else b
+        return a if _comparable_key(a) <= _comparable_key(b) else b
     if isinstance(a, int) or isinstance(b, int):
-        runtime, number = (a, b) if isinstance(a, RuntimeValue) else (b, a)
+        runtime, number = (b, a) if isinstance(a, int) else (a, b)
         return number if side == "lo" else runtime
     if side == "lo":
         known = [n for n in (_numeric_lo(a), _numeric_lo(b)) if n is not None]
@@ -699,45 +709,45 @@ def _intersect_end(a: End, b: End, side: str) -> End:
     return min(known) if known else None
 
 
-def _pair_always_empty(lo: End, hi: End) -> bool:
+def _pair_always_empty(lo: _AnyEnd, hi: _AnyEnd) -> bool:
     """No integer satisfies ``lo <= x < hi`` for any value of the runtime ends in their envelopes."""
     if lo is None or hi is None:
         return False
     if isinstance(lo, int) and isinstance(hi, int):
         return lo >= hi
     if _same_value(lo, hi):
-        return hi._plus <= lo._plus
+        return _comparable_key(hi) <= _comparable_key(lo)
     nlo, nhi = _numeric_lo(lo), _numeric_hi(hi)
     return nlo is not None and nhi is not None and nlo >= nhi
 
 
-def _lo_proven(lo: End, bound: End) -> bool:
+def _lo_proven(lo: _AnyEnd, bound: _AnyEnd) -> bool:
     """A range starting at ``lo`` cannot go below ``bound`` (``None``: no lower bound)."""
     if bound is None:
         return True
-    if isinstance(bound, RuntimeValue):
-        return _same_value(lo, bound) and lo._plus >= bound._plus
+    if _runtime(bound) is not None:
+        return _same_value(lo, bound) and _comparable_key(lo) >= _comparable_key(bound)
     numeric = _numeric_lo(lo)
     return numeric is not None and numeric >= bound
 
 
-def _hi_proven(hi: End, bound: End) -> bool:
+def _hi_proven(hi: _AnyEnd, bound: _AnyEnd) -> bool:
     """A range ending below ``hi`` cannot reach ``bound`` (``None``: no upper bound)."""
     if bound is None:
         return True
-    if isinstance(bound, RuntimeValue):
-        return _same_value(hi, bound) and hi._plus <= bound._plus
+    if _runtime(bound) is not None:
+        return _same_value(hi, bound) and _comparable_key(hi) <= _comparable_key(bound)
     numeric = _numeric_hi(hi)
     return numeric is not None and numeric <= bound
 
 
-def _always_at_most(a: End, b: End) -> bool:
+def _always_at_most(a: _AnyEnd, b: _AnyEnd) -> bool:
     """Bound end ``a`` is ``<=`` bound end ``b`` for every value of their runtime parts."""
     largest_a, least_b = _numeric_hi(a), _numeric_lo(b)
     return largest_a is not None and least_b is not None and largest_a <= least_b
 
 
-def _tightest(coordinate: str, a: End, b: End, side: str) -> End:
+def _tightest(coordinate: str, a: _AnyEnd, b: _AnyEnd, side: str) -> _AnyEnd:
     """The tighter of two failing bound ends on one side, so one compare enforces both.
 
     ``a`` is ``None`` before the first failing end. Two ints, or two runtime ends over one value,
@@ -864,8 +874,8 @@ def _conditioned_walk(
 
     def settle(name: str, computed: Interval) -> None:
         current = computed
-        lo_end: End = None
-        hi_end: End = None
+        lo_end: _AnyEnd = None
+        hi_end: _AnyEnd = None
         reasons: list[CheckReason] = []
         for lo, hi, reason in constraints.get(name, ()):
             lo_fails = not _lo_proven(current.lo, lo)
@@ -880,7 +890,14 @@ def _conditioned_walk(
             if current.overlaps(region):
                 current = current.intersect(region)
         if lo_end is not None or hi_end is not None:
-            checks.append(BoundCheck(name, lo_end, hi_end, tuple(reasons)))
+            checks.append(
+                BoundCheck(
+                    name,
+                    _door_end(lo_end, "lo"),
+                    _door_end(hi_end, "hi"),
+                    tuple(reasons),
+                )
+            )
         conditioned[name] = current
 
     for name, given in zip(graph.inputs, ranges):
@@ -897,7 +914,6 @@ def _value_ranges(
 ) -> dict[str, Interval]:
     """Every coordinate's unconditioned range (what every lane computes, valid or not)."""
     _check_input_count(graph, len(ranges))
-    _check_runtime_facts_agree([end for r in ranges for end in (r.lo, r.hi)])
     found = dict(zip(graph.inputs, ranges))
     for node in graph.nodes:
         reads = tuple(found[r] for r in node.read)
@@ -926,10 +942,6 @@ def _required_checks(
                 f"bound of axis {axis} is empty: [{bound.lo}, {bound.hi}) -- an always-empty "
                 "window cannot be read"
             )
-    _check_runtime_facts_agree(
-        [end for r in ranges for end in (r.lo, r.hi)]
-        + [end for b in bounds for end in (b.lo, b.hi)]
-    )
     checks, _ = _conditioned_walk(graph, ranges, bounds)
     return checks
 
@@ -949,7 +961,9 @@ def value_ranges(
     ``input_ranges`` gives one half-open pair per graph input, in ``inputs(...)`` order. The
     ranges are unconditioned: an out-of-domain input drives what it feeds out of range too (an
     ``unmerge`` read past its domain drives the outer piece past its length), because every lane
-    computes its address whether or not it is valid.
+    computes its address whether or not it is valid. An end at a runtime ``Value`` is reported
+    as that ``Value``; an end shifted from one by a constant (``x + 1`` for ``x`` in ``[0, T)``)
+    is reported as the number the value's stated facts give on that side.
     """
     ranges = _value_ranges(graph, _intervals(graph, input_ranges))
     return {name: interval.as_pair() for name, interval in ranges.items()}
@@ -980,7 +994,6 @@ def graph_injective(
     inputs meet, a ``broadcast`` that drops a coordinate) or one the ranges cannot rule out.
     """
     ranges = _intervals(graph, input_ranges)
-    _check_runtime_facts_agree([end for r in ranges for end in (r.lo, r.hi)])
     _, conditioned = _conditioned_walk(graph, ranges, None)
 
     known = {name for name, r in conditioned.items() if _size(r) == 1} | set(

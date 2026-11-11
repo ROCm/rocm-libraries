@@ -262,8 +262,13 @@ def _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_k
     # "process key s only if s < seqlen_k": a tail thread with s >= seqlen_k
     # iterates zero times and issues no index_k load and no store.
     s0 = b.add(b.mul(b.block_id_y(), c_block), tid)
-    key_loop = b.scf_for(s0, c_Sk, c_Sk, iv_name="s")
+    # Emit the i32 zero before scf_for: IRBuilder.scf_for appends the loop op to
+    # the block immediately, so a constant created after it is defined after the
+    # loop that uses it (the head-loop bound and the causal select below). The
+    # Python lowerer folds constants to immediates and never notices, but the C++
+    # parser enforces define-before-use and rejects the serialized IR.
     c_zero_i = b.const_i32(0)
+    key_loop = b.scf_for(s0, c_Sk, c_Sk, iv_name="s")
     with key_loop as s:
         k_row_base = b.mul(s, c_DI)
         # Causal skip: a future key (s > q_pos) runs zero head iterations, so its

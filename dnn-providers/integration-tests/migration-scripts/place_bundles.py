@@ -39,7 +39,6 @@ from pathlib import Path
 from bundle_utils import (
     DTYPE_TOKEN,
     NODE_STRUCTURAL,
-    TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
     TOP_LEVEL_IF_VARIES,
     ambiguous_attr_keys,
@@ -58,6 +57,7 @@ from bundle_utils import (
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
+    per_case_tensor_fields,
     tensors_by_uid,
     tier_for_suite,
 )
@@ -201,7 +201,7 @@ def detect_and_build(bucket: Bucket):
         template[fld] = f"${{case.{fld}}}"
     for t in template.get("tensors", []):
         uid = t.get("uid")
-        for fld in TENSOR_ALWAYS:
+        for fld in per_case_tensor_fields(t):
             if fld in t:
                 t[fld] = f"${{case.{fld}}}"
         for fld in tensor_value_varies.get(uid, set()):
@@ -220,7 +220,7 @@ def detect_and_build(bucket: Bucket):
         for uid in sorted(rep_tensors):
             entry = {"uid": uid}
             src = ctensors.get(uid, {})
-            for fld in TENSOR_ALWAYS:
+            for fld in per_case_tensor_fields(rep_tensors[uid]):
                 if fld in src:
                     entry[fld] = src[fld]
             for fld in tensor_value_varies.get(uid, set()):

@@ -17,8 +17,10 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// code object, its dispatch handler's launch inputs, and the plan's own workspace size.
 ///
 /// For a benchmarking plan, the plan saved is the candidate that the first execute()
-/// chose. A plan restored from a saved payload is refused. A plan that no ingestor engine
-/// built is refused. Reads the plan only through const accessors and an acquire load, so it
+/// chose. A plan restored from a saved payload is never captured: hipDNN saves a loaded
+/// plan from the bytes it was loaded from, so only a direct call of the provider hook sees
+/// a restored plan, and the hook refuses it. A plan that no ingestor engine built is
+/// refused. Reads the plan only through const accessors and an acquire load, so it
 /// is safe while other threads execute the plan.
 ///
 /// @throws HipdnnPluginException with a save refusal when the plan cannot be saved, and

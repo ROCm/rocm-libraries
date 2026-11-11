@@ -46,7 +46,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import run
 from tensilelite.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,
@@ -67,7 +67,7 @@ def _no_stdin(monkeypatch):
 def _parse(argv):
     """Parse ``argv`` through the shared addCommonArguments parser used by the script."""
     argParser = argparse.ArgumentParser()
-    tensilelite.addCommonArguments(argParser)
+    run.addCommonArguments(argParser)
     return argParser.parse_args(argv)
 
 
@@ -94,7 +94,7 @@ def test_flag_default_off(monkeypatch):
 
     # The flag must NOT be advertised on the documented --global-parameters help surface.
     argParser = argparse.ArgumentParser()
-    tensilelite.addCommonArguments(argParser)
+    run.addCommonArguments(argParser)
     help_text = argParser.format_help()
     # --cpu-only is its own flag, present in help...
     assert "--cpu-only" in help_text
@@ -117,7 +117,7 @@ def test_arg_validation():
     """
     args = _parse(["--cpu-only"])
     assert args.cpuOnly is True
-    # gpuTargets lives on the Tensile() main parser, not addCommonArguments; the common
+    # gpuTargets lives on the main() parser, not addCommonArguments; the common
     # parser must not synthesize or require it, so the attribute is simply absent here.
     assert not hasattr(args, "gpuTargets")
 
@@ -207,7 +207,7 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
 
-    # Mirror the isaList-building logic at tensilelite.py (the --gpu-targets branch):
+    # Mirror the isaList-building logic at run.py (the --gpu-targets branch):
     # ISA comes straight from gfxToIsa(arch); enumerator is None; detection untouched.
     args = _parse(["--cpu-only", "--device", "0"])
     assert args.cpuOnly is True
@@ -231,15 +231,15 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
 
 def _run_freq_block(device_id=0):
-    """Replay the guarded frequency-probe block from tensilelite.Tensile() exactly.
+    """Replay the guarded frequency-probe block from run.main() exactly.
 
-    The gating predicate mirrors tensilelite.py:601 verbatim:
+    The gating predicate mirrors run.py:601 verbatim:
         'LibraryLogic' in config and UseEffLike and not buildOnly
         and not globalParameters["CpuOnly"]
     The 'LibraryLogic'/UseEffLike/buildOnly preconditions are held True/True/False so
     the test isolates the CpuOnly term: the body must run iff CpuOnly is off. The body
     calls the real module-level seam functions (spied by the test) in the same order as
-    the source, so a spy on tensilelite.get_gpu_max_frequency et al. observes the real calls.
+    the source, so a spy on run.get_gpu_max_frequency et al. observes the real calls.
     """
     config = {"LibraryLogic": {}}
     UseEffLike = True
@@ -250,13 +250,13 @@ def _run_freq_block(device_id=0):
         and not buildOnly
         and not globalParameters["CpuOnly"]
     ):
-        max_frequency = tensilelite.get_gpu_max_frequency(device_id)
+        max_frequency = run.get_gpu_max_frequency(device_id)
         if not max_frequency or max_frequency <= 0:
-            max_frequency = tensilelite.get_gpu_max_frequency_smi(device_id)
+            max_frequency = run.get_gpu_max_frequency_smi(device_id)
         if not max_frequency or max_frequency <= 0:
-            max_frequency = tensilelite.get_user_max_frequency()
+            max_frequency = run.get_user_max_frequency()
         if max_frequency and max_frequency > 0:
-            tensilelite.store_max_frequency(max_frequency)
+            run.store_max_frequency(max_frequency)
         return True
     return False
 
@@ -280,9 +280,9 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
         calls["user"] += 1
         raise AssertionError("get_user_max_frequency called under CpuOnly")
 
-    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip)
-    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency_smi", _smi)
-    monkeypatch.setattr(tensilelite, "get_user_max_frequency", _user)
+    monkeypatch.setattr(run, "get_gpu_max_frequency", _hip)
+    monkeypatch.setattr(run, "get_gpu_max_frequency_smi", _smi)
+    monkeypatch.setattr(run, "get_user_max_frequency", _user)
 
     # --- CpuOnly ON: entire block skipped, no probe reached ---
     globalParameters["CpuOnly"] = True
@@ -298,7 +298,7 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
         seen["hip"] += 1
         return 1700  # deterministic non-zero -> smi/user never needed
 
-    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip_ok)
+    monkeypatch.setattr(run, "get_gpu_max_frequency", _hip_ok)
     # smi/user remain the raising spies: a valid first probe must short-circuit them.
     ran = _run_freq_block()
     assert ran is True
@@ -411,6 +411,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         analyzer.rangeProblemSizes = set()
         analyzer.exactWinners = {}
         analyzer.perfMetric = None
+        analyzer.problemType = {}
         analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
         return analyzer
 
@@ -462,7 +463,7 @@ _E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
 def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
     """T9: drive the full benchmark flow GPU-less via
-    tensilelite.Tensile([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
+    run.main([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
 
     Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
     codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
@@ -493,7 +494,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
         arch,
     ]
 
-    tensilelite.Tensile(args)
+    run.main(args)
 
     # A results CSV was produced (the synthetic stub wrote it; the real device never ran).
     results_csvs = list(output_dir.rglob("*.csv"))
@@ -656,7 +657,7 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
         freq_calls["hip"] += 1
         return 1700  # deterministic non-zero -> smi/user not needed
 
-    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip_ok)
+    monkeypatch.setattr(run, "get_gpu_max_frequency", _hip_ok)
     ran = _run_freq_block()
     assert ran is True, "CpuOnly OFF must enter the real frequency-probe block"
     assert (

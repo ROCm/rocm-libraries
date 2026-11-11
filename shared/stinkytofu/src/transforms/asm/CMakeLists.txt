@@ -29,7 +29,7 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
-    Gfx1250HazardPass.cpp
+    Gfx1250XnackHazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
     waitcnt/WmmaRunWaitMerge.cpp

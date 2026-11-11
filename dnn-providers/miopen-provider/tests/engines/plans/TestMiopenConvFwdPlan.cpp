@@ -11,6 +11,7 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
+#include "common/ConvPlanFindModeCheck.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 
 using namespace miopen_plugin;
@@ -341,6 +342,18 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
     // Create plan
     const HipdnnMiopenSettings executionSettings;
     ConvFwdPlan(*_handle, std::move(params), executionSettings);
+}
+
+TEST_F(TestGpuConvFwdPlan, BenchmarkingSelectsNormalFindMode)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    auto* attrs = graph.getNode(0).attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    test_conv_common::expectBenchmarkingSelectsNormalFindMode<ConvFwdParams, ConvFwdPlan>(
+        *_handle, graph, *attrs);
 }
 
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)

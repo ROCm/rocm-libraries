@@ -298,11 +298,13 @@ void rocke_dfcp_load_conv0_a_tile_specialized(rocke_ir_builder_t* b,
     loader.tile_cols = spec->tile_k;
     loader.block_size = rocke_deep_fused_conv_pool_spec_block_size(spec);
     loader.load_vec = load_vec;
+    loader.elem_dtype = NULL; /* elem_dtype default F16 */
     loader.use_buffer_rsrc = true;
     loader.oob_sentinel = 0x7fffffff; /* Python (1 << 31) - 1 */
     loader.vector_axis_row = false; /* vector_axis="col" default */
     loader.has_inner_dim = false;
     loader.inner_dim = 0;
+    loader.elem_dtype = NULL; /* elem_dtype default F16 */
 
     /* loader.load(b, tid=grid.tid, smem_dst=a_dst, descriptor=descriptor,
      *             rsrc=a_rsrc). */

@@ -8,15 +8,23 @@ import copy
 import dataclasses
 import hashlib
 import json
+import itertools
 import re
+from pathlib import Path
 
 import pytest
 
 from hkp_pack import agreement, desk_check, pipeline, provenance_sidecar, sources
-from hkp_pack.descriptors import _validate_ukd_fields, load_flat_input
+from hkp_pack.descriptor_context import Entry
+from hkp_pack.descriptors import (
+    Descriptor,
+    FlatInput,
+    _validate_ukd_fields,
+    load_flat_input,
+)
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
-from pack_helpers import GENERIC_TARGETS, _kdp, _silent, _write_json
+from pack_helpers import GENERIC_TARGETS, _kdp, _restamp, _silent, _write_json
 from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from test_specialization_agreement import (
     ARCH,
@@ -65,14 +73,6 @@ def _code_object(module):
     return _object([_kernel(name, ARGS[name]) for name in names])
 
 
-def _restamp(doc):
-    """Re-publish every launch's descriptor digest over an edited shipped document,
-    so only the check under test can refuse it."""
-    binding = agreement.descriptor_binding(doc)
-    for evidence in doc["provenance"]["effective_spec"].values():
-        evidence["descriptor_digest"] = binding
-
-
 def shipped(launches=ONE_MODULE, version="1.0"):
     """A shipped rocke `sources` UKD over synthesised objects.
 
@@ -114,6 +114,7 @@ def shipped(launches=ONE_MODULE, version="1.0"):
             compile_target=ARCH,
             observations=observed[vk],
             role=role,
+            origin_kind="rocke",
         )
     record = pipeline.InlineUKD(
         id="ukd-demo",
@@ -229,8 +230,8 @@ class TestVerifyBindsEachEntryToItsOwnEvidence:
 
     def test_a_symbol_the_module_exports_under_the_wrong_launch_fails(self):
         doc, records, payload = shipped()
-        # Both launches now name the primary: the object exports it, so only the
-        # role recorded for `merge` can tell.
+        # `merge` is given the primary's symbol and signature, which the object
+        # exports; only the role recorded for `merge` can tell it apart.
         doc["sources"]["merge"]["symbol"] = PRIMARY
         doc["sources"]["merge"]["signature"] = doc["sources"]["decode"]["signature"]
         _restamp(doc)
@@ -449,6 +450,34 @@ class MalformedSpec:
     resolved_use_exp2_fast: bool = True
 
 
+class _RaisingPropertySpec:
+    """`block_n` exists, as a property whose body raises AttributeError."""
+
+    head_size = 64
+    dtype = "bf16"
+    causal = True
+
+    @property
+    def block_n(self):
+        return self.missing_helper
+
+    def resolved_use_exp2_fast(self):
+        return True
+
+
+class _RaisingMethodSpec:
+    """`resolved_use_exp2_fast` exists, as a method whose body raises
+    AttributeError."""
+
+    head_size = 64
+    dtype = "bf16"
+    causal = True
+    block_n = 64
+
+    def resolved_use_exp2_fast(self):
+        return self.missing_helper
+
+
 def _requests():
     request = agreement.observation_request(consumer(), FULL_KMD)
     return {agreement.digest(request): request}
@@ -491,6 +520,22 @@ class TestFieldsALaunchDoesNotReport:
         this stage lacks."""
         with pytest.raises(HkpPackError, match="not a bound effective accessor"):
             _observed(MalformedSpec())
+
+    @pytest.mark.parametrize(
+        "spec, attribute",
+        [
+            (_RaisingPropertySpec(), "block_n"),
+            (_RaisingMethodSpec(), "use_exp2_fast"),
+        ],
+        ids=["property", "method"],
+    )
+    def test_an_attribute_that_raises_while_observed_is_not_unreported(
+        self, spec, attribute
+    ):
+        """An AttributeError from an attribute the spec does have is a defect in
+        it; only an attribute the spec lacks is a field it does not report."""
+        with pytest.raises(HkpPackError, match=f"cannot observe {attribute} via"):
+            _observed(spec)
 
     def test_a_field_one_launch_reports_and_matches_passes(self):
         launches = {
@@ -639,6 +684,20 @@ class TestSameKernelUnderTwoLaunches:
         assert sources_provenance["a"]["builder"] != sources_provenance["b"]["builder"]
         agreement.verify(doc, records, payload)
 
+    def test_equal_bytes_with_different_observations_are_still_two_compiles(
+        self, monkeypatch
+    ):
+        """Compiles group by (library, toc_key), not by their bytes: two builders
+        may emit identical objects and each keep its own evidence."""
+        monkeypatch.setitem(MODULES, "vk-x", {"primary": PRIMARY, "companions": {}})
+        monkeypatch.setitem(MODULES, "vk-y", {"primary": PRIMARY, "companions": {}})
+        doc, records, payload = shipped({"a": ("vk-x", None), "b": ("vk-y", None)})
+        assert payload["a"] == payload["b"]
+        evidence = doc["provenance"]["effective_spec"]
+        evidence["b"]["observations"]["producer"]["builder"]["sha256"] = "f" * 64
+        assert evidence["a"]["observations"] != evidence["b"]["observations"]
+        agreement.verify(doc, records, payload)
+
     def test_one_compile_claimed_by_two_launches_verifies(self):
         doc, records, payload = shipped(
             {
@@ -656,6 +715,116 @@ class TestSameKernelUnderTwoLaunches:
         )
         with pytest.raises(HkpPackError, match=r"claim the kernels \['merge'\]"):
             agreement.verify(doc, records, payload)
+
+
+class TestLaunchOrderCarriesNoMeaning:
+    """The order of `sources` keys selects nothing: the verdict and the shipped
+    bytes are the same for every order."""
+
+    LAUNCHES = {
+        "first": ("vk-a", None),
+        "second": ("vk-a", None),
+        "merge": ("vk-a", "merge"),
+        "seg": ("vk-seg", None),
+    }
+
+    @staticmethod
+    def _orders():
+        return list(itertools.permutations(TestLaunchOrderCarriesNoMeaning.LAUNCHES))
+
+    def _shipped(self, order):
+        return shipped({name: self.LAUNCHES[name] for name in order})
+
+    def test_every_order_ships_the_same_document_and_verifies(self):
+        reference = None
+        for order in self._orders():
+            doc, records, payload = self._shipped(order)
+            agreement.verify(doc, records, payload)
+            canonical = json.dumps(doc, sort_keys=True)
+            reference = reference or canonical
+            assert canonical == reference
+
+    def test_every_order_refuses_a_launch_whose_evidence_departs_from_its_siblings(
+        self,
+    ):
+        for order in self._orders():
+            doc, records, payload = self._shipped(order)
+            doc = json.loads(json.dumps(doc))
+            evidence = doc["provenance"]["effective_spec"]
+            evidence["merge"]["observations"]["producer"]["builder"]["sha256"] = (
+                "f" * 64
+            )
+            with pytest.raises(HkpPackError, match="share one code object but carry"):
+                agreement.verify(doc, records, payload)
+
+    def test_the_two_launch_refusal_names_the_pair_in_sorted_order(self):
+        for order in itertools.permutations(["decode", "merge"]):
+            doc, records, payload = shipped({n: ONE_MODULE[n] for n in order})
+            doc = json.loads(json.dumps(doc))
+            evidence = doc["provenance"]["effective_spec"]
+            evidence["merge"]["observations"]["producer"]["builder"]["sha256"] = (
+                "f" * 64
+            )
+            with pytest.raises(HkpPackError) as info:
+                agreement.verify(doc, records, payload)
+            assert "launches ['decode', 'merge'] share one code object" in str(
+                info.value
+            )
+
+    def test_the_packer_compiles_and_claims_the_same_in_every_order(self, monkeypatch):
+        compiled = []
+
+        def fake_compile(
+            source, builder, spec, arch, _dir, _req, _origins, target, **_
+        ):
+            compiled.append((source, builder, target))
+            observations = {
+                "arch": arch,
+                "compile_target": arch,
+                "symbol": PRIMARY,
+            }
+            if builder == "b1":
+                observations["companions"] = {"merge": MERGE}
+            return f"{builder}.co", PRIMARY, observations
+
+        monkeypatch.setattr(pipeline, "compile_rocke_variant", fake_compile)
+
+        def entry(builder, role=None):
+            ks = {"kind": "rocke", "source": "k/m.py", "builder": builder, "spec": {}}
+            return {**ks, "role": role} if role else ks
+
+        authored = {
+            "first": entry("b1"),
+            "second": entry("b1"),
+            "merge": entry("b1", "merge"),
+            "seg": entry("b2"),
+        }
+        results = []
+        for order in itertools.permutations(authored):
+            compiled.clear()
+            ukd = {"id": "ukd-demo", "sources": {n: dict(authored[n]) for n in order}}
+            _vk, _symbol, fields = pipeline._compile_sources_ukd(
+                ukd,
+                "UKD 'ukd-demo'",
+                ".",
+                ".",
+                ARCH,
+                "hipcc",
+                "dir",
+                {},
+                {},
+                {},
+                {},
+                {},
+                None,
+            )
+            launches = {
+                name: (launch.variant_key, launch.symbol, launch.role)
+                for name, launch in fields["launches"].items()
+            }
+            results.append((sorted(compiled), sorted(launches.items())))
+        assert all(result == results[0] for result in results)
+        assert [builder for _s, builder, _t in results[0][0]] == ["b1", "b2"]
 
 
 class TestClaimCheck:
@@ -710,6 +879,22 @@ class TestClaimCheck:
         sources.check_claims("W", "b", ["a"], [None], {"symbol": PRIMARY})
         with pytest.raises(HkpPackError, match=r"produced \['\(primary\)'\]"):
             sources.check_claims("W", "b", ["a"], ["merge"], {"symbol": PRIMARY})
+
+
+def _hip_entry(**overrides):
+    ks = {"kind": "hip", "source": "k.cpp", "entry": "e", "build": {}}
+    ks.update(overrides)
+    return ks
+
+
+def _hsaco_entry(symbol="s", **overrides):
+    ks = {"kind": "hsaco", "file": "k.co", "symbol": symbol}
+    ks.update(overrides)
+    return ks
+
+
+def _without(entry, field):
+    return {k: v for k, v in entry.items() if k != field}
 
 
 def _rocke_entry(**overrides):
@@ -799,21 +984,6 @@ class TestAuthoredValidation:
             _sources_ukd({name: _rocke_entry(), "other": _rocke_entry()}), "UKD 'k'"
         )
 
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            {"kind": "hip", "source": "k.cpp", "entry": "e", "build": {}},
-            {"kind": "hsaco", "file": "k.hsaco", "symbol": "s"},
-            {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "e"},
-        ],
-        ids=["hip", "hsaco", "embedded_source"],
-    )
-    def test_only_rocke_entries_may_be_authored(self, entry):
-        doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
-        with pytest.raises(HkpPackError) as info:
-            _validate_ukd_fields(doc, "UKD 'k'")
-        assert f"'k1' has kind '{entry['kind']}'" in str(info.value)
-
     def test_an_embedded_source_entry_is_refused_at_validation(self):
         entry = {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "e"}
         doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
@@ -823,8 +993,6 @@ class TestAuthoredValidation:
     @pytest.mark.parametrize(
         "kind, says",
         [
-            ("hip", "not yet supported"),
-            ("hsaco", "not yet supported"),
             ("embedded_source", "not packed into a code object"),
             ("kpack", "not pack input"),
         ],
@@ -833,8 +1001,81 @@ class TestAuthoredValidation:
         message = str(sources.refuse_authored_kind("W", "k1", kind))
         assert f"'k1' has kind '{kind}'" in message and says in message
 
+    def test_hip_and_hsaco_entries_may_be_authored(self):
+        _validate_ukd_fields(
+            _sources_ukd({"k0": _hip_entry(), "k1": _hip_entry()}), "U"
+        )
+        _validate_ukd_fields(
+            _sources_ukd(
+                {"k0": _hsaco_entry(), "k1": _hsaco_entry("s2")}, arch=["gfx942"]
+            ),
+            "U",
+        )
+
+    @pytest.mark.parametrize("make", [_hip_entry, _hsaco_entry], ids=["hip", "hsaco"])
+    def test_role_is_refused_on_a_hip_or_hsaco_entry(self, make):
+        doc = _sources_ukd({"k0": make(), "k1": make(role="merge")}, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match="'k1' carries 'role'"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize(
+        "entry, match",
+        [
+            (_hip_entry(build={"flags": [1]}), "invalid build"),
+            (_hip_entry(build={"flags": ["-fuse-cuid=hash"]}), "-fuse-cuid"),
+            (_without(_hip_entry(), "build"), "invalid build \\(absent\\)"),
+            (_without(_hip_entry(), "entry"), "missing required field 'entry'"),
+            (_without(_hsaco_entry(), "file"), "missing required field 'file'"),
+            (_hsaco_entry(symbol=""), "'symbol' must be a non-empty string"),
+            (_hsaco_entry(symbol="s\u00ff"), "must be ASCII"),
+        ],
+        ids=[
+            "flags-not-strings",
+            "reserved-flag",
+            "build-absent",
+            "entry-absent",
+            "file-absent",
+            "symbol-empty",
+            "symbol-non-ascii",
+        ],
+    )
+    def test_a_hip_or_hsaco_entry_is_checked_like_a_single_launch(self, entry, match):
+        other = _hip_entry() if entry["kind"] == "hip" else _hsaco_entry("s2")
+        doc = _sources_ukd({"k0": other, "k1": entry}, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match=match) as info:
+            _validate_ukd_fields(doc, "UKD 'k'")
+        assert "sources 'k1'" in str(info.value)
+
+    @pytest.mark.parametrize("arch", [None, []], ids=["absent", "empty"])
+    def test_hsaco_entries_need_a_non_empty_ukd_arch(self, arch):
+        doc = _sources_ukd({"k0": _hsaco_entry(), "k1": _hsaco_entry("s2")})
+        if arch is not None:
+            doc["arch"] = arch
+        with pytest.raises(HkpPackError, match="hsaco requires a non-empty 'arch'"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            {"k0": _hip_entry(), "k1": _hsaco_entry()},
+            {"k0": _rocke_entry(), "k1": _hip_entry()},
+            {"k0": _rocke_entry(), "k1": _hsaco_entry()},
+        ],
+        ids=["hip-hsaco", "rocke-hip", "rocke-hsaco"],
+    )
+    def test_entries_of_two_kinds_cannot_mix(self, entries):
+        doc = _sources_ukd(entries, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match="mix kernel kinds"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
     def test_an_unknown_kind_and_a_missing_kind_are_refused(self):
-        with pytest.raises(HkpPackError, match="unsupported kind 'flydsl'"):
+        with pytest.raises(
+            HkpPackError,
+            match=(
+                "'k1' has kind 'flydsl', which is not a sources entry kind "
+                r"\(expected 'rocke', 'hip' or 'hsaco', or 'kpack' once packed\)"
+            ),
+        ):
             _validate_ukd_fields(
                 _sources_ukd({"k0": _rocke_entry(), "k1": {"kind": "flydsl"}}),
                 "UKD 'k'",
@@ -980,7 +1221,7 @@ class TestEveryReaderOfAUkdsKernel:
             assert "role" not in doc["kernel_source"]
         assert ukd["sources"]["k1"]["role"] == "merge"
 
-    def test_a_non_rocke_entry_reaching_the_compile_is_refused(self):
+    def test_a_kpack_entry_reaching_the_compile_is_refused(self):
         ukd = _sources_ukd({"k0": _rocke_entry(), "k1": _packed_entry(PRIMARY)})
         with pytest.raises(HkpPackError) as info:
             pipeline._compile_ukd_variant(
@@ -1071,6 +1312,15 @@ class TestDeskCheckReaders:
         ]
         assert desk_check.toc_key_uniqueness(plain) == (2, 2)
 
+    def test_a_toc_key_shared_through_one_launch_collides_across_kernels(self):
+        two_launch = _kernel_doc("k", {"a": {"toc_key": "t"}, "b": {"toc_key": "u"}})
+        reuse = {"name": "o", "kernel_source": {"toc_key": "u"}}
+        disjoint = {"name": "o", "kernel_source": {"toc_key": "v"}}
+        assert desk_check.toc_key_uniqueness([two_launch, reuse]) == (1, 2)
+        assert desk_check.toc_key_uniqueness([two_launch, disjoint]) == (2, 2)
+        shared = _kernel_doc("k", {"a": {"toc_key": "t"}, "b": {"toc_key": "t"}})
+        assert desk_check.toc_key_uniqueness([shared]) == (1, 1)
+
     def test_symbols_of_a_sources_kernel_are_counted_per_kernel(self):
         one = _kernel_doc("k", {"a": {"symbol": "s1"}, "b": {"symbol": "s2"}})
         two = _kernel_doc("o", {"a": {"symbol": "s1"}, "b": {"symbol": "s3"}})
@@ -1151,6 +1401,54 @@ class TestDeskCheckReaders:
         assert "and kernel_source.kind is 'hip'." in str(info.value)
 
 
+class TestDeskCheckReadsEachLaunchsObject:
+    class _Archive:
+        def __init__(self, kernels):
+            self._kernels = kernels
+
+        def get_kernel(self, toc_key, arch):
+            assert arch == ARCH
+            return self._kernels.get(toc_key)
+
+    def _serve(self, monkeypatch, tmp_path, doc, kernels):
+        """Write the library file `doc` names and make `load_kpack` read `kernels`
+        (toc_key to bytes) out of it."""
+        library = tmp_path / doc["sources"]["segment"]["library"]
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"archive")
+        archive = self._Archive(kernels)
+        kpack = type(
+            "FakeKpack",
+            (),
+            {"PackedKernelArchive": type("A", (), {"read": lambda _path: archive})},
+        )
+        monkeypatch.setattr(desk_check, "load_kpack", lambda _dir: (kpack, None))
+
+    def test_each_launch_is_read_from_its_own_toc_key_and_verifies(
+        self, monkeypatch, tmp_path
+    ):
+        doc, records, payload = shipped(TWO_BUILDERS)
+        assert payload["segment"] != payload["reduce"]
+        by_toc_key = {doc["sources"][n]["toc_key"]: payload[n] for n in payload}
+        self._serve(monkeypatch, tmp_path, doc, by_toc_key)
+        read = desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
+        assert read == payload
+        agreement.verify(doc, records, read)
+
+    def test_a_toc_key_absent_from_the_archive_names_its_launch(
+        self, monkeypatch, tmp_path
+    ):
+        doc, _records, payload = shipped(TWO_BUILDERS)
+        self._serve(
+            monkeypatch,
+            tmp_path,
+            doc,
+            {doc["sources"]["segment"]["toc_key"]: payload["segment"]},
+        )
+        with pytest.raises(HkpPackError, match="launch 'reduce': toc_key 'vk-red'"):
+            desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
+
+
 class TestProvenanceSidecarGuard:
     def test_a_packed_sources_ukd_in_an_unmarked_directory_is_refused(self, tmp_path):
         """`_require_authored` refuses a directory that holds kpack UKDs but no
@@ -1182,3 +1480,172 @@ class TestProvenanceSidecarGuard:
         self, sources_value, expected
     ):
         assert provenance_sidecar._kind({"sources": sources_value}) == expected
+
+
+def _inline(ukd_id, names):
+    """An inline compiled UKD of a shard, naming `names` as its launches; no names
+    is a single-launch kernel."""
+    return pipeline.InlineUKD(
+        id=ukd_id,
+        name=ukd_id,
+        metadata={},
+        priority=0,
+        source=None,
+        entry=None,
+        build=None,
+        symbol=None,
+        variant_key=None,
+        launches={name: None for name in names},
+    )
+
+
+def _kdp_of(kdp_id, *entries, dispatch=None):
+    """A shard KDP over `entries`; its UDD is its own unless `dispatch` names one."""
+    return pipeline.ArchKDP(
+        id=kdp_id,
+        filename=f"{kdp_id}.kdp.json",
+        header={"dispatch": dispatch or f"udd-{kdp_id}"},
+        entries=list(entries),
+    )
+
+
+def _shard(*kdps, standalone=()):
+    return pipeline.IntermediateArch(
+        arch=ARCH,
+        directory=None,
+        kdps=list(kdps),
+        standalone_ukds={u.id: u for u in standalone},
+    )
+
+
+def _udds(inter, symbols=None):
+    """The input holding one UDD per dispatch the shard's KDPs name. Each UDD names
+    the handler `handler.<udd id>` unless `symbols` maps its id to another."""
+    symbols = symbols or {}
+    ids = sorted({kdp.header["dispatch"] for kdp in inter.kdps} - {None})
+    return FlatInput(
+        descriptors=[
+            Descriptor(
+                path=Path(f"{udd_id}.udd.json"),
+                doc={
+                    "id": udd_id,
+                    "name": udd_id,
+                    "dispatch_symbol": symbols.get(udd_id, f"handler.{udd_id}"),
+                },
+            )
+            for udd_id in ids
+        ]
+    )
+
+
+def _check(inter, symbols=None):
+    pipeline._check_launch_sets(_udds(inter, symbols), inter)
+
+
+class TestOneLaunchSetPerDispatchHandler:
+    """One native dispatch handler declares one launch set and serves every kernel
+    of every KDP whose UDD names it; the packer refuses kernels of one handler that
+    disagree, whether they share a KDP, a UDD, or only the dispatch symbol."""
+
+    def test_kernels_naming_different_launch_sets_are_refused(self, tmp_path):
+        inter = _shard(
+            _kdp_of(
+                "kdp-mixed",
+                _inline("ukd-one", ["decode", "merge"]),
+                _inline("ukd-two", ["segment", "reduce"]),
+            )
+        )
+        with pytest.raises(HkpPackError) as info:
+            pipeline.pack_arch(_udds(inter), inter, tmp_path, None, None)
+        message = str(info.value)
+        assert "dispatch handler 'handler.udd-kdp-mixed'" in message
+        assert "KDP 'kdp-mixed'" in message
+        assert "['ukd-one'] name launches ['decode', 'merge']" in message
+        assert "['ukd-two'] name launches ['reduce', 'segment']" in message
+
+    def test_a_single_launch_kernel_beside_a_multi_launch_one_is_refused(self):
+        inter = _shard(
+            _kdp_of(
+                "kdp-mixed", _inline("ukd-plain", []), _inline("ukd-multi", ["a", "b"])
+            )
+        )
+        with pytest.raises(HkpPackError) as info:
+            _check(inter)
+        message = str(info.value)
+        assert "KDP 'kdp-mixed'" in message
+        assert "['ukd-plain'] name launches []" in message
+        assert "['ukd-multi'] name launches ['a', 'b']" in message
+
+    def test_a_standalone_reference_is_held_to_its_launch_set(self):
+        inter = _shard(
+            _kdp_of("kdp-mixed", _inline("ukd-multi", ["a", "b"]), "ukd-alone"),
+            standalone=[_inline("ukd-alone", [])],
+        )
+        with pytest.raises(HkpPackError, match=r"\['ukd-alone'\] name launches \[\]"):
+            _check(inter)
+
+    def test_the_same_launch_set_in_a_different_key_order_is_accepted(self):
+        _check(
+            _shard(
+                _kdp_of(
+                    "kdp-demo",
+                    _inline("ukd-one", ["decode", "merge"]),
+                    _inline("ukd-two", ["merge", "decode"]),
+                )
+            )
+        )
+
+    def test_two_kdps_sharing_one_udd_are_held_to_one_launch_set(self):
+        # Each KDP agrees with itself; the loader still resolves one handler for
+        # both, so the second KDP's kernel would be dropped at load.
+        inter = _shard(
+            _kdp_of("kdp-a", _inline("ukd-a", ["decode", "merge"]), dispatch="udd-x"),
+            _kdp_of("kdp-b", _inline("ukd-b", ["decode", "reduce"]), dispatch="udd-x"),
+        )
+        with pytest.raises(HkpPackError) as info:
+            _check(inter)
+        message = str(info.value)
+        assert "dispatch handler 'handler.udd-x'" in message
+        assert "KDP 'kdp-a' (kdp-a.kdp.json) UKD(s) ['ukd-a']" in message
+        assert "KDP 'kdp-b' (kdp-b.kdp.json) UKD(s) ['ukd-b']" in message
+        assert "name launches ['decode', 'merge']" in message
+        assert "name launches ['decode', 'reduce']" in message
+
+    def test_two_udds_naming_one_dispatch_symbol_are_held_to_one_launch_set(self):
+        inter = _shard(
+            _kdp_of("kdp-multi", _inline("ukd-multi", ["decode", "merge"])),
+            _kdp_of("kdp-plain", _inline("ukd-plain", [])),
+        )
+        symbols = {"udd-kdp-multi": "sdpa.fwd", "udd-kdp-plain": "sdpa.fwd"}
+        with pytest.raises(HkpPackError, match=r"dispatch handler 'sdpa\.fwd'"):
+            _check(inter, symbols)
+
+    def test_each_dispatch_handler_may_serve_its_own_launch_set(self):
+        shared = _inline("ukd-shared", ["a", "b"])
+        _check(
+            _shard(
+                _kdp_of("kdp-ab", _inline("ukd-x", ["a", "b"]), "ukd-shared"),
+                _kdp_of("kdp-cd", _inline("ukd-y", ["c", "d"])),
+                _kdp_of("kdp-plain", _inline("ukd-z", [])),
+                # Shares kdp-ab's UDD, and its launch set with it.
+                _kdp_of("kdp-ab-again", "ukd-shared", dispatch="udd-kdp-ab"),
+                standalone=[shared],
+            )
+        )
+
+    def test_a_kdp_naming_no_udd_is_held_to_one_launch_set_on_its_own(self):
+        unbound = _kdp_of("kdp-a", _inline("ukd-a", ["a", "b"]), _inline("ukd-b", []))
+        unbound.header["dispatch"] = None
+        with pytest.raises(
+            HkpPackError,
+            match=r"KDP 'kdp-a', whose dispatch names no UDD in this root,",
+        ):
+            _check(_shard(unbound))
+
+    def test_kdps_naming_no_udd_share_no_handler(self):
+        # No UDD resolves, so there is no handler for them to share; each answers for
+        # itself, as a KDP whose dispatch the loader cannot resolve is refused whole.
+        first = _kdp_of("kdp-a", _inline("ukd-a", ["a", "b"]))
+        second = _kdp_of("kdp-b", _inline("ukd-b", []))
+        first.header["dispatch"] = second.header["dispatch"] = None
+        _check(_shard(first, second))

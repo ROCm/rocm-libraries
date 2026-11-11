@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -157,15 +157,19 @@ namespace rocalution
 #ifdef _OPENMP
         _get_backend_descriptor()->OpenMP_def_threads = omp_get_max_threads();
         _get_backend_descriptor()->OpenMP_threads     = omp_get_max_threads();
-#if _OPENMP >= 201811 && !defined(_WIN32)
+#if _OPENMP >= 200805 && !defined(_WIN32)
         _get_backend_descriptor()->OpenMP_def_nested = omp_get_max_active_levels();
 #else
         _get_backend_descriptor()->OpenMP_def_nested = omp_get_nested();
 #endif
 
-        // the default in rocALUTION is 0
-#if _OPENMP >= 201811 && !defined(_WIN32)
-        omp_set_max_active_levels(0);
+        // rocALUTION disables nested parallelism. A max-active-levels of 0 would serialize
+        // every parallel region, so only lower it to 1 when it is higher and keep a user's 0
+#if _OPENMP >= 200805 && !defined(_WIN32)
+        if(_get_backend_descriptor()->OpenMP_def_nested > 1)
+        {
+            omp_set_max_active_levels(1);
+        }
 #else
         omp_set_nested(0);
 #endif
@@ -196,7 +200,7 @@ namespace rocalution
             LOG_INFO("Warning: the accelerator is disabled");
         }
 
-        if(_rocalution_check_if_any_obj() == false)
+        if(_rocalution_check_if_any_obj() == false) // LCOV_EXCL_BR_LINE
         {
             // LCOV_EXCL_START
             LOG_INFO("Error: rocALUTION objects have been created before calling the "
@@ -234,11 +238,12 @@ namespace rocalution
         assert(_get_backend_descriptor()->OpenMP_def_threads > 0);
         omp_set_num_threads(_get_backend_descriptor()->OpenMP_def_threads);
 
-        assert((_get_backend_descriptor()->OpenMP_def_nested == 0)
-               || (_get_backend_descriptor()->OpenMP_def_nested == 1));
-#if _OPENMP >= 201811 && !defined(_WIN32)
+#if _OPENMP >= 200805 && !defined(_WIN32)
+        assert(_get_backend_descriptor()->OpenMP_def_nested >= 0);
         omp_set_max_active_levels(_get_backend_descriptor()->OpenMP_def_nested);
 #else
+        assert((_get_backend_descriptor()->OpenMP_def_nested == 0)
+               || (_get_backend_descriptor()->OpenMP_def_nested == 1));
         omp_set_nested(_get_backend_descriptor()->OpenMP_def_nested);
 #endif
 #endif

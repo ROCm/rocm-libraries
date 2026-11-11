@@ -321,16 +321,19 @@ class ErrorExtractor:
 
                     # Search for failure patterns
                     error_lines = []
+                    covered_until = 0
                     for i, line in enumerate(last_lines):
                         if re.search(
                             r"(error|failed|fatal|exception|assertion)",
                             line,
                             re.IGNORECASE,
                         ):
-                            # Include context: 2 lines before and 3 lines after
-                            start = max(0, i - 2)
+                            # Include context: 2 lines before and 3 lines after,
+                            # without repeating lines of the previous window
+                            start = max(covered_until, i - 2)
                             end = min(len(last_lines), i + 4)
                             error_lines.extend(last_lines[start:end])
+                            covered_until = max(covered_until, end)
                             if len(error_lines) >= self.MAX_CONTEXT_LINES:
                                 break
 
@@ -531,7 +534,22 @@ THEROCK_JOB_PREFIXES = ("Linux::", "Windows::")
 # Expected-failure test jobs; their failures are not actionable.
 XFAIL_JOB_MARKER = "(xfail)"
 GITHUB_ERROR_MARKER = "##[error]"
-JOBS_PER_PAGE = 100
+# Timestamp GitHub prefixes to every job log line.
+LOG_TIMESTAMP_PATTERN = re.compile(
+    r"^\ufeff?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?", re.MULTILINE
+)
+# Runner step header: the step's command, shell and env, up to "##[endgroup]".
+STEP_HEADER_GROUP = "##[group]Run "
+# GitHub's default page size. An uncached page of 100 jobs of a full
+# multi-arch run (~150 jobs with their steps) takes ~10 s to render and hits
+# the API's 10 s limit as "HTTP 502"; 30 jobs take ~2 s.
+JOBS_PER_PAGE = 30
+# gh >= 2.97.0 refuses to print API responses containing terminal escape
+# sequences (GHSA-3m3g-3wcr-px46) unless this flag is passed, and job logs
+# carry ANSI colors. Older gh neither knows nor needs the flag.
+GH_ALLOW_ESCAPES_FLAG = "--allow-escape-sequences"
+# ANSI CSI sequences (e.g. colors "\x1b[38;2;255;61;61m") and two-byte escapes.
+TERMINAL_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
 
 
 def select_failed_jobs(jobs: List[dict]) -> List[dict]:
@@ -567,15 +585,53 @@ def truncate_at_first_error(log: str) -> str:
     return log if line_end == -1 else log[: line_end + 1]
 
 
-def gh_api(endpoint: str) -> str:
+def strip_terminal_escapes(log: str) -> str:
+    """Remove ANSI escape sequences so they never reach a Teams message."""
+    return TERMINAL_ESCAPE_PATTERN.sub("", log)
+
+
+def clean_job_log(log: str) -> str:
+    """Make a GitHub Actions job log readable in a Teams message.
+
+    Drops the per-line timestamps and the runner's step headers
+    ("##[group]Run <command>" through "##[endgroup]"), keeps the content of
+    other groups without their markers, and shows "##[error]" as "Error: ",
+    like the GitHub UI does.
+    """
+    cleaned = []
+    in_step_header = False
+    for line in LOG_TIMESTAMP_PATTERN.sub("", log).splitlines(keepends=True):
+        if line.startswith("##[group]"):
+            in_step_header = line.startswith(STEP_HEADER_GROUP)
+        elif line.startswith("##[endgroup]"):
+            in_step_header = False
+        elif not in_step_header:
+            if line.startswith(GITHUB_ERROR_MARKER):
+                line = "Error: " + line[len(GITHUB_ERROR_MARKER) :]
+            cleaned.append(line)
+    return "".join(cleaned)
+
+
+def gh_api(endpoint: str, *flags: str) -> str:
     """GET a GitHub REST endpoint through the gh CLI (authenticated via GH_TOKEN)."""
     return subprocess.run(
-        ["gh", "api", endpoint],
+        ["gh", "api", *flags, endpoint],
         check=True,
         capture_output=True,
         encoding="utf-8",
         errors="replace",
     ).stdout
+
+
+def gh_api_allowing_escapes(endpoint: str) -> str:
+    """gh_api for responses that may contain terminal escape sequences."""
+    try:
+        return gh_api(endpoint, GH_ALLOW_ESCAPES_FLAG)
+    except subprocess.CalledProcessError as e:
+        if f"unknown flag: {GH_ALLOW_ESCAPES_FLAG}" not in e.stderr:
+            raise
+        # gh < 2.97.0 prints escape sequences without the flag.
+        return gh_api(endpoint)
 
 
 def list_run_jobs(repository: str, run_id: str, run_attempt: str) -> List[dict]:
@@ -596,13 +652,14 @@ def list_run_jobs(repository: str, run_id: str, run_attempt: str) -> List[dict]:
 
 
 def fetch_job_log(repository: str, job_id: int) -> str:
-    """Download a job log; an unavailable log yields an empty string so the
-    failure is still reported."""
+    """Download a job log without terminal escape sequences; an unavailable
+    log yields an empty string so the failure is still reported."""
     try:
-        return gh_api(f"repos/{repository}/actions/jobs/{job_id}/logs")
+        log = gh_api_allowing_escapes(f"repos/{repository}/actions/jobs/{job_id}/logs")
     except subprocess.CalledProcessError as e:
         logger.warning(f"Could not download log of job {job_id}: {e.stderr.strip()}")
         return ""
+    return strip_terminal_escapes(log)
 
 
 def notify_failure(
@@ -711,7 +768,9 @@ def notify_failed_jobs_from_run(
             )
             log_path = Path(log_dir) / f"{job['id']}.log"
             log_path.write_text(
-                truncate_at_first_error(fetch_job_log(repository, job["id"])),
+                clean_job_log(
+                    truncate_at_first_error(fetch_job_log(repository, job["id"]))
+                ),
                 encoding="utf-8",
             )
             logger.info(f"Reporting {failure_stage} failure of job '{job['name']}'")

@@ -192,8 +192,8 @@ namespace hipblaslt_bench
                 if(float(gold[i]) != 0.0f)
                     ++nonzero;
 
-            // allclose_check_general takes 1 as the sentinel for "no tolerance
-            // passed yet" and reports back the loosest pair it needed.
+            // allclose_check_general reports the tightest pair this block passes,
+            // or 1 when none does.
             double atol = 1.0, rtol = 1.0;
             allClose = allclose_check_general(
                            'F', shard, arg.N[0], shard, gold.data(), landed.data(), atol, rtol)

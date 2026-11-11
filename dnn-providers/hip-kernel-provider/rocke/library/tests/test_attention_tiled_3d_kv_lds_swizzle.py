@@ -13,9 +13,9 @@ import pytest
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
-    build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
 )
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 def _spec(**kw) -> UnifiedAttention3DTiledSpec:
@@ -40,6 +40,26 @@ def test_needs_fp16_bf16_kv():
         _spec(kv_storage_dtype="fp8e4m3")
 
 
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
+@pytest.mark.parametrize("kv_layout", ["paged", "strided"])
+def test_needs_power_of_two_chunks_per_row(arch, kv_layout):
+    # head_size 192 has 24 chunks per row: chunk ^ (row % 24) leaves the row.
+    make = _spec if arch == "gfx950" else _gfx942_spec
+    extra = {} if arch == "gfx950" else {"use_wide_kv_load": False}
+    with pytest.raises(ValueError, match="head_size / 8 a power of two"):
+        make(head_size=192, kv_layout=kv_layout, **extra)
+    make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
+    engine = pytest.importorskip("rocke_engine")
+    fields = asdict(
+        make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
+    )
+    fields["use_kv_lds_swizzle"] = True
+    lower = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")
+    # gfx950 paged also trips the partial-row copy check first.
+    with pytest.raises(Exception, match="use_kv_lds_swizzle"):
+        lower(fields, arch)
+
+
 def test_kernel_name_token():
     assert _spec().kernel_name().endswith("_kvswz")
     assert "kvswz" not in _spec(use_kv_lds_swizzle=False).kernel_name()
@@ -57,8 +77,6 @@ def test_kernel_name_token():
     ],
 )
 def test_native_builder_matches_python(head_size, tile, kv_layout):
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _spec(
         head_size=head_size,
@@ -71,18 +89,7 @@ def test_native_builder_matches_python(head_size, tile, kv_layout):
         kv_cache_policy="stream",
         kv_layout=kv_layout,
     )
-    reduce = UnifiedAttentionReduceTiledSpec(
-        head_size=head_size,
-        num_query_heads=32,
-        num_kv_heads=4,
-        dtype="bf16",
-        num_segments=8,
-    )
-    expected = _lower_kernel_to_llvm_python(
-        build_unified_attention_3d_tiled(spec, arch="gfx950"), arch="gfx950"
-    ) + _lower_kernel_to_llvm_python(
-        build_unified_attention_reduce_tiled(reduce, arch="gfx950"), arch="gfx950"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx950")
     actual = engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950")
     assert actual == expected
 
@@ -128,17 +135,9 @@ def test_gfx942_spec_contract(wide):
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
-    from kernels.gfx942.attention_tiled_3d import (
-        build_unified_attention_3d_tiled as build_gfx942,
-    )
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _gfx942_spec(num_seqs=3, **kw)
-    # The gfx942 binding lowers the segment kernel only.
-    expected = _lower_kernel_to_llvm_python(
-        build_gfx942(spec, arch="gfx942"), arch="gfx942"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx942")
     assert engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942") == (
         expected
     )

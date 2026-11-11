@@ -152,6 +152,66 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_rmsnorm": [
+      {
+        "cases": [
+          "1_256_1_1_bfp16_nchw",
+          "1_256_1_1_fp16_nchw",
+          "1_256_1_1_fp16_nhwc",
+          "1_256_1_1_fp32_nchw_fa2132",
+          "1_3_14_14_bfp16_nchw_4fc8d1",
+          "1_3_14_14_bfp16_nchw_5c94dc",
+          "1_3_14_14_bfp16_nchw_eebb06",
+          "1_3_14_14_fp32_nchw_4279d2",
+          "1_3_14_14_fp32_nchw_7aea38",
+          "1_3_14_14_fp32_nchw_c33bc8",
+          "2_16_8_8_bfp16_nchw_6513b8",
+          "2_16_8_8_bfp16_nchw_8580f3",
+          "2_16_8_8_bfp16_nchw_a883bf",
+          "2_16_8_8_fp32_nchw_155366",
+          "2_16_8_8_fp32_nchw_c92333",
+          "2_16_8_8_fp32_nchw_ddfcee",
+          "2_1_1_1_bfp16_nchw_c6f282",
+          "2_1_1_1_fp16_nchw_05cc31",
+          "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_fp32_nchw_82b966",
+          "2_3_4_2_2_bfp16_ncdhw_5758bd",
+          "2_3_4_2_2_bfp16_ncdhw_85becd",
+          "2_3_4_2_2_bfp16_ncdhw_bad43b",
+          "2_3_4_2_2_fp32_ncdhw_29a1cd",
+          "2_3_4_2_2_fp32_ncdhw_c11b59",
+          "2_3_4_2_2_fp32_ncdhw_d5afd7",
+          "2_3_4_4_bfp16_nchw_a986d4",
+          "2_3_4_4_bfp16_nchw_e15802",
+          "2_3_4_4_fp32_nchw_543a74",
+          "2_3_4_4_fp32_nchw_8fafa3",
+          "2_3_4_4_fp32_nchw_e19b0b",
+          "2_3_4_8_8_bfp16_ncdhw_0880bc",
+          "2_3_4_8_8_bfp16_ncdhw_0a108f",
+          "2_3_4_8_8_bfp16_ncdhw_c0300e",
+          "2_3_4_8_8_bfp16_ncdhw_cf2f02",
+          "2_3_4_8_8_fp32_ncdhw_0f8ebd",
+          "2_3_4_8_8_fp32_ncdhw_23a626",
+          "2_3_4_8_8_fp32_ncdhw_29cc98",
+          "2_3_4_8_8_fp32_ncdhw_86c7be",
+          "32_1_14_14_bfp16_nchw",
+          "32_1_14_14_fp16_nhwc",
+          "32_1_14_14_fp32_nchw_a85d3a",
+          "32_3_14_1_bfp16_nchw",
+          "32_3_14_1_bfp16_nchw_dbc6aa",
+          "32_3_14_1_fp32_nchw_366463",
+          "32_3_14_1_fp32_nchw_eb175e",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp32_nchw_400761"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

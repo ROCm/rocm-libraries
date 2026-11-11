@@ -999,6 +999,16 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
 
     const char* required_arch = rocke_attr_get_str(&op->attrs, "required_arch");
     const char* required_flavor = rocke_attr_get_str(&op->attrs, "required_llvm_flavor");
+    const rocke_attr_value_t* minimum_flavor_attr
+        = rocke_attr_get(&op->attrs, "minimum_llvm_flavor");
+    if(minimum_flavor_attr != NULL && minimum_flavor_attr->kind != ROCKE_ATTR_STR)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_TYPE,
+                      "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, "
+                      "expected a string");
+    }
+    const char* minimum_flavor = minimum_flavor_attr != NULL ? minimum_flavor_attr->u.s : NULL;
     if(required_arch
        && (!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, required_arch) != 0))
     {
@@ -1016,6 +1026,18 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
                       required_flavor,
                       rocke_llvm_flavor_name(L->flavor));
     }
+    if(minimum_flavor)
+    {
+        rocke_llvm_flavor_t minimum = rocke_llvm_flavor_from_name(minimum_flavor);
+        if(minimum == ROCKE_LLVM_FLAVOR_AUTO || !rocke_ll_flavor_at_least(L->flavor, minimum))
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.inline_asm requires LLVM flavor %s, got %s",
+                          minimum_flavor,
+                          rocke_llvm_flavor_name(L->flavor));
+        }
+    }
     raw_template = rocke_attr_get_str(&op->attrs, "template");
     if(raw_template == NULL)
     {
@@ -1028,7 +1050,12 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
     }
     template_esc = rocke_ll_escape_asm_string(L, raw_template);
 
-    sideeffect = rocke_attr_get_bool(&op->attrs, "sideeffect", true);
+    const auto* side_attr = rocke_attr_get(&op->attrs, "sideeffect");
+    if(side_attr && side_attr->kind != ROCKE_ATTR_BOOL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "LLVM inline asm sideeffect must be a boolean");
+    }
+    sideeffect = side_attr ? side_attr->u.b : true;
     flag_str = sideeffect ? " sideeffect" : "";
 
     /* Build the typed operand list. The strbufs are RAII-guarded so a throw
