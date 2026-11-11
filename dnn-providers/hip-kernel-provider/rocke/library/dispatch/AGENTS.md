@@ -238,6 +238,26 @@ stored in this tree. A downstream tuning store must drop its old
 defaults fingerprint already separates the old and new ids, and
 `lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
 
+**Tuning-id migration for gfx950 2D fp8 K and the zero-width KQ pad.** Two
+gfx950 2D changes touch stored ids; no such id is stored in this tree.
+
+- fp8 K in LDS (`kv_storage_dtype="fp8e4m3"`, `use_fp8_mfma_qk`) on the 32x32
+  QK paths: ids hash the knobs, not the emitted kernel, so these ids keep
+  their value. The kernels behind them changed: the non-transposed path (both
+  engines) and the transposed path (C++ engine only) read the fp8 K bytes as
+  bf16 without `k_scale` and computed wrong scores, and now read fp8 and scale
+  it. A stored measurement of such a kernel is of the broken one: revalidate
+  and re-measure it.
+- A pin that sets `use_kq_lds_pad` with `kq_lds_pad_halves=0` has both knobs
+  dropped as inert: a zero-width pad builds the unpadded kernel, so it takes
+  that kernel's id. An id recorded with the two knobs kept is no longer
+  produced; replaying it raises `PinRefused` (its knobs canonicalize to the
+  unpadded id) instead of building anything. Replace it with the unpadded id.
+
+`TUNING_ID_VERSION` is not bumped: a bump re-keys every family's ids, while
+here the only kernels that changed under an unchanged id are ones that
+computed wrong output, and the dropped zero-width ids are refused already.
+
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
