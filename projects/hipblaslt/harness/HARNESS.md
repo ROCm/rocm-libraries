@@ -56,6 +56,8 @@ Identical asm supports only "no performance change". Pull requests are not bench
      collection, so check whether the fetch completed (`git rev-parse FETCH_HEAD`).
    - In such a clone, do not run `git grep` over history or the whole tree. It downloads missing
      objects one at a time and can hang. Search the working tree instead.
+   - If `progress.md` exists, read it before starting, to see where earlier work stopped (see
+     `CORE.md`).
 2. **Record the baseline.** Every comparison run records the baseline commit hash.
 3. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
    only when the developer says so. Showing the exact text first is already a root `AGENTS.md` rule.
