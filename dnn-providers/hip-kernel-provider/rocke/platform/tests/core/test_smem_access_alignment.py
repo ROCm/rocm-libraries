@@ -18,9 +18,20 @@ byte-identical to the Python engine's and whose refusals must be the same.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 import pytest
-from rocke.core.ir import F16, F32, F64, FP8E4M3, I32, I64, IRBuilder, PtrType
+from rocke.core.ir import (
+    F16,
+    F32,
+    F64,
+    FP8E4M3,
+    I32,
+    I64,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+)
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
@@ -250,14 +261,35 @@ def test_access_wider_than_the_pool_claims_the_pool_alignment(engine):
     assert segs == ["16"]
 
 
-def _with_store_align(align: object):
-    """The <8 x float> store kernel, with its store's ``align`` attribute set
-    to ``align`` -- as serialized or hand-written IR may carry it."""
-    kernel = _f16_then_f32x8()
+def _with_store_align(
+    align: object, build: Callable[[], KernelDef] = _f16_then_f32x8
+) -> KernelDef:
+    """The kernel ``build`` returns (by default the <8 x float> store kernel),
+    with its one vector store's ``align`` attribute set to ``align`` -- as
+    serialized or hand-written IR may carry it."""
+    kernel = build()
     stores = [op for op in kernel.body.ops if op.name == "tile.smem_store_vN"]
     assert len(stores) == 1
     stores[0].attrs["align"] = align
     return kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_recorded_store_alignment_is_the_claim_printed(engine):
+    """A ``tile.smem_store_vN`` that records ``align 4`` claims 4 bytes, even
+    where its access width (16 bytes, the claim of the load beside it) would
+    allow more: the recorded claim is what the store promises, so it is what
+    each engine prints."""
+    kernel = _with_store_align(4, build=_f16_then_f32x4)
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
+    accesses = re.findall(
+        r"(load|store) <4 x float>.*ptr addrspace\(3\) \S+, align (\d+)$",
+        ll,
+        re.MULTILINE,
+    )
+    assert sorted(accesses) == [("load", "16"), ("store", "4")]
+    segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
+    assert segs == ["16"]
 
 
 @pytest.mark.parametrize("engine", ENGINES)
