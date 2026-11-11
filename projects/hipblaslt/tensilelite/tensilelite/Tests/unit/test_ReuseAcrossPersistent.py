@@ -1578,3 +1578,20 @@ def test_non_rap_activation_keeps_the_plain_stride():
         "s_add_u32 s[sgprNextTile], s[sgprNextTile], s[sgprPersistentGrid]",
         "s_cselect_b32 s[sgprNextTile], s[sgprTotalTiles], s[sgprNextTile]",
     ]
+
+
+def test_rap_max_resident_k_tiles_counts_the_tdm_vgpr():
+    """A NonEdge store through the TDM block (TDMStoreInst 3) holds one more VGPR, the staged tile's base, which the
+    store budget charges: at a slack that is an exact multiple of the k-tile cost, level 3 holds one k-tile less."""
+    from tensilelite.Common.DataType import DataType
+
+    isa = (12, 5, 0)
+    isaInfoMap = {isa: SimpleNamespace(regCaps={"MaxVgpr": 1024})}
+    problemType = {"ComputeDataType": DataType("s"), "DestDataType": DataType("s"), "UseInitialStridesCD": False,
+                   "DataType": DataType("F8"), "MXBlockA": 0}
+    state = {"ThreadTile0": 8, "ThreadTile1": 16, "StoreVectorWidth": 2, "BufferStore": True, "GlobalSplitU": 0,
+             "LoopIters": 1, "MIWaveTileA": 2, "MIInputPerThreadA": 48}
+    # ValuC 128, E 64 at V 4 and R 24: the slack 1024 - 128 - 256 - 40 = 600 is 25 k-tiles exactly.
+    for level, kTiles in ((0, 25), (2, 25), (3, 24)):
+        assert Solution.rapMaxResidentKTiles(dict(state, TDMStoreInst=level), problemType, isa, isaInfoMap,
+                                             False, False) == kTiles, level
