@@ -27,6 +27,8 @@
 #ifndef CONV_SB_SD
 #define CONV_SB_SD 0
 #endif
+// Space-to-depth from channels-first column vectors (sbStemBwd's SDV).
+#define CONV_SB_SDV (CONV_SB_SD != 0 && CONV_SB_LAYOUT == 0 && CONV_SB_VEC > 1)
 
 #ifdef CONV_SB_ATOM
 #define CONV_SB_FMA 0
@@ -58,5 +60,5 @@ extern "C" __global__ void __launch_bounds__(CONV_SB_TH* CONV_SB_ATOM_T::WAVE)
 
 extern "C" __global__ void __launch_bounds__(256) ConvStemBwdTransform(ConvStemBwdTransformArgs a)
 {
-    sbTransform<CONV_SB_T, CONV_SB_FT, CONV_SB_SD, CONV_SB_KC>(a);
+    sbTransform<CONV_SB_T, CONV_SB_FT, CONV_SB_SD, CONV_SB_KC, CONV_SB_SDV>(a);
 }

@@ -16,7 +16,7 @@
 
 /// B[n][uv][k] (k padded to kp, zero past K) from w, n = (c, p, q), uv = u V + v; 3-D (FT depth
 /// taps): k = (depth tap, k), each tap's run padded to kpr.
-template <class T, int FT = 0, int SD = 0, int KC = 1>
+template <class T, int FT = 0, int SD = 0, int KC = 1, int SDV = 0>
 __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
 {
     const T* w = static_cast<const T*>(a.w);
@@ -33,6 +33,15 @@ __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
         {
             td = k / a.kpr;
             k -= td * a.kpr;
+        }
+        else if constexpr(SDV != 0)
+        {
+            // Space-to-depth from dy column vectors: chunk ci holds sub-row ci % SD of channel
+            // chunk ci / SD, both sub-columns: KC / SD channels each (sbStemBwd's SDV order).
+            constexpr int KH = KC / SD;
+            const int ci = k / KC, within = k % KC;
+            td = ci % SD * SD + within / KH;
+            k = ci / SD * KH + within % KH;
         }
         else if constexpr(SD != 0)
         {
@@ -145,7 +154,12 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     static_assert(KC % KA == 0 && KC % EV == 0, "stem bwd chunk");
     static_assert(CL || CFV == 1 || CFV == EV, "stem bwd channels-first vector");
     // Space-to-depth reads every other dy column: no aligned column vectors.
-    static_assert(SD == 0 || CL || CFV == 1, "stem bwd space-to-depth vector");
+    // Space-to-depth from channels-first column vectors (SDV): a vector of dy columns holds both
+    // sub-columns of its super-columns, so a chunk takes one sub-row and both sub-columns of KH =
+    // KC / SD channels.
+    constexpr bool SDV = SD != 0 && !CL && CFV > 1;
+    constexpr int KH = SDV ? KC / SD : KC;
+    static_assert(!SDV || (SD == 2 && KC % SD == 0), "stem bwd space-to-depth vectors");
     static_assert(sbLdsBytes(static_cast<int>(sizeof(T)), U, V, NB, KC, TH, TW)
                       == static_cast<long long>(A_ELEMS + B_ELEMS) * sizeof(T),
                   "stem bwd LDS arithmetic");
@@ -172,14 +186,17 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     // Loads of a chunk, issued into registers a chunk ahead and stored after the compute:
     // A units (CL: EV channels at one (row, col); CF vectors: EV aligned columns of one (row, k)
     // row, CFV = EV; CF scalars: one element) and B units (EV k of one (n, uv)).
-    constexpr int NCU = (WC + 2 * EV - 2) / EV; // aligned column vectors covering the window
-    constexpr int UA = CL ? WR * WC * (KC / EV) : (CFV > 1 ? WR * KC * NCU : WR * WC * KC);
+    // Aligned column vectors covering the window (SDV: its SD WC dy columns).
+    constexpr int NCU = ((SDV ? SD * WC : WC) + 2 * EV - 2) / EV;
+    constexpr int UA = CL ? WR * WC * (KC / EV) : (CFV > 1 ? WR * KH * NCU : WR * WC * KC);
     constexpr int UB = NB * UV * (KC / EV);
     constexpr int PA = (UA + THREADS - 1) / THREADS, PB = (UB + THREADS - 1) / THREADS;
     typedef typename K1If<(CL || CFV > 1), Raw16, typename K1Raw<sizeof(T)>::type>::type RawA;
     RawA ra[PA];
     Raw16 rb[PB];
-    const int c0a = c0 >= 0 ? c0 / EV * EV : -((-c0 + EV - 1) / EV) * EV;
+    // The window's first dy column (SDV: of its super-columns) and the aligned vector before it.
+    const int cs = SDV ? SD * c0 + a.sdw : c0;
+    const int c0a = cs >= 0 ? cs / EV * EV : -((-cs + EV - 1) / EV) * EV;
     auto issue = [&](int k0) {
         // 3-D: a chunk lies in one depth tap's k run; its dy plane od + pd - tap.
         int kb0 = k0;
@@ -188,7 +205,14 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         // Space-to-depth: chunk k0 / KC is sub-pixel (eh, ew) of a channel chunk (sbTransform's
         // order); dy row SD y + sdh + eh.
         int sy = 0, sx = 0;
-        if constexpr(SD != 0)
+        if constexpr(SDV)
+        {
+            // SDV: chunk k0 / KC is sub-row eh of channel chunk (k0 / KC) / SD.
+            const int ci = k0 / KC;
+            kb0 = ci / SD * KH;
+            sy = a.sdh + ci % SD;
+        }
+        else if constexpr(SD != 0)
         {
             const int ci = k0 / KC;
             const int sub = ci % (SD * SD);
@@ -230,7 +254,11 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
                 k = kb0 + rk / WR;
                 x = c0 + col;
             }
-            if constexpr(SD != 0)
+            if constexpr(SDV)
+            {
+                y = SD * y + sy; // x: already a dy column
+            }
+            else if constexpr(SD != 0)
             {
                 y = SD * y + sy;
                 x = SD * x + sx;
@@ -265,6 +293,22 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
             {
                 const int kv = e % (KC / EV), rc = e / (KC / EV);
                 *reinterpret_cast<Raw16*>(As + rc * KCP + kv * EV) = ra[p];
+            }
+            else if constexpr(SDV)
+            {
+                // Column c of the window's dy columns: super-column c / SD, sub-column c % SD.
+                const int cu = e % NCU, rk = e / NCU;
+                const int row = rk % WR, kk = rk / WR;
+                const int col0 = c0a + cu * EV - cs;
+                T t[EV];
+                __builtin_memcpy(t, &ra[p], sizeof(t));
+#pragma unroll
+                for(int i = 0; i < EV; ++i)
+                {
+                    const int col = col0 + i;
+                    if(col >= 0 && col < SD * WC)
+                        As[(row * WC + col / SD) * KCP + col % SD * KH + kk] = t[i];
+                }
             }
             else if constexpr(CFV > 1)
             {

@@ -202,10 +202,12 @@ ConvShape threeDStem(int64_t taps)
     return shape;
 }
 
-/// Stride 1: 3 x 5, padding (1, 2) (the space-to-depth windows 2 x 3).
+/// Stride 1: 3 x 5, padding (1, 2) (the space-to-depth windows 2 x 3), dx 29 x 30 (dy rows not
+/// whole vectors).
 ConvShape stride1Shape()
 {
     auto shape = baseShape();
+    shape.input = {29, 30};
     shape.filter = {3, 5};
     shape.prePadding = shape.postPadding = {1, 2};
     shape.stride = {1, 1};
@@ -786,8 +788,8 @@ std::vector<ConfigRefusal> configRefusals()
          },
          "gfx942",
          [] { return threeDStem(3); }},
-        // Space-to-depth: 2, on stride 1 and no depth taps, its own window, no column vectors,
-        // the columns every (channel, 2 x 2 phase).
+        // Space-to-depth: 2, on stride 1 and no depth taps, its own window, the columns every
+        // (channel, 2 x 2 phase).
         {"SpaceToDepthOnStrideTwo", [](ConfigFields& f) { f.sd = 2; }},
         {"SpaceToDepthOtherThanTwo",
          [](ConfigFields& f) { f.sd = 3; },
@@ -814,13 +816,18 @@ std::vector<ConfigRefusal> configRefusals()
          },
          "gfx942",
          stride1Shape},
-        {"SpaceToDepthColumnVectors",
-         [](ConfigFields& f) { f.vec = 8; },
-         spaceToDepthFields,
+        // Space-to-depth reads whole-vector rows as vectors only (dy rows of 32).
+        {"SpaceToDepthScalarsOnWholeVectorRows",
+         [](ConfigFields& f) { f.vec = 1; },
+         [] {
+             auto f = spaceToDepthFields();
+             f.vec = 8;
+             return f;
+         },
          "gfx942",
          [] {
              auto shape = stride1Shape();
-             shape.input = {29, 32}; // dy rows of 32: whole vectors
+             shape.input = {29, 32};
              return shape;
          }},
         {"SpaceToDepthColumnsBelowThePhases",
@@ -1175,7 +1182,7 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
 {
     const auto launch = launchOf(spaceToDepthFields(), stride1Shape());
     ASSERT_TRUE(launch.has_value());
-    // dx 29 x 64: 15 x 32 super-pixels of 2 x 2.
+    // dx 29 x 30: 15 x 15 super-pixels of 2 x 2.
     EXPECT_EQ(launch->gridX, 1u);
     EXPECT_EQ(launch->gridY, 4u);
     EXPECT_EQ(launch->gridZ, 2u);
@@ -1185,7 +1192,7 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
     EXPECT_EQ(a.kp, 4 * 32);
     EXPECT_EQ(a.kpr, 32);
     EXPECT_EQ(a.ho, 29);
-    EXPECT_EQ(a.wo, 64);
+    EXPECT_EQ(a.wo, 30);
     EXPECT_EQ(a.oh, 0);
     EXPECT_EQ(a.ow, 1);
     EXPECT_EQ(a.sdh, 1);
@@ -1200,6 +1207,22 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
     EXPECT_EQ(t.u, 2);
     EXPECT_EQ(t.v, 3);
     EXPECT_EQ(t.kp, 4 * 32);
+    // Channels-first column vectors (dy rows of 32): a chunk is one sub-row and both
+    // sub-columns of kc / 2 = 16 channels, so kp = 2 sub-rows x 1 chunk x 32.
+    auto vectors = spaceToDepthFields();
+    vectors.vec = 8;
+    auto wide = stride1Shape();
+    wide.input = {29, 32};
+    const auto columnVectors = launchOf(vectors, wide);
+    ASSERT_TRUE(columnVectors.has_value());
+    EXPECT_EQ(columnVectors->args.kp, 2 * 32);
+    EXPECT_EQ(columnVectors->args.kpr, 16);
+    EXPECT_EQ(columnVectors->transform.kp, 2 * 32);
+    // Rows that are not whole vectors (30) decline it.
+    auto narrow = stride1Shape();
+    narrow.input = {29, 30};
+    EXPECT_FALSE(launchOf(vectors, narrow).has_value());
+
     // Off: the stride's phases, no shift.
     auto plain = spaceToDepthFields();
     plain.sd = 0;

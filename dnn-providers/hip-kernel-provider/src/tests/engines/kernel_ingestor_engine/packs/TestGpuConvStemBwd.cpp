@@ -354,6 +354,10 @@ std::vector<DeviceCase> deviceCases()
     // Stride 1 (space-to-depth configs too): odd extents (a half super-pixel at each far
     // edge), padding on one side per axis, true convolution.
     cases.push_back({"Stem3x3S1OddExtents", stem(3, 16, {13, 31}, 3, 1, 1)});
+    // Stride 1, dy rows whole vectors: space-to-depth from column vectors too.
+    cases.push_back({"Stem3x3S1WholeRows", stem(3, 24, {13, 32}, 3, 1, 1)});
+    cases.push_back({"Stem5x5S1WholeRows", stem(3, 16, {11, 40}, 5, 1, 2)});
+    cases.push_back({"Stem7x7S1WholeRows", stem(4, 8, {9, 32}, 7, 1, 3)});
     auto oneSided = stem(3, 16, {12, 22}, 3, 1, 0);
     oneSided.prePadding = {0, 2};
     oneSided.postPadding = {2, 0};

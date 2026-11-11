@@ -97,9 +97,11 @@ SD_WINDOWS = [2, 3, 4]
 # columns are exact: measured 1.3-1.5x slower on ssd300 3x3 fp32, gfx1101 / gfx1201). Per layout,
 # the chunk / tile pairs that won or came within 5% on the RDNA A/B (unet, realesrgan, superres
 # NCHW fp16; sd15 / sdxl NHWC bf16); the rest never did there and each adds a candidate per graph.
+# Keyed by (layout, vector loads); channels-first column vectors read both sub-columns at once.
 SD_KC_TILES = {
-    0: [(16, (4, 2)), (16, (8, 2)), (32, (8, 2))],
-    1: [(64, (4, 2)), (32, (4, 4))],
+    (0, False): [(16, (4, 2)), (16, (8, 2)), (32, (8, 2))],
+    (0, True): [(16, (4, 2)), (16, (8, 2)), (32, (8, 2))],
+    (1, True): [(64, (4, 2)), (32, (4, 4))],
 }
 INTS = [
     "atom_id",
@@ -193,15 +195,17 @@ def build():
                 if atom == "fma"
                 else [(2, 4), (4, 2), (4, 4), (8, 2)]
             )
-            # Space-to-depth reads every other dy column: no channels-first column vectors.
-            layouts = [(1, ev), (0, 1)] if sd else [(1, ev), (0, ev), (0, 1)]
+            layouts = [(1, ev), (0, ev), (0, 1)]
             for nb in nbs(atom, sd or s):
                 for layout, vec in layouts:
                     for kc in kcs:
                         if kc % ka or kc % ev:
                             continue
                         for th, fm in tiles:
-                            if sd and (kc, (th, fm)) not in SD_KC_TILES[layout]:
+                            if (
+                                sd
+                                and (kc, (th, fm)) not in SD_KC_TILES[(layout, vec > 1)]
+                            ):
                                 continue
                             if th * wave > 1024:
                                 continue
