@@ -130,11 +130,11 @@ def _detect_default_backend() -> str:
     # -m invocations) without per-script patches.
     #
     # ``--architecture`` defaults to the literal string "all" for a combined
-    # (all-arch) build (see TensileCreateLibrary/ParseArguments.py); "all"
+    # (all-arch) build (see create_library/parse_arguments.py); "all"
     # does not contain the substring "gfx1250" as text, but it *covers*
     # gfx1250 whenever that arch is supported. Treat it the same as an
     # explicit gfx1250 target rather than returning native-only -- the
-    # per-kernel split in TensileCreateLibrary/Run.py
+    # per-kernel split in create_library/run.py
     # (writeSolutionsAndKernelsTCL) still routes non-gfx1250 kernels to
     # native rocisa based on their actual resolved ISA, so opting into the
     # adapter here for "all" builds is always safe.

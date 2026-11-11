@@ -37,7 +37,7 @@ function(get_rocprim_test_target TEST_SOURCES TEST_TARGET)
 endfunction()
 
 function(set_build_coverage TEST_TARGET)
-  if(BUILD_CODE_COVERAGE)
+  if(ROCPRIM_ENABLE_COVERAGE)
     target_compile_options(${TEST_TARGET} PRIVATE
       -w
       -fprofile-instr-generate
@@ -65,8 +65,8 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
     target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand)
     target_compile_definitions(${TEST_TARGET} PRIVATE WITH_ROCRAND)
   endif()
-  if(BUILD_CODE_COVERAGE)
-    target_compile_definitions(${TEST_TARGET} PRIVATE CODE_COVERAGE)
+  if(ROCPRIM_ENABLE_COVERAGE)
+    target_compile_definitions(${TEST_TARGET} PRIVATE ROCPRIM_ENABLE_COVERAGE)
   endif()
   if(ROCPRIM_ENABLE_TOPK)
     target_compile_definitions(${TEST_TARGET} PRIVATE ROCPRIM_WITH_TOPK)

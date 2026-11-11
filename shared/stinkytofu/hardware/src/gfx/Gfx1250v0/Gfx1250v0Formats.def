@@ -478,6 +478,7 @@ DEF_FORMAT(WMMA,
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00CC,
+    .wmmaQueueDepth = 8,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -514,6 +515,7 @@ DEF_FORMAT(SWMMA,
     .maxOperands = 5,
     .cost = {1, 8},
     .coissue = 0x00C0,
+    .wmmaQueueDepth = 8,
     .flags = {SWMMA},
     .fields = {
         {D0, vdst, vgpr, 256, RW},
@@ -538,6 +540,7 @@ DEF_FORMAT(MXWMMA,
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00C0,
+    .wmmaQueueDepth = 8,
     .flags = {MXWMMA},
 )
 
@@ -552,6 +555,7 @@ DEF_FORMAT(MXWMMA_SCALE,
     // overrides below without needing an override of its own.
     // (Keep literal field names out of .def comments: the parser substring-matches them.)
     .blockedScale = 0x0001,
+    .wmmaQueueDepth = 5,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -575,6 +579,7 @@ DEF_FORMAT(MXWMMA_SCALE16,
     // overrides below without needing an override of its own.
     // (Keep literal field names out of .def comments: the parser substring-matches them.)
     .blockedScale = 0x0001,
+    .wmmaQueueDepth = 5,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
