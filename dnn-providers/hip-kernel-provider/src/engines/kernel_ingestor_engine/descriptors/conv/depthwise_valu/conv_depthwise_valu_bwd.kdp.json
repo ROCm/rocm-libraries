@@ -2090,6 +2090,105 @@
     },
     {
       "version": "1.0",
+      "id": "ee853afe-5c9b-5396-881f-87074e46ef56",
+      "name": "conv_depthwise_valu_bwd.f32.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6aef4b2e-9b7c-58e8-881a-ae4a1381d12f",
+      "name": "conv_depthwise_valu_bwd.f16.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "50e198ad-1626-5dd8-8f28-514de9775ec0",
+      "name": "conv_depthwise_valu_bwd.bf16.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
       "id": "e62c6895-0db6-50ba-a999-5a489f1548c7",
       "name": "conv_depthwise_valu_bwd.f32.nhwc2d.gather",
       "kernel_source": {

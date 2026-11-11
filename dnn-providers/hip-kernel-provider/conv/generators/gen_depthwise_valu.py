@@ -73,6 +73,8 @@ CONFIGS = [
     cfg("NCHW", 2, "lds", kh=5, kw=5, bh=8, bw=8, bk=8, rh=2, rw=2),
     cfg("NCHW", 2, "lds", kh=7, kw=7, bh=16, bw=32, bk=2, rh=2, rw=4),
     cfg("NCHW", 2, "lds", kh=7, kw=7, bh=8, bw=8, bk=8, rh=2, rw=2),
+    # Whole 14 x 14 / 16 x 16 planes (convnext) per block, 4 channels, 4 x 4 outputs per thread.
+    cfg("NCHW", 2, "lds", kh=7, kw=7, bh=16, bw=16, bk=4, rh=4, rw=4),
 ]
 
 # Backward data only: the gather over the taps (v5_gather_bwd), the one form a strided backward

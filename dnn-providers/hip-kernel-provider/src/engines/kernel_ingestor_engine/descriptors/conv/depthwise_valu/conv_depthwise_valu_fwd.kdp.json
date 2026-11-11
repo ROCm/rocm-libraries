@@ -2087,6 +2087,105 @@
         "vec": 0
       },
       "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "435f24f5-4d86-55f4-ab54-c0093d78b3da",
+      "name": "conv_depthwise_valu_fwd.f32.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "FWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d41c170d-799a-5c3f-9ea3-45540ac4c71f",
+      "name": "conv_depthwise_valu_fwd.f16.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "FWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ac761512-3246-5b91-b31e-14ef8cb8ee5e",
+      "name": "conv_depthwise_valu_fwd.bf16.nchw2d.lds_k7x7_b16x16x4_r4x4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "FWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "lds",
+        "kd": 0,
+        "kh": 7,
+        "kw": 7,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 16,
+        "bw": 16,
+        "bk": 4,
+        "rd": 0,
+        "rh": 4,
+        "rw": 4,
+        "stride": 0,
+        "vec": 0
+      },
+      "priority": 0
     }
   ]
 }
