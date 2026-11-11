@@ -86,6 +86,15 @@ def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, i
     still gives a valid swizzle (each row a permutation of its own columns, so
     stores and reads stay in the row), but no conflict-freedom is claimed for
     it; check the banks of such a layout before relying on it.
+
+    This is the row/column form of the XOR swizzle, for a loader that stores
+    from registers into a row of 2 to 16 chunks (16 to 128 columns at the
+    default chunk), whatever the row count.
+    :data:`rocke.helpers.layouts.XOR_SWIZZLE_TABLE` (behind
+    ``LdsLayout.xor_swizzled``) is the byte-offset form, one entry per fixed
+    MFMA-atom tile shape (five shapes); it cannot describe those tile widths
+    and heights, which is why the two coexist. A tile uses one or the other, never
+    both, and its producer and consumer must use the same one.
     """
     if chunk < 1 or chunk & (chunk - 1):
         raise ValueError(f"LDS XOR swizzle chunk must be a power of two, got {chunk}")
