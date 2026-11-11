@@ -4,11 +4,13 @@
 include_guard(GLOBAL)
 
 # Embeds Windows PE VERSIONINFO into a shipped hipBLASLt-family DLL or EXE through
-# rocm-cmake's rocm_add_version_resource, stamped with the hipBLASLt product name and
-# the git commit the binary was built from. Does nothing on non-Windows platforms,
-# for static libraries, or for targets this configuration does not define.
+# the shared rocm_libraries_add_version_resource, stamped with the hipBLASLt product
+# name and the git commit the binary was built from. Does nothing on non-Windows
+# platforms, for static libraries, or for targets this configuration does not define.
 #
 #   hipblaslt_add_version_resource(<target> <file-description>)
+
+include("${ROCM_LIBRARIES_ROOT}/cmake/modules/rocm_libraries_version_resource.cmake")
 
 if(WIN32)
     set(HIPBLASLT_VERSION_RESOURCE_COMMIT "unknown")
@@ -34,18 +36,7 @@ function(hipblaslt_add_version_resource TARGET DESCRIPTION)
     if(NOT _type MATCHES "^(EXECUTABLE|SHARED_LIBRARY|MODULE_LIBRARY)$")
         return()
     endif()
-    if(NOT COMMAND rocm_add_version_resource)
-        get_property(_warned GLOBAL PROPERTY HIPBLASLT_VERSION_RESOURCE_WARNED)
-        if(NOT _warned)
-            message(WARNING
-                "hipBLASLt: this rocm-cmake has no rocm_add_version_resource; Windows "
-                "binaries will be built WITHOUT VERSIONINFO metadata. Use a newer "
-                "ROCmCMakeBuildTools to embed version info.")
-            set_property(GLOBAL PROPERTY HIPBLASLT_VERSION_RESOURCE_WARNED TRUE)
-        endif()
-        return()
-    endif()
-    rocm_add_version_resource(${TARGET} "${TARGET}" "${DESCRIPTION}"
+    rocm_libraries_add_version_resource(${TARGET} "${TARGET}" "${DESCRIPTION}"
         PRODUCT_NAME "AMD ROCm hipBLASLt ${hipblaslt_VERSION_MAJOR}.${hipblaslt_VERSION_MINOR} (${hipblaslt_VERSION_TWEAK})"
         COMMENTS "Git commit: ${HIPBLASLT_VERSION_RESOURCE_COMMIT}")
 endfunction()

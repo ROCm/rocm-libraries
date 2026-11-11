@@ -167,39 +167,33 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 endif()
 
 # Windows VERSIONINFO for the shipped origami DLL and test binary.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules/rocm_libraries_version_resource.cmake")
 if(WIN32)
-    if(COMMAND rocm_add_version_resource)
-        set(ORIGAMI_VERSION_COMMIT_ID "unknown")
-        if(GIT)
-            execute_process(
-                COMMAND "${GIT}" rev-parse HEAD
-                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-                OUTPUT_VARIABLE _origami_git_commit_id
-                RESULT_VARIABLE _origami_git_result
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_QUIET)
-            if(_origami_git_result EQUAL 0 AND _origami_git_commit_id)
-                set(ORIGAMI_VERSION_COMMIT_ID "${_origami_git_commit_id}")
-            endif()
+    set(ORIGAMI_VERSION_COMMIT_ID "unknown")
+    if(GIT)
+        execute_process(
+            COMMAND "${GIT}" rev-parse HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _origami_git_commit_id
+            RESULT_VARIABLE _origami_git_result
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(_origami_git_result EQUAL 0 AND _origami_git_commit_id)
+            set(ORIGAMI_VERSION_COMMIT_ID "${_origami_git_commit_id}")
         endif()
-        set(_origami_product_name
-            "AMD ROCm Origami ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} (${PROJECT_VERSION_TWEAK})")
-        get_target_property(_origami_type origami TYPE)
-        if(_origami_type STREQUAL "SHARED_LIBRARY")
-            rocm_add_version_resource(origami "origami"
-                "AMD Origami - Analytical GEMM Kernel Configuration Selection Library for GPU Computing"
-                PRODUCT_NAME "${_origami_product_name}"
-                COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
-        endif()
-        if(TARGET origami-tests)
-            rocm_add_version_resource(origami-tests "origami-tests" "AMD Origami Tests"
-                PRODUCT_NAME "${_origami_product_name}"
-                COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
-        endif()
-    else()
-        message(WARNING
-            "Origami: this rocm-cmake has no rocm_add_version_resource; Windows "
-            "binaries will be built WITHOUT VERSIONINFO metadata. Use a newer "
-            "ROCmCMakeBuildTools to embed version info.")
+    endif()
+    set(_origami_product_name
+        "AMD ROCm Origami ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} (${PROJECT_VERSION_TWEAK})")
+    get_target_property(_origami_type origami TYPE)
+    if(_origami_type STREQUAL "SHARED_LIBRARY")
+        rocm_libraries_add_version_resource(origami "origami"
+            "AMD Origami - Analytical GEMM Kernel Configuration Selection Library for GPU Computing"
+            PRODUCT_NAME "${_origami_product_name}"
+            COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
+    endif()
+    if(TARGET origami-tests)
+        rocm_libraries_add_version_resource(origami-tests "origami-tests" "AMD Origami Tests"
+            PRODUCT_NAME "${_origami_product_name}"
+            COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
     endif()
 endif()
