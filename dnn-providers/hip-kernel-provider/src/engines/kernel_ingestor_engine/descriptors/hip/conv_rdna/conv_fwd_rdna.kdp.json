@@ -1,0 +1,826 @@
+{
+  "version": "1.0",
+  "id": "752302de-deb9-43ce-82ae-f2038c1a8e70",
+  "name": "hipkernel:hip_conv_fwd_rdna",
+  "arch": [
+    "gfx11-generic",
+    "gfx12-generic"
+  ],
+  "matchers": [
+    "4eca87aa-649d-45c3-b7d9-fcb0ae6d1ba1"
+  ],
+  "engine": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+  "dispatch": "ccbd5790-6e75-4375-9452-3c16bd8c5316",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6befccca-cfa8-5068-8354-0932048fd65a",
+      "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "99cf746b-26ff-5850-b394-bc4567666566",
+      "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "ad84e77a-3c5f-5fab-97b8-cacfe9da7795",
+      "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "93b6aab8-8252-5cec-a021-95c3d017a946",
+      "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "4136d5ad-3479-5249-b89e-be0d693fbce7",
+      "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "f6dc6bdf-7938-55e2-a980-b842fa6c7dad",
+      "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 0,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "cf755e59-be3e-5e3f-8fcd-1f6eb269654e",
+      "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "77743873-729a-5239-8b84-83cd6a411da3",
+      "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "c0ab5924-05e7-55ca-a50f-cacbd3c3b467",
+      "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "cd1ad970-a1d8-5296-9fc3-90319fb51cf5",
+      "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "90b972b0-006e-5b26-a0a3-43fc401065ee",
+      "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "042ac8fd-c263-508f-92b9-ab0ebf11fd61",
+      "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 1,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "b4fd55ec-97dd-59eb-bfd6-7e3282aa5d10",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "2646f145-6a11-5e5c-8498-51ab6634995f",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "2b34d59f-a7b2-5d21-9ab8-6ce49b92fa1e",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 0,
+            "CONV3D_WEI_KCZYX": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "8b21293e-ec30-59de-b2ac-418b60279120",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "16d7413a-8bb5-5ea0-8967-854bbb0667d3",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "version": "1.0",
+      "id": "0d5820a3-50dc-5fa6-958a-ffaeceab7d75",
+      "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MIOpenConv3dFwdFmaHip.cpp",
+        "entry": "MIOpenConv3dFwdFmaHip",
+        "build": {
+          "defines": {
+            "CONV3D_DTYPE": 2,
+            "CONV3D_NDHWC": 1,
+            "CONV3D_WEI_KCZYX": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
+              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "kernel_family",
+                "dtype",
+                "layout",
+                "tile_n"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

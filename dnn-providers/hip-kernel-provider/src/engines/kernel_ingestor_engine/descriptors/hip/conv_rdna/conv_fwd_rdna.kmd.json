@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+  "name": "hip_conv_fwd_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "tile_n",
+      "type": "int"
+    }
+  ]
+}
