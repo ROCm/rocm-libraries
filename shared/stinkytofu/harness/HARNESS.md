@@ -41,8 +41,8 @@ After every StinkyTofu edit, run `invoke rocisa` in `projects/hipblaslt/tensilel
 
 **The pattern check** is a filter, not a score. The patterns to check for come from the
 database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
-status. Without the database, skip this check and record it as `skipped` (see
-`DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A hit
+status. Record the result as `skipped` (no database), `no entries` (database read, nothing
+matched), or a hit (see `DATABASE.md`). A hit on a `confirmed` pattern rejects the candidate before it costs GPU time. A hit
 on a `candidate` pattern only warns the developer. A clean result means only "no known problem". The
 GPU decides the rest. Different asm is not a performance win: only tier 2 can show a gain. Identical
 asm supports only "no performance change".
@@ -61,9 +61,8 @@ asm supports only "no performance change".
      objects one at a time and can hang. Search the working tree instead.
 2. **Record the baseline.** Every comparison run records the baseline commit hash.
 3. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
-   only when the developer says so. The one exception is proposing a database entry (`DATABASE.md`).
-   Showing the exact text first is already a root `AGENTS.md` rule. Outside contributors use a GitHub
-   issue. AMD staff use JIRA or a GitHub issue.
+   only when the developer says so. Showing the exact text first is already a root `AGENTS.md` rule.
+   Outside contributors use a GitHub issue. AMD staff use JIRA or a GitHub issue.
 4. **Respect other users of shared machines.** If a tool refuses or reports that a resource is held,
    read its message and stop. Do not retry in a loop or look for a way around it.
 5. **Stopping a process.** Send SIGTERM, wait, and only then SIGKILL.
@@ -74,7 +73,14 @@ asm supports only "no performance change".
    read its `index.md`, then load the entries that matter for the task. Do not copy entries into
    tracked files, PRs, issues, or comments. If it is not set, say so once. If it is `none`, or the
    developer said not to use it, skip it without comment. The contract and entry format are in
-   `DATABASE.md`; read it only when the database is set.
+   `DATABASE.md`; read it only when the database is set. At the end of a task, if you learned
+   something that may be worth keeping (a measured result, an approach that failed, a setup quirk),
+   tell the developer and ask whether to note it down. Write an entry only if they agree.
+8. **Mind the machine's memory.** Builds, Tensile generation, and test runs (Python especially) can
+   use a lot of memory, and running out can kill the whole session. Cap the parallelism to fit (for
+   example `--jobs 4`, or `CMAKE_BUILD_PARALLEL_LEVEL`), run one heavy job at a time, and check the
+   free memory (`free -g`) before a long run. Never build the baseline and the candidate at the same
+   time.
 
 ## Components
 

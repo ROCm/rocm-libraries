@@ -50,9 +50,11 @@ An entry's `status` is `candidate` (a hit warns the developer) or `confirmed` (a
 the candidate before it costs GPU time). Only a human sets `confirmed`.
 
 - **Read:** use the index and load entries on demand. Never load the whole database.
-- **Write:** agents never edit the main branch. To add or change an entry or a memory, work on a
-  branch and open a PR in the database repo with status `candidate`. A human reviews and merges it.
-  This is the one outward action that does not need the developer's go-ahead each time.
+- **Write:** agents never edit the main branch. When a task taught you something that may be worth
+  keeping, tell the developer and ask whether to note it down, not after every run. If they agree,
+  work on a branch and open a PR in the database repo with status `candidate`. A human reviews and
+  merges it. In a local directory that is not a reviewed repo, write the entry file with
+  `status: candidate` and add its line to `index.md`.
 - **Promote:** a human may turn a confirmed entry into a doc or a rule. An agent does not edit docs or
   rules to record what it learned.
 - **Local database:** `$HARNESS_DB` may point at any directory with this layout, for personal use. The
@@ -62,7 +64,8 @@ the candidate before it costs GPU time). Only a human sets `confirmed`.
 - **Sync:** engineers pull the database repo. One file per entry keeps merges conflict-free.
 - **Not available or opted out:** the framework works without the database. It only loses the
   pattern check and the stored noise values, so measure the noise (SD) fresh from repeated
-  runs, and record the pattern check as `skipped` in the result.
+  runs, and record the pattern check as `skipped` in the result. If the database was read but
+  nothing matched, record `no entries`. That is a different outcome from `skipped`.
   - `$HARNESS_DB` not set or not readable: say so once, then continue without it.
   - `$HARNESS_DB=none`, or the developer says not to use it: skip it silently. Do not ask again, and
     do not propose entries.
