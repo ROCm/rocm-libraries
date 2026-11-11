@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -401,7 +401,7 @@ private:
             // Note: this needs to be done in order to achieve stability, in the left subsequence we want the index
             // to be before any equal elements, but in the right subsequence it must be after.
             auto key_a = thread_key;
-            auto key_b = warp_shuffle(thread_key, mid);
+            auto key_b = warp_shuffle(thread_key, mid, VirtualWaveSize);
             if(is_lower)
                 ::rocprim::swap(key_a, key_b);
 
@@ -435,7 +435,7 @@ public:
         for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank = merge_rank<false>(i, thread_key, compare_function);
-            thread_key             = warp_permute(thread_key, thread_rank);
+            thread_key             = warp_permute(thread_key, thread_rank, VirtualWaveSize);
         }
     }
 
@@ -487,7 +487,7 @@ public:
         {
             const auto thread_rank
                 = merge_rank<true>(i, thread_key, compare_function, warp_input_size);
-            thread_key = warp_permute(thread_key, thread_rank);
+            thread_key = warp_permute(thread_key, thread_rank, VirtualWaveSize);
         }
     }
 
@@ -499,8 +499,8 @@ public:
         for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank = merge_rank<false>(i, thread_key, compare_function);
-            thread_key             = warp_permute(thread_key, thread_rank);
-            thread_value           = warp_permute(thread_value, thread_rank);
+            thread_key             = warp_permute(thread_key, thread_rank, VirtualWaveSize);
+            thread_value           = warp_permute(thread_value, thread_rank, VirtualWaveSize);
         }
     }
 
@@ -512,7 +512,7 @@ public:
         auto value_index = lane_id();
         sort(thread_key, value_index, compare_function);
         // Perform a shuffle to get the final value.
-        thread_value = warp_shuffle(thread_value, value_index);
+        thread_value = warp_shuffle(thread_value, value_index, VirtualWaveSize);
     }
 
     template<class BinaryFunction>
@@ -522,7 +522,7 @@ public:
                                             BinaryFunction compare_function)
     {
         (void)storage;
-        sort(compare_function, thread_key, thread_value);
+        sort(thread_key, thread_value, compare_function);
     }
 
     template<class BinaryFunction>
@@ -572,8 +572,8 @@ public:
         {
             const auto thread_rank
                 = merge_rank<true>(i, thread_key, compare_function, warp_input_size);
-            thread_key   = warp_permute(thread_key, thread_rank);
-            thread_value = warp_permute(thread_value, thread_rank);
+            thread_key   = warp_permute(thread_key, thread_rank, VirtualWaveSize);
+            thread_value = warp_permute(thread_value, thread_rank, VirtualWaveSize);
         }
     }
 
@@ -589,7 +589,7 @@ public:
         auto value_index = lane_id();
         sort(thread_key, value_index, storage, input_size, compare_function);
         // Perform a shuffle to get the final value.
-        thread_value = warp_shuffle(thread_value, value_index);
+        thread_value = warp_shuffle(thread_value, value_index, VirtualWaveSize);
     }
 };
 
