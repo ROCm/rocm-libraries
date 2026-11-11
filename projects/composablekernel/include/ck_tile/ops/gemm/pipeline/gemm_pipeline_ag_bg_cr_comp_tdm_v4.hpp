@@ -303,6 +303,27 @@ struct GemmPipelineAgBgCrCompTDMV4
         return c.wave_n * (kRn * kAtomN) + n_local * kRn + rn;
     }
 
+    /// Whether A's or B's fragments are read through a tile window (see
+    /// GemmPipelineAgBgCrCompTDMV4Policy::IsLdsReadLinear); otherwise RowFragment reads them.
+    static constexpr bool kTileReadB = Policy::template IsLdsReadLinear<Problem, false>();
+
+    /// Wave 0's window on A's or B's fragment of one K step at repeat 0 of buffer 0. The wave
+    /// stays out of the window's per-lane coordinate so that its offset remains scalar.
+    template <bool IsA>
+    CK_TILE_DEVICE static auto MakeLdsWindow(CK_TILE_LDS_ADDR uint8_t* smem)
+    {
+        constexpr index_t rows = Policy::template GetFragmentHalves<Problem, IsA>() * 16;
+        const auto view        = make_tensor_view<address_space_enum::lds>(
+            c_style_pointer_cast<int32_t*>(smem),
+            Policy::template MakeLdsBlockDescriptor<Problem, IsA>());
+        return make_tile_window(view,
+                                make_tuple(number<rows>{}, number<kStepBytes / 4>{}),
+                                make_multi_index(0, 0),
+                                Policy::template MakeLdsReadDistribution<Problem, IsA>());
+    }
+    using ALdsWindow = decltype(MakeLdsWindow<true>(nullptr));
+    using BLdsWindow = decltype(MakeLdsWindow<false>(nullptr));
+
     struct Head
     {
         AFrag a[kRm];
@@ -384,6 +405,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         // row * stride + offset and the address takes an extra VALU op.
         index_t a_scale_stride;
         index_t b_scale_stride;
+        BLdsWindow b_window;
 
         CK_TILE_DEVICE Run(const mx_tdm_v4::Operands& p_,
                            const mx_tdm_v4::Coords& c_,
@@ -397,7 +419,8 @@ struct GemmPipelineAgBgCrCompTDMV4
               k_atoms(integer_divide_nonnegative<mx_tdm_v4::kAtomK>(
                   Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
               a_scale_stride(opaque_scalar(p_.M * 4)),
-              b_scale_stride(opaque_scalar(p_.N * 4))
+              b_scale_stride(opaque_scalar(p_.N * 4)),
+              b_window(MakeLdsWindow<false>(smem_))
         {
             b_mask = Policy::template GetTDMWorkgroupMask<false>(c.cluster_wx, c.cluster_wy);
             a_mask = Policy::template GetTDMWorkgroupMask<true>(c.cluster_wx, c.cluster_wy);
@@ -776,9 +799,39 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
         }
 
+        /// A's or B's fragment of repeat r at K step `step` through its tile window: the wave,
+        /// buffer, repeat and step are a word offset from the window's.
+        template <bool IsA>
+        CK_TILE_DEVICE auto LdsFragment(index_t buffer, index_t r, index_t step) const
+        {
+            constexpr index_t atom        = IsA ? kAtomM : kAtomN;
+            constexpr index_t repeats     = IsA ? kRm : kRn;
+            constexpr auto repeat_offsets = [] {
+                array<index_t, repeats> offsets{};
+                for(index_t i = 0; i < repeats; ++i)
+                    offsets[i] = Policy::template GetLdsRowOffset<Problem, IsA>(i * atom);
+                return offsets;
+            }();
+            constexpr index_t base = Policy::template GetLdsOperand<Problem, IsA>().base / 4;
+            constexpr index_t wave_words =
+                Policy::template GetLdsRowOffset<Problem, IsA>(repeats * atom);
+            const index_t wave = IsA ? c.wave_m : c.wave_n;
+            const index_t offset =
+                buffer / 4 + base + wave * wave_words + repeat_offsets[r] + step * (kStepBytes / 4);
+            const auto tile =
+                b_window.load_with_offset(offset, number<-1>{}, bool_constant<false>{});
+            using Vec = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
+            return tile.get_thread_buffer().template get_as<Vec>()[number<0>{}];
+        }
+
         CK_TILE_DEVICE BFrag BFragment(index_t buffer, index_t rn, index_t step) const
         {
-            const RowFrag f = RowFragment(buffer, false, NRow(c, rn, c.lane_col), LaneK(step));
+            const RowFrag f = [&] {
+                if constexpr(kTileReadB)
+                    return LdsFragment<false>(buffer, rn, step);
+                else
+                    return RowFragment(buffer, false, NRow(c, rn, c.lane_col), LaneK(step));
+            }();
             if constexpr(kMma32)
                 return f;
             else

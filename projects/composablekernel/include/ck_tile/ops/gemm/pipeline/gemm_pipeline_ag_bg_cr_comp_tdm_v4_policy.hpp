@@ -367,6 +367,163 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
             return TDMLdsPaddingConfig{};
     }
 
+    /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
+    /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (as
+    /// MRow / NRow), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte words,
+    /// is mx_tdm_v4_row_offset's less the operand's base.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
+    {
+        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
+        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t row_bytes = GetLdsRowBytes<Problem>();
+        constexpr index_t warps     = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t rows      = warps * atom * repeats;
+        constexpr index_t words     = row_bytes / 4;
+        // A component's rows split into (outer, inner) runs: iterate-mode blocks, padded blocks
+        // of whole rows, or one run (rows padded within, or unpadded).
+        constexpr bool iterate         = op.iterate_rows > 0;
+        constexpr bool padded          = !iterate && op.pad_bytes > 0;
+        constexpr bool block_pad       = padded && op.block_bytes >= row_bytes;
+        constexpr index_t inner        = iterate     ? op.iterate_rows
+                                         : block_pad ? op.block_bytes / row_bytes
+                                                     : op.rows;
+        constexpr index_t outer_stride = iterate     ? op.iterate_stride
+                                         : block_pad ? op.block_bytes + op.pad_bytes
+                                                     : 0;
+        constexpr index_t row_stride   = padded && !block_pad
+                                             ? row_bytes + row_bytes / op.block_bytes * op.pad_bytes
+                                             : row_bytes;
+        static_assert(rows % op.rows == 0 && op.rows % inner == 0 && row_bytes % 4 == 0 &&
+                          op.stride % 4 == 0 && outer_stride % 4 == 0 && row_stride % 4 == 0,
+                      "comp_tdm_v4: the LDS layout is not a whole number of words per run");
+        constexpr auto naive  = make_naive_tensor_descriptor(make_tuple(number<rows / op.rows>{},
+                                                                       number<op.rows / inner>{},
+                                                                       number<inner>{},
+                                                                       number<words>{}),
+                                                            make_tuple(number<op.stride / 4>{},
+                                                                       number<outer_stride / 4>{},
+                                                                       number<row_stride / 4>{},
+                                                                       number<1>{}),
+                                                            number<4>{},
+                                                            number<1>{});
+        constexpr auto by_row = transform_tensor_descriptor(
+            naive,
+            make_tuple(make_merge_transform(make_tuple(
+                           number<rows / op.rows>{}, number<op.rows / inner>{}, number<inner>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        constexpr auto by_wave = transform_tensor_descriptor(
+            by_row,
+            make_tuple(make_unmerge_transform(
+                           make_tuple(number<warps>{}, number<atom>{}, number<repeats>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}));
+        return transform_tensor_descriptor(
+            by_wave,
+            make_tuple(make_merge_transform(
+                           make_tuple(number<warps>{}, number<repeats>{}, number<atom>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0, 2, 1>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
+    {
+        return MakeLdsBlockDescriptor<Problem, true>();
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
+    {
+        return MakeLdsBlockDescriptor<Problem, false>();
+    }
+
+    /// 16-row halves of an A or B WMMA fragment: 2 for A of the 32x16 atom, else 1.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetFragmentHalves()
+    {
+        return IsA ? GetSpec<Problem>().atom_m() / 16 : 1;
+    }
+
+    /// One wave's read of an A or B fragment of one K step, in words: lane l reads row l % 16 of
+    /// each half and, per 32-byte chunk, the 16 bytes l / 16 selects.
+    ///   rows: (half, l % 16)   K words: (chunk, l / 16, 4)
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsReadDistribution()
+    {
+        constexpr index_t chunks = GetChunksPerLane<Problem>();
+        if constexpr(GetFragmentHalves<Problem, IsA>() == 2)
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<2, 16>, sequence<chunks, 2, 4>>,
+                                           tuple<sequence<2, 1>>,
+                                           tuple<sequence<1, 1>>,
+                                           sequence<1, 2, 2>,
+                                           sequence<0, 0, 2>>{});
+        else
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<16>, sequence<chunks, 2, 4>>,
+                                           tuple<sequence<2, 1>>,
+                                           tuple<sequence<1, 0>>,
+                                           sequence<2, 2>,
+                                           sequence<0, 2>>{});
+    }
+
+    /// Word offset of fragment-order row t of A's or B's data from the operand's base, as
+    /// MakeLdsBlockDescriptor maps it.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowOffset(index_t t)
+    {
+        constexpr MxTdmV4Spec s     = GetSpec<Problem>();
+        constexpr MxTdmV4Operand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t atom      = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats   = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        const index_t wave          = t / (repeats * atom);
+        const index_t r             = t / atom % repeats;
+        const index_t l             = t % atom;
+        const index_t row           = wave * atom * repeats + l * repeats + r;
+        return (mx_tdm_v4_row_offset<index_t>(op, GetLdsRowBytes<Problem>(), row) - op.base) / 4;
+    }
+
+    /// Whether a fragment read can take its repeat and half offsets as constants: for every
+    /// lane's first row, moving by a repeat r and a half h adds the offset of (r, h) from row 0.
+    /// Also spot-checks MakeLdsBlockDescriptor against mx_tdm_v4_row_offset (a full check is
+    /// past the constexpr step limit).
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr bool IsLdsReadLinear()
+    {
+        constexpr MxTdmV4Spec s   = GetSpec<Problem>();
+        constexpr index_t warps   = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom    = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t halves  = GetFragmentHalves<Problem, IsA>();
+        constexpr index_t rows    = warps * repeats * atom;
+        constexpr auto desc       = MakeLdsBlockDescriptor<Problem, IsA>();
+        const auto offset         = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
+        for(const index_t t : {index_t{1}, atom - 1, atom, rows / 2 + 1, rows - 1})
+            if(desc.calculate_offset(make_multi_index(t, 0)) != offset(t))
+                return false;
+        const index_t wave_offset = offset(repeats * atom);
+        for(index_t wave = 0; wave < warps; ++wave)
+            for(index_t l = 0; l < 16; ++l)
+            {
+                const index_t t0 = wave * repeats * atom + l;
+                const index_t o0 = offset(t0);
+                if(o0 != wave * wave_offset + offset(l))
+                    return false;
+                for(index_t r = 0; r < repeats; ++r)
+                    for(index_t h = 0; h < halves; ++h)
+                        if(offset(t0 + r * atom + h * 16) != o0 + offset(r * atom) + offset(h * 16))
+                            return false;
+            }
+        return true;
+    }
+
     /// The cluster workgroups that share this one's A (same cluster y) or B (same cluster x)
     /// tile and so receive its TDM loads; 0 without a cluster. Grid x walks N tiles and y M
     /// tiles.
