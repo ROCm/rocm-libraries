@@ -36,19 +36,21 @@ BLOCK_SIZES = [64, 128, 256, 512, 1024]
 IPT = [1, 2, 4, 8, 16]
 THRESHOLD = [4, 8, 12, 16]
 
+
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_search_n')
+        # Match benchmark_device_search_n.cpp (2 GiB).
+        return TunerArgs(algo_full_name="device_search_n", size=2 * 1024**3)
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
-        params['threshold'] = THRESHOLD
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
+        params["threshold"] = THRESHOLD
         return params
 
     def _get_restrictions(self, types):
@@ -61,6 +63,7 @@ class Tuner(BaseTuner):
         """Tune for all value type combinations"""
         for data_type in COMMON_KEY_TYPES:
             self.tune_type({"data_type": data_type})
+
 
 if __name__ == "__main__":
     Tuner.cli()

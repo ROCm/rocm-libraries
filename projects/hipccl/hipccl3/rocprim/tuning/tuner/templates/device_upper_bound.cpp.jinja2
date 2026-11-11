@@ -4,6 +4,4 @@
 #include "benchmark_device_binary_search.hpp"
 {% endblock %}
 
-{% block benchmark_type %}
-using benchmark_type = device_binary_search_benchmark<upper_bound_subalgorithm, value_type, output_type, 10, false ,config>;
-{% endblock %}
+{% block subalgorithm %}upper_bound_subalgorithm{% endblock %}

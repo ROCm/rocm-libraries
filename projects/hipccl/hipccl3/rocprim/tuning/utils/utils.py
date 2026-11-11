@@ -24,9 +24,10 @@ import argparse
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
-import os 
+import os
 
-BASE_DIR = f'{os.path.dirname(os.path.abspath(__file__))}/..'
+BASE_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/.."
+
 
 class Parser:
     @staticmethod
@@ -106,6 +107,7 @@ class TypeInfo:
     cpp_type: str
     size: int
     numpy_type: type | np.dtype
+
 
 TYPE_CONFIGS = {
     "int64_t": TypeInfo("int64_t", 8, np.int64),

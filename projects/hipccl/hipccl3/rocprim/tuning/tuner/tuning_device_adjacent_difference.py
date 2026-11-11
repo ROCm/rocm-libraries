@@ -35,33 +35,35 @@ Inclusive range for params tuning, edit these to adjust tuning grid range.
 BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
 IPT = [1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
 
+
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_adjacent_difference')
+        # Match benchmark_device_adjacent_difference.cpp (2 GiB).
+        return TunerArgs(algo_full_name="device_adjacent_difference", size=2 * 1024**3)
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(
+        self, key_type: str, value_type: Optional[str] = None
+    ) -> OrderedDict:
         params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
         return params
 
-    def _get_restrictions(
-        self, types: Dict[str, Any]
-    ) -> Callable[[dict], bool]:
-        
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
+
         element_size = TYPE_CONFIGS[types["value_type"]].size
-        # based on legacy tuning 
+        # based on legacy tuning
         MAX_SHARED_MEM = 65536
 
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
+            block_size = params["block_size_x"]
+            ipt = params["ipt"]
 
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2 )) + element_size
+            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2)) + element_size
 
             return ipt < max_ipt
 
@@ -70,7 +72,7 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for val_type in COMMON_KEY_TYPES:
-            self.tune_type({"value_type" : val_type})
+            self.tune_type({"value_type": val_type})
 
 
 if __name__ == "__main__":

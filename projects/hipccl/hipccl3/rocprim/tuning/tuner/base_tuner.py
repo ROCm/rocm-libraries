@@ -184,7 +184,9 @@ class BaseTuner(ABC):
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
         self.seed = None if args.seed == -1 else args.seed
-        self.param_overrides = json.loads(args.param_overrides) if args.param_overrides else {}
+        self.param_overrides = (
+            json.loads(args.param_overrides) if args.param_overrides else {}
+        )
 
         if not self.exclude_default_config:
             with open(
@@ -323,7 +325,9 @@ class BaseTuner(ABC):
 
         # If any required key is not in the pre-existing config, then we need to warn the user
         # and skip running the default case.
-        if any((not required_key in default_tune_params) for required_key in required_keys):
+        if any(
+            (not required_key in default_tune_params) for required_key in required_keys
+        ):
             warnings.warn(
                 "Existing default configuration does not match tunable parameters."
             )
@@ -385,7 +389,9 @@ class BaseTuner(ABC):
                 if best is None:
                     best = self._get_best_cached_config(types)
                 if best is None:
-                    warnings.warn(f"No cached results for {types}, '{name}' is not pinned")
+                    warnings.warn(
+                        f"No cached results for {types}, '{name}' is not pinned"
+                    )
                     continue
                 value = best[name]
             params[name] = value if isinstance(value, list) else [value]
