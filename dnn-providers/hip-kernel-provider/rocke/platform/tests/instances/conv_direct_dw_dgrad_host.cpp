@@ -41,6 +41,9 @@
  *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
  *     the dw fwd and forward WMMA validators, which must refuse it first with
  *     conv_direct_grouped.problem_dims_reason's text.
+ *   - rocke_build_direct_dw_fwd_wmma called with a NULL arch on an
+ *     initialised builder, which must default to gfx1250 (as the _new and
+ *     lower entries do) and build the same IR as an explicit "gfx1250";
  *   - the specs the Toeplitz form of the windowed depthwise dgrad refuses
  *     (parity configs 68..72 of conv_direct_dgrad_ext_emit): the CI goldens
  *     run the Python engine only, so the C++ reasons are checked here.
@@ -511,6 +514,59 @@ static void check_win_refused(const char* what,
     CHECK(strstr(reason, expected) != NULL, "%s reason: %s", what, reason);
 }
 
+/* rocke_build_direct_dw_fwd_wmma(b, spec, NULL) on an initialised builder
+ * defaults the arch to gfx1250 and lowers to the same IR as "gfx1250". */
+static char* dw_fwd_build_ll(const rocke_direct_dw_fwd_wmma_spec_t* s, const char* arch)
+{
+    rocke_ir_builder_t b = {};
+    char name[256];
+    char err[ERR_CAP];
+    char* ll = NULL;
+    rocke_kernel_def_t* k;
+
+    if(rocke_direct_dw_fwd_wmma_kernel_name(s, name, sizeof name) != ROCKE_OK
+       || rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        CHECK(false, "dw fwd builder init failed");
+        return NULL;
+    }
+    k = rocke_build_direct_dw_fwd_wmma(&b, s, arch);
+    CHECK(k != NULL,
+          "dw fwd build with arch %s failed: %s",
+          arch != NULL ? arch : "NULL",
+          rocke_ir_builder_error(&b));
+    if(k != NULL)
+    {
+        err[0] = '\0';
+        CHECK(rocke_lower_kernel_to_llvm_ex(
+                  k, ROCKE_LLVM_FLAVOR_AUTO, "gfx1250", &ll, err, sizeof(err))
+                  == ROCKE_OK,
+              "dw fwd lowering failed: %s",
+              err);
+    }
+    rocke_ir_builder_free(&b);
+    return ll;
+}
+
+static void test_dw_fwd_build_null_arch(void)
+{
+    rocke_direct_dw_fwd_wmma_spec_t s = rocke_direct_dw_fwd_wmma_spec_default();
+    char reason[ERR_CAP];
+    char* ll_null;
+    char* ll_1250;
+
+    s.problem = dw_problem(3, 3, 1, -1);
+    CHECK(rocke_direct_dw_fwd_wmma_is_valid_spec(&s, NULL, reason, sizeof(reason)),
+          "dw fwd spec refused: %s",
+          reason);
+    ll_null = dw_fwd_build_ll(&s, NULL);
+    ll_1250 = dw_fwd_build_ll(&s, "gfx1250");
+    CHECK(ll_null != NULL && ll_1250 != NULL && strcmp(ll_null, ll_1250) == 0,
+          "dw fwd NULL arch must build the gfx1250 kernel");
+    free(ll_null);
+    free(ll_1250);
+}
+
 static void test_toeplitz_wmma_refusals(void)
 {
     char reason[ERR_CAP];
@@ -542,20 +598,33 @@ static void test_toeplitz_wmma_refusals(void)
     CHECK(strcmp(reason, "mfma needs one of ('gfx950',) (got gfx942)") == 0,
           "gfx942 reason: %s",
           reason);
-    /* 71 / 72: fwd at stride 1 and 2; the forward mode is wave64 only. */
+    /* 71 / 72: fwd at stride 1 is the wave32 depthwise forward; stride 2 is a
+     * wave64 mode. */
     s = win_wmma(3, 1, "fp16");
     s.fwd = true;
-    check_win_refused(
-        "fwd at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "the wave32 depthwise forward refused on gfx1250: %s",
+          reason);
     s.problem.dtype = "bf16";
     s.out_stride = 2;
     check_win_refused(
-        "fwd s2 at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+        "fwd s2 at wave32", &s, "gfx1250", "fwd at wave_size=32 needs out_stride=1 (got 2)");
     /* The same forward spec at wave64 stays valid on gfx950. */
     s.wave_size = 64;
     CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
           "the wave64 forward form refused on gfx950: %s",
           reason);
+    /* The grouped forward form stays a wave64 mode. */
+    s = win_wmma(3, 1, "fp16");
+    s.fwd = true;
+    s.problem.groups = 10;
+    s.problem.cpg = 8;
+    s.problem.kpg = 8;
+    s.block_h = 8;
+    check_win_refused("grouped fwd at wave32",
+                      &s,
+                      "gfx1250",
+                      "the grouped fwd form needs the wave64 MFMA (got wave_size=32)");
 }
 
 /* The validator tail (rocke_wmma_fwd_limits_ok) refuses an unknown scheduler
@@ -1033,6 +1102,7 @@ int main(void)
     test_wmma_kernels_refuse_per_axis_padding();
     test_stem_wmma_kernels_refuse_per_axis_padding();
     test_toeplitz_wmma_refusals();
+    test_dw_fwd_build_null_arch();
     test_fwd_wmma_strided_view_refusals();
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();

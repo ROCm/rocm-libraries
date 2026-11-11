@@ -316,13 +316,22 @@ static bool
     {
         if(spec->dot2 || cpl != 1)
             ROCKE_SPEC_FAIL(reason, cap, "mfma excludes dot2 and ch_per_lane > 1");
-        /* The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
-         * the grouped form's dense A row as one 8-channel K chunk per lane
-         * (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
-         * would hold the wrong taps. The depthwise forward is validated only
-         * at wave64 (the gfx950 forward AOT variant). */
+        /* The wave32 WMMA runs the depthwise forward (its tap index is
+         * computed per K chunk). The grouped form loads its dense A row as
+         * one 8-channel K chunk per lane (k_chunks == 1); at k_chunks == 2
+         * that A operand would hold the wrong taps. The stride-2 output is
+         * validated only on the wave64 MFMA (the gfx950 forward AOT variant). */
         if(spec->fwd && dw_toeplitz_lanes(spec->wave_size).k_chunks != 1)
-            ROCKE_SPEC_FAIL(reason, cap, "fwd needs the wave64 MFMA form (got wave_size=32)");
+        {
+            if(p->cpg > 1)
+                ROCKE_SPEC_FAIL(
+                    reason, cap, "the grouped fwd form needs the wave64 MFMA (got wave_size=32)");
+            if(spec->out_stride != 1)
+                ROCKE_SPEC_FAIL(reason,
+                                cap,
+                                "fwd at wave_size=32 needs out_stride=1 (got %d)",
+                                spec->out_stride);
+        }
         if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
             ROCKE_SPEC_FAIL(reason, cap, "w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
         if(spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
@@ -453,13 +462,9 @@ bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
  *  Shared emission helpers
  * ===================================================================== */
 
-void rocke_dw_win_byte_strides(rocke_ir_builder_t* b,
-                               const rocke_dconv_params_t* prm,
-                               V* out[6],
-                               V* c2)
+void rocke_dw_win_byte_strides(rocke_ir_builder_t* b, const rocke_dconv_params_t* prm, V* out[6])
 {
-    if(c2 == NULL)
-        c2 = rocke_b_const_i32(b, 2);
+    V* c2 = rocke_b_const_i32(b, 2);
     out[0] = rocke_b_mul(b, prm->p_A_stride_n, c2); /* p_dY_stride_n  */
     out[1] = rocke_b_mul(b, prm->p_A_stride_hi, c2); /* p_dY_stride_ho */
     out[2] = rocke_b_mul(b, prm->p_A_stride_wi, c2); /* p_dY_stride_wo */
@@ -572,7 +577,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
     V* ch_taps = rocke_b_mul(b, ch, c_taps);
     V* w_lane = rocke_b_select(b, ch_ok, ch_taps, oob_lane);
     V* bs[6];
-    rocke_dw_win_byte_strides(b, &prm, bs, NULL);
+    rocke_dw_win_byte_strides(b, &prm, bs);
     V *dy_img = bs[0], *dy_row_bytes = bs[1], *dy_px = bs[2];
     V *dx_img = bs[3], *dx_row_bytes = bs[4], *dx_px = bs[5];
 
@@ -884,6 +889,9 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
     const int PF = spec->prefetch_rows;
     const bool FWD = spec->fwd;
     const int S = spec->out_stride;
+    /* First window column relative to the tile: the forward pads both axes by
+     * the same amount, the row's (equal to the dgrad's for a square filter). */
+    const int COL0 = FWD ? PAD - (KH - 1) : PAD - (KW - 1);
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
@@ -962,7 +970,7 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
     V* k = rocke_b_mod(b, col16, c8);
     V* q = rocke_b_div(b, col16, c8);
     V* bs[6];
-    rocke_dw_win_byte_strides(b, &prm, bs, NULL);
+    rocke_dw_win_byte_strides(b, &prm, bs);
     V *dy_img = bs[0], *dy_row_bytes = bs[1], *dy_px = bs[2];
     V *dx_img = bs[3], *dx_row_bytes = bs[4], *dx_px = bs[5];
 
@@ -1159,7 +1167,7 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
         V* pd = rocke_b_div(b, px, c_U);
         V* img_i = rocke_b_add(b, img0, pd);
         V* pm = rocke_b_mod(b, px, c_U);
-        V* cp = rocke_b_const_i32(b, PAD - (KW - 1));
+        V* cp = rocke_b_const_i32(b, COL0);
         V* pmp = rocke_b_add(b, pm, cp);
         V* wo = rocke_b_add(b, x0, pmp);
         V* ch_i = rocke_b_add(b, ch_blk, ch8);
