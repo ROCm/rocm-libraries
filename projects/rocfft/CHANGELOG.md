@@ -13,6 +13,8 @@ Documentation for rocFFT is available at
 * Multi-dimensional, multi-device transforms whose bricks split no transform length, but cannot be
   paired as above, now redistribute data between devices instead of gathering the entire transform
   on a single device.
+* Planar array types are now rejected by `rocfft_plan_create` if a field is set for either input or
+  output (previously, only the side with a field set was checked).
 
 ### Resolved issues
 
