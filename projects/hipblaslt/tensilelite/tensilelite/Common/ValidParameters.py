@@ -1032,9 +1032,11 @@ validParameters = { # we need to make sure this matches develop
     # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
-    # AccumShuffle: the epilogue accumulator shuffle (accumShuffleForLDSTrVW in
-    # KernelWriterAssembly), which bridges the ds_read_tr M order to the wide store's and is
-    # what makes VectorWidthA > 1 legal under enableLDSTrA.
+    # LDSTrStoreShuffle: the epilogue store shuffle (storeShuffleForLDSTrVW in
+    # KernelWriterAssembly). It re-orders the accumulators to bridge the ds_read_tr M order to
+    # the wide store's, and is what makes VectorWidthA > 1 legal under enableLDSTrA. Named for
+    # the read path it compensates for; it needs enableLDSTrA, VectorWidthA > 1 and SourceSwap
+    # together, so none of those alone identifies it.
     # 0 = off. enableLDSTrA clamps VectorWidthA to 1, exactly as it did before the shuffle
     #     existed -- including silently overriding an explicit VectorWidthA > 1 in the yaml.
     #     With no VectorWidthA > 1 there is nothing to bridge, so no shuffle is emitted.
@@ -1055,7 +1057,7 @@ validParameters = { # we need to make sure this matches develop
     # configuration and is not predictable from VectorWidthA, MacroTile or slotBatch alone, so
     # benchmark both. Forced to 0 when the shuffle cannot run anyway (not enableLDSTrA, or
     # StoreRemapVectorWidth > 0, which is the alternative bridge).
-    "AccumShuffle": [0, 1, 2],
+    "LDSTrStoreShuffle": [0, 1, 2],
     # If 0, store 1 element per instruction.
     # If 1, store vector-width elements per instruction.
     # if -1, store vector-wide elements per instruction unless PBD would not generate a valid kernel

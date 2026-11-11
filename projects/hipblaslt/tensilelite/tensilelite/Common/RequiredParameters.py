@@ -173,7 +173,7 @@ def getRequiredParametersMin() -> set:
         'VectorStore',
         'VectorWidthA',
         'VectorWidthB',
-        'AccumShuffle',
+        'LDSTrStoreShuffle',
         'WaveSeparateGlobalReadA',
         'WaveSeparateGlobalReadB',
         'WavefrontSize',
