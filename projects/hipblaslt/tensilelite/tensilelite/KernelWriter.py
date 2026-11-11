@@ -7700,6 +7700,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                 or not globalParameters.get("DisableSTWaitCnt", True))
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # rocisa native tree -> logical IR -> ToStinkyAsmPass.
+                               # import rocisa stays the native module; only this
+                               # conversion target changes.
+                               "LowerViaLogicalIR": bool(globalParameters.get("StinkyTofuLowerViaLogicalIR", True)),
                                # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
@@ -7859,6 +7863,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         t_str_end = time.perf_counter()
         print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
+      # Like debugAsm above, but dumps the StinkyTofu logical IR instead of the
+      # emitted assembly. Captured here, before resolveDeferredRegisterOverflow
+      # can re-stub moduleKernelBody, so the logical IR matches what was lowered.
+      debugLogical = os.environ.get("ENABLE_DEBUG_STINKYTOFU_LOGICAL") is not None
+      if debugLogical:
+        t_logical_start = time.perf_counter()
+        logical_ir_str = rocisa.dumpLogicalModuleText(moduleKernelBody.body,
+                                                      self.states.version, "kernel_name")
+        t_logical_end = time.perf_counter()
+        print2(f"StinkyTofu dumpLogicalModuleText: {t_logical_end - t_logical_start:.4f}s")
+
       # Pay off the deferral, and realign the recorded counts and the occupancy
       # with them: both now come from what the emitted code declares, not from
       # the pool estimate. The guard is defensive -- error is always 0 here --
@@ -7906,6 +7921,33 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         t3_end = time.perf_counter()
         print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
+
+      if debugLogical:
+        t_logical_write_start = time.perf_counter()
+        import hashlib, fcntl
+        os.makedirs("cmpasm/logical", exist_ok=True)
+
+        kernel_name = self.states.kernelName
+        name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
+        base_name = f"{name_hash}"
+
+        logical_path = f"cmpasm/logical/{base_name}.stir"
+        suffix = 0
+        while os.path.exists(logical_path):
+          logical_path = f"cmpasm/logical/{base_name}_{suffix}.stir"
+          suffix += 1
+
+        with open(logical_path, "w") as f:
+          f.write(logical_ir_str)
+
+        manifest = f"cmpasm/manifest_logical.txt"
+        with open(manifest, "a") as f:
+          fcntl.flock(f, fcntl.LOCK_EX)
+          f.write(f"{os.path.basename(logical_path)} -> {kernel_name}\n")
+          fcntl.flock(f, fcntl.LOCK_UN)
+
+        t_logical_write_end = time.perf_counter()
+        print2(f"StinkyTofu (3L) logical dump write: {t_logical_write_end - t_logical_write_start:.4f}s")
 
       t0_end = time.perf_counter()
       print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
