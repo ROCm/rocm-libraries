@@ -1577,7 +1577,7 @@ TYPED_TEST(ConvOutputToleranceFixture, MeansOfTheInputsWidenTheTypicalOutput)
 {
     using T = typename TypeParam::OutputType;
     const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
-    DotScale zeroMean{144, 1.0, 1.0};
+    const DotScale zeroMean{144, 1.0, 1.0};
     const auto spread = TypeParam::tolerance(zeroMean);
 
     DotScale constant = zeroMean;

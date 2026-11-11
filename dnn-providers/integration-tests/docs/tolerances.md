@@ -435,6 +435,23 @@ backward weights allows for, so it is not detected there. With a bfloat16
 backward-weights `lambda` of 24, one missing product of a 1,152-product sum is
 not detected either; a missing batch sample or row of `dy` still is.
 
+The C++ implementation was then run through the harness with the MIOpen
+engine on gfx942, on the same test-plan bundles (now every conv-fwd case in
+every type too), with the bundles' own seeds and with a seed set no fit saw,
+and on the convolution bundles in the tree:
+
+| Bundles | Seeds | Cases run | Passed | Failed |
+|---|---|---|---|---|
+| test plans, all levels | the bundles' own | 7,954 | 7,784 | 170 |
+| test plans, all levels | new | 7,954 | 7,785 | 169 |
+| in the tree (`*_Convolution*`), all levels | the bundles' own | 1,280 | 1,280 | 0 |
+
+Every failure is an output MIOpen computes wrongly (values of 1e4 to 1e36,
+infinities, NaNs or wrong signs; the classes listed above, and the 3D
+channels-last half and bfloat16 forward cases known from the forward
+calibration). With the per-op defaults the same plan cases had about 130 more
+failures per seed, all of them correct outputs.
+
 ### When an engine needs more
 
 The model describes float accumulation and, for half, io-precision
