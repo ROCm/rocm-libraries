@@ -37,6 +37,20 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
               CONV_GROUP_CB,
               CONV_GROUP_CF>(a);
 }
+#elif defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE && defined(CONV_GROUP_PF) && CONV_GROUP_PF
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
+{
+    k4ConvMmaWidePhased<CONV_GROUP_T,
+                        CONV_GROUP_ATOM,
+                        CONV_GROUP_FT,
+                        CONV_GROUP_R,
+                        CONV_GROUP_S,
+                        CONV_GROUP_TH,
+                        CONV_GROUP_WP,
+                        CONV_GROUP_NBI,
+                        CONV_GROUP_NBO,
+                        CONV_GROUP_CF>(a);
+}
 #elif defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
 {

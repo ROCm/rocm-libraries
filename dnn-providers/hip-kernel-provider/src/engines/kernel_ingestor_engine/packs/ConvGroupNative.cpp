@@ -382,12 +382,15 @@ std::optional<std::vector<GroupLaunch>> groupLaunches(const GroupProblem& proble
     return launches;
 }
 
-long long groupPhasedLdsBytes(int elementBytes, int r, int s, int th, int tw, int cb, bool cf)
+long long
+    groupPhasedLdsBytes(int elementBytes, int r, int s, int th, int tw, int cb, bool cf, int ob)
 {
     const long long vec = 16 / elementBytes;
     const long long pitch = 16LL * cb + vec;
+    const long long out = ob > 0 ? ob : cb; // output blocks the tile holds
     const long long halo = static_cast<long long>(th + r) * (tw + s) * pitch;
-    const long long tile = cf ? 2LL * th * 16 * cb * (2 * tw + 1) : 4LL * th * tw * pitch;
+    const long long tile
+        = cf ? 2LL * th * 16 * out * (2 * tw + 1) : 4LL * th * tw * (16 * out + vec);
     return (halo + tile) * elementBytes;
 }
 
@@ -532,10 +535,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     if(tile.nbi != 0)
     {
         // Wide groups: a matrix-core atom, 4 waves of whole rows, whole output-block tiles, no
-        // channel blocks, phase fusion or FMA knobs.
+        // channel blocks or FMA knobs (phase fusion allowed).
         if(tile.fma || info->wave == 0 || tile.nbi < 2 || tile.nbi > 4 || tile.nbo < 1
            || tile.nbi % tile.nbo != 0 || tile.th % 4 != 0 || tile.wp < 1 || tile.cb != 0
-           || tile.pf != 0 || tile.cg != 0 || tile.oc != 0 || tile.px != 0)
+           || tile.cg != 0 || tile.oc != 0 || tile.px != 0)
         {
             return std::nullopt;
         }
@@ -648,8 +651,14 @@ bool kernelMatches(const MatchContext& context,
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
     const long long lds
         = tile->pf != 0
-              ? conv_group::groupPhasedLdsBytes(
-                    bytes, problem->kernelR, problem->kernelS, th, tw, cb, tile->cf != 0)
+              ? conv_group::groupPhasedLdsBytes(bytes,
+                                                problem->kernelR,
+                                                problem->kernelS,
+                                                th,
+                                                tw,
+                                                cb,
+                                                tile->cf != 0,
+                                                static_cast<int>(tile->nbo))
               : conv_group::groupLdsBytes(
                     bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
     if(lds > LDS_LIMIT)
@@ -657,7 +666,7 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     // A wide channels-first config parks its output tile in the halo.
-    if(tile->nbi != 0 && tile->cf != 0
+    if(tile->nbi != 0 && tile->cf != 0 && tile->pf == 0
        && static_cast<long long>(th) * 16 * tile->nbo * (tw + 1) * bytes > lds)
     {
         return false;
@@ -838,6 +847,7 @@ public:
             options.add("CONV_GROUP_WP", std::to_string(tile->wp));
             options.add("CONV_GROUP_NBI", std::to_string(tile->nbi));
             options.add("CONV_GROUP_NBO", std::to_string(tile->nbo));
+            options.add("CONV_GROUP_PF", std::to_string(tile->pf));
         }
         else
         {

@@ -66,8 +66,9 @@ struct GroupLaunch
 std::optional<std::vector<GroupLaunch>> groupLaunches(const GroupProblem& problem, bool phased);
 
 /// LDS bytes of the phase-fused kernel: the halo (one row and column wider than a phase's) and
-/// the 2 th x 2 tw output tile.
-long long groupPhasedLdsBytes(int elementBytes, int r, int s, int th, int tw, int cb, bool cf);
+/// the 2 th x 2 tw output tile of ob output blocks (0: cb, the small-group kernel's).
+long long groupPhasedLdsBytes(
+    int elementBytes, int r, int s, int th, int tw, int cb, bool cf, int ob = 0);
 
 /// @p problem with its activations read and written in place by the channels-first (cf) kernels:
 /// nullopt unless x and y are both packed channels-first (both staged by transposes).

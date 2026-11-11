@@ -903,6 +903,223 @@ __device__ void k4ConvMmaWide(const K4Args& a)
         }
 }
 
+// Phase-fused backward data at stride 2 for wide groups: k4ConvMmaPhased's four row and column
+// phases into an LDS output tile, with k4ConvMmaWide's group padding and register tile. A
+// workgroup owns 2 TH x 2 TW dx pixels (TW = 16 WP) x NBO of a group's output blocks.
+template <class T, class Atom, int FT, int R, int S, int TH, int WP, int NBI, int NBO, int CF = 0>
+__device__ void k4ConvMmaWidePhased(const K4Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = 4 * WAVE;
+    constexpr int TW = 16 * WP;
+    constexpr int CH = 16 * NBI;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int VP = CH / VEC;
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = TH + R, HC = TW + S;
+    constexpr int TAPS = FT * R * S;
+    constexpr int KC = 16 / Atom::KA;
+    constexpr int RPW = TH / 4;
+    constexpr int OCH = 16 * NBO;
+    constexpr int OPITCH = OCH + VEC;
+    constexpr int OUT = CF != 0 ? 2 * TH * OCH * (2 * TW + 1) : 2 * TH * 2 * TW * OPITCH;
+    static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
+    static_assert(TH % 4 == 0 && NBI % NBO == 0, "whole rows a wave, whole tiles a group");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ __attribute__((aligned(16))) T halo[HR * HC * PITCH];
+    __shared__ __attribute__((aligned(16))) T tile[OUT];
+
+    const int groups = a.c / a.cg;
+    constexpr int OT = NBI / NBO;
+    long long b = blockIdx.x;
+    const int ot = static_cast<int>(b % OT);
+    b /= OT;
+    const int g = static_cast<int>(b % groups);
+    b /= groups;
+    const int tws = (a.wo + TW - 1) / TW;
+    const int twi = static_cast<int>(b % tws);
+    b /= tws;
+    const int ths = (a.ho + TH - 1) / TH;
+    const int thi = static_cast<int>(b % ths);
+    b /= ths;
+    const int od = static_cast<int>(b % a.dout);
+    const long long img = b / a.dout;
+    const int j0 = thi * TH, k0 = twi * TW;
+    const int padH = a.fph[0] > a.fph[1] ? a.fph[0] : a.fph[1];
+    const int padW = a.fpw[0] > a.fpw[1] ? a.fpw[0] : a.fpw[1];
+    const int ih0 = j0 - padH, iw0 = k0 - padW;
+    const T* in = static_cast<const T*>(a.in);
+    T* out = static_cast<T*>(a.out);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int row = lane % 16;
+    const int kb = Atom::template kBase<Atom::KPL>(lane);
+    const int c0 = g * a.cg;
+
+    for(int ph = 0; ph < 4; ++ph)
+    {
+        const int pr = ph / 2, pc = ph % 2;
+        const int ro = padH - a.fph[pr], co = padW - a.fpw[pc];
+        const T* w = static_cast<const T*>(a.w) + ph * a.wps
+                     + static_cast<long long>(g * NBI + ot * NBO) * TAPS * NBI * 256;
+        typename Atom::acc acc[RPW][WP][NBO];
+#pragma unroll
+        for(int rr = 0; rr < RPW; ++rr)
+#pragma unroll
+            for(int p = 0; p < WP; ++p)
+#pragma unroll
+                for(int ob = 0; ob < NBO; ++ob)
+                    acc[rr][p][ob] = typename Atom::acc{};
+        for(int ft = 0; ft < FT; ++ft)
+        {
+            const int id = od - a.pd + ft;
+            if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+                continue;
+            if(FT > 1 || ph == 0)
+            {
+                __syncthreads();
+                for(int i = tid; i < HR * HC * VP; i += THREADS)
+                {
+                    int v, hc, hr;
+                    if constexpr(CF != 0)
+                    {
+                        hc = i % HC;
+                        hr = (i / HC) % HR;
+                        v = i / (HC * HR);
+                    }
+                    else
+                    {
+                        v = i % VP;
+                        const int p = i / VP;
+                        hc = p % HC;
+                        hr = p / HC;
+                    }
+                    const int ih = ih0 + hr, iw = iw0 + hc;
+                    const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                                    && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
+                                    && v * VEC < a.cg;
+                    const int sih = ok ? ih : 0, siw = ok ? iw : 0, sv = ok ? v : 0;
+                    Raw val;
+                    if constexpr(CF != 0)
+                    {
+                        const long long planes = static_cast<long long>(a.di) * a.hi * a.wi;
+                        const T* at = in + (img * a.c + c0 + sv * VEC) * planes
+                                      + (static_cast<long long>(id) * a.hi + sih) * a.wi + siw;
+                        union
+                        {
+                            Raw raw;
+                            T e[VEC];
+                        } u;
+#pragma unroll
+                        for(int j = 0; j < VEC; ++j)
+                            u.e[j] = sv * VEC + j < a.cg ? at[j * planes] : T{};
+                        val = u.raw;
+                    }
+                    else
+                    {
+                        val = *reinterpret_cast<const Raw*>(
+                            in + (((img * a.di + id) * a.hi + sih) * a.wi + siw) * a.c + c0
+                            + sv * VEC);
+                    }
+                    if(!ok)
+                        val = Raw{};
+                    *reinterpret_cast<Raw*>(halo + (hr * HC + hc) * PITCH + v * VEC) = val;
+                }
+                __syncthreads();
+            }
+#pragma unroll
+            for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+                for(int fs = 0; fs < S; ++fs)
+                {
+                    const int tap = (ft * R + fr) * S + fs;
+#pragma unroll
+                    for(int ib = 0; ib < NBI; ++ib)
+                    {
+                        typename Atom::frag bf[NBO][KC];
+#pragma unroll
+                        for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                            for(int q = 0; q < KC; ++q)
+                                bf[ob][q] = k1Frag<Atom>(
+                                    w
+                                    + (((static_cast<long long>(ob) * TAPS + tap) * NBI + ib) * 16
+                                       + row)
+                                          * 16
+                                    + q * Atom::KA + kb);
+#pragma unroll
+                        for(int rr = 0; rr < RPW; ++rr)
+                        {
+                            const int r = wave + 4 * rr;
+#pragma unroll
+                            for(int p = 0; p < WP; ++p)
+                            {
+                                const int hc = p * 16 + row + fs + co, hr = r + fr + ro;
+                                const T* src = halo + (hr * HC + hc) * PITCH + ib * 16 + kb;
+#pragma unroll
+                                for(int q = 0; q < KC; ++q)
+                                {
+                                    const auto af = k1Frag<Atom>(src + q * Atom::KA);
+#pragma unroll
+                                    for(int ob = 0; ob < NBO; ++ob)
+                                        acc[rr][p][ob] = Atom::mma(af, bf[ob][q], acc[rr][p][ob]);
+                                }
+                            }
+                        }
+                    }
+                }
+        }
+        // Park the phase: tile row 2 r + pr, column 2 (fragment column) + pc.
+#pragma unroll
+        for(int rr = 0; rr < RPW; ++rr)
+#pragma unroll
+            for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                for(int p = 0; p < WP; ++p)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                    {
+                        const int r2 = 2 * (wave + 4 * rr) + pr;
+                        const int c2 = 2 * (p * 16 + Atom::dRow(lane, e)) + pc;
+                        const int ch = ob * 16 + lane % 16;
+                        tile[CF != 0 ? (r2 * OCH + ch) * (2 * TW + 1) + c2
+                                     : (r2 * 2 * TW + c2) * OPITCH + ch]
+                            = K1Elem<T>::store(acc[rr][p][ob][e]);
+                    }
+    }
+    __syncthreads();
+    const int x0 = 2 * j0, y0 = 2 * k0;
+    if constexpr(CF != 0)
+    {
+        const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
+        for(int i = tid; i < 2 * TH * OCH * 2 * TW; i += THREADS)
+        {
+            const int c2 = i % (2 * TW), ch = (i / (2 * TW)) % OCH, r2 = i / (2 * TW * OCH);
+            const int gch = ot * OCH + ch;
+            if(x0 + r2 < a.outH && y0 + c2 < a.outW && gch < a.cg)
+                out[(img * a.c + c0 + gch) * outPlanes
+                    + (static_cast<long long>(od * a.osd + a.ood) * a.outH + x0 + r2) * a.outW + y0
+                    + c2]
+                    = tile[(r2 * OCH + ch) * (2 * TW + 1) + c2];
+        }
+    }
+    else
+    {
+        // Whole 16-byte vectors of a pixel's channels (cg is a multiple of the vector).
+        constexpr int OVP = OCH / VEC;
+        const long long outPlane = img * a.outD + od * a.osd + a.ood;
+        for(int i = tid; i < 2 * TH * 2 * TW * OVP; i += THREADS)
+        {
+            const int v = i % OVP, px = i / OVP, c2 = px % (2 * TW), r2 = px / (2 * TW);
+            const int gch = ot * OCH + v * VEC;
+            if(x0 + r2 < a.outH && y0 + c2 < a.outW && gch < a.cg)
+                *reinterpret_cast<Raw*>(
+                    out + ((outPlane * a.outH + x0 + r2) * a.outW + y0 + c2) * a.c + c0 + gch)
+                    = *reinterpret_cast<const Raw*>(tile + px * OPITCH + v * VEC);
+        }
+    }
+}
+
 // The filter expansion (K4ExpandArgs), one element per thread, grid-strided.
 __device__ inline void k4Expand(const K4ExpandArgs& a)
 {

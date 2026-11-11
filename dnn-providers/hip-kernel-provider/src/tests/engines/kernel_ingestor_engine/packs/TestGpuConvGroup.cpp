@@ -302,6 +302,10 @@ std::vector<DeviceCase> deviceCases()
     wide48.groups = 2;
     wide48.stride = {2, 2};
     cases.push_back({"NchwGroups48Stride2", wide48});
+    auto wide32s2 = dense(64, 64, {10, 17}, {3, 3}, {1, 1}, true);
+    wide32s2.groups = 2;
+    wide32s2.stride = {2, 2};
+    cases.push_back({"NhwcGroups32Stride2", wide32s2});
     auto wide24 = dense(48, 48, {4, 6, 13}, {3, 3, 3}, {1, 1, 1}, true);
     wide24.groups = 2;
     cases.push_back({"NdhwcGroups24", wide24});
@@ -968,8 +972,14 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 EXPECT_FALSE(forward);
                 EXPECT_EQ(stride, 2);
                 EXPECT_LE(
-                    conv_group::groupPhasedLdsBytes(
-                        bytes, taps("r"), taps("s"), th, tw, cb, kernel.getIntMetadata("cf") != 0),
+                    conv_group::groupPhasedLdsBytes(bytes,
+                                                    taps("r"),
+                                                    taps("s"),
+                                                    th,
+                                                    tw,
+                                                    cb,
+                                                    kernel.getIntMetadata("cf") != 0,
+                                                    static_cast<int>(kernel.getIntMetadata("nbo"))),
                     64 * 1024);
             }
             else

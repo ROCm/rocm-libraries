@@ -66,17 +66,24 @@ PF_TILES = [(2, 1, 2), (4, 1, 1), (2, 2, 2)]
 PF_CF_TILES = [(2, 1, 2), (4, 1, 1)]
 
 
-def lds_pf(eb, r, s, th, tw, cb, cf):
+def lds_pf(eb, r, s, th, tw, cb, cf, ob=0):
     vec = 16 // eb
     pitch = 16 * cb + vec
+    out = ob or cb
     halo = (th + r) * (tw + s) * pitch
-    tile = 2 * th * 16 * cb * (2 * tw + 1) if cf else 4 * th * tw * pitch
+    tile = 2 * th * 16 * out * (2 * tw + 1) if cf else 4 * th * tw * (16 * out + vec)
     return (halo + tile) * eb
 
 
 # Wide groups (16 < cg <= 64, k4ConvMmaWide): nbi 16-channel blocks a group (ceil(cg / 16)),
 # (th, wp, nbo) output rows, 16-column fragments and output blocks a workgroup; every tile also
 # ships channels-first in place.
+# Phase-fused stride-2 backward data for wide groups: (th, wp, nbo) per nbi (both forms).
+WIDE_PF_TILES = {
+    2: [(4, 1, 2), (4, 1, 1)],
+    3: [(4, 1, 3), (4, 1, 1)],
+    4: [(4, 1, 4), (4, 1, 2)],
+}
 WIDE_TILES = {
     2: [(8, 1, 2), (4, 1, 2), (4, 2, 2)],
     3: [(8, 1, 3), (4, 1, 3), (4, 2, 3)],
@@ -245,21 +252,34 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             for t, r, s in FILTERS:
                 for st in strides:
                     for nbi, tiles in WIDE_TILES.items():
-                        for th, wp, nbo in tiles:
+                        pft = WIDE_PF_TILES[nbi] if tag == "bwd" and st == 2 else []
+                        for th, wp, nbo, pf in [x + (0,) for x in tiles] + [
+                            x + (1,) for x in pft
+                        ]:
                             for cf in (0, 1):
                                 kr, ks, kst = (
                                     (r, s, st)
                                     if tag == "fwd"
                                     else (-(-r // st), -(-s // st), 1)
                                 )
-                                halo = lds(EB[dtype], kr, ks, kst, th, 16 * wp, nbi)
-                                if halo > 64 * 1024:
-                                    continue
-                                if (
-                                    cf
-                                    and th * 16 * nbo * (16 * wp + 1) * EB[dtype] > halo
-                                ):
-                                    continue
+                                if pf:
+                                    if (
+                                        lds_pf(
+                                            EB[dtype], kr, ks, th, 16 * wp, nbi, cf, nbo
+                                        )
+                                        > 64 * 1024
+                                    ):
+                                        continue
+                                else:
+                                    halo = lds(EB[dtype], kr, ks, kst, th, 16 * wp, nbi)
+                                    if halo > 64 * 1024:
+                                        continue
+                                    if (
+                                        cf
+                                        and th * 16 * nbo * (16 * wp + 1) * EB[dtype]
+                                        > halo
+                                    ):
+                                        continue
                                 c = dict(
                                     atom=atom,
                                     t=t,
@@ -273,14 +293,16 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                     cg=0,
                                     oc=0,
                                     px=0,
-                                    pf=0,
+                                    pf=pf,
                                     nbi=nbi,
                                     nbo=nbo,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
                                     f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.w{nbi}"
-                                    f".t{th}x{wp}x{nbo}" + (".cf" if cf else "")
+                                    f".t{th}x{wp}x{nbo}"
+                                    + (".cf" if cf else "")
+                                    + (".pf" if pf else "")
                                 )
                                 kernels.append(
                                     {
