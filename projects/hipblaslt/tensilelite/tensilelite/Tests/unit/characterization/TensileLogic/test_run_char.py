@@ -186,6 +186,8 @@ def stub_setup_externals(monkeypatch):
     monkeypatch.setattr(Run, "assignGlobalParameters",
                         lambda cfg, iim: recorded.__setitem__("gp_config", cfg))
     monkeypatch.setattr(Run, "setVerbosity", lambda v: None)
+    # --jobs defaults to 0, which _setup resolves to the CPU budget of the host.
+    monkeypatch.setattr(Run, "CPUThreadCount", lambda: 12)
     return recorded
 
 
