@@ -731,7 +731,7 @@ about "what do we currently know is broken" has to check all nine.
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| [`logic/known_bugs.yaml`](tensilelite/tensilelite/logic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
 | Filename-driven marks in `tensilelite/tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **Partly.** An `xfail` or `wip` path is strict, because `tensilelite/pytest.ini` sets `xfail_strict = True`, so an unexpected pass fails the run. A `disabled` path is a plain skip |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
@@ -947,8 +947,8 @@ red sanitizer run does not block a merge.
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on pull requests touching either library, either test driver, the suppression file, or the workflow,
 nightly at 07:00 UTC, and on manual dispatch.
-It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
+It builds through TheRock using its `linux-release-host-asan` preset directly for host-only
+ASAN, runs quick tests for relevant PRs, and runs standard tests
 nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
@@ -971,6 +971,11 @@ Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so thi
 it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
 `HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
 leak report appears that seems to come from outside hipBLASLt.
+
+Both [`test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) and
+[`test_hipsparselt.py`](../../test/therock/test_hipsparselt.py) set `OMP_NUM_THREADS=1`
+for host and device ASAN runs. OpenMP provides limited speedups in these test clients
+and introduces high overhead in ASAN builds.
 
 **How to build it yourself.** For a standalone hipBLASLt build, `-DHIPBLASLT_ENABLE_ASAN=ON` or
 `-DHIPBLASLT_ENABLE_TSAN=ON`, with `-DTENSILELITE_ENABLE_HOST_ASAN=ON` for the TensileLite host

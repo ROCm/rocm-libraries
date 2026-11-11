@@ -547,6 +547,23 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 }
 
+TEST(TestDescriptorLoader, ParsesTheGraphCaptureBehaviorNote)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("graph_capture_note"));
+    auto documents = makeSetDocuments('1', "test:graph_capture_note");
+    documentOfType(documents, ".ued.json")["behavior_notes"]
+        = nlohmann::json::array({"runtime_compilation", "supports_graph_capture"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.behaviorNotes,
+              (std::vector<int32_t>{HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION,
+                                    HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE}));
+}
+
 TEST(TestDescriptorLoader, SemanticRevisionsAreIndependentOfFormatAndDescriptorKind)
 {
     const ScopedSymbols symbols;
@@ -983,6 +1000,34 @@ TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
               testUuid('1', ROLE_HEURISTIC));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "lists " + repeatedId + " twice"))
         << recorder.getRecordedLogsAsString();
+}
+
+/// The candidate-generator role (`predict_applicable_kernels`) is a list too, for the JIT
+/// spaces that will consume it; a bare id stays a one-element list. A list once refused the
+/// whole engine.
+TEST(TestDescriptorLoader, ReadsTheCandidateGeneratorRoleAsAList)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("candidate_list"));
+    auto listed = makeSetDocuments('1', "test:listed");
+    documentOfType(listed, ".ued.json")["predict_applicable_kernels"]
+        = {{"gfx942", nlohmann::json::array({testUuid('1', ROLE_HEURISTIC)})}};
+    writeDocuments(dir.path(), listed);
+    auto bare = makeSetDocuments('2', "test:bare");
+    documentOfType(bare, ".ued.json")["predict_applicable_kernels"]
+        = {{"gfx942", testUuid('2', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), bare);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 2u);
+    for(const auto& set : sets)
+    {
+        const char which = set.engine.name == "test:listed" ? '1' : '2';
+        ASSERT_EQ(set.engine.predictApplicableKernels.count("gfx942"), 1u) << set.engine.name;
+        const auto& ids = set.engine.predictApplicableKernels.at("gfx942");
+        ASSERT_EQ(ids.size(), 1u) << set.engine.name;
+        EXPECT_EQ(toString(ids.front()), testUuid(which, ROLE_HEURISTIC)) << set.engine.name;
+    }
 }
 
 /// A metric-suffixed L1 role key (`predict_engine_tflops`) is refused as unknown, not loaded

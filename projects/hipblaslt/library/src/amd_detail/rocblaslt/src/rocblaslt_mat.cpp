@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "alpha_mode_logging.hpp"
 #include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -967,7 +968,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
             workspace,
             "workSpaceSizeInBytes",
             workspaceSizeInBytes,
-            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            rocblaslt::traceAlphaLabel(matmul_descr->pointermode),
             alpha_scalar, 
             "beta",
             beta_scalar,
@@ -1330,7 +1331,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                                          size_t&                   gemmCount)
 {
     // internalArg0[11] is launch-wide; each record still owns its scalar pointer.
-    const bool deviceScalarAlpha = inputs[0].deviceScalarAlpha;
+    if(inputs.size() < m.size())
+        return rocblaslt_status_invalid_value;
+    const bool deviceScalarAlpha = !inputs.empty() && inputs[0].deviceScalarAlpha;
     for(const auto& input : inputs)
         if(input.deviceScalarAlpha != deviceScalarAlpha)
             return rocblaslt_status_invalid_value;
