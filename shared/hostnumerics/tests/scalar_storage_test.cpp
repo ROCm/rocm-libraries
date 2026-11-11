@@ -14,6 +14,7 @@
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -23,6 +24,17 @@ using enum IntegerOverflow;
 
 int byteAt(std::span<const std::byte> storage, size_t index) {
     return std::to_integer<int>(storage[index]);
+}
+
+// Storage holding one element with the given code: one byte, or two bytes in
+// host byte order for 16-bit types.
+std::array<std::byte, 2> codeStorage(ScalarType type, uint16_t code) {
+    std::array<std::byte, 2> storage{};
+    if (scalarTypeInfo(type).storageBits == 16)
+        std::memcpy(storage.data(), &code, sizeof(code));
+    else
+        storage[0] = static_cast<std::byte>(code);
+    return storage;
 }
 
 // Scalar storage tutorials. Run these examples with
@@ -393,32 +405,117 @@ TEST(ScalarStorageDeathTest, AssertsNonnegativeUnsignedScales) {
 }
 
 TEST(ScalarStorage, KnownFloatingEncodings) {
-    // Fixed code/value pairs check numerical meaning independently of round trips.
+    // Fixed code/value pairs check numerical meaning independently of round
+    // trips, which cannot detect a wrong code shared by the encoder and decoder.
+    // Each format lists a normal value, its largest finite value, its smallest
+    // positive value and any infinities.
     struct Example {
         ScalarType type;
         uint16_t code;
         float value;
     };
     using enum ScalarType;
+    const float infinity = std::numeric_limits<float>::infinity();
     const Example examples[]{
-        {Float4E2M1, 0x03, 1.5f},     {Float6E2M3, 0x0c, 1.5f}, {Float6E3M2, 0x0e, 1.5f},
-        {Float8E4M3, 0x3c, 1.5f},     {Float8E5M2, 0x3e, 1.5f}, {Float8E4M3Fnuz, 0x44, 1.5f},
-        {Float8E5M2Fnuz, 0x42, 1.5f}, {E4M3, 0x3c, 1.5f},       {E5M3, 0x7c, 1.5f},
-        {E8M0, 0x80, 2.0f},           {E8M0Zero, 0x80, 2.0f},   {Float16, 0x3e00, 1.5f},
+        {Float4E2M1, 0x03, 1.5f},
+        {Float4E2M1, 0x07, 6.0f},
+        {Float4E2M1, 0x01, 0.5f},
+        {Float6E2M3, 0x0c, 1.5f},
+        {Float6E2M3, 0x1f, 7.5f},
+        {Float6E2M3, 0x01, 0x1p-3f},
+        {Float6E3M2, 0x0e, 1.5f},
+        {Float6E3M2, 0x1f, 28.0f},
+        {Float6E3M2, 0x01, 0x1p-4f},
+        {Float8E4M3, 0x3c, 1.5f},
+        {Float8E4M3, 0x7e, 448.0f},
+        {Float8E4M3, 0x01, 0x1p-9f},
+        {Float8E5M2, 0x3e, 1.5f},
+        {Float8E5M2, 0x7b, 57344.0f},
+        {Float8E5M2, 0x01, 0x1p-16f},
+        {Float8E5M2, 0x7c, infinity},
+        {Float8E5M2, 0xfc, -infinity},
+        {Float8E4M3Fnuz, 0x44, 1.5f},
+        {Float8E4M3Fnuz, 0x7f, 240.0f},
+        {Float8E4M3Fnuz, 0x01, 0x1p-10f},
+        {Float8E5M2Fnuz, 0x42, 1.5f},
+        {Float8E5M2Fnuz, 0x7f, 57344.0f},
+        {Float8E5M2Fnuz, 0x01, 0x1p-17f},
+        {E4M3, 0x3c, 1.5f},
+        {E4M3, 0x7e, 448.0f},
+        {E4M3, 0x01, 0x1p-9f},
+        {E5M3, 0x7c, 1.5f},
+        {E5M3, 0xfe, 114688.0f},
+        {E5M3, 0x01, 0x1p-17f},
+        {E8M0, 0x80, 2.0f},
+        {E8M0, 0xfe, 0x1p127f},
+        {E8M0, 0x00, 0x1p-127f},
+        {E8M0Zero, 0x80, 2.0f},
+        {E8M0Zero, 0xfe, 0x1p127f},
+        {E8M0Zero, 0x01, 0x1p-126f},
+        {Float16, 0x3e00, 1.5f},
+        {Float16, 0x7bff, 65504.0f},
+        {Float16, 0x0001, 0x1p-24f},
+        {Float16, 0x7c00, infinity},
         {BFloat16, 0x3fc0, 1.5f},
+        {BFloat16, 0x7f7f, 0x1.fep127f},
+        {BFloat16, 0x0001, 0x1p-133f},
+        {BFloat16, 0x7f80, infinity},
     };
     const ScalarConversionOptions options{NearestEven, Saturate};
     for (const auto& example : examples) {
-        SCOPED_TRACE(scalarTypeName(example.type));
-        std::array<std::byte, 2> expected{};
-        if (scalarTypeInfo(example.type).storageBits == 16)
-            std::memcpy(expected.data(), &example.code, sizeof(example.code));
-        else
-            expected[0] = static_cast<std::byte>(example.code);
+        SCOPED_TRACE(::testing::Message()
+                     << scalarTypeName(example.type) << " code " << example.code);
+        const auto expected = codeStorage(example.type, example.code);
         EXPECT_EQ(decodeScalar<float>(example.type, expected, 0, options), example.value);
         std::array<std::byte, 2> actual{};
         encodeScalar(example.type, actual, 0, example.value, options);
         EXPECT_EQ(actual, expected);
+    }
+}
+
+TEST(ScalarStorage, KnownNanAndNegativeZeroEncodings) {
+    using enum ScalarType;
+    const ScalarConversionOptions options{NearestEven, Saturate};
+
+    // Every listed code decodes to NaN, and encoding NaN produces the first.
+    struct NanCodes {
+        ScalarType type;
+        std::vector<uint16_t> codes;
+    };
+    const NanCodes nanCodes[]{
+        {Float8E4M3, {0x7f, 0xff}},
+        {Float8E5M2, {0x7f, 0x7d, 0x7e, 0xfd, 0xff}},
+        {Float8E4M3Fnuz, {0x80}},
+        {Float8E5M2Fnuz, {0x80}},
+        {E4M3, {0x7f}},
+        {E5M3, {0xff}},
+        {E8M0, {0xff}},
+        {E8M0Zero, {0xff}},
+        {Float16, {0x7e00, 0x7c01, 0xfe00}},
+        {BFloat16, {0x7fc0, 0x7f81, 0xffc0}},
+    };
+    for (const auto& [type, codes] : nanCodes) {
+        SCOPED_TRACE(scalarTypeName(type));
+        for (const uint16_t code : codes)
+            EXPECT_TRUE(std::isnan(decodeScalar<float>(type, codeStorage(type, code), 0, options)))
+                << "code " << code;
+        std::array<std::byte, 2> actual{};
+        encodeScalar(type, actual, 0, std::numeric_limits<float>::quiet_NaN(), options);
+        EXPECT_EQ(actual, codeStorage(type, codes.front()));
+    }
+
+    // Negative zero keeps its sign where the format has one. FNUZ formats use
+    // the negative-zero code for NaN, so negative zero encodes as zero.
+    const std::pair<ScalarType, uint16_t> negativeZeros[]{
+        {Float4E2M1, 0x08},     {Float6E2M3, 0x20}, {Float6E3M2, 0x20},
+        {Float8E4M3, 0x80},     {Float8E5M2, 0x80}, {Float8E4M3Fnuz, 0x00},
+        {Float8E5M2Fnuz, 0x00}, {Float16, 0x8000},  {BFloat16, 0x8000},
+    };
+    for (const auto& [type, code] : negativeZeros) {
+        SCOPED_TRACE(scalarTypeName(type));
+        std::array<std::byte, 2> actual{};
+        encodeScalar(type, actual, 0, -0.0f, options);
+        EXPECT_EQ(actual, codeStorage(type, code));
     }
 }
 
