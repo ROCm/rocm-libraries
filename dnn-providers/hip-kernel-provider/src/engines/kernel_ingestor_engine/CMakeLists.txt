@@ -20,6 +20,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvRdnaCommon.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvRdnaFmaIgemm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipConvFwdFmaIgemmRdnaNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
