@@ -10,7 +10,7 @@ guide is its operational form.
 
 A per-op plan decides **which graphs exist and in which tier they run**. It does
 not decide whether a given engine is fit to integrate. That is the job of the
-engine integration gate (the "Gauntlet"), which runs a plan's graphs across
+engine integration gate, which runs a plan's graphs across
 every kernel, adds fuzzing and the benchmark corpus, and reports outcomes per
 engine. The two connect in both directions:
 
@@ -401,5 +401,5 @@ In addition, check that:
 
 Lessons L13–L15 and the ideas behind P3's hazard points, P9, P10, P11, the
 tensor-kind and alignment-placement rules, all-pairs generation from declared
-axes, and never trimming rejection probes come from the hipDNN Integration
-Gauntlet study of cuDNN, PyTorch and AITER test practice.
+axes, and never trimming rejection probes come from a study of cuDNN, PyTorch
+and AITER test practice.
