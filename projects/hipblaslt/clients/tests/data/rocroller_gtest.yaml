@@ -107,5 +107,26 @@ Tests:
   unit_check: 0
   norm_check: 1
   gpu_arch: '950'
+# rocRoller-off build only. rocRoller picks a 64x16x128 NN tile for this
+# problem (A not transposed), so both APIs must serve the checked-in NN kernel
+# for it and get the right answer.
+- name: rocroller_nn_kernel
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: bf6_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [1024]
+  N: [256]
+  K: [512]
+  transA: N
+  transB: N
+  use_ext: [0, 1]
+  expected_kernel: RR_GEMM_NN_BF6_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
 
 ...
