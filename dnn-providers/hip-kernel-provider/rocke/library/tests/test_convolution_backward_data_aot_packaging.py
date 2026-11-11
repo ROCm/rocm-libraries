@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import ctypes
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -47,12 +47,16 @@ from builders.common.convolution_backward_data import (
     BUFFER_DY,
     BUFFER_SUB_GEMM,
     BUFFER_W,
+    DIRECT_VARIANT_DEPTHWISE,
+    DIRECT_VARIANT_MFMA,
+    DIRECT_VARIANT_WMMA,
     KERNEL_FAMILY_DGRAD_HELPER,
     KERNEL_SELF,
     SPEC_CLASSES,
     TARGETS,
     ConvDgradAotProblem,
     ConvDgradAotSpec,
+    aot_dgrad_direct_fields_from_knobs,
     aot_dgrad_direct_instance_fields,
     build_gfx950_conv_dgrad_aot,
     build_gfx1250_conv_dgrad_aot,
@@ -251,9 +255,11 @@ def test_the_catalog_converts_and_reproduces_its_identities(arch, catalog):
     assert algorithms == set(TARGETS[arch].direct_algorithms) | {"implicit_gemm"}
 
 
-def test_every_form_is_packageable_with_the_sweeps_ir(arch, catalog):
+def test_every_form_is_packageable_with_the_sweeps_ir(arch, catalog, monkeypatch):
     """One instance of each emission form, built by the adapter and by the sweep's
     ``--compile-all`` job, lowers to the same IR up to the symbol."""
+    # Lower as the catalog was swept: the builder refuses an older process flavor.
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", TARGETS[arch].llvm_flavor)
     seen = set()
     for ident, spec in catalog:
         form = _form(ident)
@@ -330,8 +336,9 @@ def test_each_builder_has_the_support_predicate_hkp_pack_resolves(arch, catalog)
         assert predicate(spec, arch=arch) == (True, "ok")
 
 
-def test_an_engine_builds_only_its_own_architectures_specs(catalog):
+def test_an_engine_builds_only_its_own_architectures_specs(catalog, monkeypatch):
     _, spec = next((i, s) for i, s in catalog if not s.is_direct)
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", TARGETS[spec.ARCH].llvm_flavor)
     other = next(a for a in TARGETS if a != spec.ARCH)
     ok, why = supports_conv_dgrad_aot(spec, arch=other)
     assert not ok and f"requires arch={spec.ARCH}" in why
@@ -760,3 +767,192 @@ def test_problem_for_request_is_the_dgrad_graph_contract(arch):
     )[0]
     with pytest.raises(ValueError, match="no packaged dgrad engine"):
         conv_dgrad_aot_problem_for_request(replace(request, arch="gfx942"))
+
+
+# ---------------------------------------------------------------------------
+# Per-arch refusals
+# ---------------------------------------------------------------------------
+
+
+def _guard_cases(arch: str, catalog) -> list:
+    """``(label, spec, arch passed, refusal text)`` per per-arch guard of
+    :func:`supports_conv_dgrad_aot`: a packaged spec of ``arch`` with one field (or
+    one pair) replaced by what the other engine, or no engine, accepts."""
+    target = TARGETS[arch]
+    other = TARGETS[next(a for a in TARGETS if a != arch)]
+    specs = [s for _, s in catalog]
+
+    def first(predicate):
+        return next((s for s in specs if predicate(s)), None)
+
+    implicit = first(lambda s: not s.is_direct)
+    depthwise = first(lambda s: s.direct_variant == DIRECT_VARIANT_DEPTHWISE)
+    wmma = first(lambda s: s.direct_variant == DIRECT_VARIANT_WMMA)
+    wmma_undilated = first(
+        lambda s: s.direct_variant in ("dgrad_smallc_wmma", "dgrad_patch_wmma")
+    )
+    helper = first(lambda s: s.is_helper)
+    wave = f"wave_size must be {target.wave_size} on {arch}"
+    foreign_pipeline = next(p for p in other.pipelines if p not in target.pipelines)
+    foreign_variant = {"gfx950": DIRECT_VARIANT_WMMA, "gfx1250": DIRECT_VARIANT_MFMA}
+
+    class _NoEngineSpec(SPEC_CLASSES[arch]):
+        ARCH = "gfx942"
+
+    stray = _NoEngineSpec(
+        **{f.name: getattr(implicit, f.name) for f in fields(implicit)}
+    )
+    # A block knob of this engine that its depthwise variant does not take.
+    used = set(depthwise.DIRECT_KNOBS[depthwise.direct_variant].values())
+    unused = next(
+        n for n, v in depthwise.KNOB_DEFAULTS.items() if n not in used and v == 0
+    )
+    implicit_knob = "waves_c" if "waves_c" in implicit.KNOB_DEFAULTS else "block_waves"
+    cases = [
+        ("not a spec", object(), None, "expected one of"),
+        ("spec of no engine", stray, None, "expected one of"),
+        ("another arch", implicit, other.arch, f"requires arch={arch}"),
+        (
+            "implicit wave size",
+            replace(implicit, wave_size=other.wave_size),
+            None,
+            wave,
+        ),
+        (
+            "implicit pipeline",
+            replace(implicit, pipeline=foreign_pipeline),
+            None,
+            f"supports pipelines {target.pipelines} on {arch}",
+        ),
+        (
+            "implicit block knob",
+            replace(implicit, **{implicit_knob: 1}),
+            None,
+            f"must leave {implicit_knob} at 0",
+        ),
+        (
+            "direct wave size",
+            replace(depthwise, wave_size=other.wave_size),
+            None,
+            wave,
+        ),
+        (
+            "direct variant",
+            replace(depthwise, direct_variant=foreign_variant[arch]),
+            None,
+            "direct_variant must be one of",
+        ),
+        ("one runtime channel count", replace(depthwise, cpg=0), None, "both runtime"),
+        (
+            "runtime channels",
+            replace(depthwise, cpg=0, kpg=0),
+            None,
+            "only the runtime-channel pipeline",
+        ),
+        (
+            "direct dilation",
+            replace(depthwise, dilation_h=2, dilation_w=2),
+            None,
+            "have no dilation",
+        ),
+        (
+            "unused knob",
+            replace(depthwise, **{unused: 1}),
+            None,
+            f"does not use {unused}",
+        ),
+        (
+            "knob type",
+            replace(depthwise, **{unused: "1"}),
+            None,
+            f"{unused} must be a int",
+        ),
+    ]
+    if helper is not None:
+        cases.append(
+            (
+                "helper wave size",
+                replace(helper, wave_size=other.wave_size),
+                None,
+                wave,
+            )
+        )
+    if wmma is not None:
+        cases += [
+            (
+                "WMMA dilation",
+                replace(wmma, dilation_h=0),
+                None,
+                "dilation_h/dilation_w must be positive",
+            ),
+            ("WMMA string knob", replace(wmma, sched=0), None, "sched must be a str"),
+            (
+                "WMMA bool knob",
+                replace(wmma, wave_epilogue=2),
+                None,
+                "wave_epilogue must be 0 or 1",
+            ),
+            (
+                "WMMA int knob",
+                replace(wmma, waves_c=-1),
+                None,
+                "waves_c must be a nonnegative",
+            ),
+        ]
+    if wmma_undilated is not None:
+        cases.append(
+            (
+                "dilation of an undilated WMMA variant",
+                replace(wmma_undilated, dilation_h=2, dilation_w=2),
+                None,
+                "have no dilation",
+            )
+        )
+    return cases
+
+
+def test_each_per_arch_guard_refuses_with_its_own_text(arch, catalog):
+    """Every per-arch refusal of :func:`supports_conv_dgrad_aot`, of the identity
+    conversion and of the problem predicate, each by its own text: a packaged spec
+    of ``arch`` with one field replaced is refused for that field."""
+    wrong = []
+    for label, spec, on, text in _guard_cases(arch, catalog):
+        ok, why = supports_conv_dgrad_aot(spec, arch=on)
+        if ok or text not in why:
+            wrong.append((label, ok, why, text))
+    # The identity side: an arch with no engine, the other engine's algorithm, a
+    # string knob of the wrong type.
+    direct = next(i for i, s in catalog if s.is_direct and not s.is_helper)
+    foreign = next(
+        a
+        for a in TARGETS[next(x for x in TARGETS if x != arch)].direct_algorithms
+        if a not in TARGETS[arch].direct_algorithms
+    )
+    identity_cases = [
+        (replace(direct, arch="gfx942"), "no packaged dgrad engine for arch"),
+        (replace(direct, algorithm=foreign), f"no packaged dgrad launch on {arch}"),
+    ]
+    wmma = next((i for i, _ in catalog if i.algorithm == "direct_dgrad_wmma"), None)
+    if wmma is not None:
+        knobs = {**json.loads(wmma.knobs), "sched": 1}
+        identity_cases.append(
+            (replace(wmma, knobs=json.dumps(knobs)), "must be a nonempty string")
+        )
+    for identity, text in identity_cases:
+        try:
+            aot_dgrad_direct_instance_fields(identity)
+        except ValueError as exc:
+            if text not in str(exc):
+                wrong.append((identity.label(), False, str(exc), text))
+        else:
+            wrong.append((identity.label(), True, "ok", text))
+    # A variant this engine's knob table lacks.
+    variant = AOT_DGRAD_DIRECT_ALGORITHMS[foreign][1]
+    with pytest.raises(ValueError, match="no packaged dgrad launch takes variant"):
+        aot_dgrad_direct_fields_from_knobs(variant, {}, SPEC_CLASSES[arch].DIRECT_KNOBS)
+    problem = _p(2, 14, 14, 64, 64, 3, 3, p=(1, 1))
+    assert supports_conv_dgrad_aot_problem(problem, arch=arch) == (True, "ok")
+    ok, why = supports_conv_dgrad_aot_problem(problem, arch="gfx942")
+    if ok or "no packaged dgrad engine" not in why:
+        wrong.append(("problem of no engine", ok, why, "no packaged dgrad engine"))
+    assert not wrong, wrong
