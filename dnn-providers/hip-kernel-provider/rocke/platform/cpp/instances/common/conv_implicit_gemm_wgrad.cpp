@@ -78,6 +78,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
     s.prefetch_addr = false;
     s.register_prefetch = false;
+    s.prefetch_global_regs = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -375,10 +376,16 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
     /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
-     * rpf, sk, skpers, skr{reduction}, tf32 */
+     * rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
+     * when every conditional tag is present. The name is built before
+     * validation, so an invalid spec can reach the maximum too. */
+    enum
+    {
+        WGRAD_NAME_MAX_FLAGS = 14
+    };
     char pad_flag[32] = {0};
-    const char* flag_names[13];
-    int flag_on[13];
+    const char* flag_names[WGRAD_NAME_MAX_FLAGS];
+    int flag_on[WGRAD_NAME_MAX_FLAGS];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -461,6 +468,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      * is enough to tag it here. Mirrors Python. */
     flag_names[n_flags] = "rpf";
     flag_on[n_flags] = s->register_prefetch ? 1 : 0;
+    n_flags++;
+    /* prefetch_global_regs is a different K-loop body; only tagged when set. */
+    flag_names[n_flags] = "pgr";
+    flag_on[n_flags] = s->prefetch_global_regs ? 1 : 0;
     n_flags++;
     /* Stream-K tags, in the Python flag order: sk, skpers, skr<reduction>
      * (the last only when not the default "linear"). The CTA pool is a launch
@@ -554,6 +565,11 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "streamk runs its own K loop per work item; prefetch_addr rewrites "
+                        "the data-parallel K loop, which stream-K never reaches");
+    if(s->prefetch_global_regs)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk runs its own K loop per work item; prefetch_global_regs rewrites "
                         "the data-parallel K loop, which stream-K never reaches");
     const char* epi = s->epilogue ? s->epilogue : "default";
     if(strcmp(epi, "default") != 0)
@@ -658,6 +674,42 @@ static int wgrad_free_axis_vec(int chan, const char* dtype, bool has_override, i
     return (has_override && override_vec < v) ? override_vec : v;
 }
 
+/* Python _sync_staged_chunks: the (A, B) global loads per thread of the
+ * synchronous tile loaders, with the widths the builder picks when async_dma
+ * is off (row-axis on an M-outer tile, scalar when no width above 1 fits;
+ * column-axis on a K-outer tile). Returns false when the tile admits no width
+ * at all; the builder reports that itself. */
+static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t* s, int out[2])
+{
+    const int threads = s->warp_m * s->warp_n * s->wave_size;
+    /* spec.merged_problem: folding Gm groups multiplies kpg and cpg by Gm. */
+    const int gm = s->group_merge > 1 ? s->group_merge : 1;
+    const int caps[2] = {wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem) * gm,
+                                             s->dtype_a,
+                                             s->has_vector_size_a,
+                                             s->vector_size_a),
+                         wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem) * gm,
+                                             s->dtype_b,
+                                             s->has_vector_size_b,
+                                             s->vector_size_b)};
+    const int frees[2] = {s->tile_m, s->tile_n};
+    if(threads <= 0)
+        return false;
+    for(int i = 0; i < 2; ++i)
+    {
+        int vec = 0;
+        rocke_status_t st = s->lds_k_outer
+                                ? rocke_coalesced_tile_loader_choose_vec_axis(
+                                      s->tile_k, frees[i], threads, caps[i], /*row=*/false, &vec)
+                                : rocke_coalesced_tile_loader_choose_vec_axis(
+                                      frees[i], s->tile_k, threads, caps[i], /*row=*/true, &vec);
+        if(st != ROCKE_OK || vec <= 0)
+            return false;
+        out[i] = frees[i] * s->tile_k / (vec * threads);
+    }
+    return true;
+}
+
 /* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
  * gfx1250 async global->LDS K loop. global_load_async_to_lds moves 4, 8 or 16
  * bytes per lane, so a 16-bit chunk needs at least two elements on both
@@ -720,6 +772,24 @@ static bool wgrad_wmma_async_available(const rocke_implicit_gemm_conv_wgrad_spec
         }
     }
     return true;
+}
+
+/* Mirrors Python wgrad_atomic_store_vec(): the dW store-vector width of the
+ * cshuffle epilogue. The spec's vector_size_c when set, otherwise
+ * default_vector_sizes(..., split_k=1): the widest of 8/4/2/1 (4/2/1 for an
+ * fp32 dW) dividing the dW channel run, C, or cpg when grouped. The one width
+ * rule for the validator's packed-atomic gate, the split-K atomic epilogue
+ * and the split_k = 1 store epilogue. */
+static int wgrad_atomic_store_vec(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    if(s->has_vector_size_c)
+        return s->vector_size_c;
+    const rocke_conv_problem_t* p = &s->problem;
+    const int vc_c = (p->groups > 1) ? p->C / p->groups : p->C;
+    const char* dtype_d = s->dtype_d ? s->dtype_d : "fp16";
+    if(strcmp(dtype_d, "fp32") != 0 && vc_c % 8 == 0)
+        return 8;
+    return (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
 }
 
 /* Python _wgrad_tf32_reason(spec, arch=None): the shared TF32 gate
@@ -1012,15 +1082,9 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             {
                 store_vec = 2;
             }
-            else if(s->has_vector_size_c)
-            {
-                store_vec = s->vector_size_c;
-            }
             else
             {
-                /* vec_c is sized by the C run only (dW's last dim is the C axis). */
-                const int vc_c = (s->problem.groups > 1) ? cpg_v : s->problem.C;
-                store_vec = (vc_c % 8 == 0) ? 8 : (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
+                store_vec = wgrad_atomic_store_vec(s);
             }
 
             if(wg_N_v % 2 != 0 || store_vec % 2 != 0)
@@ -1264,6 +1328,59 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
+    /* prefetch_global_regs rewrites the plain single-buffer synchronous K loop; the
+     * async_dma ping-pong, the unroll_k loop and the prefetch_addr loop never
+     * reach it. Mirrors Python _prefetch_global_regs_conflict. */
+    if(s->prefetch_global_regs && (s->async_dma || s->unroll_k || s->prefetch_addr))
+    {
+        if(reason && reason_cap)
+        {
+            if(s->async_dma)
+                snprintf(reason,
+                         reason_cap,
+                         "prefetch_global_regs is not supported with async_dma: the direct "
+                         "global->LDS ping-pong has its own K loop");
+            else if(s->unroll_k)
+                snprintf(reason,
+                         reason_cap,
+                         "prefetch_global_regs is not supported with unroll_k: the "
+                         "double-buffered K loop has its own prefetch");
+            else
+                snprintf(reason,
+                         reason_cap,
+                         "prefetch_global_regs is not supported with prefetch_addr: the "
+                         "carried-offset K loop has its own schedule");
+        }
+        return false;
+    }
+    if(s->prefetch_global_regs)
+    {
+        /* The loop carries every global load of the next tile as a loop
+         * value, staged in ROCKE_CTL_MAX_VECS_PER_THREAD slots per operand.
+         * Mirrors Python _prefetch_global_regs_conflict / _sync_staged_chunks. */
+        int chunks[2];
+        if(wgrad_sync_staged_chunks(s, chunks))
+        {
+            for(int i = 0; i < 2; ++i)
+            {
+                if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
+                {
+                    if(reason && reason_cap)
+                        snprintf(
+                            reason,
+                            reason_cap,
+                            "prefetch_global_regs carries at most %d global loads per thread per "
+                            "operand; the %s tile needs %d (use a wider vector or a "
+                            "smaller tile)",
+                            ROCKE_CTL_MAX_VECS_PER_THREAD,
+                            i == 0 ? "A" : "B",
+                            chunks[i]);
+                    return false;
+                }
+            }
+        }
+    }
+
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
      * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
     if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
@@ -1494,6 +1611,13 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     {
         if(reason && reason_cap)
             snprintf(reason, reason_cap, "WMMA wgrad does not support prefetch_addr on %s", arch);
+        return false;
+    }
+    if(s->prefetch_global_regs && s->wave_size == 32)
+    {
+        if(reason && reason_cap)
+            snprintf(
+                reason, reason_cap, "WMMA wgrad does not support prefetch_global_regs on %s", arch);
         return false;
     }
 
@@ -2484,8 +2608,9 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
 // Mirrors Python _emit_wgrad_split_k_cshuffle_epilogue:
 //   CShuffleEpilogue.from_grid(atom, grid, max_store_vec=vec_c)
 //       .atomic_store(b, accs, dw_ptr=dW, wg_N=wg_N_v, bounds=(wg_M_v, wg_N_v))
-// vec_c uses split_k=1 semantics (same as the non-atomic cshuffle path) because
-// the cshuffle atomic path is not contraindicated by wide store_vec.
+// vec_c is the spec's vector_size_c when set; otherwise it uses split_k=1
+// semantics (same as the non-atomic cshuffle path) because the cshuffle atomic
+// path is not contraindicated by wide store_vec.
 // groups > 1 is not supported for C++ wgrad (rejected by the validator).
 // ---------------------------------------------------------------------------
 static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
@@ -2496,34 +2621,10 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                  int wg_N)
 {
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
-    bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
     (void)wg_M; /* bounds come from the ctx kernargs now */
     (void)wg_N;
-    int C = spec->problem.C;
-    int vec_c;
-
-    /* default_vector_sizes(..., split_k=1): widest vec that divides C.
-     * fp32: cap at 4; fp16/bf16: cap at 8. */
-    if(is_fp32_vec)
-    {
-        if(C % 4 == 0)
-            vec_c = 4;
-        else if(C % 2 == 0)
-            vec_c = 2;
-        else
-            vec_c = 1;
-    }
-    else
-    {
-        if(C % 8 == 0)
-            vec_c = 8;
-        else if(C % 4 == 0)
-            vec_c = 4;
-        else if(C % 2 == 0)
-            vec_c = 2;
-        else
-            vec_c = 1;
-    }
+    /* wgrad_atomic_store_vec(): vector_size_c, else split_k=1 semantics. */
+    const int vec_c = wgrad_atomic_store_vec(spec);
 
     /* WMMA reads the result through op.dst_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
@@ -3317,12 +3418,15 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
 
         /* Direct struct construction mirrors the Python CoalescedTileLoader(...)
-         * call (not from_tile): explicit load_vec + vector_axis, use_buffer_rsrc
-         * default True, oob_sentinel default (1 << 31) - 1. */
+         * call (not from_tile): explicit load_vec + vector_axis, elem_dtype =
+         * ir_dtype_a / ir_dtype_b (the LDS tile element types; only load_global,
+         * i.e. the prefetch_global_regs loop, reads it), use_buffer_rsrc default True,
+         * oob_sentinel default (1 << 31) - 1. */
         ctx->a_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_m;
         ctx->a_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_m : ctx->block_k;
         ctx->a_sync_loader.block_size = ctx->threads;
         ctx->a_sync_loader.load_vec = va;
+        ctx->a_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
         ctx->a_sync_loader.use_buffer_rsrc = true;
         ctx->a_sync_loader.oob_sentinel = 2147483647;
         ctx->a_sync_loader.vector_axis_row = axis_a;
@@ -3334,6 +3438,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->b_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_n : ctx->block_k;
         ctx->b_sync_loader.block_size = ctx->threads;
         ctx->b_sync_loader.load_vec = vb;
+        ctx->b_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_b);
         ctx->b_sync_loader.use_buffer_rsrc = true;
         ctx->b_sync_loader.oob_sentinel = 2147483647;
         ctx->b_sync_loader.vector_axis_row = axis_b;
@@ -3963,6 +4068,129 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx, bool reg
         ctx->final_accs[i] = for_op.op->results[i];
 }
 
+// ---------------------------------------------------------------------------
+// prefetch_global_regs K loop
+// ---------------------------------------------------------------------------
+
+/* Mirrors the Python ``elif spec.prefetch_global_regs:`` K-loop branch. The prologue
+ * issues tile k_lo's global reads into VGPRs. Each iteration writes the tile
+ * it carries to LDS, publishes it, and only then issues tile k+1's reads,
+ * which stay in flight under tile k's MFMAs and arrive as the next
+ * iteration's carried values. Both barriers are LDS-only: a full barrier would
+ * wait for those reads too. The reads issued in the last iteration are never
+ * stored. */
+static void wgrad_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int num_accs = ctx->num_accs;
+
+    /* _split_desc_fns(): ctx->a_descriptor_fn / b_descriptor_fn already carry
+     * the K-outer coordinate swap. */
+    rocke_loads_descriptor_fn a_fn = ctx->a_descriptor_fn;
+    rocke_loads_descriptor_fn b_fn = ctx->b_descriptor_fn;
+
+    /* _load_regs(k_lo) */
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_ctl_staged_t a0;
+    rocke_ctl_staged_t b0;
+    ctx->k_off_capture = k_lo;
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a0);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b0);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    const int n_a = a0.count;
+    const int n_v = a0.count + b0.count;
+    if(num_accs + n_v > WGRAD_PFA_MAX_ITER_ARGS)
+    {
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "prefetch_global_regs: %d accumulators + %d staged vectors exceed %d iter args",
+            num_accs,
+            n_v,
+            WGRAD_PFA_MAX_ITER_ARGS);
+        return;
+    }
+
+    rocke_iter_arg_t iter_args[WGRAD_PFA_MAX_ITER_ARGS];
+    char reg_names[WGRAD_PFA_MAX_ITER_ARGS][24];
+    for(int i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    for(int i = 0; i < n_a; ++i)
+    {
+        snprintf(reg_names[i], sizeof(reg_names[i]), "pgra%d", i);
+        iter_args[num_accs + i].name = reg_names[i];
+        iter_args[num_accs + i].init = a0.vecs[i].v;
+    }
+    for(int i = 0; i < b0.count; ++i)
+    {
+        snprintf(reg_names[n_a + i], sizeof(reg_names[n_a + i]), "pgrb%d", i);
+        iter_args[num_accs + n_a + i].name = reg_names[n_a + i];
+        iter_args[num_accs + n_a + i].init = b0.vecs[i].v;
+    }
+
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              k_lo,
+                                              ctx->c_K_gemm,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              num_accs + n_v,
+                                              "k0",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/true);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        /* The (row, col) of each chunk depends only on tid, so the prologue's
+         * slots address the carried values of every tile. */
+        rocke_ctl_staged_t a_cur = a0;
+        rocke_ctl_staged_t b_cur = b0;
+        for(int i = 0; i < n_a; ++i)
+            a_cur.vecs[i].v = for_op.iter_vars[num_accs + i];
+        for(int i = 0; i < b0.count; ++i)
+            b_cur.vecs[i].v = for_op.iter_vars[num_accs + n_a + i];
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_cur);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_cur);
+        rocke_b_sync_lds_only(b);
+
+        /* _load_regs(k0 + block_k) */
+        rocke_ctl_staged_t a_next;
+        rocke_ctl_staged_t b_next;
+        ctx->k_off_capture = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a_next);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b_next);
+
+        ctx->k_off_capture = for_op.iv;
+        rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, num_accs, yields);
+        rocke_b_sync_lds_only(b);
+        for(int i = 0; i < a_next.count; ++i)
+            yields[num_accs + i] = a_next.vecs[i].v;
+        for(int i = 0; i < b_next.count; ++i)
+            yields[num_accs + n_a + i] = b_next.vecs[i].v;
+        rocke_b_scf_yield(b, yields, num_accs + n_v);
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    /* final_accs = for_op.results[:n_acc] */
+    ctx->num_final_accs = num_accs;
+    for(int i = 0; i < num_accs; ++i)
+        ctx->final_accs[i] = for_op.op->results[i];
+}
+
 rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_ir_builder_t* b, const rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char* arch)
 {
@@ -4029,7 +4257,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     int wg_M = rocke_wgrad_conv_spec_wg_M(spec);
     int wg_N = rocke_wgrad_conv_spec_wg_N(spec);
 
-    const rocke_conv_problem_t* p = &spec->problem;
     /* --- wgrad ctx: host state only, filled as the params are declared --- */
     rocke_conv_build_ctx_t ctx;
     bool is_two_stage = is_split_k && effective_two_stage;
@@ -4401,6 +4628,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
+    else if(spec->prefetch_global_regs)
+        wgrad_emit_kloop_prefetch_global_regs(&ctx);
     else if(spec->prefetch_addr)
         wgrad_emit_kloop_prefetch_addr(&ctx, spec->register_prefetch);
     else if(ctx.async_global_lds)
@@ -4471,33 +4700,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         {
             dw_addr_ctx.dW_desc = ctx.is_pointwise ? NULL : wgrad_build_dw_descriptor(b, &ctx);
             /* _emit_wgrad_cshuffle_epilogue: CShuffleEpilogue.from_grid(...).store(...)
-             * vec_c = WgradConvSpec.default_vector_sizes(C, K, dtype_d, split_k=1)[2]
-             * For split_k=1: vec_c = _vec(C) where _vec picks largest of [8,4,2,1]
-             * that divides C for fp16/bf16, or [4,2,1] for fp32. */
+             * with max_store_vec = spec.vector_size_c when set, else
+             * default_vector_sizes(C, K, dtype_d, split_k=1)[2]: the same width
+             * as the split-K atomic epilogue (wgrad_atomic_store_vec). */
             const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
-            bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
-            int C = p->C;
-            int vec_c;
-            if(is_fp32_vec)
-            {
-                if(C % 4 == 0)
-                    vec_c = 4;
-                else if(C % 2 == 0)
-                    vec_c = 2;
-                else
-                    vec_c = 1;
-            }
-            else
-            {
-                if(C % 8 == 0)
-                    vec_c = 8;
-                else if(C % 4 == 0)
-                    vec_c = 4;
-                else if(C % 2 == 0)
-                    vec_c = 2;
-                else
-                    vec_c = 1;
-            }
+            const int vec_c = wgrad_atomic_store_vec(spec);
             rocke_cshuffle_epilogue_t cepi
                 = ctx.is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx.op, &ctx.grid, vec_c)
                               : rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);

@@ -88,7 +88,7 @@ def _bootstrap_sys_path() -> None:
 KNOWN_BAD: dict[str, str] = {}
 
 
-def _llvm_tool(name: str) -> str | None:
+def llvm_tool(name: str) -> str | None:
     """Locate an LLVM tool, preferring the ROCm install rocke itself loads.
 
     PATH is checked LAST on purpose. A ROCm install ships opt/clang under
@@ -171,7 +171,7 @@ def _unpaired_opt(
 ) -> str | None:
     """Why L0 must be skipped because `opt` is not clang's sibling, or None.
 
-    `_llvm_tool` resolves the two independently: a discovered prefix shipping
+    `llvm_tool` resolves the two independently: a discovered prefix shipping
     clang but not `opt` lets `opt` fall through to PATH, so the L0 verifier and
     the L1 compiler can be different vintages. An older `opt` that rejects a
     construct newer than its parser marks the case red as L0-VERIFY, i.e.
@@ -273,7 +273,9 @@ def _compile_argv(clang: str, path: Path, arch: str, out: Path) -> list[str]:
     ]
 
 
-def _compile(clang: str, path: Path, arch: str, out: Path) -> tuple[bool, str]:
+def compile_code_object(
+    clang: str, path: Path, arch: str, out: Path
+) -> tuple[bool, str]:
     """Compile AND LINK to a loadable hsaco. The link is the point -- see the
     module docstring for why stopping at -S would let a nonexistent intrinsic
     through."""
@@ -285,7 +287,7 @@ def _compile(clang: str, path: Path, arch: str, out: Path) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
 
 
-def _target_unsupported(diag: str) -> bool:
+def target_unsupported(diag: str) -> bool:
     """Did this clang refuse the *target*, rather than the module?
 
     The two are not the same finding and must not share a verdict. rocke wires
@@ -304,7 +306,7 @@ def _target_unsupported(diag: str) -> bool:
     return "invalid target id" in diag.lower()
 
 
-def _first_diagnostic(text: str) -> str:
+def first_diagnostic(text: str) -> str:
     """The one line worth printing in the summary table."""
     for line in text.splitlines():
         s = line.strip()
@@ -387,8 +389,8 @@ def main() -> int:
         )
         return 1 if args.strict else 0
 
-    clang = _llvm_tool("clang")
-    opt = None if args.no_verify else _llvm_tool("opt")
+    clang = llvm_tool("clang")
+    opt = None if args.no_verify else llvm_tool("opt")
     print(f"   clang  : {clang or '(not found)'}")
     if not args.no_verify:
         print(f"   opt    : {opt or '(not found, L0 skipped)'}")
@@ -421,7 +423,7 @@ def main() -> int:
     # mis-attributed run is a permanent false record. This gate writes nothing,
     # so the honest report is that nothing was measured for the flavor asked
     # about -- the same line already drawn for an arch this clang cannot target
-    # (`_target_unsupported`). Failing closed here would also newly red every
+    # (`target_unsupported`). Failing closed here would also newly red every
     # host whose PATH clang disagrees with its comgr, on a gate this change
     # turns on by default, for something the developer did not do wrong.
     # `--strict` is the CI-side opt-in to treating that as a failure.
@@ -472,10 +474,12 @@ def main() -> int:
             ok, diag = _verify(opt, path)
             if not ok:
                 return cid, "L0-VERIFY", diag
-        ok, diag = _compile(clang, path, arch, out_dir / (path.stem + f".{arch}.hsaco"))
+        ok, diag = compile_code_object(
+            clang, path, arch, out_dir / (path.stem + f".{arch}.hsaco")
+        )
         if ok:
             return cid, "OK", diag
-        return cid, ("UNVALIDATED" if _target_unsupported(diag) else "L1-COMPILE"), diag
+        return cid, ("UNVALIDATED" if target_unsupported(diag) else "L1-COMPILE"), diag
 
     print(f"\n== compiling (link to hsaco, {jobs} jobs) ==")
     results: dict[str, tuple[str, str]] = {}
@@ -530,7 +534,7 @@ def main() -> int:
             verdict, diag = new_bad[cid]
             arch = _arch_of(cid)
             print(f"\n  {verdict}  {cid}  [{arch}]")
-            print(f"    {_first_diagnostic(diag)}")
+            print(f"    {first_diagnostic(diag)}")
             if args.verbose:
                 for line in diag.splitlines():
                     print(f"      | {line}")
