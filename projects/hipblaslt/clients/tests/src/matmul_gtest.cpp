@@ -26,6 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
@@ -843,6 +844,73 @@ namespace
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
+
+    // ----------------------------------------------------------------------------
+    // MX scale layout on the TensileLite path
+    // ----------------------------------------------------------------------------
+
+    // HIPBLASLT_USE_ROCROLLER=0 keeps block-scaled problems on TensileLite, where
+    // packed scales used to run a HostPreSwizzle kernel and fail the norm check.
+    struct tensile_mx_layout_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            test_env::ScopedEnv rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+            testing_matmul(arg);
+        }
+    };
+
+    struct tensile_mx_layout_test
+        : RocBlasLt_Test<tensile_mx_layout_test, tensile_mx_layout_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_mx_layout");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(tensile_mx_layout_test, matmul)
+    {
+        if(GetParam().scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        {
+            tensile_mx_layout_testing{}(GetParam());
+            return;
+        }
+
+        // Packed scales either find a kernel that reads them, and then must match
+        // the reference, or find none. Today every gfx950 kernel for these FP8 and
+        // FP4 types is HostPreSwizzle, so they find none.
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            tensile_mx_layout_testing{}(GetParam());
+        }
+        const bool noKernel
+            = results.size() == 1 && results.GetTestPartResult(0).fatally_failed()
+              && std::strstr(results.GetTestPartResult(0).message(), "NO solution found!")
+                     != nullptr;
+        if(noKernel)
+            return;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed())
+                ADD_FAILURE_AT(r.file_name() ? r.file_name() : "", r.line_number()) << r.message();
+        }
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_mx_layout_test);
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     // ----------------------------------------------------------------------------

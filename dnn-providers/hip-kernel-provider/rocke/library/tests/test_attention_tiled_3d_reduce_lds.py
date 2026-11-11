@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
-# (``platform/CMakeLists.txt`` installs it); a source checkout reads the provider's.
+# (the rocKE umbrella CMake project installs it); a source checkout reads the provider's.
 _PACKS_DIRS = (
     Path(__file__).resolve().parent / "hkp_packs",
     Path(__file__).resolve().parents[3]

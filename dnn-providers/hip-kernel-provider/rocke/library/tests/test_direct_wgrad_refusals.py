@@ -8,7 +8,7 @@ One case per check in ``_wgrad_image_reason``, ``_wgrad_small_c_reason``,
 a spec both validators accept and changes one knob, then asserts that the
 validator and the builder refuse it with the message of that check
 (PYTHON_STYLE section 13.6). The C++ validators carry the same cases in
-``platform/tests/instances/conv_direct_wgrad_refusals_host.cpp``; keep the
+``library/cpp/tests/conv_direct_wgrad_refusals_host.cpp``; keep the
 two in step. Both read the message of each case from
 ``direct_wgrad_refusal_reasons.inc`` next to this file, so the two engines are
 held to one text.

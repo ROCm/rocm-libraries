@@ -66,7 +66,7 @@ _SEMANTIC_ARG_NAMES = (
     "right_bound",
     "left_bound",
     "align_bottom_right",
-    "lse_on",
+    "flags",
     "scale",
     "q_stride_b",
     "q_stride_s",
@@ -92,9 +92,18 @@ _SEMANTIC_ARG_NAMES = (
     "v_group",
     "SINK",
     "sink_stride",
+    "SEQLEN_Q",
+    "SEQLEN_KV",
+    "ROW_OFF_Q",
+    "ROW_OFF_KV",
+    "DROPOUT_SEED",
+    "DROPOUT_OFFSET1",
+    "dropout_offset2",
+    "idropout_p",
+    "dropout_scale",
 )
 
-_KERNARG_SEGMENT_SIZE = 264
+_KERNARG_SEGMENT_SIZE = 328
 _EXPECTED_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(5)),
     *(("by_value", 4, 40 + 4 * i) for i in range(9)),
@@ -105,6 +114,10 @@ _EXPECTED_SIGNATURE = (
     ("by_value", 4, 244),
     ("global_buffer", 8, 248),
     ("by_value", 8, 256),
+    *(("global_buffer", 8, 264 + 8 * i) for i in range(6)),
+    ("by_value", 8, 312),
+    ("by_value", 4, 320),
+    ("by_value", 4, 324),
 )
 
 # Launch geometry the native dispatch handler reproduces: one workgroup per
@@ -169,6 +182,8 @@ def _build_one(
         hd_pair=bool(knobs["hd_pair"]),
         head_dim_v=None if generic else knobs["head_dim_v"],
         has_sink=bool(knobs["has_sink"]),
+        has_dropout=bool(knobs["has_dropout"]),
+        v_mask=bool(knobs.get("v_mask", 0)),
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(
@@ -194,6 +209,10 @@ def _build_one(
     args += [1, 1]
     # The sink pointer and its head stride (read only by a sink object).
     args += [null, 0]
+    # The per-batch length and packed-sequence offset pointers (null: dense), then the
+    # dropout seed and offset pointers, offset2, threshold and scale (kernel
+    # modification 26).
+    args += [null] * 6 + [0, 0, 1.0]
     args.append(fx.Stream(None))
     # FlyDSL merges hint layers shallowly: an `llvm_options` passed here would
     # *replace* the kernel's own, not extend it. Merge onto them explicitly.
@@ -226,7 +245,7 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     op_dir = out_root / OP / arch
     op_dir.mkdir(parents=True, exist_ok=True)
 
-    instances = instances_for(OP)
+    instances = instances_for(OP, arch)
     llvm_options = LLVM_OPTIONS.get(arch, {})
     records: list[dict] = []
 
