@@ -481,7 +481,9 @@ public:
 
     fft_status execute(void** in, void** out) override
     {
-        auto ret = rocfft.execute(plan, in, out, info);
+        // out_buffer is documented as ignored for in-place transforms
+        auto ret
+            = rocfft.execute(plan, in, placement == fft_placement_inplace ? nullptr : out, info);
         return fft_status_from_rocfftparams(ret);
     }
 
