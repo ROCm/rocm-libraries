@@ -16,6 +16,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_cr_compute.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_cr_memory.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_sequence.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_affine_k_read.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_affine_v_read.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_prepared_k_read.hpp"

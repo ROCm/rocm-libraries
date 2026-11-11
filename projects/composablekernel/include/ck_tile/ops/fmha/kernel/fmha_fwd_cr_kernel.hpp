@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_cr.hpp"
 
@@ -31,6 +32,107 @@ struct FmhaFwdTdmCrKernel
     using WithTuning = FmhaFwdTdmCrKernel<Pipeline_, Epilogue_, OtherTuning, Strided_>;
 
     using StridedKernel = FmhaFwdTdmCrKernel<Pipeline_, Epilogue_, Tuning_, true>;
+
+    // Choose a native specialization; argument construction, validation and
+    // launch remain the caller's responsibility. Preserve this order when
+    // adding tuning variants, since several supported ranges overlap.
+    template <typename Args, typename Visitor>
+    CK_TILE_HOST static float VisitKernels(const Args& a, Visitor&& visitor)
+    {
+        using Kernel   = FmhaFwdTdmCrKernel;
+        using Pipeline = FmhaPipeline;
+        using Problem  = typename Pipeline::Problem;
+        if(ck_tile::get_device_name().compare(0, 7, "gfx1250") != 0 || !Kernel::IsSupportedInput(a))
+            return -1;
+
+        auto launch_strided = [&] { return visitor(typename Kernel::StridedKernel{}); };
+        if constexpr(!Pipeline::kCompact)
+            return launch_strided();
+        else
+        {
+            if(!detail::fmha_fwd_cr_compact_args(a))
+                return launch_strided();
+            auto launch = [&](auto tuning) {
+                using K = typename Kernel::template WithTuning<decltype(tuning)>;
+                return visitor(K{});
+            };
+            if constexpr(Pipeline::kM0 == 64)
+                return launch(ck_tile::FmhaTdmCrTuning<0, true, true>{});
+            else
+            {
+                if constexpr(Pipeline::kM0 == 128 && !Problem::kPadSeqLenQ && !Problem::kPadSeqLenK)
+                {
+                    if constexpr(Pipeline::kCausal)
+                    {
+                        // A single query tile has no traversal to group across heads.
+                        if(a.seqlen_q == 128 && a.seqlen_k == 128)
+                            return launch(ck_tile::FmhaTdmCrTuning<0, true, false, 0>{});
+                        // Four causal query tiles benefit from larger head groups once
+                        // every XCD owns at least two complete groups of 32 rows.
+                        if(a.nhead_q == 8 && a.seqlen_q == 512 && a.seqlen_k == 512 &&
+                           a.batch >= 64 && a.batch % 32 == 0)
+                            return launch(ck_tile::FmhaTdmCrTileTuning<4>{});
+                    }
+                    if(detail::fmha_fwd_cr_has_static_tuning(a))
+                    {
+                        switch(a.seqlen_q)
+                        {
+                        case 512: return launch(ck_tile::FmhaTdmCrTuning<512>{});
+                        case 1024: return launch(ck_tile::FmhaTdmCrTuning<1024>{});
+                        case 2048: return launch(ck_tile::FmhaTdmCrTuning<2048>{});
+                        case 4096: return launch(ck_tile::FmhaTdmCrTuning<4096>{});
+                        case 8192: return launch(ck_tile::FmhaTdmCrTuning<8192>{});
+                        case 16384: return launch(ck_tile::FmhaTdmCrTuning<16384>{});
+                        case 32768: return launch(ck_tile::FmhaTdmCrTuning<32768>{});
+                        }
+                    }
+                    if constexpr(!Pipeline::kCausal)
+                    {
+                        if(a.nhead_q == 8)
+                        {
+                            if(a.seqlen_q == a.seqlen_k)
+                            {
+                                switch(a.seqlen_q)
+                                {
+                                case 128: return launch(ck_tile::FmhaTdmCrTileTuning<1>{});
+                                case 256: return launch(ck_tile::FmhaTdmCrTileTuning<2>{});
+                                case 512: return launch(ck_tile::FmhaTdmCrTileTuning<4>{});
+                                case 640: return launch(ck_tile::FmhaTdmCrTileTuning<5>{});
+                                case 1024: return launch(ck_tile::FmhaTdmCrTileTuning<8>{});
+                                case 4096:
+                                    if(a.batch <= 4)
+                                        return launch(ck_tile::FmhaTdmCrTileTuning<32>{});
+                                    break;
+                                }
+                            }
+                            if(a.seqlen_q == 1024 && a.seqlen_k == 2048)
+                                return launch(ck_tile::FmhaTdmCrTileTuning<8, 16>{});
+                            if(a.seqlen_q == 2048 && a.seqlen_k == 1024)
+                                return launch(ck_tile::FmhaTdmCrTileTuning<16, 8>{});
+                        }
+                    }
+                }
+                if constexpr(Pipeline::kM0 == 128 && !Pipeline::kCausal && Problem::kPadSeqLenQ &&
+                             Problem::kPadSeqLenK)
+                {
+                    if(a.nhead_q == 8 && a.seqlen_q > 512 && a.seqlen_q < 640 && a.seqlen_k > 512 &&
+                       a.seqlen_k < 640)
+                    {
+                        // Nearly full tails have a fixed K tile count and benefit from
+                        // fragment masks for their partial query/key tiles.
+                        if(a.seqlen_q % 16 == 15 && a.seqlen_k % 128 > 112)
+                            return launch(ck_tile::FmhaTdmCrTileTuning<5, 0, true>{});
+                        return launch(ck_tile::FmhaTdmCrTileTuning<5, 0>{});
+                    }
+                }
+                if(a.seqlen_q <= 512)
+                    return launch(ck_tile::FmhaTdmCrTuning<0, true, false>{});
+                if(a.seqlen_q <= 2048)
+                    return launch(ck_tile::FmhaTdmCrTuning<0, true, true>{});
+                return launch(ck_tile::FmhaTdmCrTuning<>{});
+            }
+        }
+    }
 
     // Validate the complete input before compact conversion discards its layout.
     // Input exposes the named fields of CK's forward tensor/sequence view; it

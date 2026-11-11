@@ -748,7 +748,20 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
                               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
 }
 
-template <typename FmhaKernel>
+template <typename Kernel>
+using fmha_fwd_native_kargs = decltype(Kernel::MakeKargs(std::declval<const fmha_fwd_args&>()));
+
+template <typename FmhaKernel,
+          std::enable_if_t<ck_tile::is_detected<fmha_fwd_native_kargs, FmhaKernel>::value, int> = 0>
+auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
+{
+    auto kargs = FmhaKernel::MakeKargs(args);
+    return ck_tile::make_tuple(kargs, FmhaKernel::GridSize(kargs));
+}
+
+template <
+    typename FmhaKernel,
+    std::enable_if_t<!ck_tile::is_detected<fmha_fwd_native_kargs, FmhaKernel>::value, int> = 0>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
@@ -1860,18 +1873,39 @@ float fmha_batch_prefill(fmha_batch_prefill_traits,
 template <typename Kernel, typename Arch>
 struct FmhaFwdLaunch
 {
+    template <typename K, typename Visitor>
+    using has_kernel_selection =
+        decltype(K::VisitKernels(std::declval<const fmha_fwd_args&>(), std::declval<Visitor>()));
+
+    template <typename K>
+    static auto Prepare(const fmha_fwd_args& a, const K&)
+    {
+        return fmha_fwd_create_kargs_and_grids<K>(a);
+    }
+
+    template <typename Pipeline, typename Epilogue>
+    static auto Prepare(const fmha_fwd_args& a, const ck_tile::FmhaFwdV3Kernel<Pipeline, Epilogue>&)
+    {
+        return fmha_fwd_v3_create_kargs_and_grids<ck_tile::FmhaFwdV3Kernel<Pipeline, Epilogue>>(a);
+    }
+
     static float Run(const ck_tile::stream_config& s, const fmha_fwd_args& a)
     {
-        auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<Kernel>(a);
-        if(!Kernel::IsSupportedArgument(kargs))
-        {
-            ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
-            return -1;
-        }
-        return ck_tile::launch_kernel(s,
-                                      ck_tile::make_kernel<Kernel::kBlockPerCu, Arch>(
-                                          Kernel{}, grids, Kernel::BlockSize(), 0, kargs));
+        auto launch = [&](auto kernel) {
+            using K             = decltype(kernel);
+            auto [kargs, grids] = Prepare(a, kernel);
+            if(!K::IsSupportedArgument(kargs))
+            {
+                ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
+                return -1.0f;
+            }
+            return ck_tile::launch_kernel(s,
+                                          ck_tile::make_kernel<K::kBlockPerCu, Arch>(
+                                              kernel, grids, K::BlockSize(), 0, kargs));
+        };
+        if constexpr(ck_tile::is_detected<has_kernel_selection, Kernel, decltype(launch)>::value)
+            return Kernel::VisitKernels(a, launch);
+        else
+            return launch(Kernel{});
     }
 };
-
-#include "fmha_fwd_cr.hpp"

@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_cr_memory.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_sequence.hpp"
 
 // Keep QK/PV operand lifetimes and scheduling regions together.
 namespace ck_tile::detail::fmha_cr {
@@ -227,18 +228,10 @@ CK_TILE_DEVICE void run(Args a)
         vbase = (a.group ? key_start * vstride : batch * a.batch_v) + kv_head * a.head_v;
         obase = (a.group ? qs * row_stride : batch * a.batch_o) + head * a.head_o;
         lbase = (a.group ? qs : batch * a.batch_lse) + head * a.head_lse;
-        if(a.length_q)
-            a.sq = a.length_q[batch];
-        else if(a.cumulative_q)
-            a.sq = a.cumulative_q[batch + 1] - a.cumulative_q[batch];
-        else if(a.group)
-            a.sq = a.start_q[batch + 1] - qs;
-        if(a.length_k)
-            a.sk = a.length_k[batch];
-        else if(a.cumulative_k)
-            a.sk = a.cumulative_k[batch + 1] - a.cumulative_k[batch];
-        else if(a.group)
-            a.sk = a.start_k[batch + 1] - key_start;
+        a.sq  = detail::fmha_fwd_sequence_length(
+            a.group, batch, a.sq, a.length_q, a.cumulative_q, a.start_q);
+        a.sk = detail::fmha_fwd_sequence_length(
+            a.group, batch, a.sk, a.length_k, a.cumulative_k, a.start_k);
         if(tile * BM >= a.sq)
             return;
     }

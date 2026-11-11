@@ -3,13 +3,7 @@
 
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp"
-#include "ck_tile/ops/fmha/kernel/fmha_fwd_cr_kernel.hpp"
 
-// Keep native device code under the production build settings, but exercise
-// the host adapter's tuning-contract assertions even in Release test builds.
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
 #include "gtest/gtest.h"
 
@@ -515,8 +509,30 @@ TEST_F(CrForward, GroupAndEmptyKeys)
     CheckForward<ck_tile::bf16_t, 128, false, false>(129, 0, 8);
 }
 
+struct UnsupportedTuningSelection
+{
+    template <typename Args, typename Visitor>
+    static float VisitKernels(const Args&, Visitor&& visitor)
+    {
+        using Kernel = Model<ck_tile::bf16_t, 128, false, false, false>::Kernel;
+        return visitor(typename Kernel::WithTuning<ck_tile::FmhaTdmCrTuning<512>>{});
+    }
+};
+
 TEST(CrArgumentContract, FixedTuningAndCompactLayout)
 {
+    // Metadata may contain both physical padding and logical lengths. An
+    // explicit zero length must override a nonempty physical or cumulative span.
+    constexpr int32_t starts[]     = {0, 128, 384};
+    constexpr int32_t cumulative[] = {0, 96, 160};
+    constexpr int32_t lengths[]    = {80, 0};
+    using ck_tile::detail::fmha_fwd_sequence_length;
+    static_assert(fmha_fwd_sequence_length(true, 1, 512, lengths, cumulative, starts) == 0);
+    static_assert(fmha_fwd_sequence_length(true, 1, 512, nullptr, cumulative, starts) == 64);
+    static_assert(fmha_fwd_sequence_length(true, 1, 512, nullptr, nullptr, starts) == 256);
+    static_assert(fmha_fwd_sequence_length(false, 1, 512, nullptr, cumulative, nullptr) == 64);
+    static_assert(fmha_fwd_sequence_length(false, 1, 512, nullptr, nullptr, nullptr) == 512);
+
     using Kernel = Model<ck_tile::bf16_t, 128, false, false, false>::Kernel;
     using Static = Kernel::WithTuning<ck_tile::FmhaTdmCrTuning<512>>;
     using Tiles  = Kernel::WithTuning<ck_tile::FmhaTdmCrTileTuning<4>>;
@@ -540,6 +556,19 @@ TEST(CrArgumentContract, FixedTuningAndCompactLayout)
     EXPECT_TRUE(Tail::IsSupportedArgument(a));
     a.sq = 638;
     EXPECT_FALSE(Tail::IsSupportedArgument(a));
+
+    // Even if a selector chooses an incompatible tuning, the common launcher
+    // must reject it in Release builds before touching these small host buffers.
+    fmha_fwd_args input{};
+    input.q_ptr = input.k_ptr = input.v_ptr = storage;
+    input.o_ptr = input.lse_ptr = storage;
+    input.batch                 = 1; // The fixed tuning requires B32.
+    input.nhead_q               = 8;
+    input.seqlen_q = input.seqlen_k = 512;
+    input.scale_s                   = 0.5f;
+    EXPECT_EQ((FmhaFwdLaunch<UnsupportedTuningSelection, ck_tile::gfx125_t>::Run(
+                  ck_tile::stream_config{nullptr, false}, input)),
+              -1.0f);
 }
 
 #endif

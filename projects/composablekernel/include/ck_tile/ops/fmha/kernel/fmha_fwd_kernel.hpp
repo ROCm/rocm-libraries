@@ -13,6 +13,7 @@
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_workgroup_mapping.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_sequence.hpp"
 
 #include <string>
 #include <type_traits>
@@ -1889,20 +1890,12 @@ struct FmhaFwdKernel
 
                 // real logical lengths (exclude PAD)
                 // Priority: seqlen_q_ptr > cu_seqlen_q_ptr > calculated from seqstart_q_ptr
-                if(kargs.seqlen_q_ptr != nullptr)
-                {
-                    kargs.seqlen_q = kargs.seqlen_q_ptr[i_batch];
-                }
-                else if(kargs.cu_seqlen_q_ptr != nullptr)
-                {
-                    kargs.seqlen_q =
-                        kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
-                }
-                else
-                {
-                    const auto adjusted_seqstart_q_ptr = kargs.seqstart_q_ptr + i_batch;
-                    kargs.seqlen_q = adjusted_seqstart_q_ptr[1] - adjusted_seqstart_q_ptr[0];
-                }
+                kargs.seqlen_q = detail::fmha_fwd_sequence_length(true,
+                                                                  i_batch,
+                                                                  kargs.seqlen_q,
+                                                                  kargs.seqlen_q_ptr,
+                                                                  kargs.cu_seqlen_q_ptr,
+                                                                  kargs.seqstart_q_ptr);
 
                 if constexpr(kSkipMinSeqlenQ)
                 {
@@ -1918,20 +1911,12 @@ struct FmhaFwdKernel
                     return;
                 }
 
-                if(kargs.seqlen_k_ptr != nullptr)
-                {
-                    kargs.seqlen_k = kargs.seqlen_k_ptr[i_batch];
-                }
-                else if(kargs.cu_seqlen_k_ptr != nullptr)
-                {
-                    kargs.seqlen_k =
-                        kargs.cu_seqlen_k_ptr[i_batch + 1] - kargs.cu_seqlen_k_ptr[i_batch];
-                }
-                else
-                {
-                    const auto adjusted_seqstart_k_ptr = kargs.seqstart_k_ptr + i_batch;
-                    kargs.seqlen_k = adjusted_seqstart_k_ptr[1] - adjusted_seqstart_k_ptr[0];
-                }
+                kargs.seqlen_k = detail::fmha_fwd_sequence_length(true,
+                                                                  i_batch,
+                                                                  kargs.seqlen_k,
+                                                                  kargs.seqlen_k_ptr,
+                                                                  kargs.cu_seqlen_k_ptr,
+                                                                  kargs.seqstart_k_ptr);
             }
             else
             {
@@ -2685,20 +2670,12 @@ struct FmhaFwdKernel
                 batch_offset_o   = query_start * kargs.stride_o;
 
                 // get real # queries & # keys under group mode
-                if(kargs.seqlen_q_ptr != nullptr)
-                {
-                    kargs.seqlen_q = kargs.seqlen_q_ptr[i_batch];
-                }
-                else if(kargs.cu_seqlen_q_ptr != nullptr)
-                {
-                    kargs.seqlen_q =
-                        kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
-                }
-                else
-                {
-                    kargs.seqlen_q =
-                        kargs.seqstart_q_ptr[i_batch + 1] - kargs.seqstart_q_ptr[i_batch];
-                }
+                kargs.seqlen_q = detail::fmha_fwd_sequence_length(true,
+                                                                  i_batch,
+                                                                  kargs.seqlen_q,
+                                                                  kargs.seqlen_q_ptr,
+                                                                  kargs.cu_seqlen_q_ptr,
+                                                                  kargs.seqstart_q_ptr);
 
                 if constexpr(kSkipMinSeqlenQ)
                 {
@@ -2713,20 +2690,12 @@ struct FmhaFwdKernel
                     return;
                 }
 
-                if(kargs.seqlen_k_ptr != nullptr)
-                {
-                    kargs.seqlen_k = kargs.seqlen_k_ptr[i_batch];
-                }
-                else if(kargs.cu_seqlen_k_ptr != nullptr)
-                {
-                    kargs.seqlen_k =
-                        kargs.cu_seqlen_k_ptr[i_batch + 1] - kargs.cu_seqlen_k_ptr[i_batch];
-                }
-                else
-                {
-                    kargs.seqlen_k =
-                        kargs.seqstart_k_ptr[i_batch + 1] - kargs.seqstart_k_ptr[i_batch];
-                }
+                kargs.seqlen_k = detail::fmha_fwd_sequence_length(true,
+                                                                  i_batch,
+                                                                  kargs.seqlen_k,
+                                                                  kargs.seqlen_k_ptr,
+                                                                  kargs.cu_seqlen_k_ptr,
+                                                                  kargs.seqstart_k_ptr);
             }
             else
             {
@@ -3665,3 +3634,5 @@ struct FmhaFwdKernel
 };
 
 } // namespace ck_tile
+
+#include "ck_tile/ops/fmha/kernel/fmha_fwd_cr_kernel.hpp"

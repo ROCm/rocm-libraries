@@ -289,11 +289,7 @@ template <>
 inline float fmha_fwd_<{ns}::trait, {arch_tag}>(const ck_tile::stream_config& s, fmha_fwd_args a)
 {{
     using k_ = {ns}::fmha_kernel;
-    auto [kargs, grids] = {"fmha_fwd_v3_create_kargs_and_grids" if pipeline_name in ("v3", "qr_async_trload_v3") else "fmha_fwd_create_kargs_and_grids"}<k_>(a);
-    const dim3 blocks = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(
-        s, ck_tile::make_kernel<kBlockPerCu, {arch_tag}>(k_{{}}, grids, blocks, 0, kargs));
+    return FmhaFwdLaunch<k_, {arch_tag}>::Run(s, a);
 }}
 
 namespace {ns} {{

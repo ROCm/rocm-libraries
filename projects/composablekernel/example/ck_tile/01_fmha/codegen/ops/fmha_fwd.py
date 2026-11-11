@@ -85,17 +85,6 @@ FMHA_FWD_KERNEL_HEADER_QR_HPAD = """// SPDX-License-Identifier: MIT
 #include "fmha_fwd.hpp"
 """
 
-FMHA_FWD_LAUNCH_TEMPLATE = """    auto [kargs, grids] = {F_kargs_creator}<k_>(a);
-    if(!k_::IsSupportedArgument(kargs))
-    {{
-        ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
-        return -1;
-    }}
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch}>(k_{{}}, grids, blocks, 0, kargs));
-"""
-
 FMHA_FWD_KERNEL_BODY_TEMPLATE = """
 #include <iostream>
 
@@ -915,13 +904,6 @@ class FmhaFwdKernel:
             return cls._KERNEL_HEADER_QR_HPAD
         return cls._KERNEL_HEADER
 
-    @classmethod
-    def _get_cpp_kargs_creator_func_name(cls, pipeline_tag):
-        if pipeline_tag == "qr_async_trload_v3":
-            return "fmha_fwd_v3_create_kargs_and_grids"
-        else:
-            return "fmha_fwd_create_kargs_and_grids"
-
     def _get_epilogue_decl(self) -> str:
         spad = BOOL_MAP[self.F_pipeline.F_spad]
         dvpad = BOOL_MAP[self.F_pipeline.F_dvpad]
@@ -1011,16 +993,7 @@ class FmhaFwdKernel:
                 else ""
             ),
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
-            F_launch=(
-                f"    return FmhaFwdLaunch<k_, {self.F_arch.tag}>::Run(s, a);"
-                if self.F_pipeline.tag != "qr_async_trload_v3"
-                else FMHA_FWD_LAUNCH_TEMPLATE.format(
-                    F_kargs_creator=self._get_cpp_kargs_creator_func_name(
-                        self.F_pipeline.tag
-                    ),
-                    F_arch=self.F_arch.tag,
-                )
-            ),
+            F_launch=f"    return FmhaFwdLaunch<k_, {self.F_arch.tag}>::Run(s, a);",
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_epilogue=self._get_epilogue_decl(),
         )
