@@ -277,7 +277,10 @@ def _tr_swz(b: IRBuilder, row: Value) -> Value:
     """Granule XOR of weight row ``row``, 2 * (row % 4 + 4 * ((row // 8) % 2)):
     the 32 lanes of a transposing-read phase (rows 8b + i, b in 0..1, i in
     0..3, column pairs 4j) land on 32 distinct 8-byte slots of a 256-byte bank
-    period."""
+    period. Not an entry of ``rocke.helpers.layouts.XOR_SWIZZLE_TABLE``, whose
+    byte-offset swizzles cover the listed MFMA tile shapes but not this
+    64-row tile read across rows by ``ds_read_b64_tr_b16``; the C++ mirror is
+    ``tr_swz`` in ``conv_direct_dgrad_pp_mfma.cpp``."""
     lo = b.mod(row, b.const_i32(4))
     hi = b.mod(b.div(row, b.const_i32(8)), b.const_i32(2))
     return b.mul(b.add(lo, b.mul(hi, b.const_i32(4))), b.const_i32(2))
