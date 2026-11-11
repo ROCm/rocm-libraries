@@ -348,7 +348,10 @@ def emitTDMStoreLoadC(gwb) -> Module:
 def emitTDMStoreFlush(gwb) -> Module:
   """Store the staged D tile with one tensor_store_from_lds per wave.
 
-  Each wave stores MacroTile1/numWaves consecutive columns of the tile. tensor_dim0/1 bound
+  Each wave stores MacroTile1/numWaves consecutive columns of the tile. In a persistent kernel the next tile
+  must not write LDS before every wave's store has read the staged tile: the barrier that ends the tile
+  handoff orders that when the handoff has one (WorkAssignment.handoffFencesLds), and otherwise the flush
+  ends with its own. tensor_dim0/1 bound
   the store to the part of the tile inside D; a wave whose columns all lie at or past SizeJ
   skips its store instead of relying on a zero tensor_dim.
   """
@@ -371,6 +374,7 @@ def emitTDMStoreFlush(gwb) -> Module:
       # Nor this one: after the OptNLL store, nothing re-derives it before s_endpgm.
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store " + STINKY_KEEP))
       module.add(skipStore)
-  if isPersistent(gwb.kernel):
+  from ..Component import Component
+  if isPersistent(gwb.kernel) and not Component.WorkAssignment.find(kw).handoffFencesLds(gwb.kernel):
     module.add(kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS"))
   return module

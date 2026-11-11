@@ -821,6 +821,42 @@ def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys
     assert any(_code(line).startswith("s_wait_tensorcnt") for line in lines[store + 1:end]), lines[store]
 
 
+_HANDOFF = ("hand compute LDS back to persistent TDM prefetch", "hand epilogue LDS back to persistent compute",
+            "Sync before persistent re-entry")
+_FLUSH_BARRIER = "every TDM store is done with the staged tile before the next tile writes LDS"
+
+
+_MT128 = [16, 16, 32, 1, 1, 4, 4, 2, 2]
+
+
+@pytest.mark.parametrize("mi, policy", [(None, {"StreamK": 3}), (None, {"StreamK": 3, "StreamKForceDPOnly": 1}),
+                                        (None, {"StreamK": 4}), (None, {"StreamK": 3, "ClusterDim": [2, 1]}),
+                                        (_MT128, _PAP)],
+                         ids=["sk3", "dp", "sk4", "sk3_cluster", "dp_pap"])
+def test_flush_has_no_duplicate_persistent_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys, mi, policy):
+  """With TDM loads the persistent tile handoff ends with a workgroup barrier before the next tile's work, so the
+  TDM flush adds none: from the end of every store section with a TDM store to the handoff barrier nothing writes
+  LDS. Without TDM
+  loads a StaticGrid StreamK 3 handoff has no barrier, and the flush keeps its own. The PAP kernel and the
+  control are MT128x128, like the PAP tests above."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=mi, TDMStoreInst=3, TDMInst=3, **policy)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert _FLUSH_BARRIER not in asm and "tensor_store_from_lds " in asm
+  lines = asm.splitlines()
+  ends = [i for i, line in enumerate(lines) if re.match(r"label_GW_End\w*:", line)]
+  # The GlobalSplitU MultipleBuffer section ends at its own label and stores with buffer_store only.
+  ends = [end for start, end in zip([0] + ends, ends) if any("tensor_store_from_lds " in x for x in lines[start:end])]
+  assert ends
+  for end in ends:
+    handoff = next((i for i in range(end, len(lines)) if any(tag in lines[i] for tag in _HANDOFF)), None)
+    assert handoff is not None, lines[end]
+    writes = [code for code in map(_code, lines[end:handoff]) if code.startswith(("ds_store", "ds_write", "tensor_load_to_lds"))]
+    assert not writes, (lines[end], writes[:2])
+  csol, control = _emit_asm(gfx1250_iim, assembler, mi=_MT128, TDMStoreInst=3, TDMInst=0, StreamK=3)
+  assert csol.get("Valid") and control, capsys.readouterr().out
+  assert _FLUSH_BARRIER in control
+
+
 @pytest.mark.parametrize("level", _LEVELS)
 @pytest.mark.parametrize("policy", [{"StreamK": 3, "StreamKForceDPOnly": 1}, {"StreamK": 4}], ids=["dp", "sk4"])
 def test_persistent_kernels_stage_and_fence(gp_gfx1250, gfx1250_iim, assembler, capsys, level, policy):
