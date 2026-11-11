@@ -83,12 +83,23 @@ def test_direct_parse_keeps_flags_before_mode():
 
 
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
-def test_direct_parse_rejects_fp32_by_its_own_keyword(kw):
+def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
-    # The error names the keyword the command gave, not the "-m conv" value.
-    with pytest.raises(ValueError, match=f"fp32 \\('{kw}'\\)"):
-        parse_miopen_cmd_direct(f"MIOpenDriver {kw} " + _FLAGS.format(g=64, f=1))
+    # The fp32 driver keywords give fp32 problems, and TF32 under -M 0 (the
+    # direct kernels take fp32 storage).
+    cmd = f"MIOpenDriver {kw} " + _FLAGS.format(g=64, f=1)
+    assert parse_miopen_cmd_direct(cmd)[1] == "fp32"
+    assert parse_miopen_cmd_direct(cmd + " -M 0")[1] == "tf32"
+
+
+def test_direct_parse_takes_dtype_from_keyword_not_mode_value():
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # "-m conv" is a flag value, not the fp32 driver keyword.
+    cmd = "MIOpenDriver convfp16 " + _FLAGS.format(g=64, f=1)
+    assert parse_miopen_cmd_direct(cmd)[1] == "fp16"
+    assert parse_miopen_cmd_direct(cmd + " -M 0")[1] == "fp16"
 
 
 def test_direct_parse_rejects_mode_value_as_keyword():
@@ -142,7 +153,7 @@ def test_batch_chunks_single_launch_up_to_the_limit(direction):
     assert _chunks(direction, _image(15)) == [(0, 15)]
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_batch_chunks_splits_one_past_the_limit(direction):
     # 16 images are exactly 2^31 bytes: one byte past the i32 maximum.
     assert _chunks(direction, _image(16)) == [(0, 8), (8, 8)]
@@ -155,8 +166,10 @@ def test_batch_chunks_balances_slices():
 
 
 def test_batch_chunks_fp32_doubles_the_bytes():
-    assert _chunks("fwd", _image(7), "fp32") == [(0, 7)]
-    assert _chunks("fwd", _image(8), "fp32") == [(0, 4), (4, 4)]
+    # tf32 is fp32 storage with a TF32 math mode: 4-byte operands too.
+    for dtype in ("fp32", "tf32"):
+        assert _chunks("fwd", _image(7), dtype) == [(0, 7)]
+        assert _chunks("fwd", _image(8), dtype) == [(0, 4), (4, 4)]
 
 
 def test_batch_chunks_sized_by_the_larger_activation():
@@ -181,9 +194,20 @@ def test_batch_chunks_3d_counts_depth():
     assert _chunks("fwd", p) == [(0, 8), (8, 8)]
 
 
-def test_batch_chunks_wgrad_cannot_split():
-    with pytest.raises(ValueError, match="wgrad reduces over"):
-        _chunks("wgrad", _image(16))
+def test_wgrad_slices_need_a_kernel_that_accumulates():
+    """A wgrad problem past the limit runs as slices that all add into the one
+    dW: only the packed-atomic split-K kernels accumulate into it."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_implicit_gemm_conv import _wgrad_accumulates
+
+    def ident(split_k, two_stage=False, streamk="off"):
+        return SimpleNamespace(split_k=split_k, two_stage=two_stage, streamk=streamk)
+
+    assert _wgrad_accumulates(ident(4))
+    assert not _wgrad_accumulates(ident(1))
+    assert not _wgrad_accumulates(ident(4, two_stage=True))
+    assert not _wgrad_accumulates(ident(4, streamk="linear"))
 
 
 def test_batch_chunks_rejects_one_oversized_image():

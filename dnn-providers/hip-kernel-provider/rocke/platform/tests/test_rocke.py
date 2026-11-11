@@ -583,7 +583,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(loads[0].attrs["vec"], 16)
         self.assertEqual(loads[0].attrs["align"], 32)
 
-        # store_wmma_acc scatters c_per_lane scalars via the c_layout map.
+        # store_wmma_acc scatters c_per_lane scalars via the destination map.
         b3 = IRBuilder("wmma_store")
         o = b3.param("O", PtrType(F16, "global"))
         so = b3.param("so", I32)
@@ -659,7 +659,7 @@ class TestHelpers(unittest.TestCase):
         muls = [o for o in self._kernel_ops(b3.kernel) if o.name == "vector.mul"]
         self.assertEqual(len(muls), 1)
 
-        # store_wmma_tile -> c_per_lane scalar stores via the c_layout map.
+        # store_wmma_tile -> c_per_lane scalar stores via the destination map.
         b4 = IRBuilder("wmma_tile_store")
         o = b4.param("O", PtrType(F16, "global"))
         so = b4.param("so", I32)
@@ -6989,7 +6989,9 @@ class TestLauncherBind(unittest.TestCase):
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._kernel_name = "k"
         launcher._cluster_dims = None
+        launcher._contract = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):
@@ -7653,6 +7655,49 @@ class TestResolveStream(unittest.TestCase):
             self.assertEqual(resolve_stream(0), 99)
 
 
+class TestTorchDtypeAndDeviceTensor(unittest.TestCase):
+    """``torch_interop.torch_dtype`` / ``device_tensor``: the torch glue a
+    library binding uses instead of importing torch itself."""
+
+    def test_torch_dtype_resolves_by_name(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import torch_dtype
+
+        fake = SimpleNamespace(int32="i32", float16="f16")
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertEqual(torch_dtype("int32"), "i32")
+            self.assertEqual(torch_dtype("float16"), "f16")
+            with self.assertRaisesRegex(ValueError, "no dtype 'int31'"):
+                torch_dtype("int31")
+
+    def test_device_tensor_passes_values_dtype_and_device(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor
+
+        fake = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            out = device_tensor(range(3), dtype="i32", device="dev")
+        fake.tensor.assert_called_once_with([0, 1, 2], dtype="i32", device="dev")
+        self.assertIs(out, fake.tensor.return_value)
+
+    def test_both_raise_when_torch_absent(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor, torch_dtype
+
+        with mock.patch.dict(sys.modules, {"torch": None}):
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                torch_dtype("int32")
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                device_tensor([1], dtype=None, device=None)
+
+
 class TestPackArgsKernargABI(unittest.TestCase):
     """``pack_args`` / ``pack_args_kernelparams`` -- AMDGPU kernarg ABI.
 
@@ -7741,7 +7786,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
 
-    def test_as_ptr_accepts_devicemem_ptr_method(self):
+    def test_device_pointer_accepts_devicemem_ptr_method(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7757,7 +7802,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         )
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xDEAD)
 
-    def test_as_ptr_prefers_data_ptr_over_ptr(self):
+    def test_device_pointer_prefers_data_ptr_over_ptr(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7774,7 +7819,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": _Both()})
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xAAAA)
 
-    def test_as_ptr_none_encodes_null(self):
+    def test_device_pointer_none_encodes_null(self):
         import struct
 
         from rocke.runtime.packing import pack_args
@@ -7782,7 +7827,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
         packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": None})
         self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0)
 
-    def test_as_ptr_rejects_unconvertible(self):
+    def test_device_pointer_rejects_unconvertible(self):
         from rocke.runtime.packing import pack_args
 
         # A non-callable ptr attribute is not a device pointer -- the callable()

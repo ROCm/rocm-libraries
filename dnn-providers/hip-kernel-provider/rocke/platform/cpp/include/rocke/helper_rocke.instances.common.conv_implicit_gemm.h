@@ -237,6 +237,92 @@ bool rocke_conv_coalesced_load_ok(const char* operand,
 bool rocke_conv_vector_width_ok(
     const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap);
 
+/* ------------------------------------------------------------------ *
+ * ConvDataSpec.mma_dtype -- TF32 compute (_conv_implicit_gemm_common.py)
+ * ------------------------------------------------------------------ *
+ *
+ * mma_dtype selects the matrix-core input type when it differs from the
+ * storage type. NULL (Python None, the default) means the MMA consumes
+ * dtype_a / dtype_b as stored. The one other value is "tf32": A and B stay
+ * fp32 in memory and LDS, and each fragment read from LDS is reinterpreted as
+ * vec<tf32xN> for the catalog's TF32 atom -- native XF32 on gfx942, BF16x3
+ * emulation on gfx950.
+ *
+ * Every *_reason function below mirrors a Python "why, or None/''" helper:
+ * it returns true and writes the Python reason text into `reason` (if
+ * non-NULL) when the spec cannot build, and returns false when it can. */
+
+/* _TF32_LDS_LOAD_MAX: the widest single LDS load a TF32 fragment is issued as
+ * (fp32 elements): 16 B, one ds_read_b128. Wider fragments are read as several
+ * of these. */
+#define ROCKE_CONV_TF32_LDS_LOAD_MAX 4
+
+/* _is_tf32_spelling(dtype): does `dtype` spell the logical TF32 compute mode
+ * (tf32, xf32, any case)? NULL is not a spelling. */
+bool rocke_conv_is_tf32_spelling(const char* dtype);
+
+/* ConvDataSpec.is_tf32: mma_dtype == "tf32". */
+bool rocke_conv_data_is_tf32(const char* mma_dtype);
+
+/* ConvDataSpec.mma_a / mma_b: the dtype the MMA consumes for an operand
+ * stored as `storage` (mma_dtype or storage). */
+const char* rocke_conv_data_mma_operand(const char* storage, const char* mma_dtype);
+
+/* ConvDataSpec.mma_dtype_reason(): the storage/compute mix-ups the
+ * byte-sizing validators cannot catch. */
+bool rocke_conv_mma_dtype_reason(const char* dtype_a,
+                                 const char* dtype_b,
+                                 const char* dtype_d,
+                                 const char* mma_dtype,
+                                 char* reason,
+                                 size_t reason_cap);
+
+/* The conv spec fields the TF32 gates read. Python passes the spec itself
+ * (duck typed over the forward, dgrad and wgrad specs); each C family fills
+ * one of these from its own spec. effective_lds_layout() is evaluated by the
+ * family: its row stride, or (lds_layout_error non-NULL) the ValueError text
+ * it raised, which the gate returns where Python catches it. */
+typedef struct rocke_conv_tf32_spec_view
+{
+    const char* dtype_a;
+    const char* dtype_b;
+    const char* dtype_d;
+    const char* mma_dtype;
+    int wave_size;
+    int tile_m;
+    int tile_n;
+    int warp_m;
+    int warp_n;
+    int warp_tile_m;
+    int warp_tile_n;
+    int warp_tile_k;
+    bool lds_k_outer;
+    bool async_dma;
+    /* lds_layout is not None and lds_layout.swizzle is not None. The C specs
+     * take no lds_layout override, so their families always pass false. */
+    bool lds_layout_swizzled;
+    int lds_row_stride;
+    const char* lds_layout_error;
+} rocke_conv_tf32_spec_view_t;
+
+/* _tf32_conv_spec_reason(spec, arch, async_needs_k_outer=...): the one TF32
+ * gate of the dgrad and wgrad kernels (arch NULL = the arch-free validate()
+ * form). Every non-TF32 spec passes unless it spells TF32 as a storage dtype. */
+bool rocke_conv_tf32_conv_spec_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                      const char* arch,
+                                      bool async_needs_k_outer,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* _tf32_mfma_reason(spec, arch): the rules every implicit-GEMM direction
+ * shares for a TF32 spec -- wave64, a TF32 warp-tile atom (on `arch`, or on
+ * any arch when arch is NULL), the emulated-atom register ceiling, and the LDS
+ * row-stride alignment. The forward gate (_fwd_tf32_reason) calls it directly. */
+bool rocke_conv_tf32_mfma_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                 const char* arch,
+                                 char* reason,
+                                 size_t reason_cap);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
