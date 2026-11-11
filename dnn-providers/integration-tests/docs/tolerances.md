@@ -456,13 +456,14 @@ solver family, over the outputs whose test ran that one family:
 
 ### The base coefficient and the engine's
 
-The base coefficient, which the SDK uses for an engine that sets nothing, is 3:
-the smallest whole number with no false failure for every solver family of the
-data but Winograd (their largest need is 2.46, so the smallest headroom is
-1.22, on CK fused solvers on gfx942). With it the base model fails 11 to 592
-correct outputs per data set only for Winograd, whose largest need is 5.68, and
-this is how large `c` has to be for a solver that errs that much; no theory term
-tells the two apart, and the harness does not know the solver.
+The base coefficient, which the SDK uses for an engine that sets nothing, is 4:
+the smallest whole number that leaves a headroom of at least 1.5 (the floor used
+for MIOpen's value below) over the largest need of any solver family but
+Winograd, 2.46 on CK fused solvers on gfx942. At 4 that headroom is 1.63. 3
+would be enough to pass the data (1.22) but is too thin for hardware nobody has
+measured. For Winograd the same constant fails 11 to 592 correct outputs per
+data set; no theory term tells the two apart, and the harness does not know the
+solver.
 
 An engine whose solvers err more sets its own in its TOML, next to
 `[[tolerance_overrides]]`:
