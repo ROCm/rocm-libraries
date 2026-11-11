@@ -334,7 +334,13 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
     assert installed(project) == {operation: [] for operation in _OPERATIONS}
 
 
-@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
+@arch_specific(
+    ("gfx1200", "gfx1201"),
+    reason=(
+        "gfx1200 and gfx1201 label two fixture processors that publish the same "
+        "code bytes; the install routes by processor and does not branch on its name"
+    ),
+)
 def test_shared_code_payloads_install_under_separate_processor_directories(project):
     """Artifact routing follows the qualification processor, not shared code bytes."""
     tests = project / "library/tests"
