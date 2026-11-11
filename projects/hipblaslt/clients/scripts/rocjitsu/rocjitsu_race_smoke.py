@@ -22,6 +22,7 @@ import json
 import os
 import platform
 import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -29,13 +30,15 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ROCM_PATH = SCRIPT_DIR.parents[2]
 TENSILELITE_CONFIG = SCRIPT_DIR / "rocjitsu_race_smoke_tensilelite.yaml"
-HIPBLASLT_BENCH_TIMEOUT_SECONDS = 180
-TENSILELITE_TIMEOUT_SECONDS = 420
+# Each workload takes a few seconds. Together these limits must stay well
+# below the CI step timeout (15 minutes in TheRock) so a hang is reported here.
+HIPBLASLT_BENCH_TIMEOUT_SECONDS = 60
+TENSILELITE_TIMEOUT_SECONDS = 120
 
 # AMDGPU family prefix -> (GPU target, rocjitsu device config).
 TARGETS = {
     "gfx94": ("gfx942", "gfx942_cdna3_kmd.json"),
-    "gfx950": ("gfx950", "gfx950_mi355x_kmd.json"),
+    "gfx950": ("gfx950", "gfx950_mi350x_kmd.json"),
 }
 
 
@@ -65,65 +68,66 @@ def find_libomp_dir(rocm_path):
     raise SystemExit(f"libomp.so not found under {llvm_lib}")
 
 
-def workload_failures(returncode, race_log, logging_log):
+def workload_failures(returncode, output):
     """Return the reasons a workload failed, given its exit status (None after
-    a timeout) and the text of its race and logging plugin sinks."""
+    a timeout) and its console output, which includes the race and logging
+    plugin messages."""
     failures = []
     if returncode is None:
         failures.append("timed out")
     elif returncode != 0:
         failures.append(f"exited with status {returncode}")
-    if "[rocjitsu] Kernel dispatch:" not in race_log:
+    if "[rocjitsu] Kernel dispatch:" not in output:
         failures.append("race detector recorded no kernel dispatch")
-    races = sum(line.startswith("RACE ") for line in race_log.splitlines())
+    races = output.count("RACE kernel=")
     if races:
         failures.append(f"race detector reported {races} race(s)")
-    if "[rocjitsu] mfma detected in dispatch " not in logging_log:
+    if "[rocjitsu] mfma detected in dispatch " not in output:
         failures.append("no MFMA dispatch reached; the race check is inconclusive")
     return failures
+
+
+def run_with_timeout(cmd, cwd, env, timeout):
+    """Run cmd and return its exit status (None on timeout) and output.
+
+    The workload starts processes of its own (TensileLite runs a compiler and
+    tensilelite-client), so on timeout the whole process group is killed."""
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    )
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+        return proc.returncode, output
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        output, _ = proc.communicate()
+        return None, output
 
 
 def run_under_rocjitsu(name, rocjitsu, base_config, workload, env, timeout, report_dir):
     """Run one workload; return its failures and output."""
     work_dir = report_dir / name
-    sink_dir = work_dir / "sinks"
-    sink_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
     config = json.loads(base_config.read_text())
     config.setdefault("plugins", {}).update({"race": {}, "logging": {}})
-    config["sinks"] = {"types": ["stderr", "file"], "dir": str(sink_dir)}
+    # Plugin messages go to the console only. File sinks are reopened, and
+    # truncated, by every process the workload starts.
+    config["sinks"] = {"types": ["stderr"]}
     run_config = work_dir / "rocjitsu.json"
     run_config.write_text(json.dumps(config, indent=2) + "\n")
 
     cmd = [str(rocjitsu), "--config", str(run_config), "--", *workload]
     print(f"++ Exec [{work_dir}]$ {shlex.join(cmd)}", flush=True)
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
-            timeout=timeout,
-        )
-        output, returncode = result.stdout, result.returncode
-    except subprocess.TimeoutExpired as e:
-        output = e.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode(errors="replace")
-        returncode = None
+    returncode, output = run_with_timeout(cmd, work_dir, env, timeout)
     print(output, flush=True)
-
-    def read(path):
-        return path.read_text(errors="replace") if path.exists() else ""
-
-    race_log = read(sink_dir / "race.log")
-    failures = workload_failures(returncode, race_log, read(sink_dir / "logging.log"))
-    if failures and race_log:
-        # CI test jobs keep only the console log, so print the race report.
-        print(race_log, flush=True)
-    return failures, output
+    return workload_failures(returncode, output), output
 
 
 def main():
@@ -209,7 +213,7 @@ def main():
         TENSILELITE_TIMEOUT_SECONDS,
         report_dir,
     )
-    if "PASSED" not in output:
+    if ",PASSED," not in output:
         failures.append("TensileLite did not report a passing validation")
     results["tensilelite"] = failures
 
