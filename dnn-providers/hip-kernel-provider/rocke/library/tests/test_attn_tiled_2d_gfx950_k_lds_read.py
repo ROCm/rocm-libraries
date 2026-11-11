@@ -18,9 +18,11 @@ spec's rule, and that every fp8 LDS load claims only its byte width.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
-not build, so they skip there and run only in developer builds. CI has no C++
-check of these kernels; the C++ evidence is the developer
-``tools/check_byte_identity.py`` run recorded with the change.
+not build, so they skip there and run only in developer builds. The C++ check
+CI runs is the CTest ``rocke_tiled_attention_2d_gfx950_fp8_k_read``: it lowers
+the fp8 K kernel of each QK path with the C++ engine and checks in the LLVM IR
+that every LDS load reads its buffer's element type, that K is read as fp8,
+and that the kernel multiplies by k_scale as many values as it reads.
 """
 
 from __future__ import annotations
