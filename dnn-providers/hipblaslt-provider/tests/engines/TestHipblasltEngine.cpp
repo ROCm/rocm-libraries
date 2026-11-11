@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -167,6 +168,21 @@ TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
         result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestHipblasltEngine, GetDetailsReportsGraphCaptureSupport)
+{
+    HipblasltEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+    HipdnnEnginePluginHandle dummyHandle;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, result);
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
+        result.ptr, result.size);
+    EXPECT_THAT(
+        engineDetails.behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
 }
 
 TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)

@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -270,6 +271,95 @@ namespace
             "");
     }
 
+#ifdef HIPBLASLT_USE_ROCROLLER
+    // HIPBLASLT_USE_ROCROLLER=1 sends every problem down the rocRoller path, whose indices have
+    // the top bit set. A non-negative index there belongs to a Tensile algo; decoded as a
+    // rocRoller index it names an arbitrary tile, and building that kernel can take minutes.
+    TEST_F(AlgoErrors, smoke_RocRollerHandleRejectsNonRocRollerIndex)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        using HandlePtr = std::unique_ptr<void, decltype(&hipblasLtDestroy)>;
+        auto createWith = [](const char* useRocRoller) {
+            ScopedEnv         use("HIPBLASLT_USE_ROCROLLER", useRocRoller);
+            hipblasLtHandle_t h = nullptr;
+            EXPECT_EQ(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+            return HandlePtr(h, &hipblasLtDestroy);
+        };
+        HandlePtr         rocrollerOwner = createWith("1");
+        HandlePtr         tensileOwner   = createWith("0");
+        hipblasLtHandle_t rocroller      = rocrollerOwner.get();
+        ASSERT_NE(rocroller, nullptr);
+        ASSERT_NE(tensileOwner.get(), nullptr);
+
+        auto isSupported = [&](hipblasLtMatmulAlgo_t algo) {
+            size_t workspace = 0;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, layout, layout, &beta, layout, layout, algo, workspace);
+        };
+
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              count = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      rocroller, desc, layout, layout, layout, layout, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        if(count == 0)
+            GTEST_SKIP() << "rocRoller has no kernel for this problem on " << props.gcnArchName;
+
+        int index = 0;
+        std::memcpy(&index, result.algo.data, sizeof(index));
+        ASSERT_LT(index, 0);
+        EXPECT_EQ(isSupported(result.algo), HIPBLAS_STATUS_SUCCESS);
+
+        // Clearing only the top bit leaves an index that decodes to the same kernel, so only
+        // the top-bit check can refuse it.
+        hipblasLtMatmulAlgo_t unmarked = result.algo;
+        const int             cleared  = index & std::numeric_limits<int>::max();
+        std::memcpy(unmarked.data, &cleared, sizeof(cleared));
+        EXPECT_EQ(isSupported(unmarked), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatmul(rocroller,
+                                  desc,
+                                  &alpha,
+                                  a,
+                                  layout,
+                                  b,
+                                  layout,
+                                  &beta,
+                                  c,
+                                  layout,
+                                  d,
+                                  layout,
+                                  &unmarked,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+
+        // The case from the field: an algo a Tensile handle chose, passed to a rocRoller handle.
+        hipblasLtMatmulHeuristicResult_t tensile{};
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(tensileOwner.get(),
+                                                  desc,
+                                                  layout,
+                                                  layout,
+                                                  layout,
+                                                  layout,
+                                                  pref,
+                                                  1,
+                                                  &tensile,
+                                                  &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(count, 0);
+        std::memcpy(&index, tensile.algo.data, sizeof(index));
+        ASSERT_GE(index, 0);
+        EXPECT_EQ(isSupported(tensile.algo), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+#endif
+
     // No kernel applies an aux scale, so both APIs refuse a non-null one.
     TEST_F(AlgoErrors, smoke_AuxScaleIsRefused)
     {
@@ -303,9 +393,11 @@ namespace
                   HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
-    // Matmul computes every layout as column-major, so a row-major A, B, C or D is refused
-    // rather than multiplied as if it were column-major (ROCM-29960). ORDER_COL set
-    // explicitly on all four is the control: it must still get algorithms and pass every call.
+    // The extension API computes every layout as column-major, so a row-major A, B, C or D is
+    // refused rather than multiplied as if it were column-major (ROCM-29960). The C API
+    // rewrites a row-major A or B as its column-major transpose, but still refuses C and D
+    // with different orders. ORDER_COL set explicitly on all four is the control: it must
+    // still get algorithms and pass every call.
     TEST_F(AlgoErrors, smoke_RowOrderIsRefused)
     {
         const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
@@ -328,36 +420,37 @@ namespace
             const hipblasStatus_t expected
                 = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
             const std::string which = rowIndex < 0 ? "control" : std::string(1, "ABCD"[rowIndex]);
+            const bool        cApiRewrites = rowIndex == 0 || rowIndex == 1;
 
             hipblasLtMatmulHeuristicResult_t result{};
             int                              returned = -1;
             EXPECT_EQ(
                 hipblasLtMatmulAlgoGetHeuristic(
                     handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned),
-                expected)
+                cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
                 << which;
-            if(rowIndex >= 0)
+            if(cApiRewrites)
+                EXPECT_GT(returned, 0) << which;
+            else if(rowIndex >= 0)
                 EXPECT_EQ(returned, 0) << which;
-            {
-                EXPECT_EQ(hipblasLtMatmul(handle,
-                                          desc,
-                                          &alpha,
-                                          a,
-                                          mats[0],
-                                          b,
-                                          mats[1],
-                                          &beta,
-                                          c,
-                                          mats[2],
-                                          d,
-                                          mats[3],
-                                          nullptr,
-                                          nullptr,
-                                          0,
-                                          nullptr),
-                          expected)
-                    << which;
-            }
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      a,
+                                      mats[0],
+                                      b,
+                                      mats[1],
+                                      &beta,
+                                      c,
+                                      mats[2],
+                                      d,
+                                      mats[3],
+                                      nullptr,
+                                      nullptr,
+                                      0,
+                                      nullptr),
+                      cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
+                << which;
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
