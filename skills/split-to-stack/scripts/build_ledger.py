@@ -152,6 +152,81 @@ def attr_generated(repo, tip, paths):
     return gen
 
 
+C_ESCAPES = {
+    "a": 7,
+    "b": 8,
+    "t": 9,
+    "n": 10,
+    "v": 11,
+    "f": 12,
+    "r": 13,
+    '"': 34,
+    "\\": 92,
+}
+
+
+def unquote_c(s):
+    """Undo git's C-style quoting of a path (a "..." string with backslash escapes and octal bytes)."""
+    b = s[1:-1].encode("utf-8", "surrogateescape")
+    out, i = bytearray(), 0
+    while i < len(b):
+        if b[i] == 92 and i + 1 < len(b):
+            n = chr(b[i + 1])
+            if n in "01234567":
+                out.append(int(b[i + 1 : i + 4], 8))
+                i += 4
+                continue
+            out.append(C_ESCAPES.get(n, b[i + 1]))
+            i += 2
+            continue
+        out.append(b[i])
+        i += 1
+    return out.decode("utf-8", "surrogateescape")
+
+
+def header_path(rest):
+    """The path of a modified file from the text after `diff --git ` (`a/P b/P`, possibly quoted)."""
+    if rest.startswith('"'):
+        i = 1
+        while rest[i] != '"':
+            i += 2 if rest[i] == "\\" else 1
+        p = unquote_c(rest[: i + 1])
+    else:
+        p = "a/" + rest[2 : 2 + (len(rest) - 5) // 2]
+        if rest != p + " b/" + p[2:]:
+            raise SplitError("cannot parse diff header: diff --git %s" % rest)
+    return p[2:]
+
+
+def batch_hunks(repo, pin, base, tip, paths, env):
+    """{path: [hunk header lines]} for modified paths, with one `git diff` per 400 paths."""
+    out = {}
+    for i in range(0, len(paths), 400):
+        chunk = paths[i : i + 400]
+        diff = git(
+            repo,
+            *pin,
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
+            "diff",
+            HUNK_OPT,
+            *DIFF_OPTS,
+            base,
+            tip,
+            "--",
+            *chunk,
+            env=env
+        )
+        cur = None
+        for ln in diff.decode("utf-8", "surrogateescape").split("\n"):
+            if ln.startswith("diff --git "):
+                cur = out.setdefault(header_path(ln[len("diff --git ") :]), [])
+            elif ln.startswith("@@") and cur is not None:
+                cur.append(ln)
+    return out
+
+
 def generate(repo, base, tip, sets, use_attr, excludes=()):
     """Return (meta_lines, rows, counters). `sets` is a list of (name, glob); `excludes` a list of globs."""
     # Attributes come from TIP's .gitattributes (git >= 2.40), not from the checkout, a global attributes
@@ -208,6 +283,23 @@ def generate(repo, base, tip, sets, use_attr, excludes=()):
     cmap = commit_map(repo, base, tip)
     rows = []
     counters = {"H": 0, "F": 0, "G": 0}
+    # One `git diff` per chunk of modified text paths instead of one per path.
+    hunk_lines = batch_hunks(
+        repo,
+        pin,
+        base,
+        tip,
+        [
+            e["path"]
+            for e in raw
+            if e["status"] == "M"
+            and e["oldsha"] != e["newsha"]
+            and num.get(e["path"], ("0", "0"))[0] != "-"
+            and "160000" not in (e["oldmode"], e["newmode"])
+            and not (set_of(e["path"]) and "M" in GENERATED_STATUSES)
+        ],
+        denv,
+    )
 
     def new_id(k):
         counters[k] += 1
@@ -266,25 +358,12 @@ def generate(repo, base, tip, sets, use_attr, excludes=()):
             rows.append(dict(common, id=new_id("F"), hunk=""))
             continue
         if e["oldsha"] != e["newsha"]:
-            diff = git(
-                repo,
-                *pin,
-                "diff",
-                HUNK_OPT,
-                *DIFF_OPTS,
-                base,
-                tip,
-                "--",
-                path,
-                env=denv
-            )
             hunks = []
-            for ln in diff.decode("utf-8", "surrogateescape").split("\n"):
-                if ln.startswith("@@"):
-                    h = parse_hunk(ln)
-                    if h is None:
-                        raise SplitError("cannot parse hunk header: %r" % ln)
-                    hunks.append(h)
+            for ln in hunk_lines.get(path, []):
+                h = parse_hunk(ln)
+                if h is None:
+                    raise SplitError("cannot parse hunk header: %r" % ln)
+                hunks.append(h)
             if not hunks:
                 raise SplitError(
                     "%s differs between base and tip but git reports no hunks "

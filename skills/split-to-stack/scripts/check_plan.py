@@ -36,6 +36,7 @@ from splitlib import (
     FILE_STATE_KINDS,
     LEDGER_COLUMNS,
     TYPES,
+    CatFile,
     SplitError,
     contained,
     die,
@@ -55,19 +56,17 @@ from splitlib import (
 )
 
 
-def subtractive_target(repo, tip, r):
+def subtractive_target(cat, tip, r):
     """The final text (list of lines) a `subtractive:` state of ledger row r is checked against, or None
     if the row cannot take a subtractive state."""
     if r["kind"] == "H":
         _, _, c, d = r["hunk_t"]
-        blob = git(repo, "cat-file", "blob", "%s:%s" % (tip, r["path"]))
+        blob = cat.blob("%s:%s" % (tip, r["path"])) or b""
         return split_lines(blob)[c - 1 : c - 1 + d] if d > 0 else []
     if r["kind"] == "F" and r["status"] in ("A", "R", "T") and r["binary"] == "no":
-        ent = git(repo, "ls-tree", tip, "--", r["path"], check=False).decode().split()
+        ent = cat.entry(tip, r["path"])
         if ent and ent[0] in ("100644", "100755"):
-            return split_lines(
-                git(repo, "cat-file", "blob", "%s:%s" % (tip, r["path"]))
-            )
+            return split_lines(cat.blob(ent[1]) or b"")
     return None
 
 
@@ -84,6 +83,7 @@ def main():
     ap.add_argument("--no-regen", action="store_true")
     a = ap.parse_args()
     repo = toplevel(a.repo)
+    cat = CatFile(repo)
     errs, warns = [], []
     if a.prefix and not a.prefix.endswith("/"):
         raise SplitError("--prefix must end with '/' (for example users/<you>/)")
@@ -288,13 +288,7 @@ def main():
                     data = open(full, "rb").read()
                     if data and not data.endswith(b"\n"):
                         ha, hb = r["hunk_t"][0], r["hunk_t"][1]
-                        blob = git(
-                            repo,
-                            "cat-file",
-                            "blob",
-                            "%s:%s" % (base, r["path"]),
-                            check=False,
-                        )
+                        blob = cat.blob("%s:%s" % (base, r["path"])) or b""
                         nl = blob.count(b"\n") + (
                             0 if blob.endswith(b"\n") or not blob else 1
                         )
@@ -307,7 +301,7 @@ def main():
                                 "to the next line)" % (rid, arg)
                             )
                 if kind == "subtractive":
-                    final = subtractive_target(repo, tip, r)
+                    final = subtractive_target(cat, tip, r)
                     if final is None:
                         err(
                             "entry %s: a `subtractive:` state needs a text hunk or an added, renamed or "
