@@ -169,7 +169,9 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
 
 /* Per-arch CU counts. Mirrors the static table rocke.helpers.split_k
  * ARCH_NUM_CUS / DEFAULT_NUM_CUS that Python wgrad_streamk_default_pool
- * reads; test_conv_wgrad_streamk.py checks the two agree key by key. */
+ * reads; test_conv_wgrad_streamk.py checks the two agree key by key. The
+ * other gfx11 processors are left out on purpose, as in Python: the repo has
+ * no CU count for them, so they take the default. */
 static int wgrad_arch_num_cus(const char* arch)
 {
     static const struct
