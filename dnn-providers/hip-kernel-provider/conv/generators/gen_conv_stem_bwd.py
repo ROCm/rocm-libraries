@@ -93,6 +93,14 @@ GEOMETRIES_3D = [(2, 4, 1), (2, 4, 3), (1, 3, 3)]
 # the 3-D configs.
 SPACE_TO_DEPTH = 2
 SD_WINDOWS = [2, 3, 4]
+# Space-to-depth only pays where it fills idle matrix-core columns, so no FMA configs (their
+# columns are exact: measured 1.3-1.5x slower on ssd300 3x3 fp32, gfx1101 / gfx1201). Per layout,
+# the chunk / tile pairs that won or came within 5% on the RDNA A/B (unet, realesrgan, superres
+# NCHW fp16; sd15 / sdxl NHWC bf16); the rest never did there and each adds a candidate per graph.
+SD_KC_TILES = {
+    0: [(16, (4, 2)), (16, (8, 2)), (32, (8, 2))],
+    1: [(64, (4, 2)), (32, (4, 4))],
+}
 INTS = [
     "atom_id",
     "layout",
@@ -168,6 +176,8 @@ def build():
             + [(atom, 1, w, 0, SPACE_TO_DEPTH) for atom in atoms for w in SD_WINDOWS]
         )
         for atom, s, w, ft, sd in plan:
+            if sd and atom == "fma":
+                continue
             dim, ka, wave = SHAPE[atom]
             # Wide windows stage more of B per chunk: smaller chunks.
             kcs = (
@@ -191,6 +201,8 @@ def build():
                         if kc % ka or kc % ev:
                             continue
                         for th, fm in tiles:
+                            if sd and (kc, (th, fm)) not in SD_KC_TILES[layout]:
+                                continue
                             if th * wave > 1024:
                                 continue
                             if lds_bytes(e, w, w, nb, kc, th, fm * dim) > lds_limit(
