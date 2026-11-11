@@ -24,6 +24,11 @@ kernel of ``mxfp4_tdm_gemm`` on the same problem before and after the
 configurations, and reports each configuration's speedup over the mean of
 the two.
 
+``--hold-seconds`` keeps the timed launch running back to back for that
+long after the timing, so that clocks and power can be sampled from outside
+the process; ``hold_start_unix`` and ``hold_end_unix`` (host clock, seconds
+since the epoch) bound that window and ``hold_launches`` counts its launches.
+
 ``--host-only`` compiles and reports resources without touching a device;
 ``--check-only`` skips the timing. Absolute timings must not be committed
 to the repo; use ``--out`` with a path outside the tree.
@@ -132,7 +137,12 @@ FIELDS = [
     "median_us",
     "tflops",
     "speedup_vs_base",
+    "hold_start_unix",
+    "hold_end_unix",
+    "hold_launches",
 ]
+# Target device time per synchronized group of launches in the hold window.
+_HOLD_GROUP_SECONDS = 0.02
 
 
 def _out_numpy_dtype(out_dtype: str):
@@ -553,6 +563,39 @@ def _time(launcher: _Launcher, arguments: bytes, *, warmup, iters, batch) -> _Ti
     return _Times(batched_us, event_batch_us, enqueue_us, median_us)
 
 
+class _Hold(NamedTuple):
+    """The ``--hold-seconds`` window: host clock at its start and end
+    (seconds since the epoch) and the launches enqueued in it."""
+
+    start: float | None = None
+    end: float | None = None
+    launches: int = 0
+
+
+def _hold(launcher: _Launcher, arguments: bytes, seconds: float, launch_us) -> _Hold:
+    """Enqueue the prepared launch of ``arguments`` back to back for
+    ``seconds``, in groups of about ``_HOLD_GROUP_SECONDS`` of device time
+    (``launch_us`` per launch), synchronizing after each group so the window
+    ends on time. Nothing is timed."""
+    if seconds <= 0:
+        return _Hold()
+    runtime = launcher.runtime
+    group = max(1, int(_HOLD_GROUP_SECONDS * 1.0e6 / launch_us)) if launch_us else 1
+    enqueue = launcher.prepare_launch(arguments)
+    launches = 0
+    start = time.time()
+    try:
+        while time.time() - start < seconds:
+            for _ in range(group):
+                enqueue()
+            launches += group
+            runtime.sync()
+    except Exception:
+        runtime.sync()
+        raise
+    return _Hold(start, time.time(), launches)
+
+
 def _wmma_count(llvm_text: str | None) -> str:
     if not llvm_text:
         return ""
@@ -609,8 +652,8 @@ def _loop_scratch(hsaco: bytes) -> str:
 
 
 def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
-    """Check at every ``--check-betas`` value, then time. Returns (check,
-    times)."""
+    """Check at every ``--check-betas`` value, then time, then hold the timed
+    launch for ``--hold-seconds``. Returns (check, times, hold)."""
     m, n, k = spec.M, spec.N, spec.K
     alpha = np.float32(1.0 / max(k, 256))
     inputs = check_inputs(spec)
@@ -655,18 +698,20 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
                 for index, array in enumerate(device_inputs(inputs)):
                     launcher.upload(index, array)
         if failed:
-            return "FAIL:" + ",".join(failed), _Times()
+            return "FAIL:" + ",".join(failed), _Times(), _Hold()
         if args.check_only:
-            return "PASS", _Times()
+            return "PASS", _Times(), _Hold()
         timed = launcher.arguments(m, n, k, alpha, 0.0)
         if timing_inputs:
             timing = device_inputs((*timed_inputs(spec), inputs[4]))
             for index, array in enumerate(timing[:4]):
                 launcher.upload(index, array)
             timed = launcher.arguments(m, n, k, 1.0, 0.0)
-        return "PASS", _time(
+        times = _time(
             launcher, timed, warmup=args.warmup, iters=args.iters, batch=args.batch
         )
+        launch_us = times.event_batch if times.event_batch is not None else times.median
+        return "PASS", times, _hold(launcher, timed, args.hold_seconds, launch_us)
     finally:
         launcher.close()
 
@@ -690,8 +735,9 @@ def run_case(spec: MxGemmSpec, *, betas=(0.0, 0.5)) -> str:
         verify="full",
         samples=0,
         check_only=True,
+        hold_seconds=0.0,
     )
-    check, _ = _run(
+    check, _, _ = _run(
         spec,
         artifact,
         mx_gemm_grid(spec),
@@ -846,6 +892,13 @@ def main(argv: list[str] | None = None) -> int:
         help="data of the timed launches: tensile (FP4 as in "
         "mxfp4_tdm_gemm_variants_bench, 8-bit random) or check",
     )
+    parser.add_argument(
+        "--hold-seconds",
+        type=float,
+        default=0.0,
+        help="after timing, keep the timed launch running back to back this long "
+        "(for sampling clocks and power from outside; 0: no hold)",
+    )
     parser.add_argument("--check-only", action="store_true", help="check, do not time")
     parser.add_argument(
         "--host-only", action="store_true", help="compile only; no device"
@@ -895,7 +948,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.host_only:
             return _row(config, check="HOST", **values), None
-        check, times = _run(
+        check, times, hold = _run(
             run_spec,
             artifact,
             grid,
@@ -915,6 +968,9 @@ def main(argv: list[str] | None = None) -> int:
             enqueue_us=_fmt(times.enqueue),
             median_us=_fmt(times.median),
             tflops=_fmt(tflops),
+            hold_start_unix="" if hold.start is None else f"{hold.start:.3f}",
+            hold_end_unix="" if hold.end is None else f"{hold.end:.3f}",
+            hold_launches=str(hold.launches) if hold.start is not None else "",
             **values,
         )
         return row, best

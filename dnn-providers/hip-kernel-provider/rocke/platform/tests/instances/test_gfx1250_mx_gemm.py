@@ -21,6 +21,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     FIELDS,
     SPARSE_ALPHA,
     SPARSE_STEPS,
+    _hold,
     _time,
     check_inputs,
     decode_table,
@@ -1182,6 +1183,26 @@ class MxGemmBenchTimingTest(unittest.TestCase):
             _time(gpu, b"args", warmup=1, iters=1, batch=10)
         self.assertEqual(len(gpu.events), 2)
         self.assertTrue(all(event.destroyed for event in gpu.events))
+
+    def test_hold_keeps_the_prepared_launch_running(self):
+        """``--hold-seconds`` enqueues the prepared launch, built once, in
+        groups of about 20 ms of device time until the window has passed;
+        no hold enqueues nothing."""
+        gpu = _FakeGpu()
+        hold = _hold(gpu, b"args", 0.05, 1000.0)
+        self.assertEqual(gpu.prepared_with, [b"args"])
+        self.assertGreaterEqual(hold.end - hold.start, 0.05)
+        self.assertGreater(hold.launches, 0)
+        self.assertEqual(hold.launches % 20, 0)
+        self.assertEqual(gpu.enqueues, hold.launches)
+        idle = _FakeGpu()
+        self.assertEqual(_hold(idle, b"args", 0.0, 1000.0), (None, None, 0))
+        self.assertEqual(idle.prepared_with, [])
+
+    def test_failed_hold_enqueue_propagates(self):
+        gpu = _FakeGpu(fail_on=3)
+        with self.assertRaisesRegex(RuntimeError, "enqueue failed"):
+            _hold(gpu, b"args", 1.0, None)
 
     def test_out_holds_every_row_without_base(self):
         """``--out`` is written row by row; without ``--base`` nothing
