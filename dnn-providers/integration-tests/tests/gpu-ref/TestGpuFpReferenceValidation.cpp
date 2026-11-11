@@ -541,19 +541,38 @@ public:
     }
 };
 
+// Batch 0's offsets span 3 sequence rows but its seq_len is 2, so its third row (elements
+// 8..11) is a gap: physical storage that belongs to no batch.
+const std::vector<int32_t> K_GAPPED_OFFSETS = {0, 12, 24};
+const std::vector<int32_t> K_GAPPED_SEQ_LENS = {2, 3};
+constexpr size_t K_GAP_BEGIN = 8;
+constexpr size_t K_GAP_END = 12;
+
+std::shared_ptr<Tensor<int32_t>> makeIndexTensor(const std::vector<int32_t>& values)
+{
+    auto tensor = std::make_shared<Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size()), 1, 1, 1});
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        tensor->setHostValue(values[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    return tensor;
+}
+
 template <typename T, typename DeviceAlloc = DeviceAllocator<T>>
 RaggedTensor<T, HostAllocator<T>, DeviceAlloc>
     makeRaggedTensor(const std::vector<int32_t>& offsets = K_RAGGED_OFFSETS,
-                     const std::vector<int64_t>& strides = K_RAGGED_STRIDES)
+                     const std::vector<int64_t>& strides = K_RAGGED_STRIDES,
+                     const std::vector<int32_t>& seqLens = {})
 {
-    auto offsetTensor = std::make_shared<Tensor<int32_t>>(
-        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
-    for(size_t i = 0; i < offsets.size(); ++i)
-    {
-        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
-    }
     return RaggedTensor<T, HostAllocator<T>, DeviceAlloc>(
-        K_RAGGED_DIMS, strides, SDPA_SEQ_AXIS, offsetTensor);
+        K_RAGGED_DIMS,
+        strides,
+        SDPA_SEQ_AXIS,
+        makeIndexTensor(offsets),
+        std::nullopt,
+        1,
+        seqLens.empty() ? nullptr : makeIndexTensor(seqLens));
 }
 
 // Writes value(i) to the i-th stored element. A ragged buffer is packed by batch, so every
@@ -686,7 +705,38 @@ TYPED_TEST(TestGpuFpRaggedValidation, ShortLastBatchDoesNotReadPastBuffer)
     EXPECT_TRUE(validator.allClose(ref, impl));
 }
 
-// Same ragged layout (row offsets and sequence stride) but H and D strides swapped: the
+// With seq_len, a batch can own fewer rows than its offsets span. The gap rows hold
+// different values in the two tensors, so the comparison passes only if each batch is cut
+// at its length rather than at the next batch's offset. A live row that differs still fails.
+TYPED_TEST(TestGpuFpRaggedValidation, GappedLayoutSkipsRowsPastEachLength)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>(K_GAPPED_OFFSETS, K_RAGGED_STRIDES, K_GAPPED_SEQ_LENS);
+    auto impl = makeRaggedTensor<TypeParam>(K_GAPPED_OFFSETS, K_RAGGED_STRIDES, K_GAPPED_SEQ_LENS);
+    ASSERT_EQ(ref.raggedIterationInfo()->seqExtent(0), 2);
+
+    auto* refHost = ref.memory().hostData();
+    auto* implHost = impl.memory().hostData();
+    for(size_t i = 0; i < ref.elementSpace(); ++i)
+    {
+        const bool inGap = i >= K_GAP_BEGIN && i < K_GAP_END;
+        refHost[i] = static_cast<TypeParam>(1.0f);
+        implHost[i] = static_cast<TypeParam>(inGap ? 99.0f : 1.0f);
+    }
+
+    const GpuFpReferenceValidation<TypeParam> gpu(0.0f, 0.0f);
+    const CpuFpReferenceValidation<TypeParam> cpu(0.0f, 0.0f);
+    EXPECT_TRUE(gpu.allClose(ref, impl));
+    EXPECT_TRUE(cpu.allClose(ref, impl));
+
+    impl(0, 1, 1, 1) = static_cast<TypeParam>(2.0f);
+    impl.markHostModified();
+    EXPECT_FALSE(gpu.allClose(ref, impl));
+    EXPECT_FALSE(cpu.allClose(ref, impl));
+}
+
+// Same ragged layout (origins, lengths and sequence stride) but H and D strides swapped: the
 // kernel must pair elements by logical index, not by stored position.
 TYPED_TEST(TestGpuFpRaggedValidation, DifferentInnerStridesCompareLogically)
 {

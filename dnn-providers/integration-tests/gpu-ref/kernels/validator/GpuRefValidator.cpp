@@ -65,8 +65,8 @@ __device__ inline void decomposeAndComputeOffsets(long long linearIdx,
 }
 
 // Ragged counterpart of decomposeAndComputeOffsets (RFC 0014). The batch coordinate picks
-// a base from args.rowOffsets in place of a batch stride, as RaggedTensorBase::getIndexImpl
-// does. Returns false for a position past its batch's stored sequence rows: it has no
+// a base from args.origins in place of a batch stride, as RaggedTensorBase::getIndexImpl
+// does. Returns false for a position past its batch's live sequence rows: it has no
 // storage of its own (it aliases another batch or runs past the buffer) and must not be read.
 __device__ inline bool decomposeRaggedAndComputeOffsets(long long linearIdx,
                                                         const ValidatorArgs& args,
@@ -89,12 +89,11 @@ __device__ inline bool decomposeRaggedAndComputeOffsets(long long linearIdx,
     }
 
     // What remains of linearIdx is the batch coordinate.
-    const long long base = args.rowOffsets[linearIdx];
-    const long long seqExtent = (args.rowOffsets[linearIdx + 1] - base) / args.seqStride;
-    if(seqCoord >= seqExtent)
+    if(seqCoord >= args.lengths[linearIdx])
     {
         return false;
     }
+    const long long base = args.origins[linearIdx];
     refOffset += base;
     implOffset += base;
     return true;
@@ -107,7 +106,7 @@ __device__ inline bool
 {
     refIdx = idx;
     implIdx = idx;
-    if(args.rowOffsets != nullptr)
+    if(args.origins != nullptr)
     {
         return decomposeRaggedAndComputeOffsets(idx, args, refIdx, implIdx);
     }
@@ -153,7 +152,7 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
     auto refVal = toAccum(ref[refIdx]);
     auto implVal = toAccum(impl[implIdx]);
 
-    if(args.rowOffsets != nullptr)
+    if(args.origins != nullptr)
     {
         if(isnan(refVal))
         {

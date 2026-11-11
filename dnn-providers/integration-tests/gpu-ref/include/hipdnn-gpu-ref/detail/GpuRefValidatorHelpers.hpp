@@ -81,13 +81,13 @@ void setStridedLayout(Args& args,
 
 // Points args at the ragged layout both tensors share (RFC 0014); call after
 // setStridedLayout. The kernels then visit every padded logical position and skip those
-// past a batch's stored rows, so this widens args.totalElements from elementCount() (the
-// stored count) to the product of the padded dims. `rowOffsets` receives the device copy
-// of the B+1 offset table and must outlive the launch.
+// past a batch's live rows, so this widens args.totalElements from elementCount() (the
+// stored count) to the product of the padded dims. `batchTable` receives the device copy
+// of the B origins followed by the B lengths and must outlive the launch.
 void setRaggedLayout(ValidatorArgs& args,
                      const hipdnn_data_sdk::utilities::RaggedIterationInfo& layout,
                      const std::vector<int64_t>& dims,
-                     hipdnn_data_sdk::utilities::MigratableMemory<long long>& rowOffsets);
+                     hipdnn_data_sdk::utilities::MigratableMemory<long long>& batchTable);
 
 } // namespace detail
 } // namespace hipdnn_gpu_ref

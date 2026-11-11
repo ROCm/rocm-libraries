@@ -2318,8 +2318,8 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ)
 
 // A GPU reference leaves the ragged outputs of a recipe bundle on the device. Under the
 // default validator they are copied to the host and compared there; under
-// --validator gpu they are reported as not comparable.
-TEST_F(TestGoldenHarnessFixture, RaggedRecipeDeviceReferenceOutputIsComparedOnTheHost)
+// --validator gpu the device allclose validator compares them in place, gaps included.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeDeviceReferenceOutputIsComparedAtEitherSite)
 {
     SKIP_IF_NO_DEVICES();
     const auto c = fixtures::raggedSdpaGappedStatsCase();
@@ -2366,16 +2366,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeDeviceReferenceOutputIsComparedOnTh
         testing_support::driveHarness(harness, &results);
 
         const auto messages = testing_support::allMessages(results);
-        if(isAuto)
-        {
-            EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
-        }
-        else
-        {
-            EXPECT_TRUE(testing_support::anyFailed(results));
-            EXPECT_NE(messages.find("Ragged output NOT COMPARABLE ON DEVICE"), std::string::npos)
-                << messages;
-        }
+        EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
         EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
     }
 }

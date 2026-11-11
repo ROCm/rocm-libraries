@@ -83,10 +83,10 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
 
     detail::setStridedLayout(args, reference, implementation);
 
-    hipdnn_data_sdk::utilities::MigratableMemory<long long> rowOffsetsBuf;
+    hipdnn_data_sdk::utilities::MigratableMemory<long long> batchTableBuf;
     if(raggedLayout.has_value())
     {
-        detail::setRaggedLayout(args, *raggedLayout, reference.dims(), rowOffsetsBuf);
+        detail::setRaggedLayout(args, *raggedLayout, reference.dims(), batchTableBuf);
         args.comparedFlag = static_cast<int*>(flagBuf.deviceData()) + 1;
     }
 

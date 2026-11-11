@@ -14,7 +14,7 @@ namespace hipdnn_gpu_ref
 // GPU-based integer tensor validator implementing IReferenceValidation.
 // Requires exact equality between reference and implementation tensors.
 // Supports packed, strided and ragged (RFC 0014) tensors. A ragged pair must share one
-// ragged layout, and positions past a batch's stored rows are skipped, matching
+// ragged layout, and positions past a batch's live rows are skipped, matching
 // CpuIntReferenceValidation.
 template <class T>
 class GpuIntReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
