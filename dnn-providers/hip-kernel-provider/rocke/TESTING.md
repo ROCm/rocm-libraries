@@ -341,9 +341,15 @@ Key semantics:
   pytest pass with `rocke_engine`, and in installed host CI as the
   `rocke_hip_source_identity` CTest, which lowers through the installed
   `rocke_ir_lower_cli` program (`ROCKE_IR_LOWER_CLI`, one `--hip-batch` run per
-  family) because the wheel has no binding. That CTest is registered on every
-  platform but Windows, whose CI shards run close to their time limit, so CI
-  does not compare the MSVC-built engine's HIP output with Python's.
+  family) because the wheel has no binding. The op-by-op HIP parity files,
+  `tests/core/test_hip_lowering_parity.py` (every MMA atom of each target) and
+  `tests/core/test_mma_operand_register_type.py`, run there the same way, as
+  the `rocke_hip_lowering_parity` CTest; the `rocke_pytest_*` parts do not
+  collect these files. Both CTests are registered on every platform but
+  Windows, whose CI shards run close to their time limit, so CI does not
+  compare the MSVC-built engine's HIP output with Python's. `tests/run_all.py`
+  supplies the program from a configured build as well, so a developer run
+  checks it against the binding.
 
 ### 4.4 Is the emitted IR legal? (the toolchain gate)
 

@@ -22,30 +22,34 @@ Per engine (``engine`` is one of :data:`ENGINES`):
   ends with ``"(status N): " + message``, where ``N`` is the
   ``rocke_status_t`` that ``error_type`` maps to.
 - ``lower_hip_with_engine`` and ``assert_engine_rejects_hip`` are the same two
-  checks for the HIP-source lowering.
+  checks for the HIP-source lowering, whose C++ side runs as described below:
+  through the binding or the ``rocke_ir_lower_cli`` program.
 
 A test parametrized over :data:`ENGINES` checks the Python engine in every
 lane, including the lanes that do not build the binding; only its ``"cpp"``
-cases skip there, naming the reason.
+cases skip there, naming the reason (for the HIP checks, only where the
+program is not supplied either).
 
 Both engines at once: ``lower_with_both_engines``,
 ``assert_both_engines_reject``, ``lower_hip_with_both_engines`` and
 ``assert_both_engines_reject_hip`` run the same checks for the Python and the
-C++ engine, and skip as a whole when the binding is not built. Their refusal
-checks compare the C++ engine's message but not its status, which some older
-refusals do not yet share with the Python engine's exception type.
+C++ engine, and skip as a whole when the C++ lowering they need cannot run.
+Their refusal checks compare the C++ engine's message but not its status,
+which some older refusals do not yet share with the Python engine's exception
+type.
 
-``hip_outcomes_of_both_engines`` returns each engine's HIP source, or its
-refusal as a ``HipRefusal`` (error type and message), for a test that accepts
-either as long as the two agree. Where the binding is not built it runs the C++
-HIP lowering through the ``rocke_ir_lower_cli`` program that
-``ROCKE_IR_LOWER_CLI`` names (``tests/core/ir_lower_cli.cpp``), as the
-installed test tree does. ``skip_without_native_hip_lowering`` skips a test or
-module that has neither. ``python_hip_outcome`` and ``native_hip_outcomes`` are
-each engine's half, the second over many kernels in one call, and
-``ir_lower_cli_hip_outcomes`` runs the program alone, for a test that holds it
-to the binding. ``REFUSAL_ERROR_TYPES`` are the exception types that stand for a
-refusal in both engines.
+The C++ HIP lowering runs through the binding when it is built, and otherwise
+through the ``rocke_ir_lower_cli`` program that ``ROCKE_IR_LOWER_CLI`` names
+(``tests/core/ir_lower_cli.cpp``), as the installed test tree does; both call
+the engine's one serialized-IR HIP entry. ``skip_without_native_hip_lowering``
+skips a test or module that has neither. ``hip_outcomes_of_both_engines``
+returns each engine's HIP source, or its refusal as a ``HipRefusal`` (error
+type and message), for a test that accepts either as long as the two agree.
+``python_hip_outcome`` and ``native_hip_outcomes`` are each engine's half, the
+second over many kernels in one call, and ``ir_lower_cli_hip_outcomes`` runs
+the program alone, for a test that holds it to the binding.
+``REFUSAL_ERROR_TYPES`` are the exception types that stand for a refusal in
+both engines.
 
 A test that loops over the engines itself, rather than through ``pytest``
 parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
@@ -78,10 +82,10 @@ from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 __all__ = [
     "ENGINES",
-    "Engine",
-    "HipRefusal",
     "IR_LOWER_CLI_ENV",
     "REFUSAL_ERROR_TYPES",
+    "Engine",
+    "HipRefusal",
     "all_engines_backend",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
@@ -120,8 +124,8 @@ REFUSAL_ERROR_TYPES: tuple[type[Exception], ...] = tuple(_NATIVE_STATUS)
 # "<entry point>: lower failed for arch '<gfx>' (status <code>): <message>".
 _NATIVE_REFUSAL = re.compile(r"\(status (\d+)\): (.*)", re.DOTALL)
 
-#: The environment variable naming a built ``rocke_ir_lower_cli``, which
-#: ``hip_outcomes_of_both_engines`` runs where the binding is not built.
+#: The environment variable naming a built ``rocke_ir_lower_cli``, which runs
+#: the C++ HIP lowering where the binding is not built.
 IR_LOWER_CLI_ENV = "ROCKE_IR_LOWER_CLI"
 
 # Bounds a hung rocke_ir_lower_cli run, which lowers every kernel it is given.
@@ -155,13 +159,26 @@ def _require_native_engine() -> ModuleType:
     return pytest.importorskip("rocke_engine")
 
 
+def _validate_engine(engine: Engine) -> None:
+    if engine not in ENGINES:
+        raise ValueError(f"engine={engine!r}, expected one of {ENGINES}")
+
+
 def _require_engine(engine: Engine) -> None:
     """Validate ``engine``; for ``"cpp"``, skip the calling test when the
     binding is not built, before any engine runs."""
-    if engine not in ENGINES:
-        raise ValueError(f"engine={engine!r}, expected one of {ENGINES}")
+    _validate_engine(engine)
     if engine == "cpp":
         _require_native_engine()
+
+
+def _require_hip_engine(engine: Engine) -> None:
+    """Validate ``engine``; for ``"cpp"``, skip the calling test when the C++
+    HIP lowering cannot run (see :func:`skip_without_native_hip_lowering`),
+    before any engine runs."""
+    _validate_engine(engine)
+    if engine == "cpp":
+        skip_without_native_hip_lowering()
 
 
 def _native_status(error_type: type[Exception]) -> int:
@@ -202,8 +219,24 @@ def _native_llvm(kernel: KernelDef, arch: str, llvm_flavor: str | None) -> str:
     return _lower_via_cpp_engine(serialize(kernel), arch, llvm_flavor)
 
 
-def _native_hip(kernel: KernelDef, arch: str) -> str:
-    return _require_native_engine().lower_serialized_ir_hip(serialize(kernel), arch)
+def _native_hip_outcome(kernel: KernelDef, arch: str) -> str | HipRefusal:
+    (outcome,) = native_hip_outcomes([(serialize(kernel), arch)])
+    return outcome
+
+
+def _assert_native_hip_rejects(
+    kernel: KernelDef, arch: str, message: str, status: int | None
+) -> None:
+    """Assert the C++ HIP lowering refuses ``kernel`` with exactly ``message``,
+    and with ``status`` when it is given."""
+    outcome = _native_hip_outcome(kernel, arch)
+    assert isinstance(outcome, HipRefusal), (
+        f"the C++ engine lowered kernel '{kernel.name}' to HIP for {arch}; "
+        f"expected it to refuse with: {message}"
+    )
+    assert outcome.message == message, outcome
+    if status is not None:
+        assert outcome == _native_status_refusal(status, message), outcome
 
 
 def lower_with_engine(
@@ -256,16 +289,21 @@ def lower_hip_with_engine(kernel: KernelDef, arch: str, *, engine: Engine) -> st
     For ``"cpp"`` it also asserts that the text is identical to the Python
     engine's.
     """
-    _require_engine(engine)
+    _require_hip_engine(engine)
     python_hip = lower_kernel_to_hip(kernel, arch=arch)
     if engine == "python":
         return python_hip
-    native_hip = _native_hip(kernel, arch)
-    assert native_hip == python_hip, (
-        f"the C++ engine lowered kernel '{kernel.name}' to HIP for {arch} "
-        "differently from the Python engine"
+    native_outcome = _native_hip_outcome(kernel, arch)
+    refused = (
+        f"; it refused: {native_outcome}"
+        if isinstance(native_outcome, HipRefusal)
+        else ""
     )
-    return native_hip
+    assert native_outcome == python_hip, (
+        f"the C++ engine lowered kernel '{kernel.name}' to HIP for {arch} "
+        f"differently from the Python engine{refused}"
+    )
+    return python_hip
 
 
 def assert_engine_rejects_hip(
@@ -280,15 +318,13 @@ def assert_engine_rejects_hip(
 
     Same contract as :func:`assert_engine_rejects`, for the HIP source.
     """
-    _require_engine(engine)
+    _require_hip_engine(engine)
     if engine == "python":
         _assert_python_rejects(
             lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
         )
     else:
-        _assert_native_rejects(
-            lambda: _native_hip(kernel, arch), message, _native_status(error_type)
-        )
+        _assert_native_hip_rejects(kernel, arch, message, _native_status(error_type))
 
 
 def lower_with_both_engines(
@@ -334,11 +370,11 @@ def assert_both_engines_reject_hip(
 
     The C++ engine's status is not compared; see the module docstring.
     """
-    _require_native_engine()
+    skip_without_native_hip_lowering()
     _assert_python_rejects(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
-    _assert_native_rejects(lambda: _native_hip(kernel, arch), message, None)
+    _assert_native_hip_rejects(kernel, arch, message, None)
 
 
 @dataclass(frozen=True)

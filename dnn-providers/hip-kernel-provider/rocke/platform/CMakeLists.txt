@@ -677,25 +677,60 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
 
-    # Both engines lower every parity kernel to the same HIP source. The wheel
-    # has no rocke_engine binding, so the C++ lowering runs through the
-    # installed rocke_ir_lower_cli. The whole gate takes about a minute on a
-    # developer host; one family, the per-test item, a few seconds.
+    # The installed tests compare the C++ HIP lowering with the Python one
+    # through rocke_ir_lower_cli, as the wheel has no rocke_engine binding:
+    # rocke_hip_source_identity and rocke_hip_lowering_parity below.
     #
-    # Not registered on Windows: the Windows CI shards run close to their time
-    # limit. The cost is that the MSVC-built engine's HIP output is not compared
-    # with Python's in CI; it matched on every parity kernel on the Windows lanes
-    # when this gate was added, and float formatting, the most host-sensitive
-    # piece, keeps its own rocke_float_format test there. Re-register on Windows
-    # once those shards have room. It stays registered on every other platform.
+    # Neither is registered on Windows: the Windows CI shards run close to their
+    # time limit. The cost is that the MSVC-built engine's HIP output is not
+    # compared with Python's in CI; it matched on every parity kernel on the
+    # Windows lanes when this gate was added, and float formatting, the most
+    # host-sensitive piece, keeps its own rocke_float_format test there.
+    # Register them on Windows once those shards have room. They are registered
+    # on every other platform.
+    set(_ROCKE_IR_LOWER_CLI_ENVIRONMENT "")
     if(TARGET rocke_ir_lower_cli AND NOT WIN32)
       rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -v -rs --timeout=120)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 300)\n")
+      set(_ROCKE_IR_LOWER_CLI_ENVIRONMENT
+          "ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}")
     elseif(WIN32)
-      message(STATUS "rocKE: rocke_hip_source_identity not registered on Windows (CI shard time; see comment above)")
+      message(STATUS "rocKE: the installed tests do not compare the C++ HIP lowering on Windows (CI shard time; see comment above)")
+    endif()
+
+    # Both engines lower every parity kernel to the same HIP source. One family
+    # is one test, and the test bounds its emitter run below the 120 s
+    # per-test limit (EMITTER_TIMEOUT_S). The path is under tests/, in
+    # rocke_pytest_instances_dispatch's directory.
+    set(_ROCKE_HIP_SOURCE_IDENTITY_TEST "instances/differential/test_hip_source_identity.py")
+    if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\" TIMEOUT 300)\n")
+    endif()
+
+    # Both engines lower each MMA atom and operand register type to the same HIP
+    # source, or refuse it alike. These files hold the both-engine checks and
+    # the checks of the helpers they use, so they run here, with the program,
+    # rather than in rocke_pytest_core, whose time limit has no room for them;
+    # hipcc checks the source where ROCm is found. The paths are under tests/,
+    # all in rocke_pytest_core's directory.
+    set(_ROCKE_HIP_LOWERING_PARITY_TESTS
+        "core/test_hip_lowering_parity.py"
+        "core/test_mma_operand_register_type.py")
+    if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
+      list(TRANSFORM _ROCKE_HIP_LOWERING_PARITY_TESTS
+           PREPEND "\"${ROCKE_TEST_CTEST_REL}tests/" OUTPUT_VARIABLE _rocke_parity_paths)
+      list(TRANSFORM _rocke_parity_paths APPEND "\"")
+      list(JOIN _rocke_parity_paths " " _rocke_parity_paths)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_hip_lowering_parity_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\")\n"
+             "list(APPEND _rocke_hip_lowering_parity_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_hip_lowering_parity python -m pytest ${_rocke_parity_paths} -v -rs --timeout=60)\n"
+             "set_tests_properties(rocke_hip_lowering_parity PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"\${_rocke_hip_lowering_parity_environment}\"\n"
+             "  TIMEOUT 120)\n")
     endif()
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
@@ -761,10 +796,13 @@ if(ROCKE_INSTALL_TESTS)
       # is reserved for these entries; the provider categories tier them by
       # that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
-      # The HIP source identity test runs in its own entry,
-      # rocke_hip_source_identity.
+      # The HIP source identity test and the HIP lowering parity files run in
+      # their own entries (above), and on Windows, where those are not
+      # registered, in none: every check in them needs the C++ HIP lowering,
+      # which the installed tree reaches only through rocke_ir_lower_cli.
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
-           instances/differential/test_hip_source_identity.py)
+           ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
+      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
