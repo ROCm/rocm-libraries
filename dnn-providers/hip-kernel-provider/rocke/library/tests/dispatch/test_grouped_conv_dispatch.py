@@ -334,22 +334,37 @@ def test_default_llvm_flavor_is_the_registered_one():
             for s in gc.registered_conv_grouped_instances(arch, direction=direction)
         }
         assert flavors == {gc.DEFAULT_LLVM_FLAVORS[arch]}, arch
-        assert _req(arch=arch).llvm_flavor == gc.DEFAULT_LLVM_FLAVORS[arch]
-    assert _req(arch="gfx942").llvm_flavor == gc.DEFAULT_LLVM_FLAVOR
-    assert _req(arch="gfx1250", llvm_flavor="llvm23").llvm_flavor == "llvm23"
+        assert _req(arch=arch).resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS[arch]
+        assert _req(arch=arch).normalized()["llvm_flavor"] == (
+            gc.DEFAULT_LLVM_FLAVORS[arch]
+        )
+    assert _req(arch="gfx942").resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVOR
+    named = _req(arch="gfx1250", llvm_flavor="llvm23")
+    assert named.resolved_llvm_flavor() == "llvm23"
+    assert named.normalized()["llvm_flavor"] == "llvm23"
 
 
-def test_replace_across_arches_keeps_the_flavor_unless_reset():
-    """The default flavor is resolved once, at construction: replacing only the
-    arch keeps the old arch's flavor, replacing it with ``llvm_flavor=None`` too
-    resolves the new arch's default (as the field's comment documents)."""
-    gfx950 = _req(arch="gfx950")
-    assert gfx950.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
-    kept = dataclasses.replace(gfx950, arch="gfx1250")
-    assert kept.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
-    reset = dataclasses.replace(gfx950, arch="gfx1250", llvm_flavor=None)
-    assert reset == _req(arch="gfx1250")
-    assert reset.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+def test_replace_across_arches_follows_the_new_arch_flavor():
+    """A request that names no flavor keeps ``None`` and resolves its arch's
+    default where it is read, so ``replace(req, arch=...)`` -- as the attention
+    dispatcher does across arches -- admits the new arch's instances; a flavor
+    the request names is kept across the replace."""
+    gfx950 = _req(arch="gfx950", direction="dgrad")
+    assert gfx950.llvm_flavor is None
+    assert gfx950.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    moved = dataclasses.replace(gfx950, arch="gfx1250")
+    assert moved == _req(arch="gfx1250", direction="dgrad")
+    assert moved.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+    results = gc.dispatch_conv_grouped_all(moved)
+    assert results
+    assert {r.spec.identity.arch for r in results} == {"gfx1250"}
+    assert {r.spec.identity.llvm_flavor for r in results} == {
+        gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+    }
+    pinned = dataclasses.replace(gfx950, llvm_flavor=gc.DEFAULT_LLVM_FLAVORS["gfx950"])
+    kept = dataclasses.replace(pinned, arch="gfx1250")
+    assert kept.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    assert not gc.dispatch_conv_grouped_all(kept)
 
 
 def test_dispatch_does_not_read_the_process_flavor(monkeypatch):

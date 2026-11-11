@@ -248,19 +248,21 @@ class ConvGroupedRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     # LLVM flavor the caller lowers to; instances built for another flavor are
-    # not admitted. Part of the request, never read from the process: None
-    # resolves to the arch's DEFAULT_LLVM_FLAVORS entry, once, at construction.
-    # dataclasses.replace(req, arch=...) therefore keeps the old arch's flavor;
-    # pass llvm_flavor=None with the new arch to resolve the new arch's default.
+    # not admitted. Part of the request, never read from the process. None (the
+    # default) stays None in the field and means the arch's DEFAULT_LLVM_FLAVORS
+    # entry, resolved where it is read (resolved_llvm_flavor), so
+    # dataclasses.replace(req, arch=...) follows the new arch's default.
     llvm_flavor: str | None = None
 
-    def __post_init__(self) -> None:
-        if self.llvm_flavor is None:
-            flavor = DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
-            object.__setattr__(self, "llvm_flavor", flavor)
+    def resolved_llvm_flavor(self) -> str:
+        """``llvm_flavor``, or the arch's default when the request names none."""
+        if self.llvm_flavor is not None:
+            return self.llvm_flavor
+        return DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
 
     def normalized(self) -> dict:
         d = asdict(self)
+        d["llvm_flavor"] = self.resolved_llvm_flavor()
         d["dtype"] = d["dtype"].lower()
         d["layout"] = d["layout"].upper()
         d["direction"] = d["direction"].lower()
@@ -409,9 +411,10 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
-    if req.llvm_flavor not in LLVM_FLAVORS:
+    flavor = req.resolved_llvm_flavor()
+    if flavor not in LLVM_FLAVORS:
         errors.append(
-            f"unknown llvm_flavor {req.llvm_flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
+            f"unknown llvm_flavor {flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
         )
     try:
         ArchTarget.from_gfx(req.arch)
@@ -520,7 +523,9 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
+        return identity_supports_problem(
+            identity, _gemm_problem(req), req.resolved_llvm_flavor()
+        )
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -528,7 +533,7 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     problem, why = _direct_problem(req)
     if problem is None:
         return False, why
-    ok, why = identity_supports_problem(identity, problem, req.llvm_flavor)
+    ok, why = identity_supports_problem(identity, problem, req.resolved_llvm_flavor())
     if not ok:
         return False, why
     spec, why = _direct_launch_spec(identity, req)
@@ -1341,7 +1346,7 @@ def _winograd_spec(
     problem = _conv_problem(req)
     dtype = req.dtype.lower()
     steps, _ = winograd_steps(problem, dtype, plan)
-    why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
+    why = winograd_flavor_reason(problem, dtype, plan, req.resolved_llvm_flavor())
     if why is not None:
         raise ValueError(f"{name}:{plan.label}: {why}")
     return ConvWinogradSpec(
