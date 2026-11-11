@@ -243,6 +243,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     /// Whether A's or B's fragments are read through a tile window (see
     /// MxGemmPipelineAgBgCrCompTDMScheduledPolicy::IsLdsReadLinear); otherwise RowFragment reads
     /// them.
+    static constexpr bool kTileReadA = Policy::template IsLdsReadLinear<Problem, true>();
     static constexpr bool kTileReadB = Policy::template IsLdsReadLinear<Problem, false>();
 
     /// Wave 0's window on A's or B's fragment of one K step at repeat 0 of buffer 0. The wave
@@ -386,6 +387,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         // row * stride + offset and the address takes an extra VALU op.
         index_t a_scale_stride;
         index_t b_scale_stride;
+        ALdsWindow a_window;
         BLdsWindow b_window;
         AScaleWindow as_window;
         BScaleWindow bs_window;
@@ -421,6 +423,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                   Traits::kHasTail ? K + mx_tdm_scheduled::kAtomK - 1 : K)),
               a_scale_stride(opaque_scalar(M * 4)),
               b_scale_stride(opaque_scalar(N * 4)),
+              a_window(MakeLdsWindow<true>(smem_)),
               b_window(MakeLdsWindow<false>(smem_)),
               as_window(MakeLdsScaleWindow<true>(smem_, wave_m)),
               bs_window(MakeLdsScaleWindow<false>(smem_, wave_n))
@@ -817,17 +820,21 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         CK_TILE_DEVICE AFrag AFragment(index_t buffer, index_t rm, index_t step) const
         {
-            const index_t lane_k = LaneK(step);
-            if constexpr(kMma32)
+            if constexpr(kTileReadA)
             {
-                const int32x8_t r0 = RowFragment(buffer, true, MRow(rm, lane_col), lane_k);
-                const int32x8_t r1 = RowFragment(buffer, true, MRow(rm, lane_col + 16), lane_k);
+                return Pad16(LdsFragment<true>(buffer, rm, step));
+            }
+            else if constexpr(kMma32)
+            {
+                const index_t lane_k = LaneK(step);
+                const int32x8_t r0   = RowFragment(buffer, true, MRow(rm, lane_col), lane_k);
+                const int32x8_t r1   = RowFragment(buffer, true, MRow(rm, lane_col + 16), lane_k);
                 return __builtin_shufflevector(
                     r0, r1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             }
             else
             {
-                return Pad16(RowFragment(buffer, true, MRow(rm, lane_col), lane_k));
+                return Pad16(RowFragment(buffer, true, MRow(rm, lane_col), LaneK(step)));
             }
         }
 
@@ -850,9 +857,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             const index_t wave_index = IsA ? wave_m : wave_n;
             const index_t offset = buffer / 4 + base + wave_index * wave_words + repeat_offsets[r] +
                                    step * (kStepBytes / 4);
-            const auto tile =
-                b_window.load_with_offset(offset, number<-1>{}, bool_constant<false>{});
-            using Vec = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
+            const auto& window = [&]() -> const auto& {
+                if constexpr(IsA)
+                    return a_window;
+                else
+                    return b_window;
+            }();
+            const auto tile = window.load_with_offset(offset, number<-1>{}, bool_constant<false>{});
+            using Vec       = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
             return tile.get_thread_buffer().template get_as<Vec>()[number<0>{}];
         }
 
