@@ -94,20 +94,34 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     }
 
 
-def test_client_version_metadata_is_scoped_and_checked_exactly():
+def test_client_identity_is_scoped_and_checked_exactly():
     top_cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
     tests_cmake = (_PROJECT_ROOT / "tests/CMakeLists.txt").read_text(encoding="utf-8")
-    version_check = (_PROJECT_ROOT / "tests/check_client_version.cmake").read_text(
+    query_check = (_PROJECT_ROOT / "tests/check_client_version.cmake").read_text(
         encoding="utf-8"
     )
 
-    version_block = top_cmake.split(
+    block = top_cmake.split(
         'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
     )[1].split("\nendif()", 1)[0]
-    assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
     assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
-    assert '"-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"' in tests_cmake
-    assert "actual_version STREQUAL EXPECTED_VERSION" in version_check
+    # The version and commit come from release_metadata.py, which reads no ROCm
+    # root; the selected build root feeds only the client's --build-rocm.
+    assert '"${_tensilelite_source_root}/release_metadata.py" version' in block
+    assert '"${_tensilelite_source_root}/release_metadata.py" source-revision' in block
+    assert '"${_tensilelite_source_root}/tensilelite/_build_rocm.py"\n' \
+        '            "${HIPBLASLT_BUILD_ROCM_ROOT}"' in block
+    assert "release_metadata.py\"\n            \"${HIPBLASLT_BUILD_ROCM_ROOT}" not in block
+    assert 'CACHE STRING' in block and "TENSILELITE_SOURCE_REVISION" in block
+    assert "client pairing disabled" in block
+    # A new commit must re-run the configure that records it.
+    assert "--git-path" in block and "packed-refs" in block
+    assert "CMAKE_CONFIGURE_DEPENDS" in block
+
+    for query in ("version", "source-revision", "build-rocm"):
+        assert query in tests_cmake
+    assert '"-DQUERY=--${_query}"' in tests_cmake
+    assert "actual STREQUAL EXPECTED" in query_check
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
