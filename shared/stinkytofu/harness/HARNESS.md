@@ -75,7 +75,11 @@ change".
 5. **Stopping a process.** Send SIGTERM, wait, and only then SIGKILL.
 6. **Confidential details stay out of this repo.** No host names, ssh aliases, internal URLs,
    hardware-specific bug notes, or machine-specific thresholds in tracked files, logs, results, or
-   notes. Where they go: `DATABASE.md`.
+   notes. Where they go: `DATABASE.md`. Before you push, open a PR, or post anything public, check
+   what you are adding for IP addresses, internal URLs, email addresses, and internal names. If the
+   database is set, use its leak check (`config/` and its check script). A flag means ask the developer.
+   A public link or a version number that looks like an IP is a likely false alarm, so ask, and do not
+   decide alone.
 7. **The database is private and is loaded by default.** At session start, if `$HARNESS_DB` is set,
    read its `index.md`, then load the entries that matter for the task. Do not copy entries into
    tracked files, PRs, issues, or comments. If it is not set, say so once. If it is `none`, or the

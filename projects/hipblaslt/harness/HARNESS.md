@@ -70,7 +70,11 @@ performance claim is actually checked.
 5. **Stopping a process.** Send SIGTERM, wait, and only then SIGKILL.
 6. **Confidential details stay out of this repo.** No host names, ssh aliases, internal URLs,
    hardware-specific bug notes, or machine-specific thresholds in tracked files, logs, results, or
-   notes. Where they go: `DATABASE.md`.
+   notes. Where they go: `DATABASE.md`. Before you push, open a PR, or post anything public, check
+   what you are adding for IP addresses, internal URLs, email addresses, and internal names. If the
+   database is set, use its leak check (`config/` and its check script). A flag means ask the developer.
+   A public link or a version number that looks like an IP is a likely false alarm, so ask, and do not
+   decide alone.
 7. **Snapshot tests (characterization goldens).**
    - A snapshot of generated asm that fails only because the asm changed may be updated once the perf
      A/B shows a gain. Update only the nodes the change touches, and show the developer the diff.
