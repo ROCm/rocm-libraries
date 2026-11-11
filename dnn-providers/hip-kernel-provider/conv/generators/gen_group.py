@@ -1,4 +1,5 @@
-# Generates the CONV_GROUP_FWD / CONV_GROUP_BWD descriptors (small-group convolution, K4).
+# Generates the CONV_GROUP_FWD / CONV_GROUP_BWD / CONV_GROUP_WRW descriptors (small-group
+# convolution, K4).
 # Each config is admitted on correctness alone (its atom on the device and the graph's element
 # type, its filter and stride the graph's, its channel tile dividing the channels, its halo in
 # 64 KB of LDS); autotune ranks them.
@@ -32,6 +33,8 @@ FIELDS = [
     "pf",
     "nbi",
     "nbo",
+    "tw",
+    "bpu",
 ]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
@@ -221,6 +224,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             pf=pf,
                             nbi=0,
                             nbo=0,
+                            tw=0,
+                            bpu=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
@@ -296,6 +301,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                     pf=pf,
                                     nbi=nbi,
                                     nbo=nbo,
+                                    tw=0,
+                                    bpu=0,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
@@ -356,6 +363,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             pf=0,
                             nbi=0,
                             nbo=0,
+                            tw=0,
+                            bpu=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (
@@ -393,6 +402,293 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             "engine": ued,
             "dispatch": udd,
             "kernelDescriptors": kernels,
+        },
+    )
+
+# Backward weights (CONV_GROUP_WRW, k4WrwMma): (th, tw, cb) dy tile rows, columns and 16-channel
+# blocks, each at bpu workgroups a dispatch unit (the split planner's target; host-side only, so
+# the bpu twins share one compiled kernel); both forms (cf 1:
+# packed N C D H W, cf 0: packed N D H W C). The tile's positions are flattened into the atom's
+# k-steps, so tw need not be a multiple of anything: 14, 28 and 7 serve ResNeXt's 56/28/14/7
+# planes exactly.
+WRW_ATOMS = {
+    "HALF": ["mfma16_f16", "wmma11_f16", "wmma12_f16"],
+    "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"],
+    "FLOAT": ["mfma16_f32"],
+}
+WRW_TILES = [
+    (8, 16, 1),
+    (4, 16, 1),
+    (8, 14, 1),
+    (4, 28, 1),
+    (2, 32, 1),
+    (4, 32, 1),
+    (2, 56, 1),
+    (4, 16, 2),
+    (4, 28, 2),
+    (4, 14, 4),
+    (4, 7, 4),
+]
+WRW_BPU = [4, 8, 16]
+# Wide groups (17 to 32 channels, k4WrwMmaWide): nbi 16-channel blocks a group (2), (th, tw, nbo)
+# dy tile rows, columns and dy blocks a workgroup. MFMA only: on WMMA (gfx11, gfx12) the wide
+# kernel measured behind K3 on every graph. Groups past 32 channels are K3's (its per-group GEMM
+# is dense there; nbi 3 and 4 measured behind it on every arch).
+WRW_WIDE_NBI = [2]
+WRW_WIDE_ATOMS = {
+    "HALF": ["mfma16_f16"],
+    "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908"],
+    "FLOAT": ["mfma16_f32"],
+}
+WRW_WIDE_TILES = [
+    (8, 16, 1),
+    (4, 16, 1),
+    (4, 14, 1),
+    (4, 16, 2),
+    (8, 8, 2),
+    (4, 7, 2),
+]
+
+
+def lds_wrw_wide(eb, r, s, st, th, tw, nbi, nbo):
+    vec = 16 // eb
+    halo = ((th - 1) * st + r) * ((tw - 1) * st + s) + 1
+    stage = (halo * (16 * nbi + vec) + th * tw * (16 * nbo + vec)) * eb
+    red = nbi * nbo * 256 * 4 if nbi == 2 else 0
+    return max(stage, red)
+
+
+# FMA (atom "fma", fp32: RDNA has no fp32 matrix core), compiled per channels a group cg: (th, tw,
+# cb, px) dy tile rows, columns, 16-channel blocks and positions a thread's row segment.
+WRW_FMA_CGS = [2, 4, 8, 16]
+WRW_FMA_TILES = [
+    (8, 16, 1, 4),
+    (4, 16, 1, 4),
+    (4, 28, 1, 4),
+    (8, 14, 1, 7),
+    (4, 16, 1, 8),
+]
+
+
+def lds_wrw(eb, r, s, st, th, tw, cb):
+    vec = 16 // eb
+    pixels = ((th - 1) * st + r) * ((tw - 1) * st + s) + th * tw + 1
+    return pixels * (16 * cb + vec) * eb
+
+
+ued = U("ued.wrw")
+w(
+    "conv_group_wrw.ued.json",
+    {
+        "version": "1.0",
+        "id": ued,
+        "name": "hipkernel:CONV_GROUP_WRW",
+        "graph_match": {"native": "hipkernel.conv_group_wrw.graph_match"},
+        "metadata": kmd,
+        "knobs": KNOBS,
+        "behavior_notes": ["runtime_compilation"],
+    },
+)
+kernels = []
+for dtype, atoms in WRW_ATOMS.items():
+    dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    i = 0
+    for atom in atoms:
+        for t, r, s in FILTERS:
+            for st in (1, 2):
+                for th, tw, cb in WRW_TILES:
+                    if lds_wrw(EB[dtype], r, s, st, th, tw, cb) > 64 * 1024:
+                        continue
+                    for bpu in WRW_BPU:
+                        for cf in (1, 0):
+                            c = dict(
+                                atom=atom,
+                                t=t,
+                                r=r,
+                                s=s,
+                                stride=st,
+                                th=th,
+                                wp=0,
+                                cb=cb,
+                                cf=cf,
+                                cg=0,
+                                oc=0,
+                                px=0,
+                                pf=0,
+                                nbi=0,
+                                nbo=0,
+                                tw=tw,
+                                bpu=bpu,
+                            )
+                            f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                            name = (
+                                f"conv_group.wrw.{dt}.{atom}.{f}.s{st}.t{th}x{tw}x{cb}.u{bpu}"
+                                + (".cf" if cf else "")
+                            )
+                            kernels.append(
+                                {
+                                    "version": "1.0",
+                                    "id": U(name),
+                                    "name": name,
+                                    "kernel_source": {
+                                        "kind": "embedded_source",
+                                        "source_file": "kernels/ConvGroup.cpp",
+                                        "entry_point": "ConvGroup",
+                                    },
+                                    "metadata": {
+                                        "direction": "WRW",
+                                        "dtype": dtype,
+                                        **c,
+                                    },
+                                    "priority": 1000 - i,
+                                }
+                            )
+                            i += 1
+for dtype, atoms in WRW_WIDE_ATOMS.items():
+    dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    i = 0
+    for atom in atoms:
+        for t, r, s in FILTERS:
+            for st in (1, 2):
+                for nbi in WRW_WIDE_NBI:
+                    for th, tw, nbo in WRW_WIDE_TILES:
+                        if (
+                            lds_wrw_wide(EB[dtype], r, s, st, th, tw, nbi, nbo)
+                            > 64 * 1024
+                        ):
+                            continue
+                        for bpu in WRW_BPU:
+                            for cf in (1, 0):
+                                c = dict(
+                                    atom=atom,
+                                    t=t,
+                                    r=r,
+                                    s=s,
+                                    stride=st,
+                                    th=th,
+                                    wp=0,
+                                    cb=0,
+                                    cf=cf,
+                                    cg=0,
+                                    oc=0,
+                                    px=0,
+                                    pf=0,
+                                    nbi=nbi,
+                                    nbo=nbo,
+                                    tw=tw,
+                                    bpu=bpu,
+                                )
+                                f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                                name = (
+                                    f"conv_group.wrw.{dt}.{atom}.{f}.s{st}.w{nbi}"
+                                    f".t{th}x{tw}x{nbo}.u{bpu}" + (".cf" if cf else "")
+                                )
+                                kernels.append(
+                                    {
+                                        "version": "1.0",
+                                        "id": U(name),
+                                        "name": name,
+                                        "kernel_source": {
+                                            "kind": "embedded_source",
+                                            "source_file": "kernels/ConvGroup.cpp",
+                                            "entry_point": "ConvGroup",
+                                        },
+                                        "metadata": {
+                                            "direction": "WRW",
+                                            "dtype": dtype,
+                                            **c,
+                                        },
+                                        "priority": 700 - i,
+                                    }
+                                )
+                                i += 1
+i = 0
+for t, r, s in FILTERS:
+    for st in (1, 2):
+        for cg in WRW_FMA_CGS:
+            for th, tw, cb, px in WRW_FMA_TILES:
+                if lds_wrw(4, r, s, st, th, tw, cb) > 64 * 1024 or 256 % (16 * cb * cg):
+                    continue
+                for bpu in WRW_BPU:
+                    for cf in (1, 0):
+                        c = dict(
+                            atom="fma",
+                            t=t,
+                            r=r,
+                            s=s,
+                            stride=st,
+                            th=th,
+                            wp=0,
+                            cb=cb,
+                            cf=cf,
+                            cg=cg,
+                            oc=0,
+                            px=px,
+                            pf=0,
+                            nbi=0,
+                            nbo=0,
+                            tw=tw,
+                            bpu=bpu,
+                        )
+                        f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                        name = (
+                            f"conv_group.wrw.f32.fma.{f}.s{st}.g{cg}.t{th}x{tw}x{cb}.p{px}"
+                            f".u{bpu}" + (".cf" if cf else "")
+                        )
+                        kernels.append(
+                            {
+                                "version": "1.0",
+                                "id": U(name),
+                                "name": name,
+                                "kernel_source": {
+                                    "kind": "embedded_source",
+                                    "source_file": "kernels/ConvGroup.cpp",
+                                    "entry_point": "ConvGroup",
+                                },
+                                "metadata": {
+                                    "direction": "WRW",
+                                    "dtype": "FLOAT",
+                                    **c,
+                                },
+                                "priority": 500 - i,
+                            }
+                        )
+                        i += 1
+
+
+def wrw_file(kernel):
+    # One pack a dtype and atom family (each under the repo's 500 KB file limit).
+    m = kernel["metadata"]
+    dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[m["dtype"]]
+    atom = m["atom"]
+    family = (
+        "fma"
+        if atom == "fma"
+        else (
+            "rdna"
+            if atom.startswith("wmma")
+            else "cdna908" if atom.endswith("_908") else "cdna"
+        )
+    )
+    return f"{dt}_{family}"
+
+
+total += len(kernels)
+packs = {}
+for kernel in kernels:
+    packs.setdefault(wrw_file(kernel), []).append(kernel)
+for suffix, members in sorted(packs.items()):
+    w(
+        f"conv_group_wrw_{suffix}.kdp.json",
+        {
+            "version": "1.0",
+            "id": U("kdp.wrw." + suffix),
+            "name": f"hipkernel:conv_group_wrw_{suffix}",
+            "arch": [],
+            "matchers": [umd],
+            "engine": ued,
+            "dispatch": udd,
+            "kernelDescriptors": members,
         },
     )
 print(total, "kernel configs")

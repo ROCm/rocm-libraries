@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -32,12 +33,13 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvGroupProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file ConvGroupNative.cpp
- * @brief The small-group convolution engines (CONV_GROUP_FWD, CONV_GROUP_BWD): graph matching,
- *        kernel matching, workspace sizing and dispatch.
+ * @brief The small-group convolution engines (CONV_GROUP_FWD, CONV_GROUP_BWD, CONV_GROUP_WRW):
+ *        graph matching, kernel matching, workspace sizing and dispatch.
  *
  * Grouped convolutions of 2 to 16 channels a group (ResNeXt, RegNet), where an implicit GEMM
  * per group leaves its tiles mostly empty and reads 4- to 32-byte channel slices. The kernels
@@ -47,8 +49,11 @@
  * data gathers dy into dx with the filter reflected and its channel roles swapped, which the
  * expansion does, by stride phases when strided. 3-D convolutions loop the depth taps over planes. The activations are staged channels-last by the implicit-GEMM
  * engine's own parse and staging kernels when the graph's are not, or (cf configs) read and
- * written in place when both are packed channels-first. Every config is admitted on
- * correctness alone; autotune ranks them.
+ * written in place when both are packed channels-first. Backward weights reads x and dy in place
+ * (both packed channels-first or both channels-last), multiplies each 16-channel block's dy by
+ * its x at every tap's shift, keeps the in-group (diagonal) entries as fp32 partials of a split
+ * of the dy tiles, and a fixed-order reduce writes dw. Every config is admitted on correctness
+ * alone; autotune ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -408,6 +413,147 @@ std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem)
     return inPlace;
 }
 
+std::optional<GroupWrwProblem> parseGroupWrwProblem(const MatchContext& context)
+{
+    auto wrw = conv_wrw::parseWrwProblem(context);
+    if(!wrw.has_value())
+    {
+        return std::nullopt;
+    }
+    const auto& a = wrw->base.args;
+    // Groups the same each way: small (2 to 16 channels, dividing 16, whole 16-channel blocks;
+    // not depthwise) or wide (17 to 32, a multiple of 8, each padded to two blocks). Wider groups
+    // are K3's: its per-group GEMM is dense there, and the wide kernel measured behind it at 56
+    // and 64 channels on every arch.
+    if(a.groups < 2 || a.c != a.k || a.c % a.groups != 0)
+    {
+        return std::nullopt;
+    }
+    const long long cg = a.c / a.groups;
+    const bool small = cg >= 2 && cg <= 16 && 16 % cg == 0 && a.c % 16 == 0;
+    const bool wide = cg > 16 && cg <= 32 && cg % 8 == 0;
+    if(!small && !wide)
+    {
+        return std::nullopt;
+    }
+    // Unit dilation; one stride over rows and columns (the depth stride is the kernel's runtime).
+    if(a.dilation[0] != 1 || a.dilation[1] != 1 || a.dilation[2] != 1 || a.stride[1] != a.stride[2])
+    {
+        return std::nullopt;
+    }
+    GroupWrwProblem problem;
+    problem.cg = static_cast<int>(cg);
+    problem.nbi = wide ? static_cast<int>((cg + 15) / 16) : 0;
+    problem.filterT = static_cast<int>(a.filter[0]);
+    problem.filterR = static_cast<int>(a.filter[1]);
+    problem.filterS = static_cast<int>(a.filter[2]);
+    problem.stride = static_cast<int>(a.stride[1]);
+    problem.wrw = std::move(*wrw);
+    return problem;
+}
+
+long long
+    groupWrwLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb, int nbi)
+{
+    const long long vec = 16 / elementBytes;
+    const long long rows = static_cast<long long>(th - 1) * stride + r;
+    const long long cols = static_cast<long long>(tw - 1) * stride + s;
+    const long long dy = static_cast<long long>(th) * tw;
+    if(nbi == 0)
+    {
+        return (rows * cols + dy + 1) * (16LL * cb + vec) * elementBytes;
+    }
+    // Wide: x pixels (and the zero pixel) of nbi blocks, dy pixels of nbo (cb) blocks; nbi 2:
+    // two waves an x block add their sums through LDS, a 16 x 16 fp32 block product of each at
+    // least, more taps a round as the staging's LDS holds them.
+    const long long stage
+        = ((rows * cols + 1) * (16LL * nbi + vec) + dy * (16LL * cb + vec)) * elementBytes;
+    const long long red = nbi == 2 ? nbi * cb * 256LL * 4 : 0;
+    return std::max(stage, red);
+}
+
+std::optional<GroupWrwLaunch>
+    groupWrwLaunch(const GroupWrwProblem& problem,
+                   int th,
+                   int tw,
+                   int blocks,
+                   int bpu,
+                   const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
+{
+    const auto& a = problem.wrw.base.args;
+    const int64_t units = device_units::dispatchUnits(device);
+    // Channel tiles: small groups 16 cb channels of any groups; wide groups a group's nbo of its
+    // nbi blocks.
+    const bool wide = problem.nbi > 0;
+    if(th < 1 || tw < 1 || blocks < 1 || bpu < 1 || units < 1
+       || (wide ? problem.nbi % blocks != 0 : a.c % (16LL * blocks) != 0))
+    {
+        return std::nullopt;
+    }
+    GroupWrwLaunch launch;
+    auto& k = launch.args;
+    k.n = static_cast<int>(a.n);
+    k.c = static_cast<int>(a.c);
+    k.cg = problem.cg;
+    k.di = static_cast<int>(a.inSpatial[0]);
+    k.hi = static_cast<int>(a.inSpatial[1]);
+    k.wi = static_cast<int>(a.inSpatial[2]);
+    k.dout = static_cast<int>(a.outSpatial[0]);
+    k.ho = static_cast<int>(a.outSpatial[1]);
+    k.wo = static_cast<int>(a.outSpatial[2]);
+    k.sd = static_cast<int>(a.stride[0]);
+    k.pd = static_cast<int>(a.prePadding[0]);
+    k.ph = static_cast<int>(a.prePadding[1]);
+    k.pw = static_cast<int>(a.prePadding[2]);
+    k.ft = problem.filterT;
+    k.tilesW = static_cast<int>(divUp(k.wo, tw));
+    k.tilesH = static_cast<int>(divUp(k.ho, th));
+    const auto tiles = pack_features::checkedProduct(
+        {a.n, a.outSpatial[0], static_cast<int64_t>(k.tilesH), static_cast<int64_t>(k.tilesW)});
+    const long long taps
+        = static_cast<long long>(problem.filterT) * problem.filterR * problem.filterS;
+    k.partialElems = a.c * problem.cg * taps;
+    if(!tiles.has_value() || *tiles < 1)
+    {
+        return std::nullopt;
+    }
+    k.tiles = *tiles;
+    const long long blocksXY
+        = (wide ? a.groups * (problem.nbi / blocks) : a.c / (16LL * blocks)) * problem.filterT;
+    // At least 4 tiles a split; the partials (a slot a split) within 1 GiB.
+    const int64_t splits = conv_wrw::splitsWanted(blocksXY, bpu, *tiles, k.partialElems, units);
+    const long long grid = blocksXY * splits;
+    if(splits < 1 || splits > MAX_GRID || grid > MAX_GRID)
+    {
+        return std::nullopt;
+    }
+    k.splits = static_cast<int>(splits);
+    const long long slots = splits;
+    auto& r = launch.reduce;
+    r.partialElems = k.partialElems;
+    r.slots = static_cast<int>(slots);
+    r.cg = problem.cg;
+    r.t = problem.filterT;
+    r.r = problem.filterR;
+    r.s = problem.filterS;
+    r.sK = a.wStrides[0];
+    r.sC = a.wStrides[1];
+    r.sT = a.wStrides[2];
+    r.sR = a.wStrides[3];
+    r.sS = a.wStrides[4];
+    r.reflect = a.flipFilter != 0 ? 1 : 0;
+    const long long reduceGrid
+        = divUp(k.partialElems, 256 / k4WrwReduceGroups(static_cast<int>(slots)));
+    if(reduceGrid > MAX_GRID)
+    {
+        return std::nullopt;
+    }
+    launch.grid = static_cast<unsigned int>(grid);
+    launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
+    launch.workspaceBytes = alignUp(static_cast<size_t>(slots * k.partialElems) * sizeof(float));
+    return launch;
+}
+
 } // namespace conv_group
 
 namespace
@@ -417,12 +563,14 @@ using conv_group::GroupProblem;
 
 constexpr std::string_view FWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_group_fwd.graph_match";
 constexpr std::string_view BWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_group_bwd.graph_match";
+constexpr std::string_view WRW_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_group_wrw.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_group.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_group.dispatch";
 
 constexpr std::string_view EXPAND_ENTRY_POINT = "ConvGroupExpand";
 constexpr std::string_view COPY_ENTRY_POINT = "ConvGroupCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvGroupTranspose";
+constexpr std::string_view WRW_REDUCE_ENTRY_POINT = "ConvGroupWrwReduce";
 constexpr unsigned int COPY_BLOCK = 256;
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 /// LDS a workgroup may take (every target arch has at least 64 KB).
@@ -445,6 +593,10 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
     if(direction == "BWD")
     {
         return ConvDirection::BACKWARD_DATA;
+    }
+    if(direction == "WRW")
+    {
+        return ConvDirection::BACKWARD_WEIGHTS;
     }
     return std::nullopt;
 }
@@ -483,6 +635,30 @@ std::optional<BoundTokens> bwdGraphMatches(const MatchContext& context)
     return graphMatches(context, ConvDirection::BACKWARD_DATA);
 }
 
+/// Backward weights: x, dw (the w token) and dy (the y token).
+std::optional<BoundTokens> wrwGraphMatches(const MatchContext& context)
+{
+    const auto problem = conv_group::parseGroupWrwProblem(context);
+    if(!problem.has_value())
+    {
+        return std::nullopt;
+    }
+    const auto& wrw = problem->wrw;
+    BoundTokens bound;
+    bound[std::string(X_TOKEN)] = wrw.xUid;
+    bound[std::string(W_TOKEN)] = wrw.dwUid;
+    bound[std::string(Y_TOKEN)] = wrw.dyUid;
+    bound[std::string(DTYPE_TOKEN)]
+        = std::string(data_objects::EnumNameDataType(wrw.base.dataType));
+    bound[std::string(DIRECTION_TOKEN)] = std::string("WRW");
+    const auto flops = pack_features::checkedMultiply(2, wrw.base.multiplyAccumulates);
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+    return bound;
+}
+
 /// A config's compile-time choices, read from its metadata. Matrix-core configs: wp 16-column
 /// fragments a row (cg, oc, px 0). FMA configs (atom "fma"): the graph's channels a group cg, oc
 /// output channels and px columns a thread (wp 0).
@@ -498,11 +674,32 @@ struct Tile
     int64_t nbi = 0, nbo = 0;
     bool fma = false;
     int64_t tw = 0; ///< output columns a workgroup
+    /// Backward weights: the dy tile's columns (the tw knob; th its rows) and the split
+    /// planner's target workgroups a dispatch unit (1 to 16). 0 for the other directions'
+    /// configs.
+    int64_t bpu = 0;
 };
+
+/// The 16x16 atoms the wrw kernel runs (its chunks flatten the tile's positions, so the k-step
+/// need not divide a row).
+bool wrwAtom(std::string_view atom)
+{
+    static constexpr std::array<std::string_view, 10> ATOMS{"mfma16_f16",
+                                                            "mfma16_bf16",
+                                                            "mfma16_bf16_908",
+                                                            "mfma16_f32",
+                                                            "mfma16x32_f16",
+                                                            "mfma16x32_bf16",
+                                                            "wmma11_f16",
+                                                            "wmma11_bf16",
+                                                            "wmma12_f16",
+                                                            "wmma12_bf16"};
+    return std::find(ATOMS.begin(), ATOMS.end(), atom) != ATOMS.end();
+}
 
 constexpr int64_t FMA_THREADS = 256;
 
-std::optional<Tile> tileOf(const KernelDefinition& kernel)
+std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection direction)
 {
     Tile tile;
     tile.atom = kernel.getStringMetadata("atom");
@@ -527,6 +724,55 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.pf = kernel.getIntMetadata("pf");
     tile.nbi = kernel.getIntMetadata("nbi");
     tile.nbo = kernel.getIntMetadata("nbo");
+    const int64_t tw = kernel.getIntMetadata("tw");
+    tile.bpu = kernel.getIntMetadata("bpu");
+    if(direction == ConvDirection::BACKWARD_WEIGHTS)
+    {
+        // A split target of at most 16 workgroups a unit, no other direction's knobs (the
+        // filter, stride, th, tw and bpu are the problem's and the launch plan's to gate). A
+        // 16x16 atom: cb blocks 1, 2 or a multiple of 4 up to 16, no FMA knobs. Wide groups: a
+        // 16x16 atom, nbi 2 to 4 blocks a group, nbo dy blocks a workgroup dividing them, no
+        // channel blocks. FMA: compiled for cg channels a group, the 16 cb x cg (k, c) units
+        // dividing the 256 threads, row segments of px positions dividing tw.
+        if((tile.cf != 0 && tile.cf != 1) || tile.pf != 0 || tile.wp != 0 || tile.oc != 0
+           || tile.bpu > 16)
+        {
+            return std::nullopt;
+        }
+        if(tile.nbi != 0)
+        {
+            // (nbo dividing the group's blocks is the launch plan's gate.)
+            if(!wrwAtom(tile.atom) || tile.cb != 0 || tile.cg != 0 || tile.px != 0)
+            {
+                return std::nullopt;
+            }
+            tile.tw = tw;
+            return tile;
+        }
+        if(tile.nbo != 0)
+        {
+            return std::nullopt;
+        }
+        if(tile.fma)
+        {
+            if(tile.cg < 1 || tile.cb < 1 || FMA_THREADS % (16 * tile.cb * tile.cg) != 0
+               || tile.px < 1 || tw % tile.px != 0)
+            {
+                return std::nullopt;
+            }
+        }
+        else if(!wrwAtom(tile.atom) || tile.cg != 0 || tile.px != 0
+                || !(tile.cb == 1 || tile.cb == 2 || (tile.cb % 4 == 0 && tile.cb <= 16)))
+        {
+            return std::nullopt;
+        }
+        tile.tw = tw;
+        return tile;
+    }
+    if(tw != 0 || tile.bpu != 0)
+    {
+        return std::nullopt;
+    }
     if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1
        || (tile.cf != 0 && tile.cf != 1) || (tile.pf != 0 && tile.pf != 1))
     {
@@ -603,15 +849,79 @@ std::optional<GroupProblem>
 /// columns) and stride are the graph's, its channel tile divides the channels, its halo fits the
 /// LDS, a channels-first (cf) config's graph has both activations packed channels-first, and a
 /// phase-fused (pf) config's graph is backward data at row and column stride 2.
+/// The wrw problem and launch of a backward-weights config on @p context's graph: the config's
+/// atom runs on the device and multiplies the graph's element type, its filter (depth, rows,
+/// columns) and stride are the graph's, its form (cf) the graph's activation layout, its tile's
+/// LDS within 64 KB, and the launch within the limits; nullopt otherwise.
+std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>>
+    wrwFor(const MatchContext& context, const KernelDefinition& kernel, const Tile& tile)
+{
+    auto problem = conv_group::parseGroupWrwProblem(context);
+    // The FMA kernel takes any element type (the catalog ships it for fp32) at the graph's
+    // channels a group.
+    if(!problem.has_value()
+       || kernel.getStringMetadata("dtype")
+              != data_objects::EnumNameDataType(problem->wrw.base.dataType)
+       || !conv_igemm::atomRunsOn(tile.atom, context.deviceProperties.gcnArchName)
+       || (tile.fma ? tile.cg != problem->cg
+                    : conv_igemm::atomElement(tile.atom)
+                          != conv_igemm::dataElement(problem->wrw.base.dataType)))
+    {
+        return std::nullopt;
+    }
+    // A wide config for the blocks the graph's groups span, small configs for small groups.
+    if(tile.nbi != problem->nbi)
+    {
+        return std::nullopt;
+    }
+    if(tile.t != problem->filterT || tile.r != problem->filterR || tile.s != problem->filterS
+       || tile.stride != problem->stride
+       || !(tile.cf != 0 ? problem->wrw.channelsFirst : problem->wrw.channelsLast))
+    {
+        return std::nullopt;
+    }
+    const auto th = static_cast<int>(tile.th), tw = static_cast<int>(tile.tw);
+    // Channel blocks a workgroup: cb, or a wide group's nbo dy blocks.
+    const auto blocks = static_cast<int>(tile.nbi != 0 ? tile.nbo : tile.cb);
+    if(tile.th > 4096 || tile.tw > 4096
+       || conv_group::groupWrwLdsBytes(problem->wrw.elementBytes,
+                                       problem->filterR,
+                                       problem->filterS,
+                                       problem->stride,
+                                       th,
+                                       tw,
+                                       blocks,
+                                       static_cast<int>(tile.nbi))
+              > LDS_LIMIT)
+    {
+        return std::nullopt;
+    }
+    auto launch = conv_group::groupWrwLaunch(
+        *problem, th, tw, blocks, static_cast<int>(tile.bpu), context.deviceProperties);
+    if(!launch.has_value())
+    {
+        return std::nullopt;
+    }
+    return std::make_pair(std::move(*problem), std::move(*launch));
+}
+
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
     const auto direction = directionFor(kernel);
-    const auto tile = tileOf(kernel);
-    if(!direction.has_value() || !tile.has_value())
+    if(!direction.has_value())
     {
         return false;
+    }
+    const auto tile = tileOf(kernel, *direction);
+    if(!tile.has_value())
+    {
+        return false;
+    }
+    if(*direction == ConvDirection::BACKWARD_WEIGHTS)
+    {
+        return wrwFor(context, kernel, *tile).has_value();
     }
     const auto problem = problemFor(context, *direction, *tile);
     if(!problem.has_value()
@@ -764,6 +1074,53 @@ private:
     std::vector<unsigned int> _blocks;
 };
 
+/// Backward weights: the kernel (partials) and the reduce (dw).
+class PreparedConvGroupWrw : public IngestorPreparedDispatch
+{
+public:
+    PreparedConvGroupWrw(IngestorKernelCode conv,
+                         IngestorKernelCode reduce,
+                         conv_group::GroupWrwProblem problem,
+                         conv_group::GroupWrwLaunch launch)
+        : _conv(std::move(conv))
+        , _reduce(std::move(reduce))
+        , _problem(std::move(problem))
+        , _launch(launch)
+    {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _conv;
+    }
+
+    compilation::IRunnableKernel& convForStream(hipStream_t stream) const
+    {
+        return _conv.kernelForStream(stream);
+    }
+
+    compilation::IRunnableKernel& reduceForStream(hipStream_t stream) const
+    {
+        return _reduce.kernelForStream(stream);
+    }
+
+    const conv_group::GroupWrwProblem& problem() const
+    {
+        return _problem;
+    }
+
+    const conv_group::GroupWrwLaunch& wrwLaunch() const
+    {
+        return _launch;
+    }
+
+private:
+    IngestorKernelCode _conv;
+    IngestorKernelCode _reduce;
+    conv_group::GroupWrwProblem _problem;
+    conv_group::GroupWrwLaunch _launch;
+};
+
 class ConvGroupDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -780,10 +1137,16 @@ public:
                           const KernelDefinition& kernel) const override
     {
         const auto direction = directionFor(kernel);
-        const auto tile = tileOf(kernel);
+        const auto tile
+            = direction.has_value() ? tileOf(kernel, *direction) : std::optional<Tile>{};
         if(!direction.has_value() || !tile.has_value())
         {
             return 0;
+        }
+        if(*direction == ConvDirection::BACKWARD_WEIGHTS)
+        {
+            const auto wrw = wrwFor(context, kernel, *tile);
+            return wrw.has_value() ? wrw->second.workspaceBytes : 0;
         }
         const auto problem = problemFor(context, *direction, *tile);
         return problem.has_value() ? problem->workspaceBytes : 0;
@@ -794,7 +1157,12 @@ public:
                                               const KernelDefinition& kernel) const override
     {
         const auto direction = directionFor(kernel);
-        const auto tile = tileOf(kernel);
+        const auto tile
+            = direction.has_value() ? tileOf(kernel, *direction) : std::optional<Tile>{};
+        if(direction == ConvDirection::BACKWARD_WEIGHTS && tile.has_value())
+        {
+            return prepareWrw(context, bound, kernel, *tile);
+        }
         std::optional<GroupProblem> problem;
         if(direction.has_value() && tile.has_value())
         {
@@ -940,6 +1308,11 @@ public:
                 uint32_t numDeviceBuffers,
                 void* workspace) const override
     {
+        if(const auto* wrw = dynamic_cast<const PreparedConvGroupWrw*>(&prepared))
+        {
+            launchWrw(handle, *wrw, deviceBuffers, numDeviceBuffers, workspace);
+            return;
+        }
         const auto& dispatch = dynamic_cast<const PreparedConvGroup&>(prepared);
         const auto& problem = dispatch.problem();
         const auto& igemm = problem.igemm;
@@ -1022,6 +1395,97 @@ public:
     }
 
 private:
+    std::unique_ptr<PreparedDispatch> prepareWrw(const MatchContext& context,
+                                                 const BoundTokens& bound,
+                                                 const KernelDefinition& kernel,
+                                                 const Tile& tile) const
+    {
+        auto wrw = wrwFor(context, kernel, tile);
+        const auto x = tryGetBoundInt(bound, X_TOKEN);
+        const auto w = tryGetBoundInt(bound, W_TOKEN);
+        const auto y = tryGetBoundInt(bound, Y_TOKEN);
+        if(!wrw.has_value() || !x.has_value() || !w.has_value() || !y.has_value()
+           || *x != wrw->first.wrw.xUid || *w != wrw->first.wrw.dwUid || *y != wrw->first.wrw.dyUid)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "conv_group wrw dispatch was given a graph or config its matchers decline");
+        }
+        const auto& problem = wrw->first;
+        compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
+        options.add("CONV_GROUP_WRW", std::string("1"));
+        options.add("CONV_GROUP_T", elementTypeFor(problem.wrw.base.dataType));
+        if(tile.fma)
+        {
+            options.add("CONV_GROUP_FMA", std::string("1"));
+            options.add("CONV_GROUP_CG", std::to_string(tile.cg));
+            options.add("CONV_GROUP_PX", std::to_string(tile.px));
+        }
+        else
+        {
+            options.add("CONV_GROUP_ATOM", std::string(tile.info.kernelType));
+        }
+        if(tile.nbi != 0)
+        {
+            options.add("CONV_GROUP_WIDE", std::string("1"));
+            options.add("CONV_GROUP_NBI", std::to_string(tile.nbi));
+            options.add("CONV_GROUP_NBO", std::to_string(tile.nbo));
+        }
+        options.add("CONV_GROUP_R", std::to_string(problem.filterR));
+        options.add("CONV_GROUP_S", std::to_string(problem.filterS));
+        options.add("CONV_GROUP_ST", std::to_string(problem.stride));
+        options.add("CONV_GROUP_TH", std::to_string(tile.th));
+        options.add("CONV_GROUP_TW", std::to_string(tile.tw));
+        options.add("CONV_GROUP_CB", std::to_string(tile.cb));
+        options.add("CONV_GROUP_CF", std::to_string(tile.cf));
+        auto conv = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4WrwArgs>());
+        conv.setBlockSize(
+            static_cast<unsigned int>(tile.fma ? FMA_THREADS : 4 * tile.info.wave), 1, 1);
+        conv.setGridSize(wrw->second.grid, 1, 1);
+        KernelDefinition reduceKernel = kernel;
+        reduceKernel.source.entryPoint = std::string(WRW_REDUCE_ENTRY_POINT);
+        auto reduce = buildIngestorKernelCode(_kernelCompiler,
+                                              _kpackLoader,
+                                              context,
+                                              reduceKernel,
+                                              options,
+                                              signatureOf<K4WrwReduceArgs>());
+        reduce.setBlockSize(COPY_BLOCK, 1, 1);
+        reduce.setGridSize(wrw->second.reduceGrid, 1, 1);
+        return std::make_unique<PreparedConvGroupWrw>(
+            std::move(conv), std::move(reduce), std::move(wrw->first), wrw->second);
+    }
+
+    static void launchWrw(const Handle& handle,
+                          const PreparedConvGroupWrw& dispatch,
+                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                          uint32_t numDeviceBuffers,
+                          void* workspace)
+    {
+        const auto& problem = dispatch.problem().wrw;
+        if(workspace == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           "conv_group wrw needs its workspace");
+        }
+        const auto stream = handle.getStream();
+        K4WrwArgs args = dispatch.wrwLaunch().args;
+        args.x = hipdnn_plugin_sdk::findDeviceBuffer(problem.xUid, deviceBuffers, numDeviceBuffers)
+                     .ptr;
+        args.dy
+            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dyUid, deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        args.partial = static_cast<float*>(workspace);
+        dispatch.convForStream(stream).launch(stream, args);
+        K4WrwReduceArgs reduce = dispatch.wrwLaunch().reduce;
+        reduce.partial = static_cast<const float*>(workspace);
+        reduce.dw
+            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        dispatch.reduceForStream(stream).launch(stream, reduce);
+    }
+
     static constexpr long long MAX_GRID_BLOCKS = std::numeric_limits<int>::max();
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
@@ -1047,6 +1511,7 @@ void registerConvGroupSymbols(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(FWD_GRAPH_MATCHER_SYMBOL), &fwdGraphMatches);
     scope.add(std::string(BWD_GRAPH_MATCHER_SYMBOL), &bwdGraphMatches);
+    scope.add(std::string(WRW_GRAPH_MATCHER_SYMBOL), &wrwGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(DISPATCH_SYMBOL), &convGroupDispatchHandler());
 }
