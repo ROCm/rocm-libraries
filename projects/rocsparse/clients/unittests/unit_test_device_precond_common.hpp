@@ -1078,13 +1078,13 @@ namespace precond_ut
         double                    boost_val = 1.0;
         bool   boost_tol_float              = false; // the boost tolerance is passed as a float
         bool   boost_device                 = false; // boost tolerance and value in device memory
-        bool   set_boost_tol = true; // false: the boost is enabled without a tolerance
-        bool   set_boost_val = true; // false: the boost is enabled without a value
+        bool   set_boost_tol  = true; // false: the boost is enabled without a tolerance
+        bool   set_boost_val  = true; // false: the boost is enabled without a value
         bool   set_boost_late = false; // set the unset boost inputs after a compute, compute again
-        bool   set_sing_tol  = false;
-        double sing_tol      = 0.0;
-        bool   tol_after     = false; // set the tolerance after the analysis
-        size_t device_memory = 0; // > 0: size of the internal buffer of the handle
+        bool   set_sing_tol   = false;
+        double sing_tol       = 0.0;
+        bool   tol_after      = false; // set the tolerance after the analysis
+        size_t device_memory  = 0; // > 0: size of the internal buffer of the handle
     };
 
     template <typename T>
@@ -1093,11 +1093,11 @@ namespace precond_ut
         rocsparse_status                   analysis_status = rocsparse_status_internal_error;
         rocsparse_status                   compute_status  = rocsparse_status_internal_error;
         std::vector<T>                     values;
-        // With set_boost_late: the status and the values of the compute before.
-        rocsparse_status                   early_compute_status = rocsparse_status_internal_error;
-        std::vector<T>                     early_values;
         std::vector<rocsparse_singularity> singularity;
         std::vector<int64_t>               position;
+        // With set_boost_late: the status and the values of the first compute.
+        rocsparse_status early_compute_status = rocsparse_status_internal_error;
+        std::vector<T>   early_values;
     };
 
     // Destroys the descriptor when a failed ASSERT leaves the function early.
