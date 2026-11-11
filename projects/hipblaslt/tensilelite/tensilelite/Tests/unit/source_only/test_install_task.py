@@ -130,7 +130,11 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(
         "--editable",
         str(_SOURCE_ROOT),
     ]
-    assert calls[3][2]["env"]["ROCM_PATH"] == str(rocm_root)
+    # The package build reads no ROCm environment (its version is +g<commit>),
+    # so the editable install and the binding step run in the caller's
+    # environment unchanged.
+    assert calls[3][2] == {}
+    assert calls[4][2] == {}
     assert shlex.split(calls[4][1]) == [
         str(Path(sys.executable).absolute()),
         "-m",

@@ -433,7 +433,7 @@ def install(
     if not built_client.is_file() or not os.access(built_client, os.X_OK):
         raise Exit(f"Built tensilelite-client is missing or not executable: {built_client}", code=1)
 
-    env = dict(os.environ, ROCM_PATH=str(rocm))
+    # The package build reads no ROCm environment; its version is +g<commit>.
     c.run(
         shlex.join(
             [
@@ -446,8 +446,7 @@ def install(
                 "--editable",
                 str(_TASKS_DIR),
             ]
-        ),
-        env=env,
+        )
     )
     c.run(
         shlex.join(
@@ -458,8 +457,7 @@ def install(
                 "--client",
                 str(built_client),
             ]
-        ),
-        env=env,
+        )
     )
     print(f"TensileLite editable install uses: {built_client}")
 @task
