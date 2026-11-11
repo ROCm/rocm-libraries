@@ -3,9 +3,12 @@
 #
 # rocke project umbrella:
 #   - platform/ : the authoring SDK + engine (former rocKE/).
-# The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
-# editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
-# not added as a CMake subdirectory.
+#   - library/  : the kernel library. Its Python (kernels/builders/dispatch/
+#     benchmarks) is editable-installed and wheeled by the rocke-pyenv /
+#     rocke-wheels blocks below. Its C++ mirrors (library/cpp:
+#     librocke_library.a, exported as ckc::rocke_library, and the
+#     rocke_library_engine pybind module) are added by platform/CMakeLists.txt
+#     after rocke_core. library/ is not added as a subdirectory here.
 #
 # NOTE: add_subdirectory(platform) is deferred to after the ROCKE_BUILD_PYENV /
 # ROCKE_WHEEL_DIR / ROCKE_WHEEL_VERSION declarations below so that
