@@ -47,6 +47,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
     using SplitSoftmax          = typename Policy::ScoreSoftmax;
+    using Softmax               = typename Policy::Softmax;
     using Schedule              = typename Policy::Schedule;
     using Mode                  = FmhaTdmSchedMode<Problem, Policy>;
     static_assert(Mode::kIsLegal, "qr_tdm_fp8_sched schedule geometry is incompatible");
@@ -1158,9 +1159,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         sequence<0, decltype(i_su)::value * Geometry::kQkSuColumns>{},
                         sequence<kM0, (decltype(i_su)::value + 1) * Geometry::kQkSuColumns>{});
                     if constexpr(kProgressiveMax && decltype(i_su)::value < Geometry::kQkStages - 1)
-                        Policy::template StageLaneMax<decltype(i_su)::value,
-                                                      (decltype(i_su)::value > 0)>(s_acc,
-                                                                                   qk_lane_max);
+                        Softmax::template StageLaneMax<decltype(i_su)::value,
+                                                       (decltype(i_su)::value > 0)>(s_acc,
+                                                                                    qk_lane_max);
                 });
             };
 
@@ -1272,8 +1273,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                 });
                         if constexpr(kProgressiveMax)
                             static_for<0, Geometry::kQkStages - 1, 1>{}([&](auto su) {
-                                Policy::template StageLaneMax<decltype(su)::value,
-                                                              (decltype(su)::value > 0)>(
+                                Softmax::template StageLaneMax<decltype(su)::value,
+                                                               (decltype(su)::value > 0)>(
                                     s_acc, qk_lane_max);
                             });
                     }
@@ -1448,15 +1449,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             return scales;
                         }
                         else
-                            return typename Policy::NoColumnScale{};
+                            return typename Softmax::NoColumnScale{};
                     }();
                     Schedule::template RunSplitSoftmax<Mode>(
                         [&]() {
                             if constexpr(kProgressiveMax)
-                                Policy::template RunSplitSoftmaxPart01FromPartial<Problem>(
+                                Softmax::template RunSplitSoftmaxPart01FromPartial<Problem>(
                                     s_new, m, softmax_scale, delta_m0, delta_m1, qk_lane_max);
                             else
-                                Policy::template RunSplitSoftmaxPart01<Problem>(
+                                Softmax::template RunSplitSoftmaxPart01<Problem>(
                                     s_new, m, softmax_scale, delta_m0, delta_m1, col_scale);
                         },
                         [&]() { s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>(); },
@@ -1464,8 +1465,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         [](auto) {},
                         [&](auto) {
                             __builtin_amdgcn_s_setprio(kSoftmaxExpPrio);
-                            Policy::template RunSplitSoftmaxPart2AndGetScale<Problem,
-                                                                             !kQuantizedRowSum>(
+                            Softmax::template RunSplitSoftmaxPart2AndGetScale<Problem,
+                                                                              !kQuantizedRowSum>(
                                 s_new,
                                 m,
                                 l,

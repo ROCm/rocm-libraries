@@ -26,6 +26,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_output_store.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_quant_scale.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_schedule.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_softmax.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_tile_index.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_load.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
