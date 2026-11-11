@@ -7283,9 +7283,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
         elif state["VectorWidthA"] > 1:
           reject(state, printRejectionReason, "reject to reduce number of kernels")
-      # tdmStoreRejectReason accepts the auto value; check the width it resolved to.
-      if state["TDMStoreInst"] and state["StoreRemapVectorWidth"]:
-        reject(state, printRejectionReason, "TDMStoreInst does not support StoreRemapVectorWidth")
 
     # GuaranteeNoPartial
     # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark

@@ -20042,7 +20042,8 @@ class KernelWriterAssembly(KernelWriter):
     return maxVgprs, occupancy
 
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
-                      gwvw, maxVgprs, ss, beta=False, edge=False):
+                      gwvw, maxVgprs, ss, beta=False, edge=False, storeRemap=None):
+    storeRemap = kernel["StoreRemapVectorWidth"] if storeRemap is None else storeRemap
     # Get estimated numVgprAvailable
     # Use block-aware counting to avoid overestimating with fragmented pools
     # print("Max vgprs =", maxVgprs, self.vgprPool.size(), self.vgprPool.availableBlock(ss.numVgprsPerElement, ss.align))
@@ -20149,7 +20150,7 @@ class KernelWriterAssembly(KernelWriter):
     # check best numElementsPerBatch to handle a column block
     # elements of column block must be multiple size of numElementsPerBatch
     nBatchesPerRow = 0
-    if kernel["StoreRemapVectorWidth"]:
+    if storeRemap:
       firstRow = [e for e in element if e[0]==0 and e[2]==0] # format for element = (tt1, tt0, vc1, vc0)
       # find the largest factor and smaller than numElementPerBatch
       nBatchesPerRow = 1
@@ -20169,7 +20170,7 @@ class KernelWriterAssembly(KernelWriter):
     # Shrink NEPB to an N-group divisor so CLS can compact. Skip if NEPBS is set.
     # Not used for atomic / StoreRemap / subtile.
     if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["EnableMatrixInstruction"] \
-        and not atomic and not kernel["StoreRemapVectorWidth"] and not kernel.get("UseSubtileImpl") \
+        and not atomic and not storeRemap and not kernel.get("UseSubtileImpl") \
         and ss.numVgprsPerElement > 0 \
         and not GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, ss.factorDim):
       maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
@@ -20263,6 +20264,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
+    # A TDM block stages D itself, so only a buffer_store block remaps it through LDS.
+    storeRemap = kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
 
     #print "globalWriteElements: edge=", edge, "beta=", beta, "atomic=", atomic
 
@@ -20314,7 +20317,8 @@ class KernelWriterAssembly(KernelWriter):
       assert activationSetPCStruct, activationEnumStrList and activationLabelList and toActModuleList
       actPCMaxTempSgpr_ = actPCMaxTempSgpr
 
-    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss, beta, edge)
+    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss, beta, edge,
+                                                                                       storeRemap)
 
     # set atomicW after we potentially resize GWVW
     atomicW = min(gwvw, self.getVectorAtomicWidth(kernel))
@@ -20463,7 +20467,7 @@ class KernelWriterAssembly(KernelWriter):
             # elementVgprs can be large and should be perfectly tuned to the number of available
             # VGPRS.  We do not want to accidentally overflow and grow the pool here:
 
-            if kernel["StoreRemapVectorWidth"]:
+            if storeRemap:
               #Indication if this batch is last batch for this column block shape
               self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
@@ -20516,7 +20520,7 @@ class KernelWriterAssembly(KernelWriter):
           actLoopModule.add(_emit_batch_loop())
 
         # SRVW+CLS: check in the offset vgpr after the last store batch.
-        if kernel["StoreRemapVectorWidth"] and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
+        if storeRemap and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
           self.vgprPool.checkIn(self.compactLoopStoreVgpr)
           self.compactLoopStoreVgpr = -1
 
