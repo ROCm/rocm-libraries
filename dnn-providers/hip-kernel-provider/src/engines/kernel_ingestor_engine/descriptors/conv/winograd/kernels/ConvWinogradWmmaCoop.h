@@ -279,10 +279,24 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 
     for(long long item = blockIdx.x; item < items; item += gridDim.x)
     {
-        const int kb = static_cast<int>(item % nKB);
-        const long long r0 = item / nKB;
-        const int tb = static_cast<int>(r0 % nTB);
-        const int g = static_cast<int>(r0 / nTB);
+        // Item order (K5Args::order): 0 K blocks fastest (the tile block's input stays in cache
+        // across them), 1 tile blocks fastest (the K block's U stays in cache across them: large
+        // C x K, where U re-reads would dominate).
+        int kb, tb, g;
+        if(a.order == 1)
+        {
+            tb = static_cast<int>(item % nTB);
+            const long long r0 = item / nTB;
+            kb = static_cast<int>(r0 % nKB);
+            g = static_cast<int>(r0 / nKB);
+        }
+        else
+        {
+            kb = static_cast<int>(item % nKB);
+            const long long r0 = item / nKB;
+            tb = static_cast<int>(r0 % nTB);
+            g = static_cast<int>(r0 / nTB);
+        }
         const int k0 = kb * BK, t0 = tb * BT;
 
         // ---- Transform jobs: lane -> (tile, channel pair). Job wave jw covers tiles

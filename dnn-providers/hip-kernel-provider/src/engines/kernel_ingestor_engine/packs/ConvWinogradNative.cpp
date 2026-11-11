@@ -816,6 +816,10 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         plan.mainThreads
             = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
+        // RDNA: tile blocks fastest where a group's transformed filter is past cache size (4 MiB
+        // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
+        // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
+        plan.args.order = config.arch != "gfx9" && uBytes / groups >= (4LL << 20) ? 1 : 0;
         if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
         {
             return std::nullopt;

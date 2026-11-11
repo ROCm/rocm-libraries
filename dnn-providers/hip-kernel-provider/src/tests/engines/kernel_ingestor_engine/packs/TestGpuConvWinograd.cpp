@@ -293,6 +293,9 @@ std::vector<DeviceCase> deviceCases()
 
     cases.push_back({"NchwDeepChannels", dense(136, 72, {7, 9}, 1, false)});
     cases.push_back({"MixedLayouts", dense(16, 24, {10, 9}, 1, true), true});
+    // A transformed filter past 4 MiB (16 x 528 x 256 x 2 bytes): the RDNA cooperative plan runs
+    // tile blocks fastest; several tile blocks and a partial last K block.
+    cases.push_back({"NchwLargeFilterTileOrder", dense(256, 520, {9, 13}, 1, false)});
 
     // Stride 2 (F(3,2) on the phase sub-filters): odd and even extents, so phases run short on
     // either edge.
