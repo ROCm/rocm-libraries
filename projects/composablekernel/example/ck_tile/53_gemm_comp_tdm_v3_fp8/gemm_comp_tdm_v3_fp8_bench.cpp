@@ -74,6 +74,43 @@ using ALayout     = ck_tile::tensor_layout::gemm::RowMajor;
 using BLayout     = ck_tile::tensor_layout::gemm::ColumnMajor;
 using CLayout     = ck_tile::tensor_layout::gemm::RowMajor;
 
+// EXPERIMENT (B0 8 PF): cluster tile partitioner that gives each XCD one RegM x RegN region of
+// output tiles. Assumes the hardware places clusters round-robin over NumXcd XCDs by linear
+// cluster id (x fastest) and that the grid splits into exactly NumXcd regions; otherwise it
+// falls back to the contiguous cluster mapping. Needs ClusterN == 1 and RegM % ClusterM == 0.
+// A region is filled with clusters (ClusterM M-tiles x 1 N-tile) M-group-major, so the
+// ClusterM members of a cluster share their N-tile (the B multicast group).
+template <typename Shape, ck_tile::index_t RegM, ck_tile::index_t RegN, ck_tile::index_t NumXcd = 8>
+struct XcdRegionClusterPartitioner : ck_tile::GemmClusterTilePartitioner<Shape>
+{
+    using Base = ck_tile::GemmClusterTilePartitioner<Shape>;
+    using Base::Base;
+    static_assert(Base::ClusterN == 1 && RegM % Base::ClusterM == 0);
+
+    CK_TILE_DEVICE static auto GetOutputTileIndex(ck_tile::index_t blockIdx,
+                                                  ck_tile::index_t blockIdy) noexcept
+        -> const ck_tile::tuple<ck_tile::index_t, ck_tile::index_t>
+    {
+        using ck_tile::amd_wave_read_first_lane;
+        using ck_tile::index_t;
+        const index_t iM    = amd_wave_read_first_lane(blockIdx);
+        const index_t iN    = amd_wave_read_first_lane(blockIdy);
+        const index_t gridM = amd_wave_read_first_lane(gridDim.x);
+        const index_t gridN = amd_wave_read_first_lane(gridDim.y);
+        if(gridM % RegM != 0 || gridN % RegN != 0 || (gridM / RegM) * (gridN / RegN) != NumXcd)
+            return ck_tile::make_tuple(iM, iN);
+        constexpr index_t CM = Base::ClusterM;
+        const index_t cid    = amd_wave_read_first_lane(ck_tile::get_cluster_id_x() +
+                                                     ck_tile::get_cluster_id_y() * (gridM / CM));
+        const index_t xcd    = cid % NumXcd;
+        const index_t slot   = cid / NumXcd;
+        const index_t nreg_n = gridN / RegN;
+        const index_t tileM  = (xcd / nreg_n) * RegM + (slot / RegN) * CM + iM % CM;
+        const index_t tileN  = (xcd % nreg_n) * RegN + slot % RegN;
+        return ck_tile::make_tuple(tileM, tileN);
+    }
+};
+
 // One compiled kernel per (tile, epilogue, cluster). The CShuffle epilogue needs kPadM/kPadN for a
 // partial C tile; TDM clips the A/B boxes and the C store, so its instances are unpadded. With
 // Cluster > 1 the workgroups launch in Cluster x Cluster clusters.
@@ -86,30 +123,36 @@ template <ck_tile::index_t TileM,
           ck_tile::index_t WarpN,
           ck_tile::index_t WarpK,
           bool TdmEpi,
-          ck_tile::index_t Cluster = 1>
+          ck_tile::index_t ClusterM = 1,
+          ck_tile::index_t ClusterN = ClusterM,
+          ck_tile::index_t RegM     = 0, // > 0: XcdRegionClusterPartitioner (EXPERIMENT)
+          ck_tile::index_t RegN     = 0>
 struct Instance
 {
     static constexpr bool kPad     = !TdmEpi;
-    static constexpr bool kCluster = Cluster > 1;
+    static constexpr bool kCluster = ClusterM * ClusterN > 1;
     using TileShape =
         std::conditional_t<kCluster,
-                           ck_tile::ClusterTileGemmShape<ck_tile::sequence<Cluster, Cluster, 1>,
+                           ck_tile::ClusterTileGemmShape<ck_tile::sequence<ClusterM, ClusterN, 1>,
                                                          ck_tile::sequence<TileM, TileN, TileK>,
                                                          ck_tile::sequence<WarpsM, WarpsN, 1>,
                                                          ck_tile::sequence<WarpM, WarpN, WarpK>>,
                            ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
                                                   ck_tile::sequence<WarpsM, WarpsN, 1>,
                                                   ck_tile::sequence<WarpM, WarpN, WarpK>>>;
-    using Partitioner = std::conditional_t<kCluster,
-                                           ck_tile::GemmClusterTilePartitioner<TileShape>,
-                                           ck_tile::GemmTile1DPartitioner<TileShape>>;
-    using Traits      = ck_tile::TileGemmUniversalTraits<kPad,
-                                                         kPad,
-                                                         false, // kPadK
-                                                         true,  // DoubleSmemBuffer
-                                                         ALayout,
-                                                         BLayout,
-                                                         CLayout>;
+    using Partitioner = std::conditional_t<
+        (RegM > 0),
+        XcdRegionClusterPartitioner<TileShape, (RegM > 0 ? RegM : ClusterM), (RegN > 0 ? RegN : 1)>,
+        std::conditional_t<kCluster,
+                           ck_tile::GemmClusterTilePartitioner<TileShape>,
+                           ck_tile::GemmTile1DPartitioner<TileShape>>>;
+    using Traits = ck_tile::TileGemmUniversalTraits<kPad,
+                                                    kPad,
+                                                    false, // kPadK
+                                                    true,  // DoubleSmemBuffer
+                                                    ALayout,
+                                                    BLayout,
+                                                    CLayout>;
     using Problem =
         ck_tile::UniversalGemmPipelineProblem<ADataType,
                                               BDataType,
@@ -655,11 +698,36 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
     // EXPERIMENT (B0 8 PF): 256x256x256 with 4 fat waves (warps 2x2x1, 128x128 per wave).
     if(arg.get_str("warps") == "2x2")
     {
-        const std::string wt = arg.get_str("wt");
+        const std::string wt    = arg.get_str("wt");
+        const std::string place = arg.get_str("place");
+        // B-only multicast (ClusterN == 1) and the XCD-region placement: wt 32 only.
+        if(tile == "256x256x256" && wt == "32" && (cluster == "4x1" || cluster == "2x1"))
+        {
+            if(place == "8x4")
+                return cluster == "4x1"
+                           ? run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 4, 1, 8, 4>>(
+                                 arg, name)
+                           : run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 2, 1, 8, 4>>(
+                                 arg, name);
+            if(place == "default")
+                return cluster == "4x1"
+                           ? run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 4, 1>>(arg,
+                                                                                           name)
+                           : run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 2, 1>>(arg,
+                                                                                           name);
+            std::printf("-place=%s: default | 8x4\n", place.c_str());
+            return 2;
+        }
+        if(place != "default")
+        {
+            std::printf("-place needs -warps=2x2 -wt=32 -cluster=4x1|2x1\n");
+            return 2;
+        }
         if(tile != "256x256x256" || (cluster != "1x1" && cluster != "2x2") ||
            (wt != "32" && wt != "16"))
         {
-            std::printf("-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2, -wt=32|16\n");
+            std::printf("-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2 (or 4x1|2x1 with "
+                        "-wt=32), -wt=32|16\n");
             return 2;
         }
         if(wt == "32")
@@ -716,7 +784,9 @@ int dispatch(const ck_tile::ArgParser& arg)
          : tile == "256x256x256"
              ? "_w4x4x1_wt32x32x128"
              : (tile.rfind("16x", 0) == 0 ? "_w1x4x1_wt16x16x128" : "_w2x2x1_wt16x16x128")) +
-        (epi == "tdm" ? "_tdm" : "") + (arg.get_str("cluster") == "2x2" ? "_cl2x2" : "") +
+        (epi == "tdm" ? "_tdm" : "") +
+        (arg.get_str("cluster") != "1x1" ? "_cl" + arg.get_str("cluster") : "") +
+        (arg.get_str("place") != "default" ? "_xcd" + arg.get_str("place") : "") +
         (arg.get_int("k_batch") > 1 ? "_kb" + arg.get_str("k_batch") : "");
     if(epi == "cshuffle")
         return dispatch_tile<false>(arg, name);
@@ -743,6 +813,10 @@ int main(int argc, char* argv[])
             "cluster", "1x1", "1x1 | 2x2 (256x256x256 only): workgroup cluster with TDM multicast")
         .insert("warps", "default", "default | 2x2 (EXPERIMENT: 256x256x256 with 4 waves)")
         .insert("wt", "32", "with -warps=2x2: warp tile 32 (32x32x128) | 16 (16x16x128)")
+        .insert("place",
+                "default",
+                "with -warps=2x2 -wt=32 -cluster=4x1|2x1: default | 8x4 (EXPERIMENT: each XCD "
+                "covers an 8M x 4N tile region)")
         .insert("k_batch", "1", "split K into this many atomically added ranges (CShuffle only)")
         .insert("mode", "peak", "verify-int | verify-rand | peak | sustained")
         .insert("data", "rand", "input data for peak/sustained: rand | int")
