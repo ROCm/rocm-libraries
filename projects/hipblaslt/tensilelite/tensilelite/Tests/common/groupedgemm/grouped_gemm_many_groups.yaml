@@ -3,7 +3,9 @@ TestParameters:
 
 # One grouped problem of 400 gemms of different sizes (the client packs every problem size
 # into one grouped problem). Grouped kernels on 64-lane waves search the gemms 64 at a time
-# and load up to 384 per round trip, so 400 gemms cross both boundaries.
+# and load up to 384 per round trip, so 400 gemms cross both boundaries. The client launches
+# exactly one workgroup per tile, so no workgroup lands past the last tile here; the
+# GroupedMatmul gtests in hipBLASLt, whose grid comes from size hints, cover that path.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
