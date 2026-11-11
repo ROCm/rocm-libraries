@@ -15,6 +15,7 @@ pytest.importorskip("numpy", reason="the rocKE builders need numpy")
 
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import enumerate_conv_dgrad_aot_instances as tool  # noqa: E402
 import launch_surface  # noqa: E402
@@ -235,6 +236,12 @@ def test_committed_gfx1250_lists_are_what_the_tool_enumerates(
         assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype
 
 
-def test_the_default_rocke_root_is_the_in_repo_tree():
-    """Without --rocke-root the tool reads the rocKE tree beside it."""
+def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatch):
+    from test_make_conv_dgrad_aot_config import _bound_root
+
     assert tool.DEFAULT_ROCKE_ROOT.resolve() == _ROCKE.resolve()
+    argv = ["--output-dir", str(tmp_path)]
+    root = _bound_root(monkeypatch, tool, "_bind_rocke", argv)
+    assert root.resolve() == _ROCKE.resolve()
+    other = _bound_root(monkeypatch, tool, "_bind_rocke", argv + ["--rocke-root", "/x"])
+    assert other == Path("/x")

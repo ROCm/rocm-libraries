@@ -659,7 +659,28 @@ def test_dumped_config_loads_back(specs):
     assert yaml.safe_load(text) == tool.build_config(specs)
 
 
-def test_the_default_rocke_root_is_the_in_repo_tree():
-    """Without --rocke-root the tool binds the rocKE tree beside it."""
+class _Bound(Exception):
+    """Raised by a stand-in _bind_rocke to stop a tool where it binds rocKE."""
+
+
+def _bound_root(monkeypatch, module, attribute, argv, binder=None):
+    """The rocKE root ``module.main(argv)`` binds, by way of ``<attribute>`` of
+    ``binder`` (default: ``module``)."""
+
+    def bind(root):
+        raise _Bound(root)
+
+    monkeypatch.setattr(binder or module, attribute, bind)
+    with pytest.raises(_Bound) as bound:
+        module.main(argv)
+    return Path(bound.value.args[0])
+
+
+def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatch):
     assert tool.DEFAULT_ROCKE_ROOT.resolve() == _ROCKE.resolve()
-    assert (tool.DEFAULT_ROCKE_ROOT / "library" / "builders").is_dir()
+    argv = ["--instances", str(tmp_path / "x.json"), "--output", str(tmp_path / "o")]
+    root = _bound_root(monkeypatch, tool, "_bind_rocke", argv)
+    assert root.resolve() == _ROCKE.resolve()
+    # An explicit root wins.
+    other = _bound_root(monkeypatch, tool, "_bind_rocke", argv + ["--rocke-root", "/x"])
+    assert other == Path("/x")

@@ -17,6 +17,7 @@ pytest.importorskip("numpy", reason="the rocKE builders need numpy")
 
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import launch_surface  # noqa: E402
 import make_conv_dgrad_aot_test_vectors as tool  # noqa: E402
@@ -66,3 +67,11 @@ def test_the_committed_vectors_are_what_the_tool_writes(
         f"{header} is stale: regenerate it with "
         "tools/make_conv_dgrad_aot_test_vectors.py"
     )
+
+
+def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatch):
+    from test_make_conv_dgrad_aot_config import _bound_root
+
+    argv = ["--instances", str(tmp_path / "x.json"), "--output", str(tmp_path / "o")]
+    root = _bound_root(monkeypatch, tool, "_bind_rocke", argv, binder=tool._cfg)
+    assert root.resolve() == _ROCKE.resolve()
