@@ -58,7 +58,7 @@ namespace hiptensor
             std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp);
 
         // Must specialize incoming arg handling
-        virtual bool initArgs(std::vector<float> const&                    scalarValues,
+        virtual bool initArgs(std::vector<double> const&                   scalarValues,
                               std::vector<std::vector<std::size_t>> const& inLengthsArray,
                               std::vector<std::vector<std::size_t>> const& inStridesArray,
                               std::vector<std::vector<int32_t>> const&     inModesArray,

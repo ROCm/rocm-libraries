@@ -33,6 +33,10 @@ public:
                 getApplicableEngineIds,
                 (const hipdnn_backend::GraphDescriptor* graphDesc, bool findFirst),
                 (const, override));
+    MOCK_METHOD(bool,
+                isEngineApplicable,
+                (int64_t engineId, const hipdnn_backend::GraphDescriptor* graphDesc),
+                (const, override));
     MOCK_METHOD(void,
                 getEngineDetails,
                 (int64_t engineId,
@@ -48,6 +52,21 @@ public:
                 (int64_t engineId,
                  const hipdnnPluginConstData_t* engineConfig,
                  const hipdnn_backend::GraphDescriptor* graphDesc),
+                (const, override));
+    MOCK_METHOD(std::vector<uint8_t>,
+                enumerateCandidates,
+                (int64_t engineId,
+                 const hipdnnPluginConstData_t& engineConfig,
+                 const hipdnn_backend::GraphDescriptor* graph,
+                 uint64_t offset,
+                 uint64_t limit),
+                (const, override));
+    MOCK_METHOD(hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT,
+                getEnginePrediction,
+                (const hipdnnPluginConstData_t& engineConfig,
+                 const hipdnnPluginConstData_t& opGraph,
+                 hipdnnEnginePredictionKind_t kind,
+                 bool evaluate),
                 (const, override));
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
                 createExecutionContext,

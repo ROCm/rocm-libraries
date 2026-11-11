@@ -1,0 +1,105 @@
+# Skip CI Configuration for rocm-libraries
+#
+# This file defines which file patterns can skip TheRock CI.
+# When all changed files match these patterns, CI can be skipped.
+#
+# These patterns extend TheRock's base patterns in
+# build_tools/github_actions/skip-ci-base.toml.
+#
+# Pattern syntax: fnmatch glob patterns (*, ?, [abc])
+# See https://docs.python.org/3/library/fnmatch.html
+#
+# To add platform-specific skips (e.g., skip Windows CI for Linux-only projects),
+# use the [skip_ci.linux] or [skip_ci.windows] sections.
+
+version = 1
+
+[skip_ci]
+# Common patterns that skip CI on all platforms
+common = [
+    # Documentation and metadata files
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
+    "*.md",
+    "*.rst",
+    "*.rtf",
+    "*.pre-commit-config.*",
+    "*CODEOWNERS",
+    "*LICENSE",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    ".github/label*.yml",
+    ".github/skip-ci-config.toml",
+    ".gitignore",
+    "dnn-providers/*/.gitignore",
+    "dnn-providers/*/docs/*",
+    "docs/*",
+    "projects/*/.gitignore",
+    "projects/*/docs/*",
+
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
+    "shared/*/.gitignore",
+    "shared/*/docs/*",
+
+    # ComposableKernel directories not built by TheRock
+    "projects/composablekernel/Jenkinsfile",
+    "projects/composablekernel/Docker*",
+    "projects/composablekernel/client_example/*",
+    "projects/composablekernel/codegen/*",
+    "projects/composablekernel/dispatcher/*",
+    "projects/composablekernel/example/*",
+    "projects/composablekernel/experimental/*",
+    "projects/composablekernel/profiler/*",
+    "projects/composablekernel/python/*",
+    "projects/composablekernel/rocm_ck/*",
+    "projects/composablekernel/script/*",
+    "projects/composablekernel/test/*",
+    "projects/composablekernel/test_data/*",
+    "projects/composablekernel/tile_engine/*",
+    "projects/composablekernel/tutorial/*",
+    "projects/composablekernel/vars/*",
+    "projects/composablekernel/groovy/*",
+
+    # Workflows that are not TheRock CI. Changing one of these cannot affect a
+    # TheRock build or test, so there is no reason to burn runners on it.
+    ".github/workflows/auto-retry-failed.yml",
+    ".github/workflows/clang-tidy.yml",
+    ".github/workflows/close-stale-prs.yml",
+    ".github/workflows/codeql.yml",
+    ".github/workflows/component-ci*.yml",
+    ".github/workflows/docs-pr-preview*.yml",
+    ".github/workflows/gfx1250_hipblaslt_tensilelite_test.yml",
+    ".github/workflows/hipblaslt-asan-ci.yml",
+    ".github/workflows/hipblaslt-drop-build.yml",
+    ".github/workflows/hipblaslt-local-kernels-ci.yml",
+    ".github/workflows/hipdnn-superbuild-ci.yml",
+    ".github/workflows/hostnumerics-ci.yml",
+    ".github/workflows/initial-setup.yml",
+    ".github/workflows/issue-import.yml",
+    ".github/workflows/labeler.yml",
+    ".github/workflows/libraries-pr-bot.yml",
+    ".github/workflows/merge-submodules.yml",
+    ".github/workflows/miopen-wrapper-flag-on.yml",
+    ".github/workflows/multiple_pr_import.yml",
+    ".github/workflows/pr-base-freshness.yml",
+    ".github/workflows/pr-import.yml",
+    ".github/workflows/pr-merge-sync-patches.yml",
+    ".github/workflows/pr-merge-sync-patches-manual.yml",
+    ".github/workflows/pr-org-label.yml",
+    ".github/workflows/pre-commit.yml",
+    ".github/workflows/shared-ctest-ci.yml",
+    ".github/workflows/update-docs.yml",
+    ".github/workflows/update-release-staging-subtree.yml",
+    ".github/workflows/update-subtrees.yml",
+]
+
+# Patterns that skip CI only on Linux (e.g., Windows-only projects)
+linux = []
+
+# Patterns that skip CI only on Windows (e.g., Linux-only projects)
+windows = []

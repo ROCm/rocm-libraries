@@ -748,6 +748,11 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(7, D, (D->col_type != A->col_type), rocsparse_status_type_mismatch);
         ROCSPARSE_CHECKARG(8, C, (C->col_type != A->col_type), rocsparse_status_type_mismatch);
 
+        ROCSPARSE_CHECKARG(
+            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            2, trans_B, (trans_B != rocsparse_operation_none), rocsparse_status_not_implemented);
+
         return rocsparse_status_continue;
     }
 }

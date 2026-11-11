@@ -183,9 +183,9 @@ loads to once per row (before the slot loop) and batching the atomics removed
 The fp8 MFMA was `16x16x32` (K=32 per instruction), so the K-loop ran 4x more
 trips than necessary and the per-trip overhead (waitcnts, loop control) dominated.
 The `16x16x128` atom does K=128 per MFMA — 64 -> 16 MFMAs, 4x fewer trips. It
-lowers to `llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4` with the scale exponents
-pinned to 0 (= unscaled): there is no plain unscaled `16x16x128` fp8 intrinsic, so
-the scaled one with scales fixed to 0 is used.
+lowers to `llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4` with both scale operands at
+literal 0. The backend then selects the unscaled instruction. There is no unscaled
+`16x16x128` fp8 intrinsic, so the scaled one is used.
 **Nuance:** K=128 lines up exactly with the 128-element block-scale granularity,
 so one MFMA covers one scale block and dequant is a single f32 multiply per MFMA.
 **Gotcha:** the K=32 path *hangs comgr* in the modern kernel structure, so the
@@ -288,7 +288,7 @@ New, and they don't change any existing kernel's lowering (the golden IR digest
 of existing kernels stays byte-identical):
 
 - **K=128 fp8 hero atom** -- `MfmaAtom.fp8_16x16x128` ->
-  `llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4` with scale exponents pinned to 0.
+  `llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4` with both scale operands at literal 0.
 - **Direct-to-LDS** -- `llvm.amdgcn.raw.ptr.buffer.load.lds` / `global.load.lds`
   (up to 16 B = `dwordx4` on gfx950).
 

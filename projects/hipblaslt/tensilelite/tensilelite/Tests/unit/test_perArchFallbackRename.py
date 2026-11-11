@@ -31,13 +31,13 @@ passes on either implementation does not protect against this regression class.
 
 import pytest
 
-from Tensile.SolutionLibrary import (
+from tensilelite.SolutionLibrary import (
     MasterSolutionLibrary,
     PlaceholderLibrary,
     PredicateLibrary,
     ProblemMapLibrary,
 )
-from Tensile.TensileCreateLibrary.Run import renameFallbacksPerArch
+from tensilelite.create_library.run import renameFallbacksPerArch
 
 
 def _placeholder(name: str) -> PlaceholderLibrary:
@@ -199,7 +199,7 @@ def test_renameFallbacksPerArch_isIdempotent():
 # completeness invariant the runtime depends on.
 # ---------------------------------------------------------------------------
 def _per_arch_mapping_keys(libraryMapping, arch):
-    """Mirror the producer's per-arch filter logic from Run.py."""
+    """Mirror the producer's per-arch filter logic from create_library/run.py."""
     return {
         idx
         for idx, name in libraryMapping.items()

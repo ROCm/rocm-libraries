@@ -57,7 +57,9 @@ wave_any(pred)    # i32, 1 iff any lane's pred != 0
 wave_ballot(pred) # i64 bitmask
 ```
 
-LLVM emission uses `llvm.amdgcn.ballot.i64`. `wave_all` / `wave_any` compare the ballot mask to specific values (`-1` for all, `0` for none).
+LLVM emission uses `llvm.amdgcn.ballot.i64`, which sets only the low `wave_size` bits. `wave_all` compares the mask to the full-wave value (`-1` on wave64, `0xffffffff` on wave32); `wave_any` compares it to `0`.
+
+`wave_all` requires full EXEC (every lane of the wave active). Unlike HIP's `__all`, which counts only active lanes, it returns 0 under partial EXEC (a divergent region or a sub-wave workgroup).
 
 Typical use: adaptive online softmax. When `wave_all(max_diff < THRESHOLD)`, the workgroup can skip the rescale path entirely.
 
@@ -87,7 +89,7 @@ Notes:
 b.warp_shuffle_xor(v, lane_xor)
 ```
 
-Convenience wrapper: lane `l` gets `v` from lane `l ^ lane_xor`. Works for f32 and i32 directly; bitcast first for half / bf16. Internally:
+Convenience wrapper: lane `l` gets `v` from lane `l ^ lane_xor`. Works for f32 and i32 directly; bitcast first for half / bf16. An f64 `v` is split into two i32 halves, each shuffled separately, and reassembled. Internally:
 
 ```text
 addr = (lane_id() ^ lane_xor) << 2
@@ -103,6 +105,37 @@ for off in (1, 2, 4, 8, 16, 32):
 ```
 
 `helpers/attention.py::warp_xor_reduce_max(b, v)` and `warp_xor_reduce_sum(b, v)` implement this for f32. Use them instead of hand-rolling unless your kernel needs a non-standard reduce.
+
+## `warp_shuffle_xor_dpp`
+
+```text
+b.warp_shuffle_xor_dpp(v, lane_xor)
+```
+
+Register-only XOR shuffle, like CUDA `__shfl_xor_sync` inside a 16-lane row: lane `l` gets `v` from lane `l ^ lane_xor`, through one `v_mov_b32_dpp` on the VALU. There is no LDS (`ds_swizzle`) traffic and no `lgkmcnt` wait. f32 and i32 work directly.
+
+The builder emits `tile.dpp_xor` with the mask. The lowerer picks the DPP control word for the target:
+
+| `lane_xor` | gfx9 CDNA (gfx90a, gfx942, gfx950) | gfx11, gfx12, gfx1250 |
+|---|---|---|
+| 1 | `quad_perm [1,0,3,2]` | `row_xmask:1` |
+| 2 | `quad_perm [2,3,0,1]` | `row_xmask:2` |
+| 3 | `quad_perm [3,2,1,0]` | `row_xmask:3` |
+| 7 | `row_half_mirror` | `row_xmask:7` |
+| 8 | `row_ror:8` | `row_xmask:8` |
+| 15 | `row_mirror` | `row_xmask:15` |
+| other 1..15 | lowering fails with `ValueError` | `row_xmask:<mask>` |
+
+Every entry is exactly XOR with the mask, for any data. For example `row_mirror` makes lane `i` read lane `15 - i`, and `15 - i == i ^ 15` for `i` in 0..15. On gfx9, use `warp_shuffle_xor` for the masks the table rejects.
+
+The shuffle works per 16-lane row (4 rows in wave64, 2 in wave32) and never crosses a row, so `lane_xor` must be in 1..15. A 16-lane sum is:
+
+```text
+for m in (1, 2, 7, 15):        # spans all 4 lane-index bits; (1, 2, 4, 8) also works with row_xmask
+    v = v + warp_shuffle_xor_dpp(v, m)
+```
+
+Every lane of the row must be active for such a reduction: each lane also relays its partners' partial results, so one inactive lane leaves wrong totals in the active lanes.
 
 ## `ds_read_tr16_b64`
 

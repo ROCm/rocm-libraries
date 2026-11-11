@@ -56,7 +56,9 @@ try
     rocblas_stride const shiftA = 0;
     rocblas_stride const shiftB = 0;
 
+    // ------------------------------------------
     // normal (non-batched non-strided) execution
+    // ------------------------------------------
     rocblas_stride const strideA = 0;
     rocblas_stride const strideB = 0;
     rocblas_stride const strideP = 0;

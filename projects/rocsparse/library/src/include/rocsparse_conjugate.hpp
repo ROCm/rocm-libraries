@@ -43,6 +43,14 @@ namespace rocsparse
                                                void*              array,
                                                int64_t            array_stride);
 
+    rocsparse_status conjugate_strided_batched(rocsparse_handle   handle,
+                                               int64_t            batch_count,
+                                               int64_t            length,
+                                               rocsparse_datatype datatype,
+                                               void*              array,
+                                               int64_t            array_inc,
+                                               int64_t            array_stride);
+
     template <typename T>
     inline rocsparse_status conjugate(rocsparse_handle handle, int64_t length, T* array)
     {

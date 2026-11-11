@@ -20,6 +20,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_type_is */
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -166,20 +167,51 @@ rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v
 {
     /* cur = v
      * for k in range(stages):
-     *     remote = b.warp_shuffle_xor(cur, 1 << k)
+     *     mask = 1 << k
+     *     if mask <= 8 and cur.type in (f32, i32):  # inside the 16-lane DPP row
+     *         # 1, 2 -> quad_perm; 4, 8 -> dpp 7, 15 (row_half_mirror / row_mirror)
+     *         remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
+     *     else:
+     *         remote = b.warp_shuffle_xor(cur, mask)      # ds_swizzle
      *     cur = b.fadd(cur, remote)
-     * return cur */
+     * return cur
+     * The stages ascend, so each quad (half-row) already holds one sum and the
+     * i ^ 7 (i ^ 15) partner adds the same value as i ^ 4 (i ^ 8).
+     * Mirrors helpers/attention.py::warp_xor_reduce_sum (same f32/i32 guard). */
     rocke_value_t* cur = v;
     int k;
     for(k = 0; k < stages; ++k)
     {
-        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        int mask = 1 << k;
+        rocke_value_t* remote;
+        if(mask <= 8 && (rocke_i_type_is(cur->type, "f32") || rocke_i_type_is(cur->type, "i32")))
+            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask <= 2 ? mask : 2 * mask - 1);
+        else
+            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
         cur = rocke_b_fadd(b, cur, remote);
     }
     return cur;
 }
 
 /* ------------------------------------------------------ fp8 in-register dequant */
+
+rocke_value_t* rocke_decode_fp8e4m3fn_to_f32(rocke_ir_builder_t* b, rocke_value_t* byte)
+{
+    rocke_value_t* bits = rocke_b_zext(b, byte, rocke_i32());
+    rocke_value_t* magnitude = rocke_b_land(b, bits, rocke_b_const_i32(b, 0x7F));
+    rocke_value_t* sign_byte = rocke_b_land(b, bits, rocke_b_const_i32(b, 0x80));
+    rocke_value_t* sign = rocke_b_shl(b, sign_byte, rocke_b_const_i32(b, 24));
+    rocke_value_t* shifted = rocke_b_shl(b, magnitude, rocke_b_const_i32(b, 20));
+    rocke_value_t* normal = rocke_b_add(b, shifted, rocke_b_const_i32(b, 120 << 23));
+    rocke_value_t* subnormal_f = rocke_b_sitofp_f32(b, magnitude);
+    rocke_value_t* subnormal = rocke_b_fmul(b, subnormal_f, rocke_b_const_f32(b, 0.001953125));
+    rocke_value_t* is_subnormal = rocke_b_cmp_lt(b, magnitude, rocke_b_const_i32(b, 8));
+    rocke_value_t* result
+        = rocke_b_select(b, is_subnormal, rocke_b_bitcast(b, subnormal, rocke_i32()), normal);
+    rocke_value_t* is_nan = rocke_b_cmp_eq(b, magnitude, rocke_b_const_i32(b, 0x7F));
+    result = rocke_b_select(b, is_nan, rocke_b_const_i32(b, 0x7FC00000), result);
+    return rocke_b_bitcast(b, rocke_b_lor(b, result, sign), rocke_f32());
+}
 
 rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
                                             rocke_value_t* fp8_vec,

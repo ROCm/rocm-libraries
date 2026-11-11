@@ -117,6 +117,7 @@ enum class architecture : int
     gfx103x,
     gfx110x,
     gfx115x,
+    gfx117x,
     gfx120x,
     gfx125x,
 };
@@ -146,17 +147,18 @@ struct launch_dimension
     static constexpr unsigned int grp2 = static_cast<unsigned int>(Grp2);
 };
 
-template <int Gfx103x, int Gfx110x, int Gfx115x, int Gfx120x, int Gfx125x>
+template <int Gfx103x, int Gfx110x, int Gfx115x, int Gfx117x, int Gfx120x, int Gfx125x>
 struct architecture_switch
 {
     static_assert(Gfx103x == 0 || Gfx103x == 1, "Gfx103x must be 0 or 1");
     static_assert(Gfx110x == 0 || Gfx110x == 1, "Gfx110x must be 0 or 1");
     static_assert(Gfx115x == 0 || Gfx115x == 1, "Gfx115x must be 0 or 1");
+    static_assert(Gfx117x == 0 || Gfx117x == 1, "Gfx117x must be 0 or 1");
     static_assert(Gfx120x == 0 || Gfx120x == 1, "Gfx120x must be 0 or 1");
     static_assert(Gfx125x == 0 || Gfx125x == 1, "Gfx125x must be 0 or 1");
 
-    static_assert(Gfx103x + Gfx110x + Gfx115x + Gfx120x + Gfx125x == 1 ||
-                      Gfx103x + Gfx110x + Gfx115x + Gfx120x + Gfx125x == 0,
+    static_assert(Gfx103x + Gfx110x + Gfx115x + Gfx117x + Gfx120x + Gfx125x == 1 ||
+                      Gfx103x + Gfx110x + Gfx115x + Gfx117x + Gfx120x + Gfx125x == 0,
                   "only one of these configs can be chosen.");
     static constexpr architecture value =
         static_cast<bool>(Gfx103x)
@@ -165,10 +167,12 @@ struct architecture_switch
                    ? architecture::gfx110x
                    : (static_cast<bool>(Gfx115x)
                           ? architecture::gfx115x
-                          : (static_cast<bool>(Gfx120x)
-                                 ? architecture::gfx120x
-                                 : (static_cast<bool>(Gfx125x) ? architecture::gfx125x
-                                                               : architecture::unknown))));
+                          : (static_cast<bool>(Gfx117x)
+                                 ? architecture::gfx117x
+                                 : (static_cast<bool>(Gfx120x)
+                                        ? architecture::gfx120x
+                                        : (static_cast<bool>(Gfx125x) ? architecture::gfx125x
+                                                                      : architecture::unknown)))));
 };
 
 template <typename MiopenConfig,
@@ -289,6 +293,7 @@ using config = miopen::batchnorm::detail::proto_config<
     miopen::batchnorm::detail::architecture_switch<MIO_BN_GFX103X,
                                                    MIO_BN_GFX110X,
                                                    MIO_BN_GFX115X,
+                                                   MIO_BN_GFX117X,
                                                    MIO_BN_GFX120X,
                                                    MIO_BN_GFX125X>,
     MIO_BN_VARIANT,

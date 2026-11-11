@@ -12,6 +12,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <stdexcept>
+
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>

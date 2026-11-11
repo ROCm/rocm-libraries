@@ -10,6 +10,7 @@ copies it verbatim into a tree that has never seen this file.
 
 import concurrent.futures
 import itertools
+import multiprocessing
 import os
 import re
 import sys
@@ -23,8 +24,8 @@ from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
 from pack_helpers import (
+    GENERIC_TARGETS,
     _child_sys_path,
-    _conftest_only_paths,
     _kdp,
     _silent,
     _ukd,
@@ -189,7 +190,7 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     _write_json(
         dest,
         "u_standalone_wild.ukd.json",
-        _ukd("ukd-standalone-wild", _hip_ks(_K1_SOURCE, "K1", 1024)),
+        _ukd("ukd-standalone-wild", _hip_ks(_K1_SOURCE, "K1", 1024), [OTHER_ARCH]),
     )
 
     # Case 2 -- inline hip.
@@ -238,7 +239,7 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     _write_json(
         dest,
         "u_standalone_hip.ukd.json",
-        _ukd("ukd-standalone-hip", _hip_ks(_K1_SOURCE, "K1", 256)),
+        _ukd("ukd-standalone-hip", _hip_ks(_K1_SOURCE, "K1", 256), [TARGET_ARCH]),
     )
 
     # Case 6 -- a standalone rocke UKD referenced by id.
@@ -251,7 +252,7 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
         _write_json(
             dest,
             "u_standalone_rocke.ukd.json",
-            _ukd("ukd-standalone-rocke", _rocke_ks()),
+            _ukd("ukd-standalone-rocke", _rocke_ks(), [TARGET_ARCH]),
         )
 
     # Case 7 -- a standalone UKD whose own arch excludes the target, listed
@@ -306,7 +307,7 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     _write_json(
         dest,
         "u_standalone_shared.ukd.json",
-        _ukd("ukd-standalone-shared", _hip_ks(_K2_SOURCE, "K2", 512)),
+        _ukd("ukd-standalone-shared", _hip_ks(_K2_SOURCE, "K2", 512), [TARGET_ARCH]),
     )
 
     # Case 10 -- an orphan standalone UKD.
@@ -354,7 +355,7 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
         _write_json(
             dest,
             "u_standalone_embedded.ukd.json",
-            _ukd("ukd-standalone-embedded", _embedded_ks("E1B")),
+            _ukd("ukd-standalone-embedded", _embedded_ks("E1B"), [TARGET_ARCH]),
         )
 
     return dest
@@ -423,11 +424,13 @@ def _entry_identity(entry_id, ukd_doc, sdesc):
 
 
 def _observed_sequence(corpus_dir):
-    flat = load_flat_input(corpus_dir, log=_silent)
+    flat = load_flat_input(corpus_dir, GENERIC_TARGETS, log=_silent)
     ukd_by_id = flat.ukd_by_id()
     observed = []
     for kdp in flat.kdps():
-        for tup in pipeline._selected_entries(kdp.doc, TARGET_ARCH, ukd_by_id):
+        for tup in pipeline._selected_entries(
+            kdp.doc, TARGET_ARCH, ukd_by_id, GENERIC_TARGETS
+        ):
             observed.append(_entry_identity(*tup))
     return observed
 
@@ -473,7 +476,7 @@ def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
     one standalone UKD from two KDPs, so a job list that failed to dedup would
     be longer than the set of keys it carries.
     """
-    flat = load_flat_input(corpus, log=_silent)
+    flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
     assert jobs, "the corpus selects variants, so the job list cannot be empty"
     assert len({j.vk for j in jobs}) == len(jobs)
@@ -675,7 +678,7 @@ def test_prewarm_skips_hsaco_kind(hsaco_corpus):
     `_variant_key_for` declines the kind, so the prewarm drops it and only the
     compilable hip sibling is scheduled; the walk keys the hsaco UKD itself.
     """
-    flat = load_flat_input(hsaco_corpus, log=_silent)
+    flat = load_flat_input(hsaco_corpus, GENERIC_TARGETS, log=_silent)
 
     hsaco_ukd = flat.kdps()[0].doc["kernelDescriptors"][0]
     assert pipeline._variant_key_for(hsaco_ukd, Path(".")) is None
@@ -734,7 +737,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
     jobs = [_synthetic_job(corpus, 64 + i) for i in range(24)]
     monkeypatch.setattr(pipeline, "_prewarm_jobs", lambda *_a, **_k: list(jobs))
-    flat = load_flat_input(corpus, log=_silent)
+    flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
 
     tally = tmp_path / "tally"
     tally.mkdir()
@@ -800,8 +803,8 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
 
 
 @pytest.mark.quick
-def test_worker_inherits_parent_sys_path():
-    """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
+def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
+    """A spawned pool worker starts with the parent's `sys.path`, conftest inserts and all.
 
     CPython propagates `sys.path` to children under both `spawn` and
     `forkserver`, so a worker can import `hkp_pack`, and any producer module a
@@ -814,24 +817,22 @@ def test_worker_inherits_parent_sys_path():
     pool must be built after parent-side path setup, is documented at the
     construction site.
 
-    The path watched is the rocm_kpack directory conftest inserts from
-    HIPKERNELPROVIDER_ROCM_KPACK_DIR, which no `PYTHONPATH` carries. The hkp_pack
-    package root conftest also inserts is exported by the ctest environment, so a
-    child that re-read `PYTHONPATH` would have it too.
+    The pool is pinned to `spawn`: under `fork`, the Linux default up to Python 3.13,
+    the child inherits `sys.path` with the rest of the parent's memory and the check
+    would prove nothing.
+    The path watched is one the test prepends itself, in a directory no `PYTHONPATH`
+    carries, so it reaches the child only if the interpreter propagates it.
     """
-    kpack_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
-    if not kpack_dir:
-        pytest.skip(
-            "HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset, so conftest inserts no "
-            "path that PYTHONPATH does not already carry"
-        )
-    expected = _conftest_only_paths([kpack_dir])
-    assert expected, "the premise: conftest inserted it and PYTHONPATH lacks it"
+    probe = tmp_path / "parent-only-path"
+    probe.mkdir()
+    monkeypatch.syspath_prepend(str(probe))
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
-    assert set(expected) <= set(child_path)
+    assert str(probe) in child_path
 
 
 @pytest.mark.quick
@@ -973,7 +974,7 @@ def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
     """
     corpus = _write_corpus(tmp_path / "two-failures", hip_only=True)
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
-    flat = load_flat_input(corpus, log=_silent)
+    flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
 
     first, second = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)[:2]
     hipcc = _stub_hipcc(
@@ -1022,7 +1023,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
     variant_symbol = {}
     variant_observations = {}
     pipeline._prewarm_variants(
-        load_flat_input(corpus, log=_silent),
+        load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
         _stub_hipcc(tmp_path),
@@ -1035,7 +1036,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
     )
 
     jobs = pipeline._prewarm_jobs(
-        load_flat_input(corpus, log=_silent), corpus, TARGET_ARCH
+        load_flat_input(corpus, GENERIC_TARGETS, log=_silent), corpus, TARGET_ARCH
     )
     expected_symbol = {job.vk: job.ukd["kernel_source"]["entry"] for job in jobs}
     assert len(expected_symbol) == HIP_ONLY_EXPECTED_CO_COUNT
@@ -1058,7 +1059,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
 def _staged_tree(corpus, out_dir):
     """Every staged file under `out_dir`, keyed by path relative to it."""
     pipeline.compile_intermediate(
-        load_flat_input(corpus, log=_silent),
+        load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
         _stub_hipcc(out_dir.parent),
@@ -1153,7 +1154,7 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
 
     variant_co = {}
     pipeline._prewarm_variants(
-        load_flat_input(corpus, log=_silent),
+        load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
         _stub_hipcc(tmp_path),

@@ -2028,12 +2028,15 @@ void mem_inst(nb::module_ m_mem)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::string&>(),
+                      const std::string&,
+                      std::optional<rocisa::TENSORModifiers>>(),
              nb::arg("group0"),
              nb::arg("group1"),
              nb::arg("group2").none(),
              nb::arg("group3").none(),
-             nb::arg("comment") = "")
+             nb::arg("comment") = "",
+             nb::arg("tensor")  = std::nullopt)
+        .def_rw("tensor", &rocisa::TensorLoadToLds::tensor)
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);
         });

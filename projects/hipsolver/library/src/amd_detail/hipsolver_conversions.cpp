@@ -85,6 +85,32 @@ hipsolverFillMode_t rocblas2hip_fill(rocblas_fill_ fill)
     }
 }
 
+rocblas_diagonal_ hip2rocblas_diag(hipsolverDiagType_t diag)
+{
+    switch(diag)
+    {
+    case HIPSOLVER_DIAG_NON_UNIT:
+        return rocblas_diagonal_non_unit;
+    case HIPSOLVER_DIAG_UNIT:
+        return rocblas_diagonal_unit;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverDiagType_t rocblas2hip_diag(rocblas_diagonal_ diag)
+{
+    switch(diag)
+    {
+    case rocblas_diagonal_non_unit:
+        return HIPSOLVER_DIAG_NON_UNIT;
+    case rocblas_diagonal_unit:
+        return HIPSOLVER_DIAG_UNIT;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 rocblas_side_ hip2rocblas_side(hipsolverSideMode_t side)
 {
     switch(side)

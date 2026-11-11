@@ -22,7 +22,7 @@ import pytest
 from rocisa.code import Module
 from rocisa.instruction import VAddU32, VAndB32, VLShiftRightB32, VMovB32, VMulLOU32
 
-from Tensile.Components.Subtile.SubtileGREmit import (
+from tensilelite.Components.Subtile.SubtileGREmit import (
     _tluWaveAxisId,
     _tluOtherAxisId,
     _tluCoopWaveId,

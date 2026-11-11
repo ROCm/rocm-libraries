@@ -13,6 +13,12 @@
 > from a citation into a measurement. It also adds a trap list to §9 and paper citations
 > to §11. **No equation or geometry value changed**; §0–§2 and §4–§5 are re-verified
 > against the primary sources now listed in §11 and stand as written.
+>
+> **Revision 3 (AICK-1502) — gfx942 bf16 prefill as built.** Scoped to §9 row 1 only;
+> every other row, and every gfx950 section, stands as written. The shipped gfx942
+> prefill kernel absorbs `W_UK` into the query instead of expanding the latent inside
+> the flash loop, and §3.1 is not built. §2.5 records why and what the gfx942
+> measurement showed, §3 and §9 point at it. **No equation or geometry value changed.**
 
 Covers DeepSeek V2/V3/V3.1/R1 and Kimi-K2. The kernel family splits into
 two distinct kernels (prefill and decode-absorb) and a separate fp8 phase for
@@ -415,24 +421,68 @@ attention but is memory-bandwidth-bound on `W_UK` at large tile counts.
 
 > **The materialize path does not "just reuse" the existing kernels.** MLA's
 > materialized form is asymmetric — `hdim_q = d_nope + d_rope = 192`,
-> `hdim_v = d_V = 128` — and the current rocKE attention stack supports neither.
+> `hdim_v = d_V = 128` — and the current rocKE gfx942/gfx950 attention stack does not
+> support the asymmetric form (it admits 192 only as a symmetric `hdim_q == hdim_v`
+> head size).
 > `AttentionRequest` already carries `hdim_q` and `hdim_v` separately, but everything
 > below it collapses or rejects them: `_request_errors` rejects `hdim_q != hdim_v`,
 > `_problem()` collapses them (`head_size=int(req.hdim_q)`) into a
-> `UnifiedAttentionProblem` that has a single `head_size`, `AttentionSpec` likewise
-> carries one `head_size` (and bakes it into `kernel_name()` as `hd{head_size}`),
-> `UNIFIED_HEAD_SIZES = (64, 128, 256)` excludes 192 by set membership, and — separately
-> from that constant — the per-arch admission gates (`supports_tiled_2d` /
-> `supports_tiled_3d` in `library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`)
-> re-check `head_size not in (64, 128, 256)` against a *hardcoded literal*, so widening
-> `UNIFIED_HEAD_SIZES` alone does not widen them
+> `UnifiedAttentionProblem` that has a single `head_size`, and `AttentionSpec` likewise
+> carries one `head_size` (and bakes it into `kernel_name()` as `hd{head_size}`). The
+> head-size sets no longer exclude 192: `UNIFIED_HEAD_SIZES` is `(64, 128, 192, 256)`,
+> and so is the *hardcoded literal* that the per-arch admission gates
+> (`supports_tiled_2d` / `supports_tiled_3d` in
+> `library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`) check `head_size`
+> against, separately from that constant. 192 is admitted only as a symmetric size,
+> because `_request_errors` still requires `hdim_v == hdim_q`
 > (`library/dispatch/attention/common.py`,
 > `library/kernels/common/attention_unified.py`). Reusing `UnifiedAttention` here
-> therefore needs the split carried through the problem, spec and descriptor layers and
-> a widened head-size gate in *both* places — spec-layer work (§9). The request layer is
+> therefore still needs the split carried through the problem, spec and descriptor
+> layers — spec-layer work (§9). The request layer is
 > already shaped for it; the layers underneath are not. The CK-FMHA `(192,128)` alternative in §3 sidesteps that gap for *measurement*
 > only — it yields no shippable rocKE instance — so that prototype should come first
 > but does not remove the spec-layer work.
+
+> **gfx942 bf16, as built (Revision 3).** This note covers the gfx942 prefill kernel
+> (§9 row 1) only. gfx950 and the other rows still follow the text above.
+>
+> - **Chunked strategy: absorption, not in-loop expansion.** The kernel folds
+>   `W_UK`'s `K_nope` half into the query once per query row in the prologue, runs the
+>   flash loop in latent space (QK width $r_{KV} + d_{\text{rope}} = 576$, PV width
+>   $r_{KV} = 512$), and applies `W_UV` once per row in the epilogue — the §4 decode
+>   structure applied to prefill. The latent is never expanded. In-loop expansion was
+>   dropped because every query block re-expands every key tile it visits, so the
+>   expansion repeats $\lceil S_q / B_q \rceil$ times per key, at
+>   $r_{KV} \cdot (d_{\text{nope}} + d_V)$ multiply-adds per key per head — more than
+>   the attention it feeds. Absorption pays $r_{KV} \cdot (d_{\text{nope}} + d_V)$
+>   multiply-adds per *query* per head instead (prologue plus epilogue), independent of
+>   $S_k$, which is why §10.6 uses it below the
+>   threshold. The first row of the regime table should read "absorption (§4 structure)"
+>   for gfx942.
+> - **Full-prompt strategy: materialize is still the right choice, and it is not
+>   built.** The §3.1 path was measured on a 304-CU gfx942 against the absorbed kernel,
+>   with every arm gated against the fp32 reference at the §8.1 tolerance, at
+>   $H_q \in \{128, 64\}$, $B = 1$ unless noted, chunked
+>   $S_q \in [128, 2048] \times S_k \in \{8\text{K}, 32\text{K}\}$ and full prompts
+>   $S_q = S_k \in [1\text{K}, 8\text{K}]$. Materialize (torch expansion GEMM plus the
+>   AITER Triton flash kernel at $(192, 128)$, used as the stand-in for a competitive
+>   flash kernel) was faster at every measured full-prompt configuration, with the gap
+>   widening as $S$ grows. This agrees with Yun et al. The absorbed kernel was faster at
+>   every chunked configuration with $S_q \le 256$.
+> - **Measured crossover on gfx942.** Between $S_q = 256$ and $320$ at both $S_k$ for
+>   $H_q = 128$; between $256$ and $320$ at $S_k = 32\text{K}$ and between $384$ and
+>   $512$ at $S_k = 8\text{K}$ for $H_q = 64$. This replaces the ~200 citation above
+>   for gfx942 only. It is a measurement of today's kernels, not a bound: the
+>   expansion in that run was unfused (GEMM plus concat plus copy), so a fused
+>   expansion moves it down, and part of the step at $S_q = 320$ comes from the
+>   absorbed kernel switching to its one-workgroup-per-CU layout.
+> - **Why the gfx942 kernel ships absorbed-only for now.** rocKE has no competitive
+>   $(192, 128)$ flash kernel to put behind §3.1: expansion plus the existing tiled-2D
+>   kernel at `head_size = 192` (V padded) was slower than the absorbed kernel at every
+>   measured shape, and tiled-2D has no `head_size = 192` route at all for
+>   $S_q \le 512$ (its narrow route exceeds the gfx942 LDS budget). Absorbed-only is
+>   therefore an **interim** state for gfx942, blocked on that flash kernel; §9 rows 3
+>   and 4 remain open and the threshold above is what row 4 should start from.
 
 ### 2.6 Online softmax
 
@@ -457,6 +507,11 @@ The two kernels place that V expansion differently:
 ## 3. Prefill kernel specification
 
 **Op:** `mla_prefill_fwd` — compressed-KV + decoupled RoPE, causal mask, bf16.
+
+> **gfx942 as built (Revision 3).** The gfx942 kernel replaces the in-loop expansion
+> below with `W_UK` absorption (§2.5, "gfx942 bf16, as built"). The pre-kernel (steps 2–3:
+> the `W_UQ` GEMM and query RoPE) is not yet in the tree, so the gfx942 kernel takes the
+> projected, RoPE-rotated query (`q_nope`, `q_rope`) in place of `q_latent` and `W_UQ`.
 
 #### Inputs
 
@@ -620,15 +675,18 @@ this path on a scratch budget rather than on $S_q$.
 
 **Enabling work — the spec layer, and it is the whole cost of this path.** MLA's
 materialized form is asymmetric ($\texttt{hdim\_q} = 192$, $\texttt{hdim\_v} = 128$) and
-the current stack collapses or rejects that at the five sites §7.2 enumerates. Those
-five edits *are* this path's deliverable; there is no new tiling to write.
+the current stack collapses or rejects that at the sites §7.2 enumerates (items 4 and 5,
+the head-size sets, now admit 192 as a symmetric head size; items 1–3 and item 5's
+single-`head_size` check remain). Those remaining edits *are* this path's deliverable;
+there is no new tiling to write.
 
 > **Do not pad the head dimension to 256 to dodge the gate.** Padding
 > $192 \to 256$ on the score side and $128 \to 256$ on the value side makes the shape
 > admissible to `UNIFIED_HEAD_SIZES` without any spec-layer change, and it is the
 > obvious shortcut. It permanently discards **25% of the QK MFMA lanes and 50% of the
 > PV lanes**, on a path whose entire justification is that it is cheaper than the flash
-> loop. Admit 192 per §7.2 instead — the merit argument is there, and FlashInfer's MLA
+> loop. Carry the asymmetric (192, 128) pair per §7.2 instead (192 itself is already in
+> the head-size sets) — the merit argument is there, and FlashInfer's MLA
 > prefill mode runs natively at `(head_dim_k, head_dim_v) = (192, 128)` (§10.5), so the
 > asymmetric shape is the one the ecosystem already targets. This shortcut was taken in
 > an early implementation draft and measured well below the AITER Triton baseline; treat
@@ -786,10 +844,12 @@ one-head-per-workgroup kernel, because the grid shape determines the spec. Its *
 > form should be fixed before `BLOCK_H` is swept, since it sets how much of the step
 > `BLOCK_H` can affect at all.
 
-> **`attention_tiled_3d` cannot be reused as-is.** It validates
-> `1 <= num_queries_per_kv <= 16` and `16 % num_queries_per_kv == 0`
-> (`gfx942/attention_tiled_3d.py:240-246`; gfx950: 252-258). MLA's
-> `NQK = H_q / H_k = 128` fails that gate, so the head→row remap (`Bq = 1` query
+> **`attention_tiled_3d` cannot be reused as-is.** `supports_tiled_3d`
+> (`gfx942/attention_tiled_3d.py`, `gfx950/attention_tiled_3d.py`) validates
+> `1 <= num_queries_per_kv <= 16`; a `num_queries_per_kv` that does not divide 16 is
+> accepted, and its padding rows have their stores masked by the kernel. MLA's
+> `NQK = H_q / H_k = 128` still fails
+> that gate, so the head→row remap (`Bq = 1` query
 > position × `BLOCK_H` head rows) is a real spec change, not reuse. See also the engine
 > gap below.
 
@@ -818,7 +878,7 @@ it; as a new spec trait it is a spec-layer change (§9).
 > **Engine gap: `attention_tiled_3d` cannot express this spec today.** Beyond the
 > `NQK <= 16` gate above, the existing spec carries a single `head_size` that drives
 > *both* the KV descriptor width and the workspace/output width, and
-> `supports_tiled_3d` gates `head_size in {64, 128, 256}`. Decode-absorb needs a KV
+> `supports_tiled_3d` gates `head_size in {64, 128, 192, 256}`. Decode-absorb needs a KV
 > width of `r_KV + d_rope = 576` with an output width of `d_V = 128`. "The reduce is
 > unchanged" holds only for the **reduce** kernel (it stays an `HD = 128` reduce); the
 > **segment** kernel needs a new spec with decoupled `hdim_kv` / `hdim_out`, a relaxed
@@ -1383,8 +1443,10 @@ mla_mode     : str = "none"  # "none" | "prefill" | "decode_absorb"
 ```
 
 **On `hdim_q` / `hdim_v`.** These are already *separate fields* on `AttentionRequest`, so
-MLA's asymmetry needs no new field — but five things downstream still collapse or reject
-it, and all five are in scope for the implementation stories:
+MLA's asymmetry needs no new field — but five things downstream collapsed or rejected
+it, and three still do (items 1–3; items 4 and 5 now admit 192 as a symmetric head
+size, though item 5's gates still check a single `head_size`). The ones that remain are
+in scope for the implementation stories:
 
 1. `_request_errors` rejects `hdim_q != hdim_v` outright ("only hdim_q == hdim_v is
    supported").
@@ -1395,22 +1457,25 @@ it, and all five are in scope for the implementation stories:
    `head_size` and composes it into `kernel_name()` as `hd{head_size}` — so an
    asymmetric MLA spec needs its own spec type or a second field, or two distinct MLA
    shapes would hash and name identically.
-4. `UNIFIED_HEAD_SIZES = (64, 128, 256)` (`library/kernels/common/attention_unified.py`)
-   excludes 192 by set membership, both in `supports_native_unified_attention` and via
-   the `_UNIFIED_CAPABILITY` `ShapeRange`.
+4. `UNIFIED_HEAD_SIZES` (`library/kernels/common/attention_unified.py`) excluded 192 by
+   set membership, both in `supports_native_unified_attention` and via the
+   `_UNIFIED_CAPABILITY` `ShapeRange`. It is now `(64, 128, 192, 256)`, so 192 is
+   admitted there as a symmetric head size.
 5. The per-arch admission gates `supports_tiled_2d` and `supports_tiled_3d`
-   (`library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`) independently reject
+   (`library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`) independently rejected
    `head_size not in (64, 128, 256)` against a hardcoded literal, *not* against
-   `UNIFIED_HEAD_SIZES`. Widening the constant does not widen these; they are four
-   separate edits, and they are the layer an MLA kernel would have to re-implement
-   rather than widen.
+   `UNIFIED_HEAD_SIZES`: widening the constant did not widen them, and they were four
+   separate edits. All four literals are now `(64, 128, 192, 256)`. They remain the
+   layer an MLA kernel would have to re-implement rather than widen, because each still
+   checks a single `head_size`.
 
 **Why 192 is the right value to admit**, stated on its merit rather than on compatibility
 with any prior catalog: 192 is `d_nope + d_rope`, the width of the *score-side* contraction
 (§2.2). It is the head dimension the QK product actually runs at, and it is unrelated to
 the output width `d_V = 128` or to the decode kernel's `r_KV + d_rope = 576` memory
 layout. Admitting it is widening a gate to a value the math requires, not a compatibility
-carve-out.
+carve-out. The sets now include 192 (items 4 and 5); what is still missing is the
+asymmetric `(192, 128)` pairing.
 
 ### 7.3 Capability gating and candidate registration
 
@@ -1434,7 +1499,7 @@ not to `dims()`, it rejects every request ("dim not provided").
 
 An MLA candidate's `Capability` declares arches, dtypes,
 `ShapeRange`s and features. The existing unified capability is `_UNIFIED_CAPABILITY`
-(`library/dispatch/attention/generic.py:49-57`):
+(`library/dispatch/attention/generic.py:55-67`):
 
 ```python
 Capability(
@@ -1448,7 +1513,9 @@ Capability(
 
 MLA needs its **own** capability rather than a widened unified one, for the same reason
 the two ops are distinct: an `hdim_q` of 192 with `hdim_v` of 128 must not become
-selectable for standard SDPA requests as a side effect. A separate capability is
+selectable for standard SDPA requests as a side effect. (The unified `hdim_q`
+`ShapeRange` now contains 192, so it no longer separates the two; the
+`hdim_q == hdim_v` check in `_request_errors` does.) A separate capability is
 necessary but **not sufficient**: `Capability` has no `op` field, so the op never
 participates in the declarative prefilter. Both directions of the exclusion are carried
 by the predicates — an MLA request is rejected by every unified candidate only because
@@ -1678,7 +1745,7 @@ that drive gfx942/gfx950 MLA decode performance.
 
 | # | Deliverable | Arch | Dtype | Spec |
 |---|---|---|---|---|
-| 1 | MLA prefill — chunked (in-loop expansion) | gfx942 | bf16 | §3, §5.1 prefill tiling |
+| 1 | MLA prefill — chunked (`W_UK` absorption; Revision 3) | gfx942 | bf16 | §3, §5.1 prefill tiling, §2.5 gfx942 note |
 | 2 | MLA prefill — chunked (in-loop expansion) | gfx950 | bf16 | §3, §5.2 prefill tiling |
 | 3 | MLA prefill — full-prompt (materialize) | arch-independent | bf16 | **§3.1** + §7.2 spec-layer edits |
 | 4 | Prefill strategy dispatch (§2.5 footprint bound + $S_q$ threshold) | arch-independent | — | **§2.5**, `library/dispatch/attention/` |
@@ -1698,7 +1765,8 @@ Each bf16 kernel delivers: kernel impl + parity gate + bench run against
 > implying three different scopes. Rows 3 and 4 close it.
 >
 > **Row 3 is not a kernel row.** It writes no tiling: it is the per-head expansion GEMM
-> plus §7.2's five spec-layer edits, after which the *existing* unified attention runs
+> plus §7.2's remaining three spec-layer edits (items 1–3; the head-size sets of items 4
+> and 5 already admit 192), after which the *existing* unified attention runs
 > the shape at `(hdim_q, hdim_v) = (192, 128)`. It is listed arch-independent for that
 > reason — the arch-specific tiling it lands on is already shipped. It is also the
 > cheapest of the eight and the one that unblocks a number on the §8.2 family-1 shapes
@@ -1988,7 +2056,7 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - `library/builders/gfx942/attention/ALGORITHM.md` — gfx942 narrow/flash math
 - `library/builders/gfx1250/attention/gfx1250_universal_attention_plan.md` — phased plan analog
 - `library/kernels/common/fmha_fwd_fp8.py` — sync-dequant fp8 pattern (gfx950+ fp8 kernels)
-- `library/dispatch/attention/` — `AttentionRequest`, `ATTENTION_REGISTRY`, the arch candidate modules (the dispatch layer to extend; `common.py` holds the request and its gates, `generic.py:49-57` the unified `Capability`)
+- `library/dispatch/attention/` — `AttentionRequest`, `ATTENTION_REGISTRY`, the arch candidate modules (the dispatch layer to extend; `common.py` holds the request and its gates, `generic.py:55-67` the unified `Capability`)
 - `platform/python/rocke/dispatch/core.py` — `Capability`, `ShapeRange`, `KernelCandidate`, `CandidateRegistry` (the matching machinery §7.3 builds on; not re-exported through `dispatch.attention`)
 - `library/kernels/common/attention_unified.py` — `UnifiedAttentionProblem`, `UNIFIED_HEAD_SIZES`, flash building blocks
 - `library/kernels/gfx942/attention_tiled_2d.py`, `attention_tiled_3d.py` — arch baselines

@@ -33,7 +33,13 @@ rocsparse_status rocsparse::csric0(rocsparse_handle      handle,
                                    size_t                buffer_size,
                                    void*                 buffer)
 {
-    if(A->rows == 0)
+    //
+    // A batch count of zero has nothing to factorize. rocsparse::bsric0,
+    // rocsparse::bsrilu0 and rocsparse::csrilu0 all quick return on it, and every
+    // launch below puts the batch count on grid.y, which is an illegal extent at
+    // zero, so treat it the same way here rather than reaching the launch.
+    //
+    if(A->rows == 0 || A->batch_count == 0)
     {
         //
         // Quick return

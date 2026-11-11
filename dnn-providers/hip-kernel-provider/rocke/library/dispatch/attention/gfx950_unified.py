@@ -25,11 +25,12 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
 from .candidate import make_tuning_candidate
+from .tuning_specs import NUM_SEGMENTS
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -71,20 +72,28 @@ def _variants():
                         block_m_per_warp=32,
                         compile_backend=backend,
                     )
-    # gfx950 3D has fixed BLOCK_M=16 and T=block_size; segment count is the
-    # load-balancing geometry exposed by the kernel.
-    for segments in (8, 16, 32, 64, 128):
-        yield AttentionGeometryVariant(
-            arch="gfx950",
-            path="3d",
-            codepath="splitkv",
-            builder_kind="tiled_3d",
-            tile_policy="1x",
-            num_segments=segments,
-        )
+    # gfx950 3D has fixed BLOCK_M=16; the KV tile spans 1, 2, 4 or 8 pages
+    # (multi-page tiles), and the segment count is the load-balancing
+    # geometry exposed by the kernel: a fixed count, or 0 for the
+    # dispatcher's split-rule count.
+    for tile in _TILES:
+        for segments in NUM_SEGMENTS + (0,):
+            yield AttentionGeometryVariant(
+                arch="gfx950",
+                path="3d",
+                codepath="splitkv",
+                builder_kind="tiled_3d",
+                tile_policy=tile,
+                num_segments=segments,
+            )
 
 
 GFX950_TUNING_VARIANTS = tuple(_variants())
+
+# The gfx950 D256 candidate's algorithm (see _make_gfx950_d256_candidate),
+# named so a caller outside this package (the SDPA gate) does not have to
+# reconstruct the literal.
+D256_GFX950_ALGORITHM = "d256_gfx950"
 
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
@@ -100,8 +109,9 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
     The cohort is the single source of truth
     ``kernels.common.attention_unified._d256_gfx950_cohort`` — the same predicate
     the orchestrator's ``_d256_gfx950_fast`` override uses — so dispatch selection
-    and the built spec cannot drift. Only the arch gate differs (request arch
-    here vs resolved device arch there).
+    and the built spec cannot drift. Since AICK-2146 the arch gate does not differ
+    either: ``_d256_gfx950_fast`` takes ``arch`` as an explicit argument, and the
+    value it receives is the request's, so both sides gate on the same arch.
     """
     spec_id = "gfx950_d256"
     name = "attention_gfx950_d256"
@@ -114,11 +124,11 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != "2d":
+        if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
         from kernels.common.attention_unified import _d256_gfx950_cohort
 
@@ -131,7 +141,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         from kernels.common.attention_unified import _d256_gfx950_spec_overrides
 
         return AttentionSpec(
@@ -143,12 +153,15 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx950_d256",
             tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_gfx950",
+        algorithm=D256_GFX950_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

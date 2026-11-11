@@ -120,6 +120,157 @@ TEST_F(InstructionSizeCostingTest, VCvtBf16_Src255_Mod256_Logical255_PromotesTo8
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
 }
 
+// ---------------------------------------------------------------------------
+// abs/neg source modifiers force VOP3 (_e64) on compact VALU (8 bytes).
+// Regression: gfx1250 amax epilogue emits `v_max_num_f32 vD, vD, |vSrc|`
+// (VMaxF32(..., isAbs=True)); the abs modifier is VOP3-only, so the assembler
+// encodes _e64 (8 B). The size model previously kept the compact 4 B base,
+// under-counting STINKY_TOTAL_INST_BYTES and tripping CheckASMCodeSize.
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_NoModifier_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 11, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_AbsSrc1_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 11, 1));
+    inst->addModifier(VOP3Modifiers(/*neg_src0=*/false, /*neg_src1=*/false, /*neg_src2=*/false,
+                                    /*abs_src0=*/false, /*abs_src1=*/true, /*abs_src2=*/false));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_NegSrc0_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    inst->addSrcReg(StinkyRegister("v", 9, 1));
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    inst->addModifier(VOP3Modifiers(/*neg_src0=*/true));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+// Per-operand register modifier (StinkyRegister::reg.isAbs) is what the
+// rocisa->stinky conversion emits for `vgpr(..., isAbs=True)`; this is the
+// shape of the amax epilogue's `v_max_f32 vD, vD, abs(vSrc)`.
+TEST_F(InstructionSizeCostingTest, VMaxF32_OperandAbs_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    StinkyRegister absSrc("v", 11, 1);
+    absSrc.reg.isAbs = 1;
+    inst->addSrcReg(absSrc);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_OperandNeg_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    StinkyRegister negSrc("v", 9, 1);
+    negSrc.reg.isMinus = 1;
+    inst->addSrcReg(negSrc);
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+// v_fmac_f32 v0, -s1, v2 (VMacF32(src0=sgpr(...).getMinus())): SGPR src0 alone
+// keeps _e32, the negation forces _e64.
+TEST_F(InstructionSizeCostingTest, VFmacF32_NegSgprSrc0_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_fmac_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    StinkyRegister negSrc("s", 1, 1);
+    negSrc.reg.isMinus = 1;
+    inst->addSrcReg(negSrc);
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+}
+
+// A negative inline constant is a literal, not a neg modifier: v_max_f32 v5, -1.0, v10
+// stays _e32.
+TEST_F(InstructionSizeCostingTest, VMaxF32_NegativeInlineLiteral_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    StinkyRegister c;
+    c.dataType = StinkyRegister::Type::LiteralDouble;
+    c.literalDouble = -1.0;
+    inst->addSrcReg(c);
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_AllFalseVop3Modifiers_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    inst->addSrcReg(StinkyRegister("v", 9, 1));
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    inst->addModifier(VOP3Modifiers());
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+}
+
+// The cndmask (last src VCC) and VOPC (dest VCC) rules alone would keep 4 B;
+// an abs/neg source still forces _e64.
+TEST_F(InstructionSizeCostingTest, VCndmask_LastSrcVcc_AbsSrc0_Promotes8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cndmask_b32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    StinkyRegister absSrc("v", 1, 1);
+    absSrc.reg.isAbs = 1;
+    inst->addSrcReg(absSrc);
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    inst->addSrcReg(StinkyRegister(RegType::VCC, 0, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VCmp_DestVcc_NegSrc0_Promotes8) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cmp_lt_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister(RegType::VCC, 0, 1));
+    StinkyRegister negSrc("v", 1, 1);
+    negSrc.reg.isMinus = 1;
+    inst->addSrcReg(negSrc);
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+}
+
 TEST_F(InstructionSizeCostingTest, VCvtF16F32_OpSel10_ForcesVop3_EvenIfLowVgpr) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);

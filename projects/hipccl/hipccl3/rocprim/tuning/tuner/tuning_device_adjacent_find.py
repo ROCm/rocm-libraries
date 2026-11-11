@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import Optional, OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -48,17 +48,11 @@ class Tuner(BaseTuner):
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         return params
-
-    def _get_key_type_name(self) -> str:
-        return "input_type"
-
-    def _get_value_type_name(self):
-        return ""
-
+    
     def _get_restrictions(
-        self, input_type: str, _: Optional[str] = None
+        self, types: Dict[str, Any]
     ) -> Callable[[dict], bool]:
-        size = self.bytes_size // TYPE_CONFIGS[input_type].size
+        size = self.bytes_size // TYPE_CONFIGS[types["input_type"]].size
 
         def validate(params):
             return size >= 2
@@ -68,7 +62,7 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for val_type in COMMON_KEY_TYPES:
-            self.tune_type(val_type)
+            self.tune_type({"input_type" : val_type})
 
 
 if __name__ == "__main__":

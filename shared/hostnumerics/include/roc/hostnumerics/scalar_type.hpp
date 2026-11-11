@@ -5,9 +5,14 @@
 
 #include <array>
 #include <cassert>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace roc::hostnumerics {
 enum class ScalarCategory : uint8_t {
@@ -172,4 +177,198 @@ inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
 }
 
+namespace detail {
+template <typename T>
+struct NativeScalarType;
+
+template <>
+struct NativeScalarType<bool> {
+    static constexpr ScalarType value = ScalarType::Boolean;
+};
+template <>
+struct NativeScalarType<uint8_t> {
+    static constexpr ScalarType value = ScalarType::UInt8;
+};
+template <>
+struct NativeScalarType<int8_t> {
+    static constexpr ScalarType value = ScalarType::Int8;
+};
+template <>
+struct NativeScalarType<uint16_t> {
+    static constexpr ScalarType value = ScalarType::UInt16;
+};
+template <>
+struct NativeScalarType<int16_t> {
+    static constexpr ScalarType value = ScalarType::Int16;
+};
+template <>
+struct NativeScalarType<uint32_t> {
+    static constexpr ScalarType value = ScalarType::UInt32;
+};
+template <>
+struct NativeScalarType<int32_t> {
+    static constexpr ScalarType value = ScalarType::Int32;
+};
+template <>
+struct NativeScalarType<uint64_t> {
+    static constexpr ScalarType value = ScalarType::UInt64;
+};
+template <>
+struct NativeScalarType<int64_t> {
+    static constexpr ScalarType value = ScalarType::Int64;
+};
+template <>
+struct NativeScalarType<float> {
+    static constexpr ScalarType value = ScalarType::Float32;
+};
+template <>
+struct NativeScalarType<double> {
+    static constexpr ScalarType value = ScalarType::Float64;
+};
+template <>
+struct NativeScalarType<std::complex<float>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat32;
+};
+template <>
+struct NativeScalarType<std::complex<double>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat64;
+};
+}  // namespace detail
+
+// Tests whether a C++ type has a native mapping, ignoring cv/ref qualifiers.
+// Integer mappings use the fixed-width aliases (int8_t through uint64_t), whose
+// underlying types vary by platform. Use int64_t rather than long or long long
+// for portable callers. An integer type is mapped only if it is the same type
+// as one of those aliases; plain char is not mapped.
+// C++23's optional <stdfloat> types, including float16_t and bfloat16_t, are not mapped.
+template <typename T>
+concept NativeScalar = requires { detail::NativeScalarType<std::remove_cvref_t<T>>::value; };
+
+// Unsupported types fail the NativeScalar constraint at compile time.
+template <NativeScalar T>
+inline constexpr ScalarType nativeScalarType =
+    detail::NativeScalarType<std::remove_cvref_t<T>>::value;
+
+namespace detail {
+// The C++ type that holds one encoded value of Type. Signed integers, float,
+// double and complex values use their native type. Every other whole-byte
+// encoding, including bool, half, bfloat16 and the 8-bit floating-point and
+// scale formats, uses an unsigned integer of the same width. If the storage
+// width is not divisible by 8 bits, ScalarTag::Storage is void: elements must
+// be accessed as packed bits rather than individual C++ objects.
+template <ScalarType Type>
+constexpr auto scalarStorageIdentity() {
+    constexpr uint16_t bits = scalarTypeInfo(Type).storageBits;
+    if constexpr (bits % 8 != 0) {
+        return std::type_identity<void>{};
+    } else if constexpr (Type == ScalarType::Int8) {
+        return std::type_identity<int8_t>{};
+    } else if constexpr (Type == ScalarType::Int16) {
+        return std::type_identity<int16_t>{};
+    } else if constexpr (Type == ScalarType::Int32) {
+        return std::type_identity<int32_t>{};
+    } else if constexpr (Type == ScalarType::Int64) {
+        return std::type_identity<int64_t>{};
+    } else if constexpr (Type == ScalarType::Float32) {
+        return std::type_identity<float>{};
+    } else if constexpr (Type == ScalarType::Float64) {
+        return std::type_identity<double>{};
+    } else if constexpr (Type == ScalarType::ComplexFloat32) {
+        return std::type_identity<std::complex<float>>{};
+    } else if constexpr (Type == ScalarType::ComplexFloat64) {
+        return std::type_identity<std::complex<double>>{};
+    } else if constexpr (bits == 8) {
+        return std::type_identity<uint8_t>{};
+    } else if constexpr (bits == 16) {
+        return std::type_identity<uint16_t>{};
+    } else if constexpr (bits == 32) {
+        return std::type_identity<uint32_t>{};
+    } else {
+        static_assert(bits == 64);
+        return std::type_identity<uint64_t>{};
+    }
+}
+
+template <ScalarType TypeValue>
+struct ScalarTag {
+    static_assert(isConcreteScalarType(TypeValue));
+    static constexpr ScalarType type = TypeValue;
+    static constexpr uint16_t storageBits = scalarTypeInfo(TypeValue).storageBits;
+    using Storage = typename decltype(scalarStorageIdentity<TypeValue>())::type;
+};
+}  // namespace detail
+
+// Dispatches a type-templated operation on a runtime ScalarType by calling
+// visitor.template operator()<Tag>(args...). Tag supplies type, storageBits,
+// and Storage (void when the storage width is not divisible by 8 bits).
+// The visitor is instantiated for every tag and must return the same type for each.
+// Visitors and arguments are forwarded; value, reference, and void returns are preserved.
+// Invalid types throw std::runtime_error before invoking the visitor.
+template <typename Visitor, typename... Args>
+decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
+    auto dispatch = [&]<ScalarType TypeValue>() -> decltype(auto) {
+        return std::forward<Visitor>(visitor).template operator()<detail::ScalarTag<TypeValue>>(
+            std::forward<Args>(args)...);
+    };
+    switch (type) {
+        case ScalarType::Boolean:
+            return dispatch.template operator()<ScalarType::Boolean>();
+        case ScalarType::Int4:
+            return dispatch.template operator()<ScalarType::Int4>();
+        case ScalarType::Int8:
+            return dispatch.template operator()<ScalarType::Int8>();
+        case ScalarType::Int16:
+            return dispatch.template operator()<ScalarType::Int16>();
+        case ScalarType::Int32:
+            return dispatch.template operator()<ScalarType::Int32>();
+        case ScalarType::Int64:
+            return dispatch.template operator()<ScalarType::Int64>();
+        case ScalarType::UInt8:
+            return dispatch.template operator()<ScalarType::UInt8>();
+        case ScalarType::UInt16:
+            return dispatch.template operator()<ScalarType::UInt16>();
+        case ScalarType::UInt32:
+            return dispatch.template operator()<ScalarType::UInt32>();
+        case ScalarType::UInt64:
+            return dispatch.template operator()<ScalarType::UInt64>();
+        case ScalarType::Float4E2M1:
+            return dispatch.template operator()<ScalarType::Float4E2M1>();
+        case ScalarType::Float6E2M3:
+            return dispatch.template operator()<ScalarType::Float6E2M3>();
+        case ScalarType::Float6E3M2:
+            return dispatch.template operator()<ScalarType::Float6E3M2>();
+        case ScalarType::Float8E4M3:
+            return dispatch.template operator()<ScalarType::Float8E4M3>();
+        case ScalarType::Float8E5M2:
+            return dispatch.template operator()<ScalarType::Float8E5M2>();
+        case ScalarType::Float8E4M3Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E4M3Fnuz>();
+        case ScalarType::Float8E5M2Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E5M2Fnuz>();
+        case ScalarType::E4M3:
+            return dispatch.template operator()<ScalarType::E4M3>();
+        case ScalarType::E5M3:
+            return dispatch.template operator()<ScalarType::E5M3>();
+        case ScalarType::E8M0:
+            return dispatch.template operator()<ScalarType::E8M0>();
+        case ScalarType::E8M0Zero:
+            return dispatch.template operator()<ScalarType::E8M0Zero>();
+        case ScalarType::Float16:
+            return dispatch.template operator()<ScalarType::Float16>();
+        case ScalarType::BFloat16:
+            return dispatch.template operator()<ScalarType::BFloat16>();
+        case ScalarType::Float32:
+            return dispatch.template operator()<ScalarType::Float32>();
+        case ScalarType::Float64:
+            return dispatch.template operator()<ScalarType::Float64>();
+        case ScalarType::ComplexFloat32:
+            return dispatch.template operator()<ScalarType::ComplexFloat32>();
+        case ScalarType::ComplexFloat64:
+            return dispatch.template operator()<ScalarType::ComplexFloat64>();
+        case ScalarType::Count:
+            break;
+    }
+    throw std::runtime_error("Invalid ScalarType: " + std::to_string(static_cast<unsigned>(type)) +
+                             ".");
+}
 }  // namespace roc::hostnumerics

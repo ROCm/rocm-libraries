@@ -203,6 +203,28 @@ int64_t rocsparse_clients::spmat_descr<T, I, J>::get_nrows() const
 }
 
 template <typename T, typename I, typename J>
+int64_t rocsparse_clients::spmat_descr<T, I, J>::get_nnz() const
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+    return std::visit(select_lambdas{
+                          [](const coo_t& that) -> int64_t { return that.host().nnz; },
+                          [](const coo_aos_t& that) -> int64_t { return that.host().nnz; },
+                          [](const csr_t& that) -> int64_t { return that.host().nnz; },
+                          [](const csc_t& that) -> int64_t { return that.host().nnz; },
+                          [](const ell_t& that) -> int64_t { return that.host().nnz; },
+                          [](const bell_t& that) -> int64_t {
+                              return static_cast<int64_t>(that.host().m) * that.host().ell_cols;
+                          },
+                          [](const bsr_t& that) -> int64_t {
+                              return static_cast<int64_t>(that.host().nnzb)
+                                     * that.host().row_block_dim * that.host().col_block_dim;
+                          },
+                          [](const sell_t& that) -> int64_t { return that.host().nnz; },
+                      },
+                      this->m_data);
+}
+
+template <typename T, typename I, typename J>
 int64_t rocsparse_clients::spmat_descr<T, I, J>::get_size_values() const
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -292,12 +314,53 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
                            const bool                        to_int = arg.timing ? false : true;
                            rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_coo(that.host());
+                           //
+                           // Scale values, unless they are exact integers: scaling would
+                           // make them inexact.
+                           //
+                           if(!to_int)
+                           {
+                               auto&              that_host = that.host();
+                               const size_t       size      = that_host.nnz;
+                               floating_data_t<T> mx        = floating_data_t<T>(0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   mx = std::max(mx, std::abs(that_host.val[i]));
+                               }
+                               mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx
+                                                                  : floating_data_t<T>(1.0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   that_host.val[i] *= mx;
+                               }
+                           }
                        },
 
                        [&](csr_t& that) {
                            const bool                        to_int = arg.timing ? false : true;
                            rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_csr(that.host());
+
+                           //
+                           // Scale values, unless they are exact integers: scaling would
+                           // make them inexact.
+                           //
+                           if(!to_int)
+                           {
+                               auto&              that_host = that.host();
+                               const size_t       size      = that_host.nnz;
+                               floating_data_t<T> mx        = floating_data_t<T>(0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   mx = std::max(mx, std::abs(that_host.val[i]));
+                               }
+                               mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx
+                                                                  : floating_data_t<T>(1.0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   that_host.val[i] *= mx;
+                               }
+                           }
                        },
 
                        [&](bsr_t& that) {
@@ -393,7 +456,6 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
             CHECK_HIP_ERROR(hipMemcpy(
                 &host_values[i * stride], buffer, host_values_size_in_bytes, hipMemcpyDefault));
             T* p = &host_values[i * stride];
-
             for(int64_t j = 0; j < host_values_size; ++j)
             {
                 p[j] = p[j] * (1.0 + random_cached_generator<float>(1.0, 2.0) * random_multiplier);

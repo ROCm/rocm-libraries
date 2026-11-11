@@ -984,13 +984,15 @@ struct tile_window_with_static_distribution
     template <typename TDMConfig_,
               typename LdsTileWindow_,
               typename GatherIndexView_,
-              index_t i_access_ = -1,
-              bool full_tile_   = false>
+              index_t i_access_        = -1,
+              bool full_tile_          = false,
+              bool RematerializeStride = false>
     CK_TILE_DEVICE auto tdm_load_to_lds(const TDMConfig_& tdm_config,
                                         LdsTileWindow_&& lds_tile,
                                         const GatherIndexView_& gather_index_view,
-                                        number<i_access_>         = {},
-                                        bool_constant<full_tile_> = {}) const
+                                        number<i_access_>                  = {},
+                                        bool_constant<full_tile_>          = {},
+                                        bool_constant<RematerializeStride> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         using LdsDataType   = typename LdsTileWindow::DataType;
@@ -1008,10 +1010,22 @@ struct tile_window_with_static_distribution
         const auto& lds_tensor_descriptor  = lds_bottom_tensor_view.get_tensor_descriptor();
         auto smem_base_ptr                 = lds_bottom_tensor_view.get_buffer_view().p_data_;
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
-        // Use cached computation for global strides
-        auto&& global_strides = get_cached_global_strides();
+        auto global_strides = get_cached_global_strides();
+        if constexpr(RematerializeStride)
+        {
+            static_assert(Base::NDimBottomTensor == 2 && Traits::PackedSize == 1);
+            auto unit       = make_zero_multi_index<2>();
+            unit(I0)        = 1;
+            const index_t s = glb_tensor_descriptor.calculate_offset(unit);
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+            // Keep the clamped descriptor word local to this TDM issue.
+            asm volatile("s_max_i32 %0, %1, 1" : "=s"(global_strides(I0)) : "s"(s) : "scc");
+#else
+            global_strides(I0) = max(s, index_t{1});
+#endif
+        }
 
         auto process_coord = [&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0]; // without origin
@@ -1192,7 +1206,7 @@ struct tile_window_with_static_distribution
         // Use cached computation for global strides (same as tdm_load_to_lds)
         auto&& global_strides = get_cached_global_strides();
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0]; // without origin
@@ -1349,7 +1363,7 @@ struct tile_window_with_static_distribution
         using Traits = typename Base::Traits;
 
         auto&& global_strides             = get_cached_global_strides();
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         // Use window lengths (X-space) instead of ys_to_d lengths (Y-space)
         constexpr auto win_lengths = typename Base::WindowLengths{};
@@ -1436,7 +1450,7 @@ struct tile_window_with_static_distribution
 
         static constexpr index_t num_tensor_dims = BottomTensorView_::get_num_of_dimension();
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         const auto lds_window_origin       = lds_tile.get_window_origin();
         const auto& lds_bottom_tensor_view = lds_tile.get_bottom_tensor_view();
@@ -1989,10 +2003,9 @@ struct tile_window_with_static_distribution
     {
         if(!tensor_cache_initialized_)
         {
-            using Traits = typename Base::Traits;
-            const auto& glb_tensor_descriptor =
-                this->get_bottom_tensor_view().get_tensor_descriptor();
-            cached_global_strides_ = generate_array(
+            using Traits                      = typename Base::Traits;
+            const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
+            cached_global_strides_            = generate_array(
                 [&](auto i) {
                     auto unit_vec   = make_zero_multi_index<Base::NDimBottomTensor>();
                     unit_vec(i)     = 1;

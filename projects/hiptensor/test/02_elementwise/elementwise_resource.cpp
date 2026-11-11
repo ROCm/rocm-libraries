@@ -149,6 +149,11 @@ namespace hiptensor
         {
             fillLaunchKernel<float>((float*)devicePtr.get(), mCurrentMatrixElement, seed);
         }
+        else if(mCurrentDataType == HIPTENSOR_R_16BF)
+        {
+            fillLaunchKernel<hip_bfloat16>(
+                (hip_bfloat16*)devicePtr.get(), mCurrentMatrixElement, seed);
+        }
         else
         {
             fillLaunchKernel<_Float16>((_Float16*)devicePtr.get(), mCurrentMatrixElement, seed);

@@ -27,6 +27,7 @@
 
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  Prologue  (Python lines 1676-1733)
@@ -37,27 +38,23 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
     const rocke_direct_conv_32c_spec_t* spec = ctx->spec;
     char reason[ROCKE_ERR_MSG_CAP];
 
+    /* spec.validate(), then is_valid_spec_32c -- both raise ValueError. */
     if(rocke_direct_conv_32c_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
     if(!rocke_direct_conv_32c_is_valid_spec(spec, ctx->arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid direct_conv_32c spec for %s: %s", ctx->arch, reason);
         return false;
     }
 
     ctx->p = spec->problem;
 
     /* io_type = _io_type(p.dtype): f16 or bf16 IR type. */
-    ctx->io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+    ctx->io_type = rocke_dconv_io_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
     if(ctx->io_type == NULL)
     {
         return false; /* builder sticky error already set by rocke_b_io_ir_type */
@@ -104,7 +101,7 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
     /* AOT: the store guard bounds against the runtime output width. */
     ctx->c_W = ctx->params.p_Wo;
     ctx->c_BG_cpg = rocke_b_const_i32(b, ctx->BLOCK_GROUPS * ctx->p.cpg);
-    ctx->c_half_bytes = rocke_b_const_i32(b, 2);
+    ctx->c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(ctx->p.dtype));
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
 
     /* Lane decomposition for mfma_f32_32x32x8_f16 (Python lines 1715-1716). */
@@ -158,8 +155,8 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
 void rocke_dconv32c_load_weights(rocke_dconv_32c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    const char* dtype = rocke_direct_conv_problem_dtype(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
     int r_const, s_const, atom_idx;
 
     {
@@ -203,12 +200,8 @@ void rocke_dconv32c_load_weights(rocke_dconv_32c_ctx_t* ctx)
                 in_values[3] = ch_off;
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off, &valid);
-                if(is_bf16)
-                    ctx->weights[r_const][s_const][atom_idx] = rocke_b_buffer_load_vN_bf16(
-                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
-                else
-                    ctx->weights[r_const][s_const][atom_idx] = rocke_b_buffer_load_vN_f16(
-                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
+                ctx->weights[r_const][s_const][atom_idx] = rocke_dconv_load_elems(
+                    b, dtype, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 4);
             }
         }
     }
@@ -321,7 +314,6 @@ static int rocke_dconv32c_issue_dram_load(rocke_dconv_32c_ctx_t* ctx,
                                           int out_cap)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     int count = 0;
     int i;
 
@@ -369,10 +361,8 @@ static int rocke_dconv32c_issue_dram_load(rocke_dconv_32c_ctx_t* ctx,
         valid = rocke_b_land(b, addr_valid, ctx->chunk_meta[i].in_bounds);
         a_off_bytes = rocke_b_mul(b, a_off_elems, ctx->c_half_bytes);
         safe_off = rocke_b_select(b, valid, a_off_bytes, ctx->oob_sentinel);
-        if(is_bf16)
-            a_vec = rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
-        else
-            a_vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
+        a_vec = rocke_dconv_load_elems(
+            b, rocke_direct_conv_problem_dtype(&ctx->p), ctx->a_rsrc, safe_off, ctx->c0, 4);
         a_vec = rocke_b_select(b, valid, a_vec, ctx->io_vec4_zero);
         lds_idx = rocke_b_mul(b, ctx->chunk_meta[i].chunk_idx, rocke_b_const_i32(b, 4));
 
@@ -594,6 +584,23 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx)
                 int flat = qt * KH + p_idx;
                 rocke_value_t* acc_in = accs_flat[flat];
 
+                if(rocke_dconv_is_f32_storage(p->dtype))
+                {
+                    /* The same 4-wide 32x32 logical atoms on fp32 / TF32
+                     * MFMAs; gfx950 TF32 pairs channel atoms 0+1 / 2+3. */
+                    rocke_value_t* as[64];
+                    rocke_value_t* bs[64];
+                    int np = 0;
+                    for(s_const = 0; s_const < KW; ++s_const)
+                        for(atom_idx = 0; atom_idx < 4; ++atom_idx)
+                        {
+                            as[np] = ctx->weights[r_const][s_const][atom_idx];
+                            bs[np++] = inputs_by_q[qt][s_const][atom_idx];
+                        }
+                    accs_flat[flat]
+                        = rocke_dconv_mma_f32_chain(b, ctx->arch, p->dtype, 32, as, bs, np, acc_in);
+                    continue;
+                }
                 for(s_const = 0; s_const < KW; ++s_const)
                 {
                     for(atom_idx = 0; atom_idx < 4; ++atom_idx)
@@ -681,7 +688,6 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx)
                     rocke_value_t* safe_d_off;
                     rocke_value_t* pair_elems[2];
                     rocke_value_t* pair_f32;
-                    rocke_value_t* pair_h;
                     const char* off_names[4];
                     rocke_value_t* off_vals[4];
 
@@ -707,17 +713,8 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx)
                     pair_elems[0] = rocke_b_vec_extract(b, acc_to_flush, slot0);
                     pair_elems[1] = rocke_b_vec_extract(b, acc_to_flush, slot1);
                     pair_f32 = rocke_b_vec_pack(b, pair_elems, 2, rocke_f32());
-                    if(is_bf16)
-                    {
-                        pair_h = rocke_b_vec_trunc_f32_to_bf16(b, pair_f32);
-                        rocke_b_buffer_store_vN_bf16(
-                            b, ctx->d_rsrc, safe_d_off, ctx->c0, pair_h, 1);
-                    }
-                    else
-                    {
-                        pair_h = rocke_b_vec_trunc_f32_to_f16(b, pair_f32);
-                        rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d_off, ctx->c0, pair_h, 1);
-                    }
+                    rocke_dconv_store_from_f32(
+                        b, p->dtype, ctx->d_rsrc, safe_d_off, ctx->c0, pair_f32, 2);
                 }
             }
             accs_flat[flat] = ctx->zero_acc;

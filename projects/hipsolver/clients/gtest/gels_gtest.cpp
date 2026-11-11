@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,7 +111,7 @@ protected:
         if(arg.peek<rocblas_int>("n") == -1 && arg.peek<rocblas_int>("nrhs") == -1)
             testing_gels_bad_arg<API, BATCHED, STRIDED, T>();
 
-        arg.batch_count = 1;
+        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_gels<API, BATCHED, STRIDED, INPLACE, T>(arg);
     }
 };
@@ -129,6 +129,10 @@ class GELS_COMPAT : public GELS_BASE<API_COMPAT, false>
 };
 
 class GELS_INPLACE : public GELS_BASE<API_NORMAL, true>
+{
+};
+
+class GELS_BATCHED : public GELS_BASE<API_NORMAL, true>
 {
 };
 
@@ -214,6 +218,28 @@ TEST_P(GELS_INPLACE, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
+// batched tests
+
+TEST_P(GELS_BATCHED, batched__float)
+{
+    run_tests<true, false, float>();
+}
+
+TEST_P(GELS_BATCHED, batched__double)
+{
+    run_tests<true, false, double>();
+}
+
+TEST_P(GELS_BATCHED, batched__float_complex)
+{
+    run_tests<true, false, rocblas_float_complex>();
+}
+
+TEST_P(GELS_BATCHED, batched__double_complex)
+{
+    run_tests<true, false, rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          GELS,
 //                          Combine(ValuesIn(large_matrix_sizeA_range),
@@ -248,4 +274,8 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GELS_INPLACE,
+                         Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         GELS_BATCHED,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));

@@ -38,11 +38,19 @@ Building hipSPARSE from source also requires the following components and depend
 
 *  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
 *  `git <https://git-scm.com/>`_
-*  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
+*  `CMake <https://cmake.org/>`_ (Version 3.25.2 or later)
+*  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it)
 *  `vcpkg <https://github.com/Microsoft/vcpkg.git>`_
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
+
+The tests need 19 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+Before building the tests, run ``dvc pull -R projects/hipsparse/clients/matrices`` from the root of the rocm-libraries repository.
+Reading from the DVC storage doesn't require credentials.
+In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
+``git sparse-checkout add .dvc`` first.
+Alternatively, configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
 When building hipSPARSE from source, select a supported version of the :doc:`rocSPARSE <rocsparse:index>` library
 dependency. Given a specific version of hipSPARSE,
@@ -74,14 +82,15 @@ Use the following commands for a sparse checkout:
 .. note::
 
    To include the rocSPARSE dependency, set the projects for the sparse checkout using
-   ``git sparse-checkout set projects/hipsparse projects/rocsparse``.
+   ``git sparse-checkout set projects/hipsparse projects/rocsparse .dvc``.
+   The ``.dvc`` directory is needed to download the test matrices with ``dvc pull``.
 
 .. code-block:: shell
 
    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries
    git sparse-checkout init --cone
-   git sparse-checkout set projects/hipsparse # add projects/rocsparse to include dependency
+   git sparse-checkout set projects/hipsparse .dvc # add projects/rocsparse to include dependency
    git checkout release/rocm-rel-x.y  # or use the branch you want to work with
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
@@ -141,6 +150,15 @@ Building the library and client from source
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following table lists the common ways to use ``rmake.py`` to build the hipSPARSE library and clients.
+
+.. note::
+
+   The tests need the SuiteSparse test matrices. Before running these commands, pull them with
+   ``dvc pull -R clients/matrices`` from the ``projects\hipsparse`` directory.
+   ``rmake.py`` downloads missing matrices only when you pass ``--matrices-dir``.
+   The clients also need GoogleTest. Pass ``--gtest-path`` with the directory that contains
+   ``GTestConfig.cmake``, or pass ``--cmake-darg ALLOW_FETCH_DEPS=ON`` to download GoogleTest and any missing
+   matrices during configuration.
 
 .. csv-table::
    :header: "Command","Description"

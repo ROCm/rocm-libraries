@@ -219,3 +219,41 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   spgemm_alg: [rocsparse_spgemm_alg_default]
   filename: [Chevron4]
+
+# Rows of C whose hash table does not fit in shared memory. The 16 dense rows of Chebyshev4 take
+# about 23000 products and 9900 columns of C at N = 11500, and 136000 and 59000 at N = 68121.
+- name: spgemm_reuse_mult_csr_file
+  category: pre_checkin
+  function: spgemm_reuse_csr
+  indextype: *i32_i64
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: [68121]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [Chebyshev4]
+
+- name: spgemm_reuse_mult_csr_file
+  category: nightly
+  function: spgemm_reuse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: [11500, 68121]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [Chebyshev4]

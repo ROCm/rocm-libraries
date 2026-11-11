@@ -3,12 +3,12 @@
 
 target_sources(hipblaslt-clients-common
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_timing.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_hooks.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/candidate_search.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cotenant.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/datatype_interface.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/device_vector.hpp"
@@ -29,6 +29,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/near.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/norm.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/singletons.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataManipulation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_cleanup.hpp"

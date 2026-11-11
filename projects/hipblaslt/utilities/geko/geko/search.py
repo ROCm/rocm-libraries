@@ -205,19 +205,10 @@ def run(
         return pd.DataFrame()
 
     def _config_to_gemm_key(cfg: dict) -> tuple:
-        return (
-            cfg["transA"],
-            cfg["transB"],
-            cfg["batch_count"],
-            cfg["M"],
-            cfg["N"],
-            cfg["K"],
-            cfg["a_type"],
-            cfg["b_type"],
-            cfg["c_type"],
-            cfg["d_type"],
-            _normalize_compute_type(cfg["compute_type"]),
-        )
+        key = [cfg[k] for k in GEMM_LOG_FIELDS]
+        index = GEMM_LOG_FIELDS.index("compute_type")
+        key[index] = _normalize_compute_type(key[index])
+        return tuple(key)
 
     configs = [(cfg, i) for i, cfg in enumerate(configs)]
     processed_file = output_dir / "processed.csv"

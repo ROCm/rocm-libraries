@@ -4,6 +4,7 @@
 #ifndef MIOPEN_GUARD_MLOPEN_TMP_DIR_HPP
 #define MIOPEN_GUARD_MLOPEN_TMP_DIR_HPP
 
+#include <iosfwd>
 #include <string_view>
 #include <miopen/filesystem.hpp>
 #include <miopen/config.hpp>
@@ -23,8 +24,10 @@ struct TmpDir
     operator const fs::path&() const { return path; }
     operator std::string() const { return path.string(); }
 
-    MIOPEN_INTERNALS_EXPORT int
-    Execute(std::string_view cmd, std::string_view args, bool allowChangingCwd = true) const;
+    MIOPEN_INTERNALS_EXPORT int Execute(std::string_view cmd,
+                                        std::string_view args,
+                                        bool allowChangingCwd = true,
+                                        std::ostream* out     = nullptr) const;
 
     MIOPEN_INTERNALS_EXPORT ~TmpDir();
 };

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "rocsparse_bench.hpp"
 #include "rocsparse_routine.hpp"
 #include "utility.hpp"
+#include <exception>
 #include <iostream>
 
 #include "rocsparse_bench_app.hpp"
@@ -123,6 +124,17 @@ int main(int argc, char* argv[])
         {
             return status;
         }
+        catch(const hipError_t& error)
+        {
+            std::cerr << "rocsparse-bench error: " << hipGetErrorString(error) << " (" << error
+                      << ")" << std::endl;
+            return EXIT_FAILURE;
+        }
+        catch(const std::exception& error)
+        {
+            std::cerr << "rocsparse-bench error: " << error.what() << std::endl;
+            return EXIT_FAILURE;
+        }
     }
     else
     {
@@ -152,6 +164,17 @@ int main(int argc, char* argv[])
         catch(const rocsparse_status& status)
         {
             return status;
+        }
+        catch(const hipError_t& error)
+        {
+            std::cerr << "rocsparse-bench error: " << hipGetErrorString(error) << " (" << error
+                      << ")" << std::endl;
+            return EXIT_FAILURE;
+        }
+        catch(const std::exception& error)
+        {
+            std::cerr << "rocsparse-bench error: " << error.what() << std::endl;
+            return EXIT_FAILURE;
         }
     }
 }

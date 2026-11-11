@@ -46,6 +46,7 @@ using rocsparse_ut::device_vector;
 using rocsparse_ut::launch_single_warp;
 using rocsparse_ut::launch_warp_by_size;
 using rocsparse_ut::to_host;
+using rocsparse_ut::wfreduce_first_valid_lane;
 
 using namespace rocsparse_ut_collective_extras;
 
@@ -104,7 +105,9 @@ namespace
     }
 
     // Host reference mirrors the exact xor-butterfly (stride wf/2 down to SUB) at
-    // the device's runtime wavefront width; every lane's result is checked.
+    // the device's runtime wavefront width; every lane's result is checked on the
+    // shuffle path, the last SUB lanes on the gfx8/gfx9 DPP path (see
+    // rocsparse_ut::wfreduce_first_valid_lane).
     template <uint32_t SUB, typename T, typename Gen>
     void run_wfreduce_partial_sum(Gen gen)
     {
@@ -130,7 +133,7 @@ namespace
                                       d_out.ptr),
                   hipSuccess);
         auto h = to_host(d_out);
-        for(uint32_t l = 0; l < wf; ++l)
+        for(uint32_t l = wfreduce_first_valid_lane(wf, SUB); l < wf; ++l)
             EXPECT_DOUBLE_EQ(h[l], cur[l]);
     }
 } // namespace

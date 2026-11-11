@@ -295,6 +295,42 @@ rocblas_reduction_kernel_part2(int n_sums, V* __restrict__ in, T* __restrict__ o
         out[blockIdx.x] = T(FINALIZE{}(sum));
 }
 
+/*! \brief rocblas_reduction_kernel_part2_pass_major
+    gathers partial results stored as [sum][batch] and finishes the final reduction.
+    ********************************************************************/
+template <int NB, int WIN, typename FINALIZE, typename V, typename T = V>
+ROCBLAS_KERNEL(NB)
+rocblas_reduction_kernel_part2_pass_major(int n_sums,
+                                          int batch_count,
+                                          V* __restrict__ in,
+                                          T* __restrict__ out)
+{
+    V sum = 0;
+
+    int inc = NB * WIN;
+
+    int i         = threadIdx.x * WIN;
+    int remainder = n_sums % WIN;
+    int end       = n_sums - remainder;
+    for(; i < end; i += inc) // cover all sums as 1 block
+    {
+        for(int j = 0; j < WIN; j++)
+            sum += in[size_t(i + j) * batch_count + blockIdx.x];
+    }
+    if(threadIdx.x < remainder)
+    {
+        sum += in[size_t(n_sums - 1 - threadIdx.x) * batch_count + blockIdx.x];
+    }
+
+    if(warpSize == WARP_32)
+        sum = rocblas_dot_block_reduce<WARP_32, NB>(sum);
+    else
+        sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
+
+    if(threadIdx.x == 0)
+        out[blockIdx.x] = T(FINALIZE{}(sum));
+}
+
 /*! \brief rocblas_reduction_batched_kernel_workspace_size
     Work area for reductions where full reduction to single value occurs
     Additional passes add to workspace requirement for ILP64 subdivisions but size limited to chunks

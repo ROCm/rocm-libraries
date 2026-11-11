@@ -30,6 +30,9 @@
 
 namespace rocsparse
 {
+    // bid is the coefficient block this thread block handles (hipBlockIdx_x, or
+    // the grid-stride block index when grid.x was clamped against the device
+    // limit). It is always 64-bit so bid * NUM_COEFF cannot wrap.
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               bool          AOS,
@@ -39,7 +42,8 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void sddmm_coox_device(rocsparse_operation transA,
+    ROCSPARSE_DEVICE_ILF void sddmm_coox_device(int64_t             bid,
+                                                rocsparse_operation transA,
                                                 rocsparse_operation transB,
                                                 rocsparse_order     orderA,
                                                 rocsparse_order     orderB,
@@ -68,15 +72,16 @@ namespace rocsparse
         static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
         const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
         const I local_thread_index                       = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
-        const J incx                                     = (orderA == rocsparse_order_column)
-                                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
-                                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
 
-        const J incy = (orderB == rocsparse_order_column)
-                           ? ((transB == rocsparse_operation_none) ? 1 : ldb)
-                           : ((transB == rocsparse_operation_none) ? ldb : 1);
+        const int64_t incx = (orderA == rocsparse_order_column)
+                                 ? ((transA == rocsparse_operation_none) ? lda : 1)
+                                 : ((transA == rocsparse_operation_none) ? 1 : lda);
 
-        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
+        const int64_t incy = (orderB == rocsparse_order_column)
+                                 ? ((transB == rocsparse_operation_none) ? 1 : ldb)
+                                 : ((transB == rocsparse_operation_none) ? ldb : 1);
+
+        const int64_t innz = bid * NUM_COEFF + local_coeff_index;
         if(innz >= nnz)
         {
             return;
@@ -112,6 +117,7 @@ namespace rocsparse
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               bool          AOS,
+              bool          GRID_STRIDE,
               typename T,
               typename I,
               typename J,
@@ -162,27 +168,51 @@ namespace rocsparse
         // per nonzero), so the row/column index strides are twice the value
         // stride; these strides are computed by the caller and passed in
         // separately here.
+        //
+        // The host launches GRID_STRIDE = false only when rocsparse::get_grid_size_x
+        // did not clamp grid.x, so every coefficient block has its own thread block
+        // and hipBlockIdx_x indexes it directly. When the clamp binds, GRID_STRIDE =
+        // true walks the coefficient blocks in 64 bits with a block-uniform trip
+        // count.
+        static constexpr int64_t NUM_COEFF
+            = static_cast<int64_t>(BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
-                transA,
-                transB,
-                orderA,
-                orderB,
-                M,
-                N,
-                K,
-                nnz,
-                alpha,
-                load_pointer(dense_A, batch, batch_stride_A),
-                lda,
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(coo_val, batch, values_batch_stride_C),
-                load_pointer(coo_row_ind, batch, row_indices_batch_stride_C),
-                load_pointer(coo_col_ind, batch, col_indices_batch_stride_C),
-                coo_base);
+            const auto process_block = [&](int64_t bid) {
+                rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
+                    bid,
+                    transA,
+                    transB,
+                    orderA,
+                    orderB,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    alpha,
+                    load_pointer(dense_A, batch, batch_stride_A),
+                    lda,
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(coo_val, batch, values_batch_stride_C),
+                    load_pointer(coo_row_ind, batch, row_indices_batch_stride_C),
+                    load_pointer(coo_col_ind, batch, col_indices_batch_stride_C),
+                    coo_base);
+            };
+
+            if constexpr(GRID_STRIDE)
+            {
+                for(int64_t bid = hipBlockIdx_x; bid * NUM_COEFF < nnz; bid += hipGridDim_x)
+                {
+                    process_block(bid);
+                }
+            }
+            else
+            {
+                process_block(hipBlockIdx_x);
+            }
         }
     }
 
@@ -192,17 +222,17 @@ namespace rocsparse
                                   J N,
                                   I nnz,
                                   const C* __restrict__ dense_C,
-                                  J lda,
+                                  int64_t lda,
                                   C* __restrict__ coo_val,
                                   const I* __restrict__ coo_row,
                                   const I* __restrict__ coo_col,
                                   rocsparse_index_base coo_base)
     {
-        const auto NUM_THREADS = hipGridDim_x * BLOCKSIZE;
+        const int64_t NUM_THREADS = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        const auto gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        for(auto idx = gid; idx < nnz; idx += NUM_THREADS)
+        for(int64_t idx = gid; idx < nnz; idx += NUM_THREADS)
         {
             const I row = coo_row[idx * ((AOS) ? 2 : 1)] - coo_base;
             const I col = coo_col[idx * ((AOS) ? 2 : 1)] - coo_base;

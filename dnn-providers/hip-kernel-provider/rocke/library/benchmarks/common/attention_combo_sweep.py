@@ -41,7 +41,7 @@ from dispatch.attention import (
     attention_dispatch_result,
     iter_dispatch_attention_all,
 )
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from rocke.dispatch.core import spec_identity
 from rocke.dispatch.tuning.walk import sample_count, sweep_level
 from benchmarks.common.attention_flops import attention_flops
@@ -87,7 +87,10 @@ def _requests(args):
                     hdim_v=d,
                     arch=args.arch,
                     dtype=args.dtype,
-                    mask_type=1 if args.causal else 0,
+                    # ``_reference`` anchors the mask on the bottom-right diagonal
+                    # (``sk - sq``) for both the causal and the windowed case.
+                    mask_type=2 if args.causal else 0,
+                    diagonal_alignment=1,
                     kv_block_size=args.kv_block_size,
                     sliding_window=args.sliding_window,
                     num_cus=args.num_cus,
@@ -203,7 +206,7 @@ def _unified_tensors(req, seed: int):
         "cu_seqlens_q": cu,
         "seqused_k": used,
         "block_table": table,
-        "problem": _problem(req),
+        "problem": attention_problem(req),
         "_dense_q": q_dense,
         "_dense_k": k_dense,
         "_dense_v": v_dense,

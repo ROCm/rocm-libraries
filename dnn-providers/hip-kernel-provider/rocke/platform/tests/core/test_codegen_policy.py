@@ -13,6 +13,7 @@ from rocke.core.codegen_policy import (
     SchedulerStrategy,
     apply_codegen_policy,
     codegen_policy_for_kernel,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import IRBuilder
 from rocke.core.ir_serialize import parse, serialize
@@ -57,10 +58,21 @@ class TestCodegenPolicy(unittest.TestCase):
                 )
 
     def test_invalid_scheduler_strategies_are_rejected(self):
-        for value in ("", "default", "ITERATIVE-ILP", 1, True, object()):
+        """The ValueError text, word for word: the C++ engine's
+        rocke_scheduler_strategy_reason writes the same text, so a change
+        here must be made there too."""
+        for value in ("", "default", "ITERATIVE-ILP", "it's", 1, True, object()):
             with self.subTest(value=value):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as ctx:
                     CodegenPolicy(scheduler_strategy=value)
+                self.assertEqual(
+                    str(ctx.exception),
+                    f"unsupported scheduler_strategy {value!r}; expected one of: "
+                    "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
+                    "max-memory-clause, or None",
+                )
+                self.assertEqual(scheduler_strategy_reason(value), str(ctx.exception))
+        self.assertIsNone(scheduler_strategy_reason(None))
 
     def test_apply_and_remove_policy(self):
         kernel = _kernel()
@@ -111,6 +123,28 @@ class TestCodegenPolicy(unittest.TestCase):
             '"amdgpu-waves-per-eu"="2,2"',
             attrs,
         )
+
+    def test_launch_bounds_minimum_is_the_target_wave_size(self):
+        # LLVM discards an inverted min>max range and falls back to its default
+        # 1024 maximum, losing the register budget implied by the kernel limit.
+        for arch, max_wg, expected in (
+            ("gfx950", 64, "64,64"),
+            ("gfx950", 256, "64,256"),
+            ("gfx1151", 32, "32,32"),
+            ("gfx1151", 64, "32,64"),
+        ):
+            with self.subTest(arch=arch, max_wg=max_wg):
+                kernel = _kernel()
+                kernel.attrs["max_workgroup_size"] = max_wg
+                llvm = _lower_kernel_to_llvm_python(kernel, arch=arch)
+                self.assertIn(
+                    f'"amdgpu-flat-work-group-size"="{expected}"',
+                    next(
+                        line
+                        for line in llvm.splitlines()
+                        if line.startswith("attributes #0")
+                    ),
+                )
 
     def test_scheduler_policy_is_not_forwarded_as_a_raw_comgr_flag(self):
         kernel = _kernel()

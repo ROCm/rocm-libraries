@@ -24,8 +24,6 @@
 
 #pragma once
 
-#pragma once
-
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrsv_info.hpp"
 #include "rocsparse_datatype_utils.hpp"
@@ -84,6 +82,36 @@ namespace rocsparse
                                  rocsparse_csrsv_info        csrsv_info,
                                  void*                       temp_buffer,
                                  bool                        force_conj = false);
+
+    inline rocsparse_status csrsv_solve(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        bool                        operation_conjugate,
+                                        rocsparse_datatype          alpha_datatype,
+                                        const void*                 alpha,
+                                        int64_t                     alpha_stride,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_const_dnvec_descr x,
+                                        rocsparse_dnvec_descr       y,
+                                        rocsparse_solve_policy      policy,
+                                        rocsparse_csrsv_info        csrsv_info,
+                                        size_t                      buffer_size_in_bytes,
+                                        void*                       buffer)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(csrsv_solve(handle,
+                                              trans,
+                                              alpha_datatype,
+                                              alpha,
+                                              alpha_stride,
+                                              A,
+                                              x,
+                                              y,
+                                              policy,
+                                              csrsv_info,
+                                              buffer,
+                                              operation_conjugate));
+
+        return rocsparse_status_success;
+    }
 
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,

@@ -30,6 +30,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 using namespace stinkytofu;
 
@@ -673,11 +674,10 @@ TEST_F(AsmEmitterTest, MUBUFStoreB32_OffVAddr) {
     inst->addSrcReg(StinkyRegister("s", 60, 4));  // rsrc  s[60:63]
     inst->addSrcReg(StinkyRegister("s", 46, 1));  // soffset s46
 
-    // glc+slc on an arch that uses sc0/sc1 naming (gfx1250, hasMUBUFConst=false)
+    // glc+slc on an arch that uses sc0/sc1 naming (gfx1250)
     MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/true, /*slc=*/true,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/true,
-                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
-                            /*hasSC0Modifier=*/true);
+                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/true);
     inst->addModifier(mubufMod);
 
     AsmEmitterOptions options;
@@ -705,8 +705,7 @@ TEST_F(AsmEmitterTest, MUBUFLoadB32_OffVAddr) {
 
     MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/false,
-                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
-                            /*hasSC0Modifier=*/false);
+                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false);
     inst->addModifier(mubufMod);
 
     AsmEmitterOptions options;
@@ -733,8 +732,8 @@ TEST_F(AsmEmitterTest, MUBUFScopeModifier) {
 
     MUBUFModifiers mubufMod(/*offen=*/true, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/true,
-                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
-                            /*hasSC0Modifier=*/false, /*scope=*/MUBUFScope::SCOPE_DEV);
+                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                            /*scope=*/MUBUFScope::SCOPE_DEV);
     inst->addModifier(mubufMod);
 
     AsmEmitterOptions options;
@@ -762,9 +761,8 @@ TEST_F(AsmEmitterTest, MUBUFTemporalHintModifier) {
 
     MUBUFModifiers mubufMod(/*offen=*/true, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/false,
-                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
-                            /*hasSC0Modifier=*/false, /*scope=*/MUBUFScope::SCOPE_CU,
-                            /*th=*/TemporalHint::TH_RT);
+                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                            /*scope=*/MUBUFScope::SCOPE_CU, /*th=*/TemporalHint::TH_RT);
     inst->addModifier(mubufMod);
 
     AsmEmitterOptions options;
@@ -778,6 +776,87 @@ TEST_F(AsmEmitterTest, MUBUFTemporalHintModifier) {
 
     std::string expected =
         "buffer_load_b128 v[0:3], v8, s[0:3], s0 offen offset:0 scope:SCOPE_CU th:TH_LOAD_RT\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+// gfx1250's buffer soffset field takes an SGPR, M0 or null but no inline
+// constant, so a zero soffset has to print as null.
+TEST_F(AsmEmitterTest, MUBUFAtomicZeroSOffsetIsNull) {
+    StinkyInstruction* inst = createInstruction("buffer_atomic_add_f32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addDestReg(StinkyRegister("v", 12, 1));  // vdata, read-write
+    inst->addSrcReg(StinkyRegister("v", 32, 1));   // vaddr
+    inst->addSrcReg(StinkyRegister("s", 60, 4));   // rsrc  s[60:63]
+    inst->addSrcReg(StinkyRegister(0));            // soffset
+    legalizeReadWriteSources(inst);
+    // The read of vdata is listed after soffset, so soffset is not the last source.
+    ASSERT_TRUE(inst->getSrcRegs().back() == StinkyRegister("v", 12, 1));
+
+    MUBUFModifiers mubufMod(/*offen=*/true, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
+                            /*nt=*/false, /*lds=*/false, /*isStore=*/false,
+                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                            /*scope=*/MUBUFScope::SCOPE_DEV);
+    inst->addModifier(mubufMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected =
+        "buffer_atomic_add_f32 v12, v32, s[60:63], null offen offset:0 scope:SCOPE_DEV "
+        "th:TH_ATOMIC_RETURN\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+// The soffset field, not the MUBUF modifiers, decides the spelling.
+TEST_F(AsmEmitterTest, MUBUFZeroSOffsetIsNullWithoutModifiers) {
+    StinkyInstruction* inst = createInstruction("buffer_load_b32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 8, 1));
+    inst->addSrcReg(StinkyRegister("s", 0, 4));
+    inst->addSrcReg(StinkyRegister(0));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected = "buffer_load_b32 v0, v8, s[0:3], null\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+// The Python adaptor keeps a "0" passed as a string as a literal string.
+TEST_F(AsmEmitterTest, MUBUFStringZeroSOffsetIsNull) {
+    StinkyInstruction* inst = createInstruction("buffer_load_b32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 8, 1));
+    inst->addSrcReg(StinkyRegister("s", 0, 4));
+    inst->addSrcReg(StinkyRegister("0"));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected = "buffer_load_b32 v0, v8, s[0:3], null\n";
     EXPECT_EQ(assembly, expected);
 }
 

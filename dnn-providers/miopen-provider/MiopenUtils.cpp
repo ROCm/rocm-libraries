@@ -3,6 +3,8 @@
 
 #include "MiopenUtils.hpp"
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
 namespace miopen_plugin::miopen_utils
 {
 
@@ -107,6 +109,12 @@ size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttr
     return attr.dims()->size() - 2;
 }
 
+bool hasLeakyReluSlope(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
+{
+    const auto slope = attrs.relu_lower_clip_slope();
+    return slope.has_value() && *slope != 0.f;
+}
+
 ActivationParams mapPointwiseModeToMiopenActivation(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
 {
@@ -119,7 +127,6 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     {
         auto lowerClip = attrs.relu_lower_clip();
         auto upperClip = attrs.relu_upper_clip();
-        auto lowerClipSlope = attrs.relu_lower_clip_slope();
 
         if(lowerClip && upperClip)
         {
@@ -137,11 +144,13 @@ ActivationParams mapPointwiseModeToMiopenActivation(
             return ActivationParams{
                 miopenActivationCLIPPEDRELU, static_cast<double>(*upperClip), 0.0, 0.0};
         }
-        if(lowerClipSlope)
+        if(hasLeakyReluSlope(attrs))
         {
             // Leaky ReLU
-            return ActivationParams{
-                miopenActivationLEAKYRELU, static_cast<double>(*lowerClipSlope), 0.0, 0.0};
+            return ActivationParams{miopenActivationLEAKYRELU,
+                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
+                                    0.0,
+                                    0.0};
         }
         if(lowerClip && *lowerClip != 0.f)
         {
@@ -188,6 +197,37 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported activation operation");
+    }
+}
+
+void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor, bool benchmarkingEnabled)
+{
+    if(benchmarkingEnabled)
+    {
+        THROW_ON_MIOPEN_FAILURE(
+            miopenSetConvolutionFindMode(convDescriptor, miopenConvolutionFindModeNormal));
+    }
+}
+
+bool envFindEnforceIsSet()
+{
+    const std::string value = hipdnn_data_sdk::utilities::toLower(
+        hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE"));
+    if(value == "db_update" || value == "search" || value == "search_db_update"
+       || value == "db_clean")
+    {
+        return true;
+    }
+    // MIOpen falls back to std::stoul, which skips leading whitespace and ignores trailing
+    // characters. A value it cannot parse makes MIOpen throw; here it counts as unset.
+    try
+    {
+        const unsigned long action = std::stoul(value);
+        return action >= 2 && action <= 5;
+    }
+    catch(const std::exception&)
+    {
+        return false;
     }
 }
 }

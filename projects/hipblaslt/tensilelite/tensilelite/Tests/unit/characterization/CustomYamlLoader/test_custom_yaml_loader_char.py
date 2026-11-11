@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.CustomYamlLoader``: the event-based YAML
+"""Characterization tests for ``tensilelite.CustomYamlLoader``: the event-based YAML
 parser (`parse_general`/`parse_sequence`/`parse_mapping`/`parse_scalar`) and the
 stream/sequence-item/dict-item/logic-gfx-arch loaders, driven over tmp yaml."""
 
 import pytest
 
-from Tensile.CustomYamlLoader import (
+from tensilelite.CustomYamlLoader import (
     DEFAULT_YAML_LOADER,
     is_float,
     load_yaml_stream,

@@ -6,6 +6,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _PKG_PARENT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir)
 )
@@ -20,7 +22,7 @@ from rocisa_stinkytofu_adaptor.enum import (  # noqa: E402
 )
 
 
-class TestDevelopGapEnumValues(unittest.TestCase):
+class TestDevelopGapEnumValues(AdaptorTestCase):
     def test_temporal_hint_values(self):
         self.assertEqual(TemporalHint.TH_NONE, -1)
         self.assertEqual(TemporalHint.TH_RT, 0)

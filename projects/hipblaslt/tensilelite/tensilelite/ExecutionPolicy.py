@@ -87,6 +87,18 @@ def hasStaticAssignment(state):
     return isPersistent(state) and _policy(state).assignment == WorkAssignment.STATIC_GRID
 
 
+def isStreamKSpatialCluster(state):
+    """Whether StreamK source uses spatial cluster workers sharing a K range.
+
+    Like DataParallel clustering, the schedule is selected by the execution
+    policy and cluster geometry. Prebuilt payload compatibility is tracked
+    separately by PersistentLoopArgsVersion.
+    """
+    policy = _policy(state)
+    return (policy.stream_k and policy.assignment == WorkAssignment.STATIC_GRID
+            and any(axis > 1 for axis in state.get("ClusterDim", [1, 1])))
+
+
 def hasDynamicAssignment(state):
     return _policy(state).assignment == WorkAssignment.DYNAMIC_WORK_QUEUE
 
@@ -263,7 +275,7 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     support = dict(result.get("InternalSupportParams", {}))
     version = support.get("PersistentLoopArgsVersion", 0)
     outer_version = support.get("KernArgsVersion", 3)
-    if type(version) is not int or version not in (0, 1):
+    if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
@@ -276,14 +288,20 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
         # it below, while preserving explicit and prebuilt layout contracts.
         if not regenerate or handwritten or "InternalSupportParams" in explicit:
             raise ValueError("PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid")
+    cluster_stream_k = isStreamKSpatialCluster(result)
+    if version == 2 and not cluster_stream_k:
+        if not regenerate or handwritten or "InternalSupportParams" in explicit:
+            raise ValueError("PersistentLoopArgsVersion=2 requires StreamK/StaticGrid with a spatial cluster")
+    if version == 2 and outer_version != 3 and (not regenerate or handwritten):
+        raise ValueError("PersistentLoopArgsVersion=2 requires KernArgsVersion=3")
     if version == 1 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
     if regenerate and not handwritten:
-        # DataParallel tile traversal and its argument layout are
+        # Persistent tile traversal and its argument layout are
         # generator capabilities. Regenerating known older logic upgrades both;
         # handwritten/prebuilt artifacts retain the layout they declare.
-        support["PersistentLoopArgsVersion"] = 1 if policy.persistent_data_parallel else 0
-        if policy.persistent_data_parallel:
+        support["PersistentLoopArgsVersion"] = 2 if cluster_stream_k else 1 if policy.persistent_data_parallel else 0
+        if policy.persistent_data_parallel or cluster_stream_k:
             support["KernArgsVersion"] = 3
     if regenerate and (legacy or support.get("PersistentLoopArgsVersion", 0) != version
                        or support.get("KernArgsVersion", outer_version) != outer_version):

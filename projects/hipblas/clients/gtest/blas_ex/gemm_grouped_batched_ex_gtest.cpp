@@ -39,7 +39,7 @@ namespace
             {
                 if(!hipblas_client_global_filters(args))
                     return false;
-                return static_cast<bool>(FILTER<T...>{});
+                return FILTER<T...>::value;
             }
         };
 

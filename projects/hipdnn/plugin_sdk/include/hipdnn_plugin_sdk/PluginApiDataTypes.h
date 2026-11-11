@@ -55,6 +55,18 @@ typedef enum
 } hipdnnPluginType_t;
 
 /**
+ * @brief Prediction work an engine is asked to perform.
+ *
+ * Engine predictions must not enumerate configurations or invoke the configuration
+ * predictor. Neither kind may benchmark, tune, or execute the operation graph.
+ */
+typedef enum
+{
+    HIPDNN_ENGINE_PREDICTION_ENGINE = 0, ///< Predict ordinary engine execution with tuning off.
+    HIPDNN_ENGINE_PREDICTION_CONFIGURATION = 1, ///< Select and predict an exact configuration.
+} hipdnnEnginePredictionKind_t;
+
+/**
  * @brief Structure for describing a constant data buffer.
  *
  * This structure provides a way to pass buffer information (a pointer and a size) into and out of functions.

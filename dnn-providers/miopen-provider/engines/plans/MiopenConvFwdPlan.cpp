@@ -109,6 +109,9 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                 + " dimensions, expected " + std::to_string(expectedDims));
     }
 
+    miopen_utils::setBenchmarkingFindMode(_params.conv().convDescriptor(),
+                                          _executionSettings.benchmarkingEnabled());
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
@@ -176,9 +179,6 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
-                                         _executionSettings.benchmarkingEnabled());
-
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionForwardAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
@@ -214,7 +214,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
                                                       perfResults.data(),
                                                       workspace,
                                                       workspaceSize,
-                                                      false));
+                                                      _executionSettings.benchmarkingEnabled()));
 
             if(returnedAlgoCount <= 0)
             {

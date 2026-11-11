@@ -34,7 +34,7 @@ from analyze_timing import (
 )
 
 
-# Sample timing output that mimics real Tensile output
+# Sample timing output that mimics real TensileLite output
 SAMPLE_TIMING_LOG = """\
 Some initial output that should be ignored
 TIMING:library_loading:45.123

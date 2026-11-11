@@ -17,6 +17,7 @@ EnginePlugin::EnginePlugin(SharedLibrary&& lib)
     : PluginBase(std::move(lib))
 {
     resolveSymbols();
+    _parsedApiVersion = parseApiVersion(apiVersion(), cachedName());
 }
 
 EnginePlugin::EnginePlugin()
@@ -25,6 +26,28 @@ EnginePlugin::EnginePlugin()
 #ifndef NDEBUG
     _initialized = true;
 #endif
+}
+
+std::optional<hipdnn_data_sdk::utilities::Version> EnginePlugin::parsedApiVersion() const
+{
+    return _parsedApiVersion;
+}
+
+std::optional<hipdnn_data_sdk::utilities::Version>
+    EnginePlugin::parseApiVersion(std::string_view rawVersion, const std::string& pluginName)
+{
+    try
+    {
+        return hipdnn_data_sdk::utilities::Version{rawVersion};
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
+                                pluginName,
+                                std::string(rawVersion),
+                                e.what());
+        return std::nullopt;
+    }
 }
 
 void EnginePlugin::resolveSymbols()
@@ -106,6 +129,8 @@ void EnginePlugin::resolveSymbols()
         HIPDNN_BACKEND_LOG_INFO("Plugin does not supply engine names "
                                 "(hipdnnEnginePluginGetEngineName not exported)");
     }
+    tryAssignSymbol(_funcEnumerateCandidates, "hipdnnEnginePluginEnumerateCandidates");
+    tryAssignSymbol(_funcGetPrediction, "hipdnnEnginePluginGetPrediction");
 
 #ifndef NDEBUG
     _initialized = true;
@@ -276,6 +301,61 @@ void EnginePlugin::getEngineDetails(hipdnnEnginePluginHandle_t handle,
     assert(_initialized);
     invokePluginFunction(
         "get engine details", _funcGetEngineDetails, handle, engineId, opGraph, engineDetails);
+}
+
+void EnginePlugin::enumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                       const hipdnnPluginConstData_t* engineConfig,
+                                       const hipdnnPluginConstData_t* opGraph,
+                                       uint64_t offset,
+                                       uint64_t limit,
+                                       hipdnnPluginConstData_t* engineDetails) const
+{
+    if(_funcEnumerateCandidates == nullptr)
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Plugin does not export matched-catalog enumeration");
+    }
+    const auto status
+        = _funcEnumerateCandidates(handle, engineConfig, opGraph, offset, limit, engineDetails);
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Engine does not support matched-catalog enumeration");
+    }
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Candidate enumeration failed: ")
+                                  + std::string(getLastErrorString()));
+    }
+}
+
+bool EnginePlugin::getPrediction(hipdnnEnginePluginHandle_t handle,
+                                 const hipdnnPluginConstData_t* engineConfig,
+                                 const hipdnnPluginConstData_t* opGraph,
+                                 hipdnnEnginePredictionKind_t kind,
+                                 bool evaluate,
+                                 hipdnnPluginConstData_t* prediction) const
+{
+    assert(_initialized);
+    *prediction = {nullptr, 0};
+    if(_funcGetPrediction == nullptr)
+    {
+        return false;
+    }
+    const auto status
+        = _funcGetPrediction(handle, engineConfig, opGraph, kind, evaluate ? 1 : 0, prediction);
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return false;
+    }
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Engine prediction failed: ")
+                                  + std::string(getLastErrorString()));
+    }
+    return true;
 }
 
 void EnginePlugin::destroyEngineDetails(hipdnnEnginePluginHandle_t handle,

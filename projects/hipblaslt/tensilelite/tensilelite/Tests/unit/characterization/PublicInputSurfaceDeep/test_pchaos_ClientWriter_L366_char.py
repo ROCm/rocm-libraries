@@ -74,9 +74,9 @@ def _call_writeRunScript(tmp_path, monkeypatch, os_name_value):
     """Call writeRunScript with os.name patched to os_name_value.
 
     Monkeypatches:
-      - Tensile.ClientWriter.os.name              (the module's os reference)
+      - tensilelite.ClientWriter.os.name              (the module's os reference)
       - os.name                                   (global fallback)
-      - Tensile.ClientWriter.getClientExecutablePath  (returns fake path string)
+      - tensilelite.ClientWriter.getClientExecutablePath  (returns fake path string)
 
     ``getClientExecutablePath`` must be patched because it calls
     ``os.path.isfile(globalParameters.get("PrebuiltClient"))`` which returns
@@ -86,7 +86,7 @@ def _call_writeRunScript(tmp_path, monkeypatch, os_name_value):
 
     Returns the path returned by writeRunScript.
     """
-    import Tensile.ClientWriter as cw
+    import tensilelite.ClientWriter as cw
 
     monkeypatch.setattr(cw.os, "name", os_name_value)
     monkeypatch.setattr("os.name", os_name_value)

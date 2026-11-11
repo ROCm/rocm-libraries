@@ -18,13 +18,20 @@
  *                                             acc_vgprs,threads_per_block,grid}
  *     .kernel_name() / .validate()          rocke_direct_conv_nongrouped_kernel_name /
  *                                             rocke_direct_conv_nongrouped_validate
+ *     .workspace_bytes                      rocke_direct_conv_nongrouped_workspace_bytes
  *   is_valid_nongrouped_spec(spec, arch)          rocke_direct_conv_nongrouped_is_valid_spec
  *   build_direct_conv_nongrouped(spec, arch)      rocke_build_direct_conv_nongrouped(_new)
  *   (+ convenience: build -> lower .ll)     rocke_direct_conv_nongrouped_lower_to_llvm
+ *   @dataclass(frozen) DirectSplitReduceSpec      rocke_direct_conv_split_reduce_spec_t
+ *     .kernel_name() / .validate() / .grid() rocke_direct_conv_split_reduce_{kernel_name,
+ *                                             validate,grid}
+ *   build_direct_conv_split_reduce(spec, arch)    rocke_build_direct_conv_split_reduce(_new)
+ *   (+ convenience: build -> lower .ll)     rocke_direct_conv_split_reduce_lower_to_llvm
  *
  * The shared problem struct (rocke_direct_conv_problem_t, Python
- * DirectConvProblem) comes from rocke/instance_conv_direct_grouped.h; this
- * family requires problem.groups == 1, so cpg is the full C and kpg the full K.
+ * DirectConvProblem) comes from rocke/instance_conv_direct_grouped.h. With
+ * grouped == false this family requires problem.groups == 1, so cpg is the
+ * full C and kpg the full K.
  *
  * AOT: the kernel declares the direct-conv kernarg block of
  * rocke_conv_direct_arg_names("fwd") (instance_conv_abi.h). N, H, W, Ho, Wo,
@@ -33,6 +40,27 @@
  * only has to pass validate() -- the emitted IR does not depend on its extents
  * or channel counts. validate() on the problem actually launched is what keeps
  * every tensor below the masked-access offset, so run it per launch shape.
+ *
+ * Split-C (split_c > 1): the channel loop is split over split_c workgroups per
+ * output tile, each writing an fp32 partial sum into slab `split` of a packed
+ * [split_c, N, Ho, Wo, K] workspace bound to D; the DirectSplitReduceSpec
+ * kernel (same kernarg block, workspace bound to A) folds the slabs into the
+ * output. split_c == 1 emits exactly the unsplit kernel.
+ *
+ * Grouped (grouped == true): groups >= 1 with p_groups and the per-group
+ * channel counts runtime. A workgroup owns group_merge consecutive groups and
+ * runs them as one dense problem of group_merge * cpg input and
+ * group_merge * kpg output channels with block-diagonal weights (off-diagonal
+ * fragments staged as zeros). The merged group is the innermost coordinate of
+ * the cell axis. grouped == false emits exactly the dense kernel.
+ *
+ * fp32 storage (problem.dtype "fp32" / "tf32"): 4-byte elements, dwordx4 global
+ * and LDS pieces (the weight array split into 16-byte planes for an 8-element
+ * fragment), and each logical tile x tile atom issued on the arch's catalog
+ * atoms by rocke_dconv_mma_f32_logical (instance_conv_direct_grouped_internal.h):
+ * "tf32" feeds TF32 operands (gfx950: the emulated BF16x3 xf32 atoms; gfx942: the
+ * native xf32 atoms), "fp32" the exact fp32 atoms. The plain kernel only:
+ * grouped and split_c > 1 refuse it. fp16 / bf16 emit exactly as before.
  *
  * Optional Python knobs (`iglp: int | None`, `waves_per_eu: int | None`) map to
  * the sentinels ROCKE_DCONV_NONGROUPED_IGLP_NONE / ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE.
@@ -73,7 +101,7 @@ extern "C" {
  *      waves_n: int = 4                    # waves splitting tile_h
  *      atom: str = "32x32x16"              # 32x32x16 | 32x32x8 | 16x16x32 | 16x16x16
  *      wave_size: int = 64
- *      lds_pad: int = 8
+ *      lds_pad: int = 8                    # elements; fp32 storage wants 4
  *      chiplet_swizzle: bool = True
  *      swizzle_wgm: int = 8
  *      chiplet_chunk: int = 64
@@ -81,6 +109,9 @@ extern "C" {
  *      double_buffer: bool = False
  *      iglp: int | None = None
  *      waves_per_eu: int | None = None
+ *      split_c: int = 1
+ *      grouped: bool = False
+ *      group_merge: int = 1                # groups per workgroup (grouped only)
  * ===================================================================== */
 typedef struct rocke_direct_conv_nongrouped_spec
 {
@@ -94,7 +125,8 @@ typedef struct rocke_direct_conv_nongrouped_spec
     int waves_n; /* default 4   */
     const char* atom; /* default "32x32x16" */
     int wave_size; /* default 64  */
-    int lds_pad; /* default 8   */
+    int lds_pad; /* default 8; elements (16 bytes is the conflict-free pad:
+                  * 8 halves, 4 floats) */
     bool chiplet_swizzle; /* default true  */
     int swizzle_wgm; /* default 8   */
     int chiplet_chunk; /* default 64  */
@@ -102,22 +134,35 @@ typedef struct rocke_direct_conv_nongrouped_spec
     bool double_buffer; /* default false */
     int iglp; /* default ROCKE_DCONV_NONGROUPED_IGLP_NONE */
     int waves_per_eu; /* default ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE */
+    int split_c; /* default 1 */
+    bool grouped; /* default false */
+    int group_merge; /* default 1 */
 } rocke_direct_conv_nongrouped_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default() with
- * groups = 1. Caller fills N,H,W,cpg,kpg (and KH/KW/PAD/stride/dtype). */
+ * groups = 1. Caller fills N,H,W,cpg,kpg (and KH/KW/PAD/stride/dtype; groups
+ * too when grouped). */
 rocke_direct_conv_nongrouped_spec_t rocke_direct_conv_nongrouped_spec_default(void);
 
 /* Derived geometry (Python @property). Return 0 for an unknown atom. */
 int rocke_direct_conv_nongrouped_threads_per_block(const rocke_direct_conv_nongrouped_spec_t* spec);
 long rocke_direct_conv_nongrouped_lds_bytes(const rocke_direct_conv_nongrouped_spec_t* spec);
 int rocke_direct_conv_nongrouped_acc_vgprs(const rocke_direct_conv_nongrouped_spec_t* spec);
-/* spec.grid() -> (n_w_tiles * n_h_tiles * N * n_k_tiles, 1, 1). */
+/* spec.grid() -> (n_w_tiles * n_h_tiles * N * n_merged_groups * n_k_tiles * split_c,
+ * 1, 1); n_k_tiles spans merged_k = kpg * group_merge (grouped) or kpg, and
+ * n_merged_groups is groups / group_merge (grouped) or 1. */
 void rocke_direct_conv_nongrouped_grid(const rocke_direct_conv_nongrouped_spec_t* spec,
                                        int grid[3]);
+/* spec.workspace_bytes: bytes of the fp32 [split_c, N, Ho, Wo, total_k]
+ * partial-sum workspace a split_c > 1 kernel writes (0 when split_c == 1). */
+long long
+    rocke_direct_conv_nongrouped_workspace_bytes(const rocke_direct_conv_nongrouped_spec_t* spec);
 
-/* kernel_name(): kernel_name_join(name, problem.short(), t{h}x{w}x{k}, ck{ck},
- * w{wm}x{wn}, a{atom}, g{wgm}|gnone, [db], [iglp{n}], [we{n}], [bf16]). */
+/* kernel_name(): kernel_name_join(name, problem.short(), [d{dh}x{dw}],
+ * t{h}x{w}x{k}, ck{ck}, w{wm}x{wn}, a{atom}, g{wgm}|gnone, [db], [iglp{n}],
+ * [we{n}], [sc{n}], [grp{group_merge}], [p{lds_pad}], [dtype]): p{lds_pad} only
+ * for fp32 storage with a pad other than 4; the dtype flag is empty for fp16
+ * and the dtype itself otherwise (bf16 / fp32 / tf32). */
 rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     const rocke_direct_conv_nongrouped_spec_t* spec, char* out, size_t out_cap);
 
@@ -128,8 +173,10 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     const rocke_direct_conv_nongrouped_spec_t* spec, char* reason, size_t reason_cap);
 
 /* is_valid_nongrouped_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Adds to validate(): stride in {1, 2}, the MFMA atom present on arch, wave
- * size / threads-per-block / LDS capacity within the arch limits. */
+ * Adds to validate(): stride in {1, 2}, the MFMA atom present on arch (fp32
+ * storage: an fp32 / TF32 catalog atom of the tile that issues the fragment,
+ * split or zero-padded), wave size / threads-per-block / LDS capacity within
+ * the arch limits. */
 bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongrouped_spec_t* spec,
                                                 const char* arch,
                                                 char* reason,
@@ -153,6 +200,62 @@ rocke_status_t
                                                char** out_ll,
                                                char* err,
                                                size_t err_cap);
+
+/* ===================================================================== *
+ *  DirectSplitReduceSpec  -- the second pass of a split_c > 1 kernel
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectSplitReduceSpec:
+ *      dtype: str = "fp16"
+ *      split_c: int = 2
+ *      threads: int = 256
+ *      name: str = "direct_conv_split_reduce"
+ *
+ *  Sums the split_c fp32 slabs of the packed [split_c, N, Ho, Wo, K] workspace
+ *  (bound to A) and writes the output (D, NHWK through the p_D_stride_*
+ *  kernargs) in dtype. Takes the forward direct-conv kernarg block; B unused.
+ * ===================================================================== */
+typedef struct rocke_direct_conv_split_reduce_spec
+{
+    const char* dtype; /* default "fp16" */
+    int split_c; /* default 2   */
+    int threads; /* default 256 */
+    const char* name; /* default "direct_conv_split_reduce" */
+} rocke_direct_conv_split_reduce_spec_t;
+
+rocke_direct_conv_split_reduce_spec_t rocke_direct_conv_split_reduce_spec_default(void);
+
+/* kernel_name(): kernel_name_join(name, sc{n}, b{threads}, [bf16]). */
+rocke_status_t rocke_direct_conv_split_reduce_kernel_name(
+    const rocke_direct_conv_split_reduce_spec_t* spec, char* out, size_t out_cap);
+
+/* validate(): ROCKE_ERR_VALUE + the Python ValueError message on a violated
+ * invariant, else ROCKE_OK and "ok". */
+rocke_status_t rocke_direct_conv_split_reduce_validate(
+    const rocke_direct_conv_split_reduce_spec_t* spec, char* reason, size_t reason_cap);
+
+/* spec.grid(problem) -> (ceil(N * Ho * Wo * total_k / (threads * 8)), 1, 1). */
+void rocke_direct_conv_split_reduce_grid(const rocke_direct_conv_split_reduce_spec_t* spec,
+                                         const rocke_direct_conv_problem_t* problem,
+                                         int grid[3]);
+
+/* build_direct_conv_split_reduce(spec, arch) into an already-initialised builder. */
+rocke_kernel_def_t* rocke_build_direct_conv_split_reduce(
+    rocke_ir_builder_t* b, const rocke_direct_conv_split_reduce_spec_t* spec, const char* arch);
+
+/* Initialise `b` with the spec's kernel name, then build. */
+rocke_kernel_def_t* rocke_build_direct_conv_split_reduce_new(
+    rocke_ir_builder_t* b, const rocke_direct_conv_split_reduce_spec_t* spec, const char* arch);
+
+/* Convenience: build + lower to LLVM IR text. *out_ll is malloc'd (caller
+ * frees); on failure the builder/lowerer message is written to err. */
+rocke_status_t
+    rocke_direct_conv_split_reduce_lower_to_llvm(const rocke_direct_conv_split_reduce_spec_t* spec,
+                                                 const char* arch,
+                                                 rocke_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

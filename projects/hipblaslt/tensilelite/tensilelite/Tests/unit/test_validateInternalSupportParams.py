@@ -23,9 +23,9 @@
 
 import pytest
 
-from Tensile.Common.ValidParameters import validateInternalSupportParams
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.GlobalParameters import defaultInternalSupportParams
+from tensilelite.Common.ValidParameters import validateInternalSupportParams
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.GlobalParameters import defaultInternalSupportParams
 
 
 class TestCleanDict:

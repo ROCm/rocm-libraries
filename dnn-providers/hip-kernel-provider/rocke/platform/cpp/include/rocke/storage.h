@@ -3,8 +3,13 @@
 /* Shared bit storage; mirrors core/storage.py.
  * BitPacking      -> rocke_bit_packing_t
  * FragmentPacking -> rocke_fragment_packing_t
+ * register_packing -> rocke_register_packing
+ * packed_word_range -> rocke_packed_word_range
  * All descriptors are caller-owned. Functions return false for invalid inputs,
- * overflow or insufficient buffers; no exceptions cross this C API.
+ * overflow or insufficient buffers; no exceptions cross this C API. The two
+ * register functions also write the reason into a caller-owned `err` buffer
+ * (truncated to `err_cap`, may be NULL), worded as core/storage.py words the
+ * ValueError it raises.
  */
 #ifndef ROCKE_STORAGE_H
 #define ROCKE_STORAGE_H
@@ -83,6 +88,34 @@ bool rocke_fragment_pack(const rocke_fragment_packing_t* p,
                          size_t count,
                          uint64_t* carriers,
                          size_t carrier_count);
+
+/* How `count` elements of `dtype` (any accepted spelling) sit densely in 32-bit
+ * registers: low-bit-first, no padding between elements, whole registers only.
+ * On success *packed is false for a dtype of 8 or more bits (Python's None: it
+ * has an LLVM element type, and LLVM packs its vectors into registers itself),
+ * and true with the dense packing in *out for a sub-byte dtype. Fails for an
+ * unknown dtype, a count below 1, a predicate, or a payload that leaves a
+ * register partly filled. Python's TypeError for a non-integer count has no C
+ * twin. */
+bool rocke_register_packing(const char* dtype,
+                            int64_t count,
+                            bool* packed,
+                            rocke_fragment_packing_t* out,
+                            char* err,
+                            size_t err_cap);
+
+/* The registers [*first_word, *end_word) that hold elements
+ * [start, start + length) of `packing`. Fails for a start below 0, a length
+ * below 1, a range that runs past the fragment, or one that does not start and
+ * end on a register boundary (the message names the element step that does).
+ * Python's TypeError for a non-integer start or length has no C twin. */
+bool rocke_packed_word_range(const rocke_fragment_packing_t* packing,
+                             int64_t start,
+                             int64_t length,
+                             uint64_t* first_word,
+                             uint64_t* end_word,
+                             char* err,
+                             size_t err_cap);
 #ifdef __cplusplus
 }
 #endif

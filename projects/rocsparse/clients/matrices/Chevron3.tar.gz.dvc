@@ -1,0 +1,6 @@
+outs:
+- path: Chevron3.tar.gz
+  remote: sparse-matrices
+  md5: 5e784e1f8c6341287a2842bd188b347a
+  size: 15315390
+  hash: md5

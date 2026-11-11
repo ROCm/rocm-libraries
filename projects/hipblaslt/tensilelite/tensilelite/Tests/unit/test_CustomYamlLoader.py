@@ -22,17 +22,17 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for Tensile.CustomYamlLoader.
+"""Unit tests for tensilelite.CustomYamlLoader.
 
 CustomYamlLoader is a thin, dependency-light wrapper around PyYAML's event API
-that performs strict scalar typing and partial reads of Tensile logic/config
+that performs strict scalar typing and partial reads of TensileLite logic/config
 YAML. These tests exercise the real functions against real YAML inputs (no
 mocking) and assert on concrete parsed values.
 """
 
 import pytest
 
-from Tensile.CustomYamlLoader import (
+from tensilelite.CustomYamlLoader import (
     DEFAULT_YAML_LOADER,
     archMatch,
     parse_scalar,

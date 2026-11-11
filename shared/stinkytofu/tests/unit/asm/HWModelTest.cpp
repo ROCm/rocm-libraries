@@ -27,7 +27,10 @@
 // numbers is covered by DAGSchedulerPassTest.cpp and tests/filecheck/dag_*.stir.
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
@@ -43,7 +46,7 @@ TEST(HWModel, Gfx1250KnownDefaults) {
 
     EXPECT_EQ(hw.lds.readQueueDepth, 16);
     EXPECT_EQ(hw.lds.readDrainLatency, 0);
-    EXPECT_EQ(hw.lds.readThrottleLatency, 72);
+    EXPECT_EQ(hw.lds.readCreditLifetime, 72);
 
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);
     EXPECT_EQ(hw.barrier.jumpOverheadCycles, 6);
@@ -92,7 +95,7 @@ TEST(HWModel, Gfx1250v0MatchesGfx1250ForNow) {
 
     EXPECT_EQ(v0.lds.readQueueDepth, base.lds.readQueueDepth);
     EXPECT_EQ(v0.lds.readDrainLatency, base.lds.readDrainLatency);
-    EXPECT_EQ(v0.lds.readThrottleLatency, base.lds.readThrottleLatency);
+    EXPECT_EQ(v0.lds.readCreditLifetime, base.lds.readCreditLifetime);
     EXPECT_EQ(v0.barrier.signalToWaitLatency, base.barrier.signalToWaitLatency);
     EXPECT_EQ(v0.hazards.rules, base.hazards.rules);
 }
@@ -214,4 +217,25 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
         EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
     }
+}
+
+// archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
+TEST(ArchResolve, ArchNameDisambiguatesSharedTriple) {
+    const auto& helper = ArchHelper::getInstance();
+    if (helper.getArchInfo(std::string("gfx1250v0")) == nullptr ||
+        helper.getArchInfo(std::string("gfx1250")) == nullptr) {
+        GTEST_SKIP() << "build does not register both gfx1250 and gfx1250v0";
+    }
+
+    const std::array<int, 3> triple = {12, 5, 0};
+
+    // Empty name: resolve by triple alone -> the first-registered stepping.
+    EXPECT_EQ(resolveArchId(triple, ""), getGfxArchID(12, 5, 0));
+
+    // A concrete name picks the matching stepping within the same triple.
+    EXPECT_EQ(resolveArchId(triple, "gfx1250v0"), getGfxArchID("gfx1250v0"));
+    EXPECT_EQ(resolveArchId(triple, "gfx1250"), getGfxArchID("gfx1250"));
+
+    // The two steppings are distinct identities, so v0 is not the triple default.
+    EXPECT_NE(resolveArchId(triple, "gfx1250v0"), resolveArchId(triple, ""));
 }

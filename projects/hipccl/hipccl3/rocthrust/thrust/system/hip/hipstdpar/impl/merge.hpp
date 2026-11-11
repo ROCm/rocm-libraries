@@ -46,6 +46,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -83,7 +84,14 @@ inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::merge(THRUST_NS_QUALIFIER::device, f0, l0, f1, l1, fo, ::std::move(r));
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::merge(THRUST_NS_QUALIFIER::device, f0, l0, f1, l1, fo, ::std::move(fn));
+      },
+      "hipstdpar merge: failed to synchronize",
+      r
+  );
 }
 
 template <

@@ -15,6 +15,8 @@ GlobalParameters:
   DataInitTypeD: 2
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
+  DataInitTypeScaleA: 3
+  DataInitTypeScaleB: 3
   # PrintTensorC: 1
   # PrintTensorD: 1
   # PrintTensorRef: 1
@@ -280,5 +282,79 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TN - F8 in, bf16 out, vector ScaleA/B + ScaleAlphaVec + bias
+  # M or N <= 31: scale vectors under 128 bytes (gfx125x SRD num_records split)
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 1
+      BiasDataTypeList: [B]
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+        - DepthU: [128]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 256, 1, 256]
+          - Exact: [16, 256, 1, 256]
+          - Exact: [31, 256, 1, 256]
+          - Exact: [32, 256, 1, 256]
+          - Exact: [256, 1, 1, 256]
+          - Exact: [256, 16, 1, 256]
+          - Exact: [256, 31, 1, 256]
+          - Exact: [256, 32, 1, 256]
+          - Exact: [16, 16, 1, 512]
+        - BiasTypeArgs: ['b']
         - ActivationArgs:
           - [Enum: none]

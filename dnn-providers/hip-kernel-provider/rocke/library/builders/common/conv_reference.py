@@ -21,10 +21,127 @@ Five forward/backward implementations are provided:
 
 from __future__ import annotations
 
+import contextlib
+import functools
+
 import torch
 import torch.nn.functional as F
 
+# torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
+# the batch images past that offset come back wrong (measured with MIOpen on a
+# 4.8 GB fp32 activation). The forward and backward-data references therefore
+# run batch slices whose fp32 operands stay below a 2^31-byte cap -- well under
+# the 2^32 break point, so a slice can never straddle it -- and concatenate
+# them; every image is independent in those two directions.
+_MAX_SLICE_BYTES = 2**31 - 1
 
+
+def _out_extent(i: int, f: int, s: int, pad: int, d: int) -> int:
+    return (i + 2 * pad - d * (f - 1) - 1) // s + 1
+
+
+def _image_elems(p) -> int:
+    """Elements of one image's input or output activation, whichever is larger."""
+    out = (
+        _out_extent(p.Hi, p.Y, p.sH, p.pH, p.dH)
+        * _out_extent(p.Wi, p.X, p.sW, p.pW, p.dW)
+        * p.K
+    )
+    inp = p.Hi * p.Wi * p.C
+    if p.is_3d:
+        out *= _out_extent(p.Di, p.Z, p.sD, p.pD, p.dD)
+        inp *= p.Di
+    return max(out, inp)
+
+
+def _batch_slices(p, n: int):
+    """``[(n0, count), ...]`` covering a batch of ``n`` in fp32-safe slices."""
+    step = max(1, _MAX_SLICE_BYTES // (4 * _image_elems(p)))
+    return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
+
+
+@contextlib.contextmanager
+def ieee_fp32():
+    """Run torch's fp32 convolutions in IEEE fp32, never TF32.
+
+    The references below are the fp32 truth a TF32 kernel is judged against,
+    and torch >= 2.9 defaults ``torch.backends.cudnn.conv.fp32_precision`` to
+    ``"tf32"`` (``allow_tf32=True`` before that): once the backend honours it,
+    the reference itself would silently become TF32. The new per-operator API
+    is used where it exists, for the GPU (cuDNN / MIOpen) and the CPU (oneDNN)
+    convolutions alike -- mixing it with the legacy ``allow_tf32`` flag makes
+    torch raise -- and the previous settings are restored on exit.
+    """
+    cudnn = torch.backends.cudnn
+    convs = [
+        conv
+        for conv in (
+            getattr(cudnn, "conv", None),
+            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
+        )
+        if conv is not None and hasattr(conv, "fp32_precision")
+    ]
+    if convs:
+        old = [conv.fp32_precision for conv in convs]
+        for conv in convs:
+            conv.fp32_precision = "ieee"
+        try:
+            yield
+        finally:
+            for conv, prec in zip(convs, old):
+                conv.fp32_precision = prec
+    else:
+        old = cudnn.allow_tf32
+        cudnn.allow_tf32 = False
+        try:
+            yield
+        finally:
+            cudnn.allow_tf32 = old
+
+
+# A TF32 kernel's error, peak-relative, against :func:`tf32_reference_inputs`:
+# gfx950's BF16x3 emulation is about fp32 accurate, and 1e-4 fails a single
+# bf16 pass or a dropped cross term. gfx942's native XF32 is judged on masked
+# inputs, which leaves only accumulation error, held to 1e-3.
+TF32_REFERENCE_TOL = {"emulated": 1e-4, "native": 1e-3}
+
+
+def _tf32_native(arch: str) -> bool:
+    from kernels.conv.direct_aot_jobs import tf32_is_emulated
+
+    return not tf32_is_emulated(arch)
+
+
+def tf32_reference_inputs(t: torch.Tensor, arch: str, dtype: str = "tf32"):
+    """``t`` as the MMA on ``arch`` consumes it for a ``dtype`` problem.
+
+    A native XF32 MFMA (gfx942) reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); the BF16x3 emulation (gfx950) and the fp32 atoms use
+    the full payload, so every other case returns ``t`` unchanged. The arch
+    question is the catalog's (``tf32_is_emulated``).
+    """
+    if dtype != "tf32" or not _tf32_native(arch):
+        return t
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+
+
+def tf32_reference_tol(arch: str) -> float:
+    """The TF32 bound for ``arch`` against :func:`tf32_reference_inputs`."""
+    return TF32_REFERENCE_TOL["native" if _tf32_native(arch) else "emulated"]
+
+
+def _ieee(fn):
+    """Decorate a torch reference to run under :func:`ieee_fp32`."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with ieee_fp32():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_ieee
 def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference weight gradient for a convolution problem.
 
@@ -70,6 +187,7 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
 
 
+@_ieee
 def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference input gradient for a convolution problem.
 
@@ -85,10 +203,13 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     Returns:
         Input gradient as a float32 torch.Tensor in NHWC layout.
     """
+    slices = _batch_slices(p, dY.shape[0])
+    if len(slices) > 1:
+        return torch.cat([dgrad_reference(dY[n0 : n0 + n], W, p) for n0, n in slices])
     dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
     W_t = W.float().cuda().permute(0, 3, 1, 2).contiguous()  # KYXC -> KCYX
     dX_nchw = torch.nn.grad.conv2d_input(
-        input_size=(p.N, p.C, p.Hi, p.Wi),
+        input_size=(dY.shape[0], p.C, p.Hi, p.Wi),
         weight=W_t,
         grad_output=dY_t,
         stride=(p.sH, p.sW),
@@ -99,6 +220,7 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     return dX_nchw.permute(0, 2, 3, 1).contiguous()  # NCHW -> NHWC
 
 
+@_ieee
 def conv_reference(
     A: torch.Tensor, B: torch.Tensor, p, out_dtype: torch.dtype | None = None
 ) -> torch.Tensor:
@@ -119,8 +241,12 @@ def conv_reference(
     Returns:
         Reference output as a float32 torch.Tensor.
     """
+    slices = _batch_slices(p, A.shape[0])
+    if len(slices) > 1:
+        return torch.cat(
+            [conv_reference(A[n0 : n0 + n], B, p, out_dtype) for n0, n in slices]
+        )
     if not p.is_3d:
-        A_t = A.float().cuda().permute(0, 3, 1, 2)  # NHWC -> NCHW
         # B layout is KYXC with C = C_total. PyTorch F.conv2d expects weights
         # shaped [K, C/groups, Y, X]. Each filter stores cpg channels contiguously
         # at the start of its C dimension; slice to cpg then permute.
@@ -128,18 +254,37 @@ def conv_reference(
         B_t = (
             B.float().cuda()[:, :, :, :Cg].permute(0, 3, 1, 2)
         )  # [K,Y,X,Cg]->[K,Cg,Y,X]
-        result = (
-            F.conv2d(
-                A_t,
-                B_t,
-                stride=(p.sH, p.sW),
-                padding=(p.pH, p.pW),
-                dilation=(p.dH, p.dW),
-                groups=p.groups,
+        # The backend's conv produces garbage once an fp32 operand passes
+        # 2**31 bytes (seen on an 8x768x768x256 batch: the last image is
+        # wrong), so a large batch is convolved a few images at a time.
+        n_img, h_img, w_img, c_img = A.shape
+        # The padded input extent bounds the output's (stride >= 1).
+        out_bound = (h_img + 2 * p.pH) * (w_img + 2 * p.pW) * B.shape[0]
+        img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
+        per_chunk = ((1 << 31) - 1) // img_bytes
+        if per_chunk < 1:
+            raise ValueError(
+                f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
+                f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
+                "the batch split cannot make it fit"
             )
-            .permute(0, 2, 3, 1)  # NCHW -> NHWC
-            .contiguous()
-        )
+        parts = []
+        for n0 in range(0, n_img, per_chunk):
+            A_t = A[n0 : n0 + per_chunk].float().cuda().permute(0, 3, 1, 2)
+            parts.append(
+                F.conv2d(
+                    A_t,
+                    B_t,
+                    stride=(p.sH, p.sW),
+                    padding=(p.pH, p.pW),
+                    dilation=(p.dH, p.dW),
+                    groups=p.groups,
+                )
+                .permute(0, 2, 3, 1)  # NCHW -> NHWC
+                .contiguous()
+            )
+            del A_t
+        result = parts[0] if len(parts) == 1 else torch.cat(parts)
     else:
         A_t = A.float().cuda().permute(0, 4, 1, 2, 3)  # NDHWC -> NCDHW
         Cg = p.C // p.groups

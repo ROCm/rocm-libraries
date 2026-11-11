@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the pure support-functions slice of
-``Tensile.SolutionStructs.Solution`` (L165-439): the type-mismatch collector
+``tensilelite.SolutionStructs.Solution`` (L165-439): the type-mismatch collector
 machinery, the benchmark-arg dataclasses, and the index helpers. The
 cap-coupled ``Solution`` class (L444+) is out of this slice.
 """
@@ -34,13 +34,13 @@ from typing import Any, Callable, ContextManager
 
 import pytest
 
-from Tensile.Activation import ActivationType
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Activation import ActivationType
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 # NOTE: SolutionStructs/__init__.py re-exports the `Solution` *class*, which
-# shadows the submodule attribute, so `import Tensile.SolutionStructs.Solution
+# shadows the submodule attribute, so `import tensilelite.SolutionStructs.Solution
 # as S` would bind S to the class. Use import_module to get the real module.
-S = importlib.import_module("Tensile.SolutionStructs.Solution")
+S = importlib.import_module("tensilelite.SolutionStructs.Solution")
 
 pytestmark = pytest.mark.unit
 

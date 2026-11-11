@@ -68,6 +68,8 @@ LAPACK main functions
 
     :ref:`hipsolverXgeqrf_bufferSize <geqrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgeqrf <geqrf>`, x, x, x, x
+    :ref:`hipsolverXgeqrfBatched_bufferSize <geqrfBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgeqrfBatched <geqrfBatched>`, x, x, x, x
 
 .. csv-table:: Problem and matrix reductions
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -88,8 +90,12 @@ LAPACK main functions
     :ref:`hipsolverXpotrs <potrs>`, x, x, x, x
     :ref:`hipsolverXpotrsBatched_bufferSize <potrs_batched_bufferSize>`, x, x, x, x
     :ref:`hipsolverXpotrsBatched <potrs_batched>`, x, x, x, x
+    :ref:`hipsolverXgetriBatched_bufferSize <getri_batched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetriBatched <getri_batched>`, x, x, x, x
     :ref:`hipsolverXgetrs_bufferSize <getrs_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgetrs <getrs>`, x, x, x, x
+    :ref:`hipsolverXgetrsBatched_bufferSize <getrsBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetrsBatched <getrsBatched>`, x, x, x, x
     :ref:`hipsolverXXgesv_bufferSize <gesv_bufferSize>`, x, x, x, x
     :ref:`hipsolverXXgesv <gesv>`, x, x, x, x
 
@@ -98,6 +104,8 @@ LAPACK main functions
 
     :ref:`hipsolverXXgels_bufferSize <gels_bufferSize>`, x, x, x, x
     :ref:`hipsolverXXgels <gels>`, x, x, x, x
+    :ref:`hipsolverXgelsBatched_bufferSize <gels_batched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgelsBatched <gels_batched>`, x, x, x, x
 
 .. csv-table:: Symmetric eigensolvers
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -161,10 +169,10 @@ These wrappers are supported in rocSOLVER, but are provided by equivalent functi
 that use different algorithmic approaches or by functionality that is not fully exposed in the public API.
 For these reasons, the corresponding wrappers are not provided in the regular hipSOLVER API.
 
-Householder reflections
+64-bit functions
 ------------------------------
 
-The following Householder reflector methods are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+The following methods are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
 
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -172,16 +180,13 @@ The following Householder reflector methods are implemented in rocSOLVER, but 64
     :ref:`hipsolverDnXlarft_bufferSize <dense_larft_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXlarft <dense_larft>`, x, x, x, x
 
-Linear-system solvers
-------------------------------
-
-The following linear-system solvers are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
-
 .. csv-table:: Linear-system solvers
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`hipsolverDnXsytrs_bufferSize <dense_sytrs_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXsytrs <dense_sytrs>`, x, x, x, x
+    :ref:`hipsolverDnXtrtri_bufferSize <dense_trtri_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXtrtri <dense_trtri>`, x, x, x, x
 
 Partial SVD functions
 ------------------------------

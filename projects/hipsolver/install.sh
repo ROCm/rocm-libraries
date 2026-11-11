@@ -174,7 +174,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "cmake" "gcc-c++" "libcxx-devel" "rpm-build" )
   local library_dependencies_sles=( "make" "cmake" "gcc-c++" "libcxxtools9" "rpm-build" )
 
-  if [[ "${build_cuda}" == true || $HIP_PLATFORM == "nvidia" ]]; then
+  if [[ "${build_cuda}" == true ]]; then
     # Ideally, this could be cuda-cublas-dev, but the package name has a version number in it
     library_dependencies_ubuntu+=( "cuda" )
     library_dependencies_centos+=( "" ) # how to install cuda on centos?
@@ -625,11 +625,11 @@ fi
     cmake_common_options+=("-DCMAKE_BUILD_TYPE=Debug")
   fi
 
-  # cuda
+  # cuda — HIP_PLATFORM env var is no longer used (hipcc/hipconfig removed).
+  # When invoked via rmake.py, USE_CUDA=ON is passed through that script.
+  # When invoked directly via install.sh --cuda, we must pass it here.
   if [[ "${build_cuda}" == true ]]; then
-    export HIP_PLATFORM="nvidia"
-  else
-    export HIP_PLATFORM="$(${rocm_path}/bin/hipconfig --platform)"
+    cmake_common_options+=("-DUSE_CUDA=ON")
   fi
 
   # clients

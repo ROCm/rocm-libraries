@@ -5,9 +5,15 @@
 Call the production predictor with an exact target, opcode, wave size, and a
 sequence of access records for one instruction in one wave. Each lane may supply
 at most one active access, covering the opcode's full width. Submit separate
-requests for separate instructions or waves. Each access must be naturally aligned
-to the opcode's full width, and its full byte range must fit within the selected
-profile's LDS capacity.
+requests for separate instructions or waves. Each access must meet the opcode's
+supported prediction alignment, which defaults to its full width unless an
+explicit alignment is specified, and its full byte range must fit within the
+selected profile's LDS capacity.
+
+Profiles may impose additional request restrictions. Consult the matching
+architecture guide in the [reference index](index.md#choose-the-reference) before
+constructing a request. In particular, see [gfx1201 supported requests](gfx1201.md#supported-requests)
+for its alignment requirements, active-pair scope, and unsupported broadcasts.
 
 Each access has:
 

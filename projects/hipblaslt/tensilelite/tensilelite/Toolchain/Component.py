@@ -22,17 +22,18 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-from os import name as os_name
+import shutil
 from os import environ
+from os import name as os_name
 from pathlib import Path
-from re import search, sub, IGNORECASE
+from re import IGNORECASE, MULTILINE, match, search, sub
 from shlex import split
-from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
-from typing import List
+from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
+from typing import List, Optional
 
 from ..Common import SemanticVersion, print2
-from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
-from .Validators import ToolchainDefaults, validateToolchain
+from ..Common.Architectures import compilerTargetOf
+from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
   """Invokes a command with the provided arguments in a subprocess.
@@ -80,15 +81,96 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
 
 
-def get_rocm_version() -> str:
-    """Compute the ROCm version string using hipconfig.
+_DEFAULT_ROCM_ROOT = Path("/opt/rocm")
+_HIP_VERSION_PARTS = ("MAJOR", "MINOR", "PATCH")
+
+
+def _parse_hip_version(version_str: str) -> SemanticVersion:
+    version_match = match(r"^\s*(\d+)\.(\d+)\.(\d+)", version_str)
+    if not version_match:
+        raise RuntimeError(f"Invalid HIP version: {version_str!r}")
+    return SemanticVersion(*(int(part) for part in version_match.groups()))
+
+
+def _read_hip_build_version(path: Path) -> Optional[str]:
+    """Read HIP_VERSION_MAJOR/MINOR/PATCH from a HIP metadata file."""
+    try:
+        contents = path.read_text()
+    except OSError:
+        return None
+
+    values = []
+    for part in _HIP_VERSION_PARTS:
+        value = search(
+            rf"^\s*(?:#define\s+)?HIP_VERSION_{part}(?:\s*=\s*|\s+)(\d+)",
+            contents,
+            MULTILINE,
+        )
+        if not value:
+            raise RuntimeError(f"Invalid HIP version file: {path}")
+        values.append(value.group(1))
+    return ".".join(values)
+
+
+def _read_version_from_root(root: Path) -> Optional[str]:
+    """Read the HIP build version from HIP metadata files only.
+
+    Reads share/hip/version and include/hip/hip_version.h, which contain the
+    HIP build version including the patch/build number used for feature gating.
+    The ROCm release file (.info/version) is intentionally excluded — it contains
+    only the release version and silently drops the build number, which can cause
+    incorrect feature detection when patch-level thresholds are checked.
+    """
+    for relative_path in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
+        version_str = _read_hip_build_version(root / relative_path)
+        if version_str:
+            return version_str
+    return None
+
+
+def get_rocm_version() -> SemanticVersion:
+    """Compute the HIP build version used by the selected ROCm toolchain.
+
+    Reads ROCM_VERSION (set by CMake from hip_VERSION) first. Standalone
+    discovery prefers HIP's build-version metadata over the ROCm release file.
+
+    Note: Python ROCm SDK (pip) version detection is intentionally omitted here;
+    it will be handled by PR #11023 with proper feature-gating once the
+    infrastructure is in place.
 
     Raises:
-        RuntimeError: If hipconfig fails to execute.
+        RuntimeError: If the version cannot be determined or parsed.
     Return:
-        ROCm version string
+        HIP build SemanticVersion
     """
-    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+    version_str = environ.get("ROCM_VERSION")
+    if version_str:
+        return _parse_hip_version(version_str)
+
+    for root in (environ.get("ROCM_PATH"), environ.get("HIP_PATH"), _DEFAULT_ROCM_ROOT):
+        if root:
+            version_str = _read_version_from_root(Path(root))
+            if version_str:
+                return _parse_hip_version(version_str)
+
+    for exe in ("amdclang++", "rocm-smi", "amd-smi"):
+        exe_path = shutil.which(exe)
+        if not exe_path:
+            continue
+        candidate = Path(exe_path).resolve().parent
+        for _ in range(5):
+            version_str = _read_version_from_root(candidate)
+            if version_str:
+                return _parse_hip_version(version_str)
+            parent = candidate.parent
+            if parent == candidate:
+                break
+            candidate = parent
+
+    raise RuntimeError(
+        "Failed to get ROCm version from ROCM_VERSION, ROCM_PATH, HIP_PATH, "
+        "/opt/rocm, or a PATH-derived ROCm root"
+    )
 
 
 class Component:
@@ -202,8 +284,7 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
-        features = deviceTargetFeaturesOf(targetGfx)
-        targetGfx = compilerTargetOf(targetGfx)
+        targetGfx = compilerTargetOf(targetGfx, self.path)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -211,7 +292,6 @@ class Assembler(Component):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
-            *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
             f"-mcpu={targetGfx}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
@@ -283,12 +363,9 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
-        # -Xclang reaches every device compile; an alias always builds alone.
-        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
-        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
+        archFlags = [f"--offload-arch={compilerTargetOf(gfx, self.path)}" for gfx in target_list]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
@@ -398,7 +475,9 @@ class Linker(Component):
                 "-Xlinker", f"--build-id={build_id_kind}",
         ]
 
-    def _response_file_args(self, srcPaths: List[str], destPath: str) -> List[str]:
+    def _response_file_args(
+        self, srcPaths: List[str], destPath: str, extraArgs: Optional[List[str]] = None
+    ) -> List[str]:
         """
         Create a response file and return the arguments to pass to the linker.
 
@@ -414,7 +493,7 @@ class Linker(Component):
         responsePath = Path(destPath).with_name(Path(destPath).name + ".linker_args")
         with open(responsePath, "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
-        return [*(self.default_args), "-o", destPath, f"@{responsePath}"]
+        return [*(self.default_args), *(extraArgs or []), "-o", destPath, f"@{responsePath}"]
 
     def _use_response_file(self, args: List[str]) -> bool:
         """
@@ -429,19 +508,22 @@ class Linker(Component):
         line_length = sum(len(arg) for arg in args) + len(args) - 1
         return line_length >= sysconf("SC_ARG_MAX")
 
-    def __call__(self, srcPaths: List[str], destPath: str):
+    def __call__(self, srcPaths: List[str], destPath: str, threads: Optional[int] = None):
         """
         Links object files into a code object file.
 
         Args:
             srcPaths: A list of paths to object files.
             destPath: A destination path for the generated code object file.
+            threads: Number of threads ld.lld may use. When None, it uses every
+                hardware thread.
         Raises:
             RuntimeError: If linker invocation fails.
         """
-        args = [*(self.default_args), *srcPaths, "-o", destPath]
+        extraArgs = ["-Xlinker", f"--threads={threads}"] if threads else []
+        args = [*(self.default_args), *extraArgs, *srcPaths, "-o", destPath]
         if self._use_response_file(args):
-            args = self._response_file_args(srcPaths, destPath)
+            args = self._response_file_args(srcPaths, destPath, extraArgs)
         return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
 
 

@@ -8,9 +8,10 @@ The following directories contain public API that **requires** Doxygen documenta
 |-----------|-------|-------|
 | `backend/include/` | All `.h` files | C API headers (hipdnn_backend.h, enums, status codes) |
 | `frontend/include/hipdnn_frontend/` | All `.hpp` files **except** `detail/` subdirectory | Frontend classes, attributes, error handling |
-| `frontend/include/hipdnn_frontend/attributes/` | All attribute classes | Operation configuration (convolution, batchnorm, matmul, pointwise) |
+| `frontend/include/hipdnn_frontend/attributes/` | All attribute classes | Operation configuration (for example convolution, batchnorm, matmul, pointwise) |
+| `frontend/include/hipdnn_frontend/autotune/` | Autotune API | Engine autotuning |
 | `frontend/include/hipdnn_frontend/knob/` | Knob system | Engine configuration knobs |
-| `plugin_sdk/include/` | Plugin interfaces | For plugin developers |
+| `plugin_sdk/include/` | Plugin interfaces | For plugin developers. Not in the `Doxyfile` `INPUT` list, so `doxygen Doxyfile` does not check these headers |
 
 ## What to Exclude
 
@@ -112,4 +113,4 @@ When adding a new operation to `Graph.hpp`, add a Doxygen comment following this
 2. Document all public classes with `@class`, `@brief`, and usage example
 3. Document all public methods with `@brief`, `@param`, `@return`
 4. Document all enum values with `///<` inline comments
-5. Run `doxygen Doxyfile` to verify documentation builds without warnings
+5. Run `doxygen Doxyfile` from `projects/hipdnn` (or `ninja doxygen` in a standalone build) to verify documentation builds without warnings

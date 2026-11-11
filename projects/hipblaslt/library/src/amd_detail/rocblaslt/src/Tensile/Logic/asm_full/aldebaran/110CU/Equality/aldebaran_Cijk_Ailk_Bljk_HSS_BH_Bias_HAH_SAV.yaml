@@ -231,6 +231,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqGZ7SeEC
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB0_GRVW8_GSU1_LPB8_LRVW8_MIWT2_2_NEPBS0_NLCA1_PLR5_SS0_SU4_SUS128_SVW4_VW1_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -344,6 +345,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 1
+  SolutionUID: 0uTnqGZ8Jdw8
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x16x64_MI16x16x16x1_SN_1LDSB0_GRVW4_GSU1_LPB16_LRVW8_MIWT2_1_NEPBS0_NLCA1_PLR5_SS0_SU0_SUS0_SVW4_VW1_WG64_4_1_WGM4
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -457,6 +459,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 2
+  SolutionUID: 0uTnqGZ8JVjN
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_GRVW8_GSU1_LPB16_LRVW8_MIWT1_1_NEPBS2_NLCA1_PLR5_SS0_SU4_SUS128_SVW4_VW1_WG32_8_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -571,6 +574,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 3
+  SolutionUID: 0uTnqGZ7rlhj
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_GRVW8_GSU1_LPB16_LRVW8_MIWT1_1_NEPBS2_NLCA1_PLR5_SS0_SU32_SUS128_SVW4_VW1_WG32_8_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -684,6 +688,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 4
+  SolutionUID: 0uTnqGZ7llNt
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_GRVW8_GSU7_LPB16_LRVW8_MIWT1_1_NEPBS2_NLCA1_PLR5_SS0_SU0_SUS0_SVW4_VW1_WG32_8_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -799,6 +804,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 5
+  SolutionUID: 0uTnqGZ9H2Vo
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_GRVW8_GSU7_LPB16_LRVW8_MIWT1_1_NEPBS2_NLCA1_PLR5_SS0_SU4_SUS128_SVW4_VW1_WG32_8_1_WGM2
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -914,6 +920,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 6
+  SolutionUID: 0uTnqGZ8jTJ8
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x96x64_MI32x32x8x1_SN_1LDSB0_GRVW8_GSU1_LPB8_LRVW8_MIWT1_3_NEPBS0_NLCA1_PLR9_SS0_SU4_SUS128_SVW4_VW1_WG128_2_1_WGM8
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1026,6 +1033,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 7
+  SolutionUID: 0uTnqGZ8ZJx5
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x64x32_MI32x32x8x1_SN_1LDSB0_GRVW8_GSU1_LPB8_LRVW8_MIWT2_1_NEPBS2_NLCA1_PLR5_SS1_SU0_SUS0_SVW2_VW2_WG64_4_1_WGM8
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1140,6 +1148,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 8
+  SolutionUID: 0uTnqGZ9QkHX
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB1_GRVW8_GSU1_LPB8_LRVW8_MIWT2_2_NEPBS2_NLCA1_PLR5_SS1_SU0_SUS0_SVW2_VW2_WG64_4_1_WGM1
   1LDSBuffer: 1
   AssertFree0ElementMultiple: 8
@@ -1256,6 +1265,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 9
+  SolutionUID: 0uTnqGZ9FD09
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB1_GRVW8_GSU1_LPB8_LRVW8_MIWT2_2_NEPBS2_NLCA1_PLR5_SS1_SU4_SUS256_SVW2_VW2_WG64_4_1_WGM4
   1LDSBuffer: 1
   AssertFree0ElementMultiple: 8
@@ -1371,6 +1381,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 10
+  SolutionUID: 0uTnqGZ8ahkz
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB1_GRVW8_GSU1_LPB8_LRVW8_MIWT2_2_NEPBS2_NLCA1_PLR5_SS1_SU32_SUS128_SVW2_VW2_WG64_4_1_WGM8
   1LDSBuffer: 1
   AssertFree0ElementMultiple: 8
@@ -1485,6 +1496,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 11
+  SolutionUID: 0uTnqGZ8nyyg
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x16x64_MI16x16x16x1_SN_1LDSB0_GRVW4_GSU1_LPB16_LRVW8_MIWT2_1_NEPBS0_NLCA1_PLR5_SS1_SU0_SUS0_SVW2_VW2_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1599,6 +1611,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 12
+  SolutionUID: 0uTnqGZ99ptF
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x16x64_MI16x16x16x1_SN_1LDSB0_GRVW4_GSU7_LPB16_LRVW8_MIWT2_1_NEPBS0_NLCA1_PLR5_SS1_SU4_SUS128_SVW1_VW1_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1714,6 +1727,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 13
+  SolutionUID: 0uTnqGZ9WjgR
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x16x64_MI16x16x16x1_SN_1LDSB0_GRVW4_GSU1_LPB16_LRVW8_MIWT2_1_NEPBS0_NLCA1_PLR5_SS1_SU0_SUS0_SVW1_VW1_WG64_4_1_WGM2
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1828,6 +1842,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 14
+  SolutionUID: 0uTnqGZ9UOHP
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x16x64_MI16x16x16x1_SN_1LDSB0_GRVW4_GSU8_LPB16_LRVW8_MIWT2_1_NEPBS0_NLCA1_PLR5_SS1_SU0_SUS0_SVW2_VW2_WG64_4_1_WGM2
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -1943,6 +1958,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 15
+  SolutionUID: 0uTnqGZ9BLdT
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_GRVW8_GSU9_LPB16_LRVW8_MIWT1_1_PLR5_SU0_SUS0_SVW4_VW4_WG64_4_1_WGM8
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2057,6 +2073,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 16
+  SolutionUID: 0uTnqGZ9Lz1r
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_GRVW2_GSU9_MIWT1_1_SU0_SUS0_SRVW0_SVW4_VW4_WG64_4_1_WGM15
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2172,6 +2189,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 17
+  SolutionUID: 0uTnqGZ8Xj1e
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_Bias_HAH_SAV_BH_MT16x32x64_MI16x16x16x1_SN_GRVW8_LPB8_MIWT1_1_NTB3_NEPBS0_PGR2_PLR5_SPO1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2290,6 +2308,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 18
+  SolutionUID: 0uTnqGZ9W53F
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_Bias_HAH_SAV_BH_MT16x32x64_MI16x16x16x1_SN_GRVW8_LPB8_MIWT1_1_NTB3_NEPBS1_PGR2_PLR5_SPO1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2408,6 +2427,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 19
+  SolutionUID: 0uTnqGZ9ANYE
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_GRVW2_GSU6_MIWT1_1_SU0_SUS0_SRVW0_SVW4_VW2_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2524,6 +2544,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 20
+  SolutionUID: 0uTnqGZ8llMZ
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT32x16x64_MI16x16x16x1_SN_GRVW8_GSU25_LPB16_LRVW8_MIWT1_1_PLR5_SU0_SUS0_SVW2_VW8_WG32_4_1_WGM8
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2639,6 +2660,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 21
+  SolutionUID: 0uTnqGZ8mACV
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT16x16x64_MI16x16x16x1_SN_GRVW8_GSU25_LPB16_LRVW8_MIWT1_1_PLR5_SU0_SUS0_SVW4_VW8_WG16_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2756,6 +2778,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 22
+  SolutionUID: 0uTnqGZ913ne
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB0_GRVW8_LPB8_LRVW8_MIWT2_2_NEPBS0_NLCA1_PLR5_SS0_SU4_SUS128_SRVW4_SVW4_VW1_WG64_4_1_WGM21
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2869,6 +2892,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 23
+  SolutionUID: 0uTnqGZ8zC3W
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB0_GRVW8_LPB8_LRVW8_MIWT2_2_NEPBS2_NLCA1_PLR5_SS0_SU4_SUS256_SRVW4_SVW4_VW2_WG64_4_1_WGM15
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -2982,6 +3006,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 24
+  SolutionUID: 0uTnqGZ98uj5
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_GRVW8_GSU1_LPB16_LRVW8_MIWT1_1_PLR5_SU0_SUS0_SVW4_VW2_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -3096,6 +3121,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 25
+  SolutionUID: 0uTnqGZ8n4UT
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_GRVW4_GSU1_LPB16_LRVW8_MIWT1_1_PLR5_SU0_SUS0_SVW4_VW8_WG64_4_1_WGM1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: true
@@ -3210,6 +3236,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 26
+  SolutionUID: 0uTnqGZ8i3z1
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAH_SAV_MT256x128x32_MI32x32x8x1_SN_1LDSB1_GRVW8_LPB8_LRVW8_MIWT4_2_NEPBS2_NLCA1_PLR5_SS1_SU0_SUS0_SRVW0_SVW4_VW4_WG64_4_1_WGM1
   1LDSBuffer: 1
   AssertFree0ElementMultiple: 8

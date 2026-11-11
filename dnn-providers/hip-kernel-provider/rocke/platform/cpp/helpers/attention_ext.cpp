@@ -129,13 +129,28 @@ rocke_value_t* rocke_wave64_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v)
 
 /* ----------------------------------------------- binary search on cu_q */
 
-rocke_value_t* rocke_binary_search_seq_idx(rocke_ir_builder_t* b,
-                                           rocke_value_t* cu_q,
-                                           rocke_value_t* q_block_global_idx,
-                                           rocke_value_t* num_seqs,
-                                           int block_q,
-                                           int iterations,
-                                           bool per_token)
+rocke_value_t* rocke_binary_search_seq_idx_trip_count(rocke_ir_builder_t* b,
+                                                      rocke_value_t* num_seqs)
+{
+    /* bits = b.bitcast(b.sitofp_f32(num_seqs), I32)
+     * exponent = b.lshr(bits, b.const_i32(23))
+     * return b.smax(b.sub(exponent, b.const_i32(126)), b.const_i32(1)) */
+    rocke_value_t* as_f32 = rocke_b_sitofp_f32(b, num_seqs);
+    rocke_value_t* bits = rocke_b_bitcast(b, as_f32, rocke_i32());
+    rocke_value_t* exponent = rocke_b_lshr(b, bits, rocke_b_const_i32(b, 23));
+    rocke_value_t* unbiased = rocke_b_sub(b, exponent, rocke_b_const_i32(b, 126));
+    return rocke_b_smax(b, unbiased, rocke_b_const_i32(b, 1));
+}
+
+/* The search with a constant trip count (`upper == NULL`) or a runtime one. */
+static rocke_value_t* binary_search_seq_idx_impl(rocke_ir_builder_t* b,
+                                                 rocke_value_t* cu_q,
+                                                 rocke_value_t* q_block_global_idx,
+                                                 rocke_value_t* num_seqs,
+                                                 int block_q,
+                                                 int iterations,
+                                                 rocke_value_t* upper,
+                                                 bool per_token)
 {
     rocke_value_t* bq;
     rocke_iter_arg_t iter_args[2];
@@ -162,7 +177,7 @@ rocke_value_t* rocke_binary_search_seq_idx(rocke_ir_builder_t* b,
      * hoist lb/ub/step first, then build the iter inits, to pin IR order. */
     {
         rocke_value_t* lb = rocke_b_const_i32(b, 0);
-        rocke_value_t* ub = rocke_b_const_i32(b, (int64_t)iterations);
+        rocke_value_t* ub = upper != NULL ? upper : rocke_b_const_i32(b, (int64_t)iterations);
         rocke_value_t* step = rocke_b_const_i32(b, 1);
         iter_args[0].name = "left";
         iter_args[0].init = rocke_b_const_i32(b, 0);
@@ -215,4 +230,28 @@ rocke_value_t* rocke_binary_search_seq_idx(rocke_ir_builder_t* b,
     /* return b.sub(loop.results[0], b.const_i32(1)) */
     res0 = (loop.op != NULL) ? loop.op->results[0] : NULL;
     return rocke_b_sub(b, res0, rocke_b_const_i32(b, 1));
+}
+
+rocke_value_t* rocke_binary_search_seq_idx(rocke_ir_builder_t* b,
+                                           rocke_value_t* cu_q,
+                                           rocke_value_t* q_block_global_idx,
+                                           rocke_value_t* num_seqs,
+                                           int block_q,
+                                           int iterations,
+                                           bool per_token)
+{
+    return binary_search_seq_idx_impl(
+        b, cu_q, q_block_global_idx, num_seqs, block_q, iterations, NULL, per_token);
+}
+
+rocke_value_t* rocke_binary_search_seq_idx_dyn(rocke_ir_builder_t* b,
+                                               rocke_value_t* cu_q,
+                                               rocke_value_t* q_block_global_idx,
+                                               rocke_value_t* num_seqs,
+                                               int block_q,
+                                               rocke_value_t* iterations,
+                                               bool per_token)
+{
+    return binary_search_seq_idx_impl(
+        b, cu_q, q_block_global_idx, num_seqs, block_q, 0, iterations, per_token);
 }

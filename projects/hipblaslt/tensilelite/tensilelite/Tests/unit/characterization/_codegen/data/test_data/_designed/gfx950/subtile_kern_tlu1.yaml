@@ -4,7 +4,7 @@
 ################################################################################
 # P5 DESIGNED subtile-kernel TLU1 config for gfx950.
 #
-# Targets Tensile/Components/Subtile/Kernel.py uncovered TLU1 arms:
+# Targets tensilelite/Components/Subtile/Kernel.py uncovered TLU1 arms:
 #   151-152  (ABGRTile.__init__: GRTag_TLU1 branch — contiguousDim='M')
 #   159, 163, 167, 175  (ABGRTile properties hit via ABGRTile instantiation)
 #   188, 191, 194, 197  (ABGRTile emit methods reached during codegen)

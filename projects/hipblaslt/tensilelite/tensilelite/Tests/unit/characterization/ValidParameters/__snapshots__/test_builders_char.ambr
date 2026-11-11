@@ -1379,6 +1379,7 @@
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
+    'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
     'CompactLoopStore',
@@ -1413,6 +1414,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
@@ -1467,6 +1469,7 @@
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
     'PersistentXCCMapping',
+    'PostLoopStoreInNll',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
@@ -1487,6 +1490,7 @@
     'StaggerUMapping',
     'StaggerUStride',
     'StinkyTofuParameters',
+    'StinkyTofuRegisterAllocation',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1680,6 +1684,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ClusterAIDMapping': dict({
+      'head': list([
+        -2,
+        -1,
       ]),
       'len': 2,
       'type': 'list',
@@ -1952,7 +1964,7 @@
           patch=0,
         ),
       ]),
-      'len': 23,
+      'len': 25,
       'type': 'list',
     }),
     'InitCIterWmma': dict({
@@ -1977,8 +1989,9 @@
       'head': list([
         0,
         1,
+        2,
       ]),
-      'len': 2,
+      'len': 3,
       'type': 'list',
     }),
     'KernelLanguage': dict({
@@ -1986,6 +1999,14 @@
         'Assembly',
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'LDSSegmentBRotate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'LDSSegmentInterleave': dict({
@@ -2465,6 +2486,14 @@
       'len': 8,
       'type': 'list',
     }),
+    'PostLoopStoreInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2621,6 +2650,10 @@
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
     }),

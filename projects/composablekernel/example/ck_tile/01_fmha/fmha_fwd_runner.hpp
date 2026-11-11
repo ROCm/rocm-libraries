@@ -1463,7 +1463,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.lse_ptr  = lse_buf.GetDeviceBuffer();
             args.o_ptr    = o_buf.GetDeviceBuffer();
 
-            args.seqlen_k     = shape_seqlen_k;     // unused in group mode (or kvcache enabled)
+            // Batch: per-sequence K; group: total physical K, a sched selector hint.
+            args.seqlen_k     = shape_seqlen_k;
             args.max_seqlen_q = pack_gqa_seqlen_q_; // use packed seqlen for grid size
 
             args.scale_s = scale_s;
@@ -1487,6 +1488,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
             if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
             {
+                // Fix group-mode tile selection: use the longest sequence length instead of
+                // the total Q length, which incorrectly selected large tiles for short sequences.
+                if(mode == mode_enum::group &&
+                   (ck_tile::is_gfx11_supported() || ck_tile::is_gfx120_supported()))
+                    args.max_seqlen_q = max_seqlen_q;
+
                 if(qscale.type == quant_scale_enum::pertensor)
                 {
                     args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();

@@ -40,6 +40,9 @@ typedef struct rocke_ati_arch_row
 {
     const char* gfx;
     const rocke_arch_target_t* target; /* fully-built singleton descriptor */
+    /* The generic target this row takes its facts from (arch_specs.json
+     * "facts_of"), or NULL for a row that holds its own facts. */
+    const char* facts_of;
 } rocke_ati_arch_row_t;
 
 /* The registry of all known arches, sorted by gfx token (so rocke_known_arches
@@ -55,6 +58,18 @@ extern const int rocke_ati_arch_registry_len;
  * of rocke_known_arches). Defined in bucket 0 alongside the registry so both stay
  * in sync. */
 extern const char* const rocke_ati_known_arches[];
+
+/* One catalogued LLVM generic processor and its NULL-terminated concrete
+ * members (arch_specs.json "generic_targets"). */
+typedef struct rocke_ati_generic_row
+{
+    const char* generic;
+    const char* const* members;
+} rocke_ati_generic_row_t;
+
+/* Generic target rows, terminated by a row whose .generic == NULL. Defined in
+ * bucket 0. */
+extern const rocke_ati_generic_row_t rocke_ati_generic_targets[];
 
 #ifdef __cplusplus
 } /* extern "C" */

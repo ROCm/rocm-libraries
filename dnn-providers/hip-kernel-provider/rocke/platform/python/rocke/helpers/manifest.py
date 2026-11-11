@@ -24,6 +24,7 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "cpg": <int>, "kpg": <int>,            // conv only
       "grid_explicit": [gx, gy, gz],         // optional, overrides grid_order
       "grid_order": "MN" | "NM",             // optional
+      "cluster_dims": [cx, cy, cz],          // optional, gfx1250 cluster launch
       "args_signature": [
         {"name": ..., "type": "ptr<f16,global>" | "ptr<bf16,global>" | "i32", "size_bytes": ...},
         ...
@@ -56,6 +57,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from ..core.ir import LAUNCH_THROUGH_FROM_ARTIFACT
+from ..runtime.contract import parameter_contract
 from .compile import KernelArtifact
 
 
@@ -116,13 +119,22 @@ def _provenance_fields() -> Dict[str, str]:
     return {"engine_build_id": bid, "engine_version": ver}
 
 
+def _cluster_fields(artifact: KernelArtifact) -> Dict[str, List[int]]:
+    """``{"cluster_dims": [x, y, z]}`` for a kernel compiled with a gfx1250
+    workgroup-cluster shape, else ``{}`` so other manifests are unchanged.
+    Launchers must pass this shape to the cluster launch path."""
+    kernel = getattr(artifact, "kernel", None)
+    dims = kernel.cluster_dims if kernel is not None else None
+    return {} if dims is None else {"cluster_dims": list(dims)}
+
+
 # ---------------------------------------------------------------------
 # Args signature helpers
 # ---------------------------------------------------------------------
 
 
 def gemm_args_signature(
-    *, with_bytes: bool = False, dtype: str = "fp16"
+    *, with_bytes: bool = False, dtype: str = "fp16", c_dtype: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
@@ -130,19 +142,33 @@ def gemm_args_signature(
     M, N, K dimensions (this is the implicit-GEMM convolution
     signature; the universal GEMM doesn't need them since it doesn't
     use buffer_rsrc).
+
+    `dtype` types the A/B operands; `c_dtype` types C and defaults to
+    `dtype`. They differ for the 8-bit GEMMs, whose operands are fp8/bf8
+    but whose output is bf16 — an fp8 C would quantize the result to ~2
+    decimal digits for no bandwidth win worth having.
     """
-    _dtype_map = {"fp16": "f16", "bf16": "bf16"}
-    if dtype not in _dtype_map:
-        raise ValueError(
-            f"gemm_args_signature: unsupported dtype {dtype!r}; "
-            f"supported: {list(_dtype_map)}"
-        )
+    _dtype_map = {
+        "fp16": "f16",
+        "bf16": "bf16",
+        "fp8e4m3": "fp8e4m3",
+        "bf8e5m2": "bf8e5m2",
+    }
+    if c_dtype is None:
+        c_dtype = dtype
+    for name, val in (("dtype", dtype), ("c_dtype", c_dtype)):
+        if val not in _dtype_map:
+            raise ValueError(
+                f"gemm_args_signature: unsupported {name} {val!r}; "
+                f"supported: {list(_dtype_map)}"
+            )
     ir_type = _dtype_map[dtype]
     ptr_type = f"ptr<{ir_type}, global>"
+    c_ptr_type = f"ptr<{_dtype_map[c_dtype]}, global>"
     sig: List[Dict[str, Any]] = [
         {"name": "A", "type": ptr_type, "size_bytes": 8},
         {"name": "B", "type": ptr_type, "size_bytes": 8},
-        {"name": "C", "type": ptr_type, "size_bytes": 8},
+        {"name": "C", "type": c_ptr_type, "size_bytes": 8},
     ]
     if with_bytes:
         sig += [
@@ -261,6 +287,7 @@ def make_simple_op_manifest(
         "ir_authored": True,
         "is_binary": bool(is_binary),
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if elems_per_block is not None:
         manifest["elems_per_block"] = int(elems_per_block)
@@ -329,6 +356,7 @@ def make_gemm_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))
@@ -415,6 +443,7 @@ def make_conv_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if grid_explicit is not None:
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
@@ -456,6 +485,7 @@ def make_attention_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))
@@ -474,7 +504,18 @@ def write_artifact(
 
     Returns the paths written, keyed by short name (`hsaco`, `ir`,
     `ll`, `manifest`).
+
+    Refuses a kernel whose parameter contract a launch from the written
+    `.hsaco` would drop (`ParameterContract.code_object_refusal`): one that
+    states parameter facts or an exact workgroup size, or checks a
+    `gpu_checked_value`. Launch such a kernel with
+    `KernelLauncher.from_artifact`.
     """
+    refusal = parameter_contract(artifact.kernel).code_object_refusal()
+    if refusal is not None:
+        raise ValueError(
+            f"{artifact.kernel_name}: {refusal} -- {LAUNCH_THROUGH_FROM_ARTIFACT}"
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     name = artifact.kernel_name
     paths: Dict[str, Path] = {}

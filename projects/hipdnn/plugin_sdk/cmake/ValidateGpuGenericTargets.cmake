@@ -1,0 +1,75 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Validates data/gpu_generic_targets.json; each violation is a FATAL_ERROR naming the key.
+# cmake-lint: disable=E1120
+
+# Checks the generics map: names, member shape, duplicates.
+function(_hipdnn_gpu_generic_targets_validate_generics json json_path)
+    string(JSON generics_type ERROR_VARIABLE err TYPE "${json}" generics)
+    if(err OR NOT generics_type STREQUAL "OBJECT")
+        message(FATAL_ERROR "gpu_generic_targets: ${json_path}: missing required object 'generics'")
+    endif()
+    string(JSON generic_count LENGTH "${json}" generics)
+    if(generic_count EQUAL 0)
+        message(FATAL_ERROR "gpu_generic_targets: ${json_path}: 'generics' must be non-empty")
+    endif()
+
+    math(EXPR last_generic "${generic_count} - 1")
+    foreach(g RANGE 0 ${last_generic})
+        string(JSON generic MEMBER "${json}" generics ${g})
+        if(NOT generic MATCHES "^gfx[0-9]+(-[0-9]+)?-generic$")
+            message(FATAL_ERROR "gpu_generic_targets: ${json_path}: generic name '${generic}' does not match ^gfx[0-9]+(-[0-9]+)?-generic$")
+        endif()
+        string(JSON members_type TYPE "${json}" generics "${generic}")
+        if(NOT members_type STREQUAL "ARRAY")
+            message(FATAL_ERROR "gpu_generic_targets: ${json_path}: generics.${generic} must be an array")
+        endif()
+        string(JSON member_count LENGTH "${json}" generics "${generic}")
+        if(member_count EQUAL 0)
+            message(FATAL_ERROR "gpu_generic_targets: ${json_path}: generics.${generic} must list at least one member")
+        endif()
+
+        set(seen "")
+        math(EXPR last_member "${member_count} - 1")
+        foreach(m RANGE 0 ${last_member})
+            string(JSON member_type TYPE "${json}" generics "${generic}" ${m})
+            if(NOT member_type STREQUAL "STRING")
+                message(FATAL_ERROR "gpu_generic_targets: ${json_path}: generics.${generic}[${m}] must be a string")
+            endif()
+            string(JSON member GET "${json}" generics "${generic}" ${m})
+            if(NOT member MATCHES "^gfx[0-9a-f]+$")
+                message(FATAL_ERROR "gpu_generic_targets: ${json_path}: member '${member}' of ${generic} does not match ^gfx[0-9a-f]+$")
+            endif()
+            list(FIND seen "${member}" seen_at)
+            if(NOT seen_at EQUAL -1)
+                message(FATAL_ERROR "gpu_generic_targets: ${json_path}: member '${member}' is listed twice in ${generic}")
+            endif()
+            list(APPEND seen "${member}")
+        endforeach()
+    endforeach()
+endfunction()
+
+# Validates the schema version and every generic; FATAL_ERROR on the first violation.
+function(hipdnn_validate_gpu_generic_targets json_path)
+    if(NOT EXISTS "${json_path}")
+        message(FATAL_ERROR "gpu_generic_targets: cannot read '${json_path}'")
+    endif()
+    file(READ "${json_path}" json)
+
+    string(JSON _root_type ERROR_VARIABLE parse_error TYPE "${json}")
+    if(parse_error)
+        message(FATAL_ERROR "gpu_generic_targets: ${json_path}: not valid JSON: ${parse_error}")
+    endif()
+
+    string(JSON version ERROR_VARIABLE err GET "${json}" schemaVersion)
+    if(err)
+        message(FATAL_ERROR "gpu_generic_targets: ${json_path}: missing required key 'schemaVersion'")
+    endif()
+    string(JSON version_type TYPE "${json}" schemaVersion)
+    if(NOT version_type STREQUAL "NUMBER" OR NOT version STREQUAL "1")
+        message(FATAL_ERROR "gpu_generic_targets: ${json_path}: 'schemaVersion' must be 1, got '${version}'")
+    endif()
+
+    _hipdnn_gpu_generic_targets_validate_generics("${json}" "${json_path}")
+endfunction()

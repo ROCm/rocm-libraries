@@ -31,7 +31,7 @@
 
 #include <hiptensor/hiptensor.h>
 
-HIPTENSOR_EXPORT hiptensorStatus_t
+hiptensorStatus_t
     hiptensorElementwisePermuteReference(const void*                       alpha,
                                          const void*                       A,
                                          const hiptensorTensorDescriptor_t descA,
@@ -43,7 +43,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
                                          const hiptensorDataType_t         typeScalar,
                                          const hipStream_t                 stream);
 
-HIPTENSOR_EXPORT hiptensorStatus_t
+hiptensorStatus_t
     hiptensorElementwiseBinaryOpReference(const void*                       alpha,
                                           const void*                       A,
                                           const hiptensorTensorDescriptor_t descA,
@@ -60,7 +60,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
                                           hiptensorOperator_t               opAC,
                                           hiptensorDataType_t               typeScalar,
                                           hipStream_t                       stream);
-HIPTENSOR_EXPORT hiptensorStatus_t
+hiptensorStatus_t
     hiptensorElementwiseTrinaryOpReference(const void*                       alpha,
                                            const void*                       A,
                                            const hiptensorTensorDescriptor_t descA,

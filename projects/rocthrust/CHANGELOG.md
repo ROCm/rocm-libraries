@@ -3,6 +3,19 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.7.1 for ROCm 10.2.0
+
+### Fixed
+
+* hipstdpar: `sincos` forwarding to the corresponding `__ocml` function.
+* hipstdpar: segfault when stack size is unlimited.
+* hipstdpar: process abort when allocation size is zero.
+* Potential build errors when code coverage is enabled.
+
+### Upcoming changes
+
+* This project location will be deprecated in ROCm 10.3.  See the new hipCCL project folder at https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl.
+
 ## rocThrust 4.7.0 for ROCm 10.1.0
 
 ### Changed

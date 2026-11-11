@@ -61,17 +61,166 @@ __device__ inline float fp8OcpE4m3ToFloat(unsigned char bits)
     return ((bits & 0x80u) != 0) ? -mag : mag;
 }
 
-// One-byte fp8 E4M3 (OCP) storage that decodes to float on read. HipRtcTypeName maps
-// fp8_e4m3 to this type so the SDPA kernel can load fp8 Q/K/V.
-// NOLINTNEXTLINE(readability-identifier-naming)
-struct GpuRefFp8E4M3
+// --- FP8 E4M3 FNUZ device decode ---
+// Bit-exact with hipdnn_data_sdk::types::fp8_e4m3_fnuz: bias 8, no infinity, no negative zero,
+// the single NaN at 0x80. Normals are (8 + m) * 2^(e - 11), subnormals m * 2^-10.
+__device__ inline float fp8FnuzE4m3ToFloat(unsigned char bits)
+{
+    if(bits == 0x80u)
+    {
+        return __builtin_nanf("");
+    }
+    const unsigned exponent = (bits >> 3) & 0xFu;
+    const unsigned mantissa = bits & 0x7u;
+    // 2^(e - 11) built from its float bits (biased exponent e - 11 + 127).
+    const float mag = exponent == 0 ? static_cast<float>(mantissa) * 0.0009765625f
+                                    : static_cast<float>(8u + mantissa)
+                                          * __builtin_bit_cast(float, (exponent + 116u) << 23);
+    return ((bits & 0x80u) != 0) ? -mag : mag;
+}
+
+// --- FP8 E5M2 device decode ---
+// Bit-exact with hipdnn_data_sdk::types::fp8_e5m2 (OCP: bias 15, infinity at exponent 31 with a
+// zero mantissa, NaN otherwise) and fp8_e5m2_fnuz (bias 16, no infinity or negative zero, the
+// single NaN at 0x80). Normals are (4 + m) * 2^(e - bias - 2), subnormals m * 2^(-bias - 1).
+__device__ inline float fp8OcpE5m2ToFloat(unsigned char bits)
+{
+    const unsigned exponent = (bits >> 2) & 0x1Fu;
+    const unsigned mantissa = bits & 0x3u;
+    const bool negative = (bits & 0x80u) != 0;
+    if(exponent == 31)
+    {
+        const float special = mantissa == 0 ? __builtin_huge_valf() : __builtin_nanf("");
+        return negative ? -special : special;
+    }
+    const float mag = exponent == 0 ? static_cast<float>(mantissa) * 0.0000152587890625f // 2^-16
+                                    : static_cast<float>(4u + mantissa)
+                                          * __builtin_bit_cast(float, (exponent + 110u) << 23);
+    return negative ? -mag : mag;
+}
+
+__device__ inline float fp8FnuzE5m2ToFloat(unsigned char bits)
+{
+    if(bits == 0x80u)
+    {
+        return __builtin_nanf("");
+    }
+    const unsigned exponent = (bits >> 2) & 0x1Fu;
+    const unsigned mantissa = bits & 0x3u;
+    const float mag = exponent == 0 ? static_cast<float>(mantissa) * 0.00000762939453125f // 2^-17
+                                    : static_cast<float>(4u + mantissa)
+                                          * __builtin_bit_cast(float, (exponent + 109u) << 23);
+    return ((bits & 0x80u) != 0) ? -mag : mag;
+}
+
+// The fp8 formats, numbered as SdpaFp8Format / SdpaFwdArgs::pFp8Format.
+#define GPU_REF_FP8_E4M3 1
+#define GPU_REF_FP8_E4M3_FNUZ 2
+#define GPU_REF_FP8_E5M2 3
+#define GPU_REF_FP8_E5M2_FNUZ 4
+
+__device__ inline float fp8ToFloat(unsigned char bits, int format)
+{
+    switch(format)
+    {
+    case GPU_REF_FP8_E4M3_FNUZ:
+        return fp8FnuzE4m3ToFloat(bits);
+    case GPU_REF_FP8_E5M2:
+        return fp8OcpE5m2ToFloat(bits);
+    case GPU_REF_FP8_E5M2_FNUZ:
+        return fp8FnuzE5m2ToFloat(bits);
+    default:
+        return fp8OcpE4m3ToFloat(bits);
+    }
+}
+
+// --- FP8 device encode ---
+// Bit-exact with hipdnn_data_sdk's encoders: round to nearest, ties to even, saturating (also for
+// infinity), FNUZ formats have no negative zero and NaN at 0x80. Finite magnitudes increase with
+// the code up to the format's largest finite code, so this searches the decoded values; a tie goes
+// to the even code, which is round-half-to-even.
+template <int FORMAT>
+__device__ inline unsigned char fp8FromFloat(float x)
+{
+    constexpr bool FNUZ = FORMAT == GPU_REF_FP8_E4M3_FNUZ || FORMAT == GPU_REF_FP8_E5M2_FNUZ;
+    // Largest finite code: E4M3 0x7E (0x7F is NaN), E5M2 0x7B (0x7C up are inf / NaN).
+    constexpr unsigned MAX_CODE = FNUZ ? 0x7Fu : (FORMAT == GPU_REF_FP8_E5M2 ? 0x7Bu : 0x7Eu);
+    const auto decode
+        = [](unsigned code) { return fp8ToFloat(static_cast<unsigned char>(code), FORMAT); };
+    const bool negative = __builtin_signbit(x) != 0;
+    if(__builtin_isnan(x))
+    {
+        return FNUZ ? 0x80u : static_cast<unsigned char>(0x7Fu | (negative ? 0x80u : 0u));
+    }
+    const float a = __builtin_fabsf(x);
+    unsigned code = MAX_CODE;
+    if(a < decode(MAX_CODE))
+    {
+        unsigned lo = 0;
+        unsigned hi = MAX_CODE; // decode(lo) <= a < decode(hi)
+        while(hi - lo > 1)
+        {
+            const unsigned mid = (lo + hi) / 2;
+            if(decode(mid) <= a)
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        const float below = a - decode(lo);
+        const float above = decode(hi) - a;
+        code = below < above ? lo : (above < below ? hi : ((lo & 1u) == 0 ? lo : hi));
+    }
+    if(FNUZ && code == 0)
+    {
+        return 0;
+    }
+    return static_cast<unsigned char>(code | (negative ? 0x80u : 0u));
+}
+
+// One-byte fp8 storage that decodes to float on read and encodes on construction. HipRtcTypeName
+// maps hipdnn_data_sdk's fp8 types to these, so SDPA kernels load and store fp8 tensors.
+template <int FORMAT>
+struct GpuRefFp8 // NOLINT(readability-identifier-naming)
 {
     unsigned char data;
+    GpuRefFp8() = default;
+    __device__ explicit GpuRefFp8(float f)
+        : data(fp8FromFloat<FORMAT>(f))
+    {
+    }
     __device__ operator float() const // NOLINT(google-explicit-constructor)
     {
-        return fp8OcpE4m3ToFloat(data);
+        return fp8ToFloat(data, FORMAT);
     }
 };
+// NOLINTBEGIN(readability-identifier-naming)
+using GpuRefFp8E4M3 = GpuRefFp8<GPU_REF_FP8_E4M3>;
+using GpuRefFp8E4M3Fnuz = GpuRefFp8<GPU_REF_FP8_E4M3_FNUZ>;
+using GpuRefFp8E5M2 = GpuRefFp8<GPU_REF_FP8_E5M2>;
+using GpuRefFp8E5M2Fnuz = GpuRefFp8<GPU_REF_FP8_E5M2_FNUZ>;
+// NOLINTEND(readability-identifier-naming)
+
+// x rounded to an fp8 format and back (GPU_REF_FP8_*; 0 leaves x).
+__device__ inline float roundToFp8(float x, int format)
+{
+    switch(format)
+    {
+    case GPU_REF_FP8_E4M3:
+        return fp8ToFloat(fp8FromFloat<GPU_REF_FP8_E4M3>(x), format);
+    case GPU_REF_FP8_E4M3_FNUZ:
+        return fp8ToFloat(fp8FromFloat<GPU_REF_FP8_E4M3_FNUZ>(x), format);
+    case GPU_REF_FP8_E5M2:
+        return fp8ToFloat(fp8FromFloat<GPU_REF_FP8_E5M2>(x), format);
+    case GPU_REF_FP8_E5M2_FNUZ:
+        return fp8ToFloat(fp8FromFloat<GPU_REF_FP8_E5M2_FNUZ>(x), format);
+    default:
+        return x;
+    }
+}
 
 // --- safeConvert ---
 

@@ -1,7 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Synchronization contracts for generated multi-wave extension reductions."""
+"""Synchronization contracts for generated multi-wave extension reductions.
+
+Both generators below target gfx90a. When this process imported stinkytofu,
+the reduction text is rendered in a native-rocisa worker.
+"""
 
 import os
 import sys
@@ -13,13 +17,13 @@ TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 if TENSILE_ROOT not in sys.path:
     sys.path.insert(0, TENSILE_ROOT)
 
+from codegen_harness import run_where_backend_matches_isa  # noqa: E402
 from gpu_test_helpers import init_rocisa  # noqa: E402
 
-from Tensile.Common.Architectures import gfxToIsa  # noqa: E402
-from Tensile.Common.DataType import DataType  # noqa: E402
+from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
+from tensilelite.Common.DataType import DataType  # noqa: E402
 
-import AMaxGenerator  # noqa: E402
-import LayerNormGenerator  # noqa: E402
+from tensilelite._extops import amax_generator, layer_norm_generator  # noqa: E402
 
 
 def _amax_generator():
@@ -27,7 +31,7 @@ def _amax_generator():
     isa = gfxToIsa(target)
     init_rocisa(target=target, wavesize=64)
     half = DataType("H")
-    return AMaxGenerator.AMaxKernelGenerator(
+    return amax_generator.AMaxKernelGenerator(
         i_type=half,
         o_type=half,
         scale_type=DataType("S"),
@@ -45,7 +49,7 @@ def _layer_norm_generator():
     target = "gfx90a"
     isa = gfxToIsa(target)
     init_rocisa(target=target, wavesize=64)
-    return LayerNormGenerator.LayerNormKernelGenerator(
+    return layer_norm_generator.LayerNormKernelGenerator(
         io_type=DataType("S"),
         num_workitems=256,
         num_load_count=4,
@@ -61,10 +65,17 @@ def _between(text: str, start: str, end: str) -> str:
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
+def _inter_wave_reduction_text(make_generator):
+    return str(make_generator().inter_wave_reduction())
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("make_generator", [_amax_generator, _layer_norm_generator])
 def test_inter_wave_reduction_synchronizes_before_lds_reuse(make_generator):
-    text = str(make_generator().inter_wave_reduction())
+    # Both generators hardcode gfx90a, so the worker split follows that ISA.
+    text = run_where_backend_matches_isa(
+        gfxToIsa("gfx90a"), _inter_wave_reduction_text, make_generator
+    )
 
     upper = _between(text, "label_upper:", "label_lower:")
     lower = _between(text, "label_lower:", "label_empty:")

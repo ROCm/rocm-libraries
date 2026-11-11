@@ -75,9 +75,10 @@ def _bootstrap_rocisa_on_syspath() -> None:
 
     for root in candidates:
         if _has_built_rocisa(root):
-            # ``root`` for ``import rocisa``; ``tensilelite`` so an eventual
-            # ``import rocisa_stinkytofu_adaptor`` (adapter backend) also works.
-            for p in (tensilelite, root):
+            # ``root`` for ``import rocisa``; adaptor parent so
+            # ``import rocisa_stinkytofu_adaptor`` resolves the inner package.
+            _adaptor_parent = os.path.join(tensilelite, "rocisa_stinkytofu_adaptor")
+            for p in (tensilelite, _adaptor_parent, root):
                 if p not in sys.path:
                     sys.path.insert(0, p)
             break
@@ -87,7 +88,11 @@ _bootstrap_rocisa_on_syspath()
 
 import pytest  # noqa: E402  (must follow sys.path bootstrap above)
 
-from rocisa import _resolve_backend, _stinkytofu_available  # noqa: E402
+from rocisa import (  # noqa: E402
+    _resolve_backend,
+    _stinkytofu_available,
+    _unwrap_source_tree_adapter,
+)
 
 
 class _Probe:
@@ -147,16 +152,42 @@ def test_unavailable_surfaces_reason_and_skips_load(warnings_sink):
     assert msgs == [reason]
 
 
-def test_load_failure_falls_back_with_reason(warnings_sink):
-    """Available but the adapter import/rewire failed -> native + warning that
-    surfaces the concrete reason."""
+def test_load_failure_after_available_raises(warnings_sink):
+    """Binding already imported + adapter load failure must not fall back to
+    native rocisa (that loads _rocisa.so and nanobind-aborts)."""
     msgs, warn = warnings_sink
     load = _Probe((False, "import failed: ModuleNotFoundError('boom')"))
 
-    assert _resolve_backend("stinkytofu", _Probe((True, "")), load, warn=warn) is False
-    assert len(msgs) == 1
-    assert "boom" in msgs[0]
-    assert "adapter failed to load" in msgs[0]
+    with pytest.raises(ImportError, match="Cannot fall back to native rocisa"):
+        _resolve_backend("stinkytofu", _Probe((True, "")), load, warn=warn)
+    assert msgs == []
+
+
+def test_auto_detected_unavailable_falls_back_silently(warnings_sink):
+    """Auto-detected gfx1250 but stinkytofu not built -> silent fallback."""
+    msgs, warn = warnings_sink
+    load = _Probe((True, ""))
+
+    assert _resolve_backend(
+        "stinkytofu", _Probe((False, "not built")), load,
+        warn=warn, auto_detected=True,
+    ) is False
+    assert load.calls == 0
+    assert msgs == []
+
+
+def test_auto_detected_load_failure_after_available_raises(warnings_sink):
+    """Auto-detected gfx1250, stinkytofu available but adapter fails -> raise,
+    not a silent native fallback (the binding is already in-process)."""
+    msgs, warn = warnings_sink
+    load = _Probe((False, "import failed: AttributeError('boom')"))
+
+    with pytest.raises(ImportError, match="Cannot fall back to native rocisa"):
+        _resolve_backend(
+            "stinkytofu", _Probe((True, "")), load,
+            warn=warn, auto_detected=True,
+        )
+    assert msgs == []
 
 
 def test_backend_value_is_normalized_strip_lower():
@@ -228,3 +259,50 @@ def test_available_failure_messages_are_distinct(monkeypatch):
         assert ok is False
         reasons.append(reason)
     assert len(set(reasons)) == len(reasons)
+
+
+def test_unwrap_source_tree_namespace_loads_inner_package(tmp_path, monkeypatch):
+    """Repo-root-on-sys.path binds the outer directory as a namespace package.
+
+    The real package is one level down and must be what ``import rocisa`` uses,
+    otherwise ``from rocisa import rocIsa`` fails with ``(unknown location)``.
+    An already-installed regular package wins over that namespace directory, so
+    hide those path entries and exercise the source-tree layout on its own.
+    """
+    outer = tmp_path / "rocisa_stinkytofu_adaptor"
+    inner = outer / "rocisa_stinkytofu_adaptor"
+    inner.mkdir(parents=True)
+    (inner / "base.py").write_text("MARKER = 1\n")
+    (inner / "__init__.py").write_text(
+        "from . import base\n"
+        "VALUE = base.MARKER\n"
+        "class rocIsa:\n"
+        "    pass\n"
+        "_LAZY_SUBMODULES = frozenset()\n"
+    )
+    for key in list(sys.modules):
+        if key == "rocisa_stinkytofu_adaptor" or key.startswith("rocisa_stinkytofu_adaptor."):
+            monkeypatch.delitem(sys.modules, key, raising=False)
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [
+            p
+            for p in sys.path
+            if not os.path.isfile(os.path.join(p, "rocisa_stinkytofu_adaptor", "__init__.py"))
+        ],
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    try:
+        import rocisa_stinkytofu_adaptor as namespace
+
+        assert namespace.__file__ is None
+        real = _unwrap_source_tree_adapter(namespace)
+        assert real.__file__
+        assert real.VALUE == 1
+        assert real.rocIsa.__name__ == "rocIsa"
+    finally:
+        for key in list(sys.modules):
+            if key == "rocisa_stinkytofu_adaptor" or key.startswith("rocisa_stinkytofu_adaptor."):
+                sys.modules.pop(key, None)

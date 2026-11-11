@@ -80,11 +80,11 @@ def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
     return specs
 
 
-def _sdpa_tiled_spec(prob: object):
+def _sdpa_tiled_spec(prob: object, arch: str):
     """Derive the (deterministic, problem-driven) 2D tiled spec for a problem."""
     from kernels.common import attention_unified as au
 
-    return au._tiled_spec_from_problem(prob)
+    return au._tiled_spec_from_problem(prob, arch)
 
 
 def _sdpa_build(prob: object):
@@ -98,7 +98,7 @@ def _sdpa_build(prob: object):
     return build_unified_attention_2d(UnifiedAttention2DSpec(problem=prob))
 
 
-def _sdpa_config_columns(prob: object) -> Dict[str, object]:
+def _sdpa_config_columns(prob: object, arch: str) -> Dict[str, object]:
     """Recover the 68-feature kernel columns from the problem-driven tiled spec.
 
     The FMHA feature layout treats ``tm0`` as the per-warp query block
@@ -113,7 +113,7 @@ def _sdpa_config_columns(prob: object) -> Dict[str, object]:
     mask = 0
     sink = False
     try:
-        spec = _sdpa_tiled_spec(prob)
+        spec = _sdpa_tiled_spec(prob, arch)
         T = int(getattr(spec, "tile_size", T))
         block_q = int(getattr(spec, "block_m_per_warp", block_q))
         sink = bool(getattr(spec, "use_sinks", False))
@@ -173,8 +173,15 @@ def _sdpa_flops(prob: object) -> float:
 # =====================================================================
 
 
-def build_sdpa_adapter() -> OpAdapter:
-    """Construct the SDPA OpAdapter for use with ``generate()``."""
+def build_sdpa_adapter(arch: str) -> OpAdapter:
+    """Construct the SDPA OpAdapter for use with ``generate()``.
+
+    ``arch`` is closed over rather than passed per call: ``OpAdapter``'s
+    ``config_columns`` hook is a one-argument callback (``platform``'s
+    contract), so the sweep's target arch has no other way to reach the spec
+    builder -- and without it the feature columns would be derived for whatever
+    arch the builder defaulted to, not the one being swept.
+    """
     return OpAdapter(
         op_type="fmha",
         enumerate_specs=_sdpa_enumerate,
@@ -184,7 +191,7 @@ def build_sdpa_adapter() -> OpAdapter:
             if hasattr(p, "kernel_name")
             else f"sdpa_b{p.num_seqs}_sq{p.max_seqlen_q}_sk{p.max_seqlen_k}"
         ),
-        config_columns=_sdpa_config_columns,
+        config_columns=lambda p: _sdpa_config_columns(p, arch),
         problem_columns=_sdpa_problem_columns,
         flops=_sdpa_flops,
     )
@@ -229,7 +236,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cache_dir=args.cache_dir,
         arch=args.arch,
         max_shapes=args.max_shapes,
-        adapter=build_sdpa_adapter(),
+        adapter=build_sdpa_adapter(args.arch),
     )
     return 0
 

@@ -248,7 +248,7 @@ namespace rocwmma
         enum struct Gfx11Predicates : bool
         {
             // Valid for gfx11 only
-            ArchTest = (bool)TestTraits::Arch::IsGfx11,
+            ArchTest = (bool)TestTraits::Arch::IsGfx11 && !(bool)TestTraits::Arch::IsGfx117x,
 
             // Wave size on gfx11 is 32
             WaveSizeTest = (bool)TestTraits::Arch::IsWave32,
@@ -296,8 +296,8 @@ namespace rocwmma
 
         enum struct Gfx12Predicates : bool
         {
-            // Valid for gfx11 only
-            ArchTest = (bool)TestTraits::Arch::IsGfx12,
+            // Packed WMMA layouts on gfx117x and gfx12
+            ArchTest = (bool)TestTraits::Arch::IsGfx12 || (bool)TestTraits::Arch::IsGfx117x,
 
             // Wave size on gfx11 is 32
             WaveSizeTest = (bool)TestTraits::Arch::IsWave32,

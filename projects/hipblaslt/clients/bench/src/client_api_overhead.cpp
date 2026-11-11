@@ -33,6 +33,9 @@
 
 #include "helper.h"
 
+// From the clients' utility.hpp, whose CHECK_* macros clash with helper.h's.
+bool hipblaslt_timing_allowed_with_adaptive_sm_count();
+
 using clock_point  = std::chrono::time_point<std::chrono::steady_clock>;
 using double_micro = std::chrono::duration<double, std::micro>;
 using HHSRunner    = Runner<hipblasLtHalf, hipblasLtHalf, hipblasLtHalf, float, float>;
@@ -201,6 +204,8 @@ int main(int argc, char** argv)
         printUsage(argv[0]);
         return err;
     }
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
 
     int returned_sol;
     // new: test get heuristic with requested-solution = 100, -1

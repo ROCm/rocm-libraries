@@ -181,19 +181,18 @@ namespace TensileLite
             }
 
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
-                    (*iter)->postWarmup(startEvents, stopEvents, stream);
+                    (*iter)->postWarmup(startEvents, stopEvents);
             }
 
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
-                    (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+                    (*iter)->validateWarmups(slots, startEvents, stopEvents);
             }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -244,25 +243,24 @@ namespace TensileLite
                     (*iter)->setNumEnqueuesPerSync(count);
             }
 
-            virtual void preEnqueues(hipStream_t const& stream) override
+            virtual void preEnqueues() override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
-                    (*iter)->preEnqueues(stream);
+                    (*iter)->preEnqueues();
             }
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
-                    (*iter)->postEnqueues(startEvents, stopEvents, stream);
+                    (*iter)->postEnqueues(startEvents, stopEvents);
             }
 
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
-                    (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+                    (*iter)->validateEnqueues(slots, startEvents, stopEvents);
             }
 
             virtual void finalizeReport() override

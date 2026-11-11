@@ -1,0 +1,120 @@
+/*
+MIT License
+
+Copyright (c) 2026 Advanced Micro Devices, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <string>
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
+#include "framework/config_param.hpp"
+#include "framework/dtype.hpp"
+#include "framework/skip_list.hpp"
+#include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
+#include "reference/jpeg_compression_distortion_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+// quality in [1, 99]. At q50 the scaled table is the Annex K base table, so it must stay green. q10
+// (needs the 255 clamp) and q90 (needs integer rounding) are red: the kernel quantizes by the raw
+// real-valued product.
+struct JpegParams {
+    int quality;
+    std::string name() const {
+        return "q" + std::to_string(quality);
+    }
+};
+
+// Covers fp rounding in the DCT round-trip only; not loosened for q10/q90.
+constexpr Tolerance kJpegTolerance = kRoundingTolerance;
+
+template <typename T>
+void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op) {
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
+    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    const std::size_t count = element_count(desc);
+    const std::size_t bytes = byte_size(desc, cfg.dtype);
+
+    PinnedArray<Rpp32s> quality(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    for (Rpp32u i = 0; i < shape.n; ++i) {
+        quality[i] = op.quality;
+        roi[i] = roiVec[i];
+    }
+
+    // Input salt 1 keeps DCT coefficients off exact quantizer rounding ties (the default salt and
+    // salts 3-5 hit them). Re-check if the fill, size or quality set changes: a tie shows up as a
+    // 1-LSB red that looks like a kernel defect.
+    std::vector<T> input(count), dstInit(count), golden(count), actual(count);
+    fill_input<T>(input.data(), count, cfg.dtype, /*salt=*/1);
+    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/3);
+    golden = dstInit;
+    jpeg_compression_distortion_reference<T>(input.data(), golden.data(), desc, cfg.dtype,
+                                             roi.data(), XYWH, op.quality);
+
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    src.write(input.data(), bytes);
+    dst.write(dstInit.data(), bytes);
+
+    RppHandle handle(cfg.backend, shape.n);
+    ASSERT_EQ(rppt_jpeg_compression_distortion(src.ptr(), &desc, dst.ptr(), &desc, quality.data(),
+                                               roi.data(), XYWH, handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    handle.sync();
+    dst.read(actual.data(), bytes);
+
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+                               kJpegTolerance(cfg.dtype)));
+}
+
+}  // namespace
+
+// Full name:
+// Image_Geometric/JpegCompressionDistortionTest.Correctness/
+//   <Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_q<Quality>
+class JpegCompressionDistortionTest : public SkipListTest<WithParams<JpegParams>> {};
+
+TEST_P(JpegCompressionDistortionTest, Correctness) {
+    const auto& p = GetParam();
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_jpeg_compression_distortion<Element<decltype(tag)>>(p.cfg, p.op);
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, JpegCompressionDistortionTest,
+                         ::testing::ValuesIn(with_params<JpegParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {JpegParams{50}, JpegParams{10}, JpegParams{90}})),
+                         op_config_name<JpegParams>);

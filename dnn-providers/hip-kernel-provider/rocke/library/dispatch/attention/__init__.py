@@ -19,7 +19,7 @@ arch modules, and adding an arch touches exactly one line here.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Iterator, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from rocke.dispatch.core import (
     CandidateRegistry,
@@ -42,14 +42,19 @@ from . import (
     gfx942_unified,
     gfx950_dense,
     gfx950_unified,
+    gfx1151,
     gfx1250,
     strided_decode,
 )
 from .candidate import (
     DENSE_ALGORITHM,
+    DENSE_ALGORITHMS,
     DENSE_GRID_ALGORITHM,
     DENSE_PERSIST_ALGORITHM,
 )
+from .generic import D256_DECODE_ALGORITHM, UNIFIED_2D_ALGORITHM, UNIFIED_3D_ALGORITHM
+from .gfx942_unified import GFX942_DENSE_PIPE_ALGORITHM
+from .gfx950_unified import D256_GFX950_ALGORITHM
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -62,10 +67,29 @@ from .common import (
     AttentionTuningSpec,
     FAMILY,
     _device_num_cus,
-    _problem,
     _request_errors,
     _resolve_num_cus,
     _selector_matches,
+    attention_band,
+    attention_problem,
+    canonical_arch,
+    dense_scale_range,
+)
+
+# Every algorithm that routes through the unified launch path
+# (``run_unified_attention_torch``, no tuning spec): the two generic tiled
+# paths, the two per-arch fast cohorts, and D256 decode. A routed family's
+# gate (e.g. SDPA's ``bind_unified.py``) builds its own "which algorithms do
+# I serve" set from this one, so a new unified route candidate cannot go
+# unnoticed by only renaming a literal nobody re-checks.
+UNIFIED_ALGORITHMS = frozenset(
+    {
+        UNIFIED_2D_ALGORITHM,
+        UNIFIED_3D_ALGORITHM,
+        D256_DECODE_ALGORITHM,
+        D256_GFX950_ALGORITHM,
+        GFX942_DENSE_PIPE_ALGORITHM,
+    }
 )
 
 _FAMILY = FAMILY
@@ -87,6 +111,7 @@ for _module in (
     gfx950_dense,
     gfx950_unified,
     gfx1250,
+    gfx1151,
 ):
     _module.register(ATTENTION_ROUTE_REGISTRY, ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
@@ -202,7 +227,7 @@ def iter_dispatch_attention_all(
     sweep_level: str = "production",
 ) -> Iterator[DispatchResult]:
     """Yield each :func:`attention_dispatch_result` for ``req``."""
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return
     yield from iter_at_level(
         sweep_level,
@@ -291,7 +316,7 @@ def attention_sweep_space(
     ``limit`` stops after that many specs; the stream is only materialized
     up to what is returned.
     """
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return ()
     assert isinstance(req, AttentionRequest)
     specs = []
@@ -352,6 +377,42 @@ def priority_ranker(
     return candidates
 
 
+# Per-arch dense candidate order for unpinned contiguous-layout requests.
+_DENSE_AUTO_ORDER = {
+    # One candidate whose default spec already picks its body.
+    "gfx942": lambda req: (gfx942_dense.CANDIDATE_NAME,),
+    "gfx950": gfx950_dense.dense_auto_order,
+}
+
+
+def _dense_auto_pin(req: AttentionRequest) -> Optional[AttentionRequest]:
+    """Pin an unpinned ``layout='dense'`` request with more than one query row
+    to the first dense candidate of its arch's order that admits it.
+
+    Contiguous tensors are the only layout the dense kernels read, so a paged
+    (or unspecified) layout never reaches them. Single-row (decode) requests
+    go to the strided split-KV decode kernel, which reads contiguous K/V as a
+    strided view.
+    """
+    if any(
+        str(getattr(req, field, "auto")).strip().lower() not in ("auto", "")
+        for field in ("algorithm", "spec_id", "tuning_id")
+    ):
+        return None
+    layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
+    if layout != "dense" or int(req.seqlen_q) <= 1:
+        return None
+    order = _DENSE_AUTO_ORDER.get(req.arch)
+    if order is None:
+        return None
+    for name in order(req):
+        candidate = ATTENTION_REGISTRY.get(name)
+        pinned = replace(req, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        if candidate.admits(pinned)[0]:
+            return pinned
+    return None
+
+
 def dispatch_attention(
     req: AttentionRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
@@ -359,7 +420,11 @@ def dispatch_attention(
 
     Unpinned (``algorithm`` / ``spec_id`` left at ``auto``) it returns the
     unified 2D-tiled or 3D split-KV path, a pure function of the problem whose
-    CTA geometry the instance builder resolves (see :mod:`.common`). A tuned
+    CTA geometry the instance builder resolves (see :mod:`.common`). The one
+    exception is a request for contiguous tensors (``layout='dense'``): with
+    more than one query row on an arch with a dense kernel it gets that
+    kernel's default spec (see :func:`_dense_auto_pin`), and with one query
+    row on gfx942/gfx950 the strided split-KV decode kernel. Otherwise a tuned
     kernel -- a dense candidate or a unified tuning geometry -- is selected only
     by pinning ``algorithm`` + ``spec_id``; ``tuning_id`` (with the knobs
     recorded next to it in ``tuning_knobs``) then names one configuration of
@@ -375,6 +440,7 @@ def dispatch_attention(
     ``ranker`` is the engine-level selection seam; it defaults to
     :func:`priority_ranker`.
     """
+    req = _dense_auto_pin(req) or req
     candidate = ATTENTION_REGISTRY.select(req, ranker=ranker or priority_ranker)
     spec = candidate.select_spec(req)
     request = (
@@ -395,10 +461,116 @@ def dispatch_attention(
     )
 
 
+def dispatch_for_arches(
+    req: AttentionRequest,
+    arches: str | Sequence[str],
+    *,
+    ranker: Ranker | None = None,
+    strict: bool = True,
+) -> Dict[str, "DispatchResult | ValueError"]:
+    """Run :func:`dispatch_attention` for each of ``arches``.
+
+    Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
+    compare selections across architectures from a single host.
+
+    .. note:: **The arch is taken from the request, never from the device** --
+       that part is unconditional. One host read remains: with ``req.num_cus ==
+       0`` the CU count is auto-resolved, and on a box whose arch matches the
+       target arch that resolution reads the live device (see
+       :func:`~.common._resolve_num_cus`). Since ``num_cus`` drives 2D/3D routing
+       and ``num_segments``, the same ``(req, arch)`` pair can select a different
+       kernel on a gfx942 box, a gfx950 box, and a CPU box. **Pass an explicit
+       ``num_cus`` (or ``target_ctas``) to make the comparison reproducible and
+       fully host-independent.**
+
+    Example::
+
+        results = dispatch_for_arches(req, ["gfx942", "gfx950"])
+        print(results["gfx942"].candidate.name)
+        print(results["gfx950"].candidate.name)
+
+    Each arch is canonicalized via :func:`canonical_arch` (strips suffixes such
+    as ``:sramecc+``, normalizes case) before dispatch, so ``"GFX950"`` and
+    ``"gfx950:sramecc+"`` both appear in the output under the key ``"gfx950"``.
+    Duplicate arches after canonicalization are dispatched only once, and
+    insertion order is preserved so the output reads in the caller's order.
+
+    Args:
+        req:    Base :class:`AttentionRequest`. Its ``arch`` field is overridden
+                for each target; all other fields are preserved.
+        arches: A sequence of arch names (``["gfx942", "gfx950"]``) or, for CLI
+                and config callers, one comma-separated string
+                (``"gfx942,gfx950"``). Splitting happens only for the ``str``
+                form -- a sequence is used as given, so an arch name is never
+                silently cut in half.
+        ranker: Optional ranker forwarded to :func:`dispatch_attention`.
+        strict: ``True`` (default) propagates the first dispatch failure.
+                ``False`` maps each failing arch to its exception instead, so
+                one unsupported arch does not discard the results for the
+                others -- the point of a cross-arch comparison. Values are then
+                ``DispatchResult | ValueError``; test with ``isinstance``.
+                Only ``ValueError`` (the dispatcher's "unsupported" answer,
+                including ``PinRefused``) is collected: any other exception is a
+                bug on the dispatch path and propagates under both settings
+                rather than being filed as an unsupported arch.
+
+    Raises:
+        ValueError: if ``arches`` is empty, or an entry does not canonicalize.
+                    This is a malformed argument, not a per-arch dispatch
+                    failure, so ``strict=False`` does not suppress it.
+    """
+    if isinstance(arches, str):
+        # CLI boundary only: --arches gfx942,gfx950. A Sequence[str] is already
+        # the structured form and must not be re-split.
+        requested = arches.split(",")
+    else:
+        requested = list(arches)
+        # canonical_arch() truncates a target ID at its first comma, so an entry
+        # like "gfx942,gfx950" would quietly canonicalize to "gfx942" and the
+        # second arch would vanish from the results. Reject it instead.
+        joined = [a for a in requested if isinstance(a, str) and "," in a]
+        if joined:
+            raise ValueError(
+                f"comma-joined entries in a sequence of arches: {joined!r}. "
+                "Pass the whole thing as one string, or split it yourself"
+            )
+    if not requested:
+        raise ValueError("arches is empty: nothing to dispatch for")
+
+    results: Dict[str, "DispatchResult | ValueError"] = {}
+    for raw in requested:
+        arch = canonical_arch(raw)
+        if not arch:
+            raise ValueError(f"invalid arch {raw!r} in arches {arches!r}")
+        if arch in results:
+            continue  # deduplicate after canonicalization
+        try:
+            results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
+        except ValueError as exc:
+            # ``ValueError`` ONLY, deliberately -- it is the dispatcher's "this
+            # arch cannot run this request" answer (``PinRefused`` subclasses it).
+            # A bare ``except Exception`` would also swallow ``TypeError`` /
+            # ``AttributeError``, i.e. a bug in the dispatch path, and report it
+            # in the results mapping as though the arch were merely unsupported.
+            # That is the failure mode that let the missing-arch ``TypeError`` in
+            # ``gfx942_unified`` read as an unsupported arch instead of a crash.
+            if strict:
+                raise
+            results[arch] = exc
+    return results
+
+
 __all__ = [
+    "D256_DECODE_ALGORITHM",
+    "D256_GFX950_ALGORITHM",
     "DENSE_ALGORITHM",
+    "DENSE_ALGORITHMS",
     "DENSE_GRID_ALGORITHM",
     "DENSE_PERSIST_ALGORITHM",
+    "GFX942_DENSE_PIPE_ALGORITHM",
+    "UNIFIED_2D_ALGORITHM",
+    "UNIFIED_3D_ALGORITHM",
+    "UNIFIED_ALGORITHMS",
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
     "ATTENTION_EXECUTION_REGISTRY",
@@ -411,12 +583,16 @@ __all__ = [
     "AttentionRequest",
     "AttentionSpec",
     "AttentionTuningSpec",
+    "attention_band",
     "attention_candidates",
     "attention_execution_candidates",
     "attention_dispatch_result",
+    "attention_problem",
     "attention_sweep_space",
     "attention_tuning_spec",
+    "dense_scale_range",
     "dispatch_attention",
+    "dispatch_for_arches",
     "dispatch_attention_all",
     "iter_dispatch_attention_all",
     "iter_registered_attention_combos",

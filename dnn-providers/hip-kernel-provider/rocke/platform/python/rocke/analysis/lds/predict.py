@@ -21,7 +21,6 @@ from .model import (
 from .opcodes import get_opcode_spec
 from .registry import LdsProfile, resolve_profile
 
-
 __all__ = ["LdsPredictionError", "predict_lds_conflicts"]
 
 
@@ -85,11 +84,18 @@ def _validate_accesses(
                 f"{access.lds_byte_address + access.access_width_bytes} exceeds "
                 f"{profile.identity.target} LDS capacity {profile.lds_capacity_bytes}"
             )
-        if access.lds_byte_address % spec.access_width_bytes:
+        alignment = spec.alignment_bytes or spec.access_width_bytes
+        if access.lds_byte_address % alignment:
             raise LdsPredictionError(
                 f"access {access.access_id} address {access.lds_byte_address} must be "
-                f"{spec.access_width_bytes}-byte aligned"
+                f"{alignment}-byte aligned"
             )
+    # Profiles can narrow the common request contract to their observed scope.
+    validate_request = getattr(profile, "validate_request", None)
+    if validate_request is not None:
+        ok, reason = validate_request(opcode, ordered)
+        if not ok:
+            raise LdsPredictionError(reason)
     return ordered
 
 
@@ -150,7 +156,8 @@ def predict_lds_conflicts(
     """Predict conflicts and broadcasts for one LDS instruction in one wave.
 
     Each lane may contribute at most one active access of the opcode's full width.
-    Accesses must be naturally aligned and fit within the profile's LDS capacity.
+    Accesses must meet the opcode's alignment and the profile's request scope,
+    and fit within the profile's LDS capacity.
     """
 
     if isinstance(coordinate_axes, (str, bytes)) or not isinstance(

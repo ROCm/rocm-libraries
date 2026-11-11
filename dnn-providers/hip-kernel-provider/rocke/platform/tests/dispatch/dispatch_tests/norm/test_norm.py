@@ -13,6 +13,7 @@ from rocke.dispatch.families.norm import (
     norm_candidates,
     norm_sweep_space,
 )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _rms(rows, cols, arch, dtype="fp16"):
@@ -25,18 +26,20 @@ def _ln(rows, cols, arch, dtype="fp16"):
 
 class TestNormDispatch(unittest.TestCase):
     def test_rejects_unknown_kind(self):
-        with self.assertRaises(ValueError):
-            dispatch_norm(
-                NormRequest(rows=4, cols=4096, kind="groupnorm", arch="gfx950")
-            )
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch), self.assertRaises(ValueError):
+                dispatch_norm(
+                    NormRequest(rows=4, cols=4096, kind="groupnorm", arch=arch)
+                )
 
     def test_rejects_unsupported_dtype(self):
-        with self.assertRaises(ValueError):
-            dispatch_norm(
-                NormRequest(
-                    rows=4, cols=4096, kind="rmsnorm", arch="gfx950", dtype="fp8"
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch), self.assertRaises(ValueError):
+                dispatch_norm(
+                    NormRequest(
+                        rows=4, cols=4096, kind="rmsnorm", arch=arch, dtype="fp8"
+                    )
                 )
-            )
 
     def test_rejects_unknown_arch(self):
         with self.assertRaises(ValueError):
@@ -44,29 +47,39 @@ class TestNormDispatch(unittest.TestCase):
 
     def test_picks_largest_blocksize_then_widest_vec(self):
         # cols=4096: b1024*v4=4096 divides; b1024*v8=8192 does not.
-        r = dispatch_norm(_rms(4096, 4096, "gfx950"))
-        self.assertEqual(r.spec.block_size, 1024)
-        self.assertEqual(r.spec.vec, 4)
-        self.assertEqual(r.candidate.algorithm, "rmsnorm")
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_norm(_rms(4096, 4096, arch))
+                self.assertEqual(r.spec.block_size, 1024)
+                self.assertEqual(r.spec.vec, 4)
+                self.assertEqual(r.candidate.algorithm, "rmsnorm")
 
     def test_widest_vec_when_divisible(self):
         # cols=8192: b1024*v8=8192 divides -> widest vec wins.
-        r = dispatch_norm(_rms(4096, 8192, "gfx950"))
-        self.assertEqual((r.spec.block_size, r.spec.vec), (1024, 8))
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_norm(_rms(4096, 8192, arch))
+                self.assertEqual((r.spec.block_size, r.spec.vec), (1024, 8))
 
     def test_layernorm_kind_selects_layernorm_candidate(self):
-        r = dispatch_norm(_ln(1024, 2048, "gfx950"))
-        self.assertEqual(r.candidate.algorithm, "layernorm")
-        self.assertIn("layernorm", r.candidate.name)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_norm(_ln(1024, 2048, arch))
+                self.assertEqual(r.candidate.algorithm, "layernorm")
+                self.assertIn("layernorm", r.candidate.name)
 
     def test_grid_is_one_cta_per_row(self):
-        r = dispatch_norm(_rms(777, 4096, "gfx950"))
-        self.assertEqual(r.grid, (777, 1, 1))
-        self.assertEqual(r.block, (r.spec.block_size, 1, 1))
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_norm(_rms(777, 4096, arch))
+                self.assertEqual(r.grid, (777, 1, 1))
+                self.assertEqual(r.block, (r.spec.block_size, 1, 1))
 
     def test_bf16_supported(self):
-        r = dispatch_norm(_rms(512, 2048, "gfx950", dtype="bf16"))
-        self.assertEqual(r.spec.dtype, "bf16")
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_norm(_rms(512, 2048, arch, dtype="bf16"))
+                self.assertEqual(r.spec.dtype, "bf16")
 
     def test_runs_on_rdna_arch(self):
         # Norm is arch-family agnostic; gfx1151 (RDNA, wave32) must select too.
@@ -76,35 +89,41 @@ class TestNormDispatch(unittest.TestCase):
         self.assertEqual(r.spec.wave_size, 32)
 
     def test_kind_gate_filters_candidates(self):
-        req = _rms(4096, 4096, "gfx950")
-        for c in norm_candidates():
-            ok, _ = c.admits(req)
-            if ok:
-                self.assertEqual(c.algorithm, "rmsnorm")
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _rms(4096, 4096, arch)
+                for c in norm_candidates():
+                    ok, _ = c.admits(req)
+                    if ok:
+                        self.assertEqual(c.algorithm, "rmsnorm")
 
     def test_unique_candidate_names(self):
         names = [c.name for c in norm_candidates()]
         self.assertEqual(len(names), len(set(names)))
 
     def test_explicit_spec_id_selects_that_candidate(self):
-        req = NormRequest(
-            rows=4096,
-            cols=4096,
-            kind="rmsnorm",
-            arch="gfx950",
-            spec_id="rmsnorm_b256_v4",
-        )
-        r = dispatch_norm(req)
-        self.assertEqual(r.candidate.spec_id, "rmsnorm_b256_v4")
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = NormRequest(
+                    rows=4096,
+                    cols=4096,
+                    kind="rmsnorm",
+                    arch=arch,
+                    spec_id="rmsnorm_b256_v4",
+                )
+                r = dispatch_norm(req)
+                self.assertEqual(r.candidate.spec_id, "rmsnorm_b256_v4")
 
     def test_sweep_space_enumerates_valid_block_vec_combos(self):
-        req = _rms(4096, 4096, "gfx950")
-        winner = dispatch_norm(req)
-        specs = norm_sweep_space(req)
-        results = dispatch_norm_all(req)
-        self.assertGreater(len(specs), 1)
-        self.assertEqual(len(results), len(specs))
-        self.assertEqual(results[0].candidate.name, winner.candidate.name)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _rms(4096, 4096, arch)
+                winner = dispatch_norm(req)
+                specs = norm_sweep_space(req)
+                results = dispatch_norm_all(req)
+                self.assertGreater(len(specs), 1)
+                self.assertEqual(len(results), len(specs))
+                self.assertEqual(results[0].candidate.name, winner.candidate.name)
 
 
 if __name__ == "__main__":

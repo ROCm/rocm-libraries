@@ -64,7 +64,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [true]
         - LdsPadA: [-1]
@@ -72,7 +73,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1, 1]
+        - 1LDSBuffer: [0]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
@@ -101,6 +102,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 2, 1024] # batch>1 (GSU=1 and 2)
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -145,7 +147,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [true]
         - LdsPadA: [-1]
@@ -153,7 +156,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
@@ -226,7 +229,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [true]
         - LdsPadA: [-1]
@@ -234,7 +238,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1, 1]
+        - 1LDSBuffer: [0]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
@@ -308,7 +312,8 @@ BenchmarkProblems:
         - ClusterLocalRead: [0]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [true]
         - LdsPadA: [-1]
@@ -316,7 +321,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1, 1]
+        - 1LDSBuffer: [0]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]

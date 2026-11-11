@@ -155,7 +155,7 @@ void testing_trsv(const Arguments& arg)
     double residual_eps_multiplier = RESIDUAL_EPS_MULTIPLIER;
     double eps                     = std::numeric_limits<real_t<T>>::epsilon();
 
-    if(!ROCBLAS_REALLOC_ON_DEMAND)
+    if(arg.size_query)
     {
         // Compute size
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));

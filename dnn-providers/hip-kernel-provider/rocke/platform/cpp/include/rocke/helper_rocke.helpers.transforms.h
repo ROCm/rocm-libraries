@@ -2,11 +2,13 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/helper_rocke.helpers.transforms.h -- C99 port of a SUBSET of
- * rocke/helpers/transforms.py: the CK Tile-style coordinate-transform DAG.
+ * rocke/helpers/transforms.py: the CK Tile-style coordinate-transform DAG,
+ * plus the magic-number division of rocke/helpers/magic_division.py that the
+ * DAG's magic unmerge emits.
  *
  * SCOPE OF THIS PORT (this phase) -- exactly these Python symbols:
- *   calculate_magic_numbers        rocke_calculate_magic_numbers
- *   do_magic_division              rocke_do_magic_division
+ *   magic_division.calculate_magic_numbers  rocke_calculate_magic_numbers
+ *   magic_division.do_magic_division        rocke_do_magic_division
  *   CoordVar                       rocke_coord_var_t
  *   Embed (transform)              rocke_embed() / ROCKE_XFORM_EMBED
  *   PassThrough (via pass_through) rocke_pass_through() / ROCKE_XFORM_PASS_THROUGH
@@ -75,7 +77,7 @@ bool rocke_calculate_magic_numbers(rocke_ir_builder_t* b,
  * Emits `dividend // divisor` via the mul-hi magic sequence:
  *   mult_i32 = (multiplier >= 2**31) ? multiplier - 2**32 : multiplier
  *   tmp      = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
- *   summed   = b.add(tmp, dividend)
+ *   summed   = b.add_nuw(tmp, dividend)
  *   return shift == 0 ? summed : b.lshr(summed, b.const_i32(shift))
  *
  * `dividend` is an i32 SSA value (treated unsigned); the result is the i32
@@ -395,7 +397,9 @@ typedef struct rocke_dynamic_tensor_descriptor
 {
     rocke_tensor_descriptor_t base; /* must be first for safe cast */
     int n_dynamic; /* == base.n_base              */
-    rocke_value_t* dynamic_strides[8]; /* parallel to base.base_names */
+    /* Parallel to base.base_names. NULL marks a compile-time stride, read from
+     * base.base_strides with the static rule (no multiply for 1). */
+    rocke_value_t* dynamic_strides[8];
 } rocke_dynamic_tensor_descriptor_t;
 
 rocke_dynamic_tensor_descriptor_t*
@@ -404,6 +408,21 @@ rocke_dynamic_tensor_descriptor_t*
                                           const char* const* coord_names,
                                           int n_coords,
                                           rocke_value_t* const* strides);
+
+/* Python: DynamicTensorDescriptor.create with a mix of Value and int strides.
+ * strides[i] == NULL takes static_strides[i] as a compile-time stride (1 when
+ * static_strides is NULL). Returns the descriptor as its base view (is_dynamic
+ * set; pass it to rocke_tensor_descriptor_transform / _offset directly), or NULL
+ * with the builder's error set -- the descriptor calls then no-op on the dead
+ * builder, so callers need not check. rocke_tensor_descriptor_naive_dynamic is
+ * this with every stride a Value. */
+rocke_tensor_descriptor_t*
+    rocke_tensor_descriptor_naive_dynamic_mixed(rocke_ir_builder_t* b,
+                                                const char* name,
+                                                const char* const* coord_names,
+                                                int n_coords,
+                                                rocke_value_t* const* strides,
+                                                const int* static_strides);
 
 bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
                                             const rocke_dynamic_tensor_descriptor_t* desc,
@@ -493,7 +512,8 @@ bool rocke_transforms_descriptor_offset(rocke_ir_builder_t* b,
  * terms are summed into a small i32 within-block offset. *out_base_i64 and
  * *out_within are written on success (within is const_i32(0) when no other
  * terms); *out_valid is NULL == Python None. Returns false (builder error set)
- * if base_coord is not among the descriptor's base coords. */
+ * if base_coord is not among the descriptor's base coords. A dynamic descriptor
+ * multiplies by its runtime strides, widening the base_coord one to i64. */
 bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
                                                   const rocke_tensor_descriptor_t* desc,
                                                   const char* base_coord,
