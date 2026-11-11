@@ -227,6 +227,9 @@
         "support": {
           "gfx1151": [
             "linux"
+          ],
+          "gfx1201": [
+            "linux"
           ]
         }
       }
