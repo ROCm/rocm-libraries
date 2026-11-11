@@ -11,9 +11,10 @@
 // "No suitable algorithm was found" (rocm-libraries#14965). A size that does not fit in free
 // memory is not reported, so callers do not try to allocate it (#6974).
 //
-// MIOPEN_DEBUG_FIND_ONLY_SOLVER makes one GEMM solver the only candidate on every arch, so GEMM is
-// the alternative to the naive solvers, and the workspace queries also disable the other solver
-// families, so the reported size is that solver's. Free memory comes from AvailableMemoryHandle.
+// MIOPEN_DEBUG_FIND_ONLY_SOLVER makes one GEMM solver the only Find candidate on every arch, so
+// GEMM is the alternative to the naive solvers. The immediate-mode fallback ignores it, so the
+// workspace queries also disable the other solver families (OnlyGemm), and the reported size is
+// that solver's. Free memory comes from AvailableMemoryHandle.
 // ScopedFindDb keeps find-db records out, except in the find-db test, which points the find-db at
 // a temporary file.
 
@@ -433,15 +434,15 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindDbRecordDoesNotBypassFreeMemoryBudge
 }
 
 // In Fast mode the query takes the immediate-mode fallback's pick; a GEMM pick must not bypass
-// the budget either.
+// the budget either. The fallback ignores MIOPEN_DEBUG_FIND_ONLY_SOLVER, so the other algorithm
+// families are disabled to make GemmFwdRest its pick on every arch.
 TEST(GPU_ConvDilatedGemmWorkspace_FP32, FastModeFallbackDoesNotBypassFreeMemoryBudget)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
 #else
     ScopedFindDb no_find_db;
-    ScopedEnvironment<std::string> only_gemm(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
-                                             std::string{"GemmFwdRest"});
+    OnlyGemm only_gemm{"GemmFwdRest"};
 
     auto problem = ReproDilatedConv();
     // Set on the descriptor: the find mode is read from MIOPEN_FIND_MODE once per process.
