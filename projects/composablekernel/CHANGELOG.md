@@ -34,6 +34,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Removed
 * Removed the CK Tile FMHA forward `fp8fp32` data type; use `fp8`, which now has the same FP32 output.
 * Removed the CK Tile FMHA `bf8` data type from the FMHA example, the dispatcher FMHA code generator, and the Tile Engine FMHA benchmark; use `fp8` or `fp8bf16` instead.
+* Removed the deprecated CK Tile FMHA pipeline `BlockFmhaPipelineQRKSVSFp8` (`block_fmha_pipeline_qr_ks_vs_fp8.hpp`).
 
 ### Optimized
 * Improved FMHA forward performance on gfx1250 for eligible scheduled BF16 head dimension 128 causal attention workloads by grouping workgroups within each XCD.
