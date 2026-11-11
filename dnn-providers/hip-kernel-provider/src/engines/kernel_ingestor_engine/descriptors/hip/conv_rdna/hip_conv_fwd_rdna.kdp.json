@@ -2,23 +2,31 @@
   "version": "1.0",
   "id": "2e852f30-1df1-5fbe-911c-98933a471ff9",
   "name": "hipkernel:hip_conv_fwd_rdna",
-  "arch": [
-    "gfx1100",
-    "gfx1101",
-    "gfx1102",
-    "gfx1103",
-    "gfx1150",
-    "gfx1151",
-    "gfx1152",
-    "gfx1153",
-    "gfx1200",
-    "gfx1201"
-  ],
   "matchers": [
     "170b083e-29cf-59a7-80e1-94b8083967ad"
   ],
   "engine": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
   "dispatch": "1efdba66-68bb-585b-8e28-42ded51419bf",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+          "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "kernel_family",
+            "dtype",
+            "layout",
+            "tile_n"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
   "kernelDescriptors": [
     {
       "version": "1.0",
@@ -43,27 +51,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -88,27 +76,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -133,27 +101,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -178,27 +126,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -223,27 +151,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -268,27 +176,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -313,27 +201,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -358,27 +226,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -403,27 +251,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -448,27 +276,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -493,27 +301,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -538,27 +326,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -583,27 +351,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -628,27 +376,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -673,27 +401,7 @@
         "layout": "CHANNELS_FIRST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -718,27 +426,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 32
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -763,27 +451,7 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 64
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     },
     {
       "version": "1.0",
@@ -808,27 +476,19 @@
         "layout": "CHANNELS_LAST",
         "tile_n": 128
       },
-      "priority": 0,
-      "provenance": {
-        "specialization_contract": {
-          "schema_version": 1,
-          "consumers": [
-            {
-              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
-              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
-              "metadata_fields": [],
-              "matcher_only_fields": [
-                "kernel_family",
-                "dtype",
-                "layout",
-                "tile_n"
-              ],
-              "bindings": {},
-              "vocabulary": {}
-            }
-          ]
-        }
-      }
+      "priority": 0
     }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
   ]
 }
