@@ -26,10 +26,12 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 60> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 62> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
+                                                      "StridedTransposeNarrow2",
+                                                      "StridedTransposeNarrow4",
                                                       "StridedCastFloatToFloat",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",

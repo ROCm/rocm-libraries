@@ -26,7 +26,8 @@ struct StridedCopyArgs
     /// unit-stride in dst; the rest are batch.
     int srcUnitAxis;
     int dstUnitAxis;
-    int padding0;
+    /// Transpose kernel only: every offset src and dst reach fits 32 bits.
+    int narrow;
 };
 
 /// dst[i] = convert(src[i]) for every multi-index i of `dims`, src fp32 and dst the entry

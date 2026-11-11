@@ -255,6 +255,113 @@ __device__ void col2imDisjoint(const Col2ImArgs& args)
     }
 }
 
+/// The strided transpose with every offset in 32 bits (args.narrow): the block's tile and base
+/// found once with 32-bit divisions, and 16-bit elements moved in pairs -- a 64 x 64 tile whose
+/// rows load and store as 4-byte pairs where aligned, one element at a time where not. Moves
+/// bytes: the generic transpose's result bit for bit.
+template <typename Bits>
+__device__ void stridedTransposeNarrow(const StridedCopyArgs& args)
+{
+    constexpr int PAIR = sizeof(Bits) == 2 ? 2 : 1;
+    constexpr int TILE = 32 * PAIR;
+    constexpr int LANES = TILE / PAIR; // threads along a tile row
+    constexpr int ROWS = 256 / LANES;
+    __shared__ Bits tile[TILE][TILE + 1];
+    const int a = args.srcUnitAxis;
+    const int b = args.dstUnitAxis;
+    const int extentA = static_cast<int>(args.dims[a]);
+    const int extentB = static_cast<int>(args.dims[b]);
+    const int tilesA = (extentA + TILE - 1) / TILE;
+    const int tilesB = (extentB + TILE - 1) / TILE;
+    // Tiles in diagonal order within each (tilesA x tilesB) plane: consecutive blocks start
+    // their rows in different memory partitions instead of all a large stride apart.
+    int block = static_cast<int>(blockIdx.x);
+    const int tilesPlane = tilesA * tilesB;
+    const int inPlane = block % tilesPlane;
+    block /= tilesPlane;
+    const int tb = inPlane % tilesB;
+    const int ta = (inPlane / tilesB + tb) % tilesA;
+    const int a0 = ta * TILE;
+    const int b0 = tb * TILE;
+    int srcBase = 0;
+    int dstBase = 0;
+    for(int axis = args.rank - 1; axis >= 0; --axis)
+    {
+        if(axis == a || axis == b)
+        {
+            continue;
+        }
+        const int extent = static_cast<int>(args.dims[axis]);
+        const int coordinate = block % extent;
+        block /= extent;
+        srcBase += coordinate * static_cast<int>(args.srcStrides[axis]);
+        dstBase += coordinate * static_cast<int>(args.dstStrides[axis]);
+    }
+    const auto* src = static_cast<const Bits*>(args.src) + srcBase;
+    auto* dst = static_cast<Bits*>(args.dst) + dstBase;
+    const int srcB = static_cast<int>(args.srcStrides[b]);
+    const int dstA = static_cast<int>(args.dstStrides[a]);
+    const int tx = static_cast<int>(threadIdx.x) % LANES;
+    const int ty = static_cast<int>(threadIdx.x) / LANES;
+    const int ia = a0 + PAIR * tx;
+    for(int j = ty; j < TILE; j += ROWS)
+    {
+        const int ib = b0 + j;
+        if(ib >= extentB)
+        {
+            continue;
+        }
+        const Bits* from = src + ia + ib * srcB;
+        if constexpr(PAIR == 2)
+        {
+            if(ia + 1 < extentA && (reinterpret_cast<unsigned long long>(from) & 3) == 0)
+            {
+                const unsigned int pair = *reinterpret_cast<const unsigned int*>(from);
+                tile[j][PAIR * tx] = static_cast<Bits>(pair & 0xffffu);
+                tile[j][PAIR * tx + 1] = static_cast<Bits>(pair >> 16);
+                continue;
+            }
+        }
+#pragma unroll
+        for(int q = 0; q < PAIR; ++q)
+        {
+            if(ia + q < extentA)
+            {
+                tile[j][PAIR * tx + q] = from[q];
+            }
+        }
+    }
+    __syncthreads();
+    const int ib = b0 + PAIR * tx;
+    for(int j = ty; j < TILE; j += ROWS)
+    {
+        const int ja = a0 + j;
+        if(ja >= extentA)
+        {
+            continue;
+        }
+        Bits* to = dst + ib + ja * dstA;
+        if constexpr(PAIR == 2)
+        {
+            if(ib + 1 < extentB && (reinterpret_cast<unsigned long long>(to) & 3) == 0)
+            {
+                *reinterpret_cast<unsigned int*>(to)
+                    = static_cast<unsigned int>(tile[PAIR * tx][j])
+                      | static_cast<unsigned int>(tile[PAIR * tx + 1][j]) << 16;
+                continue;
+            }
+        }
+#pragma unroll
+        for(int q = 0; q < PAIR; ++q)
+        {
+            if(ib + q < extentB)
+            {
+                to[q] = tile[PAIR * tx + q][j];
+            }
+        }
+    }
+}
+
 #include "ConvRepackDisjoint.h"
 
 template <typename OutputType>
@@ -1101,6 +1208,16 @@ extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs4V2(Im2Co
 extern "C" __global__ void __launch_bounds__(256) Im2ColDisjointOutputs4V4(Im2ColArgs args)
 {
     im2colDisjointOutputs<unsigned int, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) StridedTransposeNarrow2(StridedCopyArgs args)
+{
+    stridedTransposeNarrow<unsigned short>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) StridedTransposeNarrow4(StridedCopyArgs args)
+{
+    stridedTransposeNarrow<unsigned int>(args);
 }
 
 extern "C" __global__ void __launch_bounds__(256) StridedTranspose2(StridedCopyArgs args)

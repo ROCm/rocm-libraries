@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <numeric>
 #include <random>
@@ -447,6 +448,29 @@ TEST(TestGpuRepackKernels, DisjointIm2colMatchesTheGenericKernelBitForBit)
         {"Im2ColDisjointOutputs2V1", "Im2ColDisjointOutputs2V8", "Im2ColDisjointOutputs4V4"})
     {
         EXPECT_EQ(entries.count(entry), 1u) << entry;
+    }
+}
+
+TEST(TestGpuRepackKernels, NarrowTransposeMatchesTheHostAcrossTiles)
+{
+    // Channels-first to channels-last over several 64 x 64 tiles with ragged edges: odd channel
+    // and pixel counts (16-bit pairs straddling the edges and misaligned rows), an even pair, and
+    // a subsampled source.
+    SKIP_IF_NO_DEVICES();
+    const RepackProgram program;
+    for(const auto& [n, c, pixels, step] : std::vector<std::array<int64_t, 4>>{
+            {2, 70, 131, 1}, {1, 128, 4225, 1}, {3, 33, 64, 1}, {2, 66, 96, 2}})
+    {
+        CopyCase copyCase;
+        copyCase.dims = {n, c, pixels};
+        copyCase.srcStrides = {c * pixels * step, pixels * step, step};
+        copyCase.dstStrides = {c * pixels, 1, c};
+        copyCase.srcSpan = n * c * pixels * step;
+        copyCase.dstSpan = n * c * pixels;
+        SCOPED_TRACE(::testing::Message()
+                     << n << " x " << c << " x " << pixels << " step " << step);
+        runCopy<uint16_t>(copyCase, program);
+        runCopy<uint32_t>(copyCase, program);
     }
 }
 
