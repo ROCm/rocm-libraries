@@ -399,7 +399,7 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
             return validMoment(p.epsilon) && validMoment(p.magnitude) && validMoment(p.slope);
         });
     if(coefficients.summationOrder.has_value()
-       && !(std::isfinite(*coefficients.summationOrder) && *coefficients.summationOrder > 0.0))
+       && (!std::isfinite(*coefficients.summationOrder) || !(*coefficients.summationOrder > 0.0)))
     {
         throw std::invalid_argument("calculateConvFpropOutputTolerance: the summation-order "
                                     "coefficient must be finite and positive.");

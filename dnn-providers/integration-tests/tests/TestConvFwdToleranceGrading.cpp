@@ -135,7 +135,11 @@ std::string pointwiseJson(const char* name,
 
 std::string graphJson(const Spec& spec)
 {
-    const std::string dtype = spec.isFloat ? "float" : spec.isHalf ? "half" : "bfloat16";
+    std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    if(spec.isFloat)
+    {
+        dtype = "float";
+    }
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
@@ -831,7 +835,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, EngineCoefficientDecidesAFloatOutputB
 {
     const auto base = floatTolerance(defaultFillScale(), 3.0);
     const auto wide = floatTolerance(defaultFillScale(), 9.0);
-    const double reference = static_cast<double>(K_REFERENCE);
+    const auto reference = static_cast<double>(K_REFERENCE);
     const double baseBand = base.atol + base.rtol * reference;
     const double wideBand = wide.atol + wide.rtol * reference;
     ASSERT_LT(1.6 * baseBand, wideBand);
