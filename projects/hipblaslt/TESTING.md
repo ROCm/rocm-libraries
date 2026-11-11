@@ -947,8 +947,8 @@ red sanitizer run does not block a merge.
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on pull requests touching either library, either test driver, the suppression file, or the workflow,
 nightly at 07:00 UTC, and on manual dispatch.
-It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
+It builds through TheRock using its `linux-release-host-asan` preset directly for host-only
+ASAN, runs quick tests for relevant PRs, and runs standard tests
 nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
