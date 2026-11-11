@@ -367,6 +367,19 @@ validParameters = { # we need to make sure this matches develop
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
+    # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
+    # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
+    # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
+    # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2Inc64Bit": [False, True],
+    # Address form of the PrefetchGL2 global_prefetch_b8.
+    # False: a 64-bit vgpr pair address per load (vaddr, saddr=off).
+    # True: a 64-bit sgpr pair base per tensor (GL2PrefetchBase{A,B,...}) plus a
+    # 32-bit vgpr offset per load. Halves the address vgprs and advances the
+    # address with scalar instead of vector adds, but each lane's byte offset
+    # from the base (within one prefetch tile) must fit in 32 bits.
+    # Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2SAddr": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -1241,7 +1254,7 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
@@ -1340,7 +1353,6 @@ validParameters = { # we need to make sure this matches develop
     # one operand once and only the other operand is duplicated across GL2s.
     # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
     # -1: Disabled
-    # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
     "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled

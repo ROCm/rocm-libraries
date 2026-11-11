@@ -26,6 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
@@ -641,6 +642,33 @@ namespace
         }
     }
 
+    TEST(MatmulMemory_pre_checkin, peak_resident_memory_survives_the_estimate_check)
+    {
+#ifndef __linux__
+        GTEST_SKIP() << "the peak resident memory is read from /proc";
+#endif
+        // The check resets the kernel's peak, which GNU time and getrusage report too. The peak
+        // printed at the end of the run still includes memory touched before the reset.
+        const size_t   pinned = size_t(1) << 30;
+        ScopedVariable no_limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", nullptr);
+        {
+            HipHostBuffer touched(HIP_R_8I, pinned);
+            ASSERT_EQ(touched.memcheck(), hipSuccess);
+        }
+        auto before = peak_resident_bytes();
+        ASSERT_GE(before.value_or(0), pinned);
+        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        for(int i = 0; i < 2; i++) // the first check in a process measures nothing
+            MemoryEstimateCheck{MemoryEstimateCheck::kMinBytes};
+        ASSERT_TRUE(last_memory_estimate_measurement().measured)
+            << "the peak resident memory could not be reset";
+        // The kernel's resident counts drift by a few MiB, so compare with half the pinned size.
+        size_t hwm = 0;
+        ASSERT_TRUE(read_self_status("VmHWM:", hwm));
+        EXPECT_LT(hwm, *before - pinned / 2);
+        EXPECT_GE(peak_resident_bytes().value_or(0), *before - pinned / 2);
+    }
+
     // ----------------------------------------------------------------------------
     // matmul
     // ----------------------------------------------------------------------------
@@ -816,6 +844,73 @@ namespace
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
+
+    // ----------------------------------------------------------------------------
+    // MX scale layout on the TensileLite path
+    // ----------------------------------------------------------------------------
+
+    // HIPBLASLT_USE_ROCROLLER=0 keeps block-scaled problems on TensileLite, where
+    // packed scales used to run a HostPreSwizzle kernel and fail the norm check.
+    struct tensile_mx_layout_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            test_env::ScopedEnv rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+            testing_matmul(arg);
+        }
+    };
+
+    struct tensile_mx_layout_test
+        : RocBlasLt_Test<tensile_mx_layout_test, tensile_mx_layout_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_mx_layout");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(tensile_mx_layout_test, matmul)
+    {
+        if(GetParam().scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        {
+            tensile_mx_layout_testing{}(GetParam());
+            return;
+        }
+
+        // Packed scales either find a kernel that reads them, and then must match
+        // the reference, or find none. Today every gfx950 kernel for these FP8 and
+        // FP4 types is HostPreSwizzle, so they find none.
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            tensile_mx_layout_testing{}(GetParam());
+        }
+        const bool noKernel
+            = results.size() == 1 && results.GetTestPartResult(0).fatally_failed()
+              && std::strstr(results.GetTestPartResult(0).message(), "NO solution found!")
+                     != nullptr;
+        if(noKernel)
+            return;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed())
+                ADD_FAILURE_AT(r.file_name() ? r.file_name() : "", r.line_number()) << r.message();
+        }
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_mx_layout_test);
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     // ----------------------------------------------------------------------------
