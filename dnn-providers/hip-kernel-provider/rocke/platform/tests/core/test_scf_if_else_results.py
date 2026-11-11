@@ -15,7 +15,8 @@ and in a loop) or before the end of a branch of one with results, directly or
 in an scf.if within the branch, of an LDS allocation or a packed-only type as a
 result, of an if/else without one condition and two branches, of a yield in
 the kernel body or in an scf.if in a loop body, and of a malformed if/else in
-an unrolled loop of zero trips; a loop in a branch keeps its own yield; and,
+an unrolled loop of zero trips, directly in its body or in an scf.if there; a
+loop in a branch keeps its own yield; and,
 when a GPU is present, a kernel whose lanes take both branches on the LLVM and
 the hipcc route. The refusals run the verifier and the Python lowerings
 everywhere, and the C++ lowerings where the ``rocke_engine`` binding is built.
@@ -383,14 +384,20 @@ STRAY_YIELD_MESSAGE = (
 PLACEMENTS = ("direct", "in_scf_if")
 
 
+def _emit_placed(b, placement, emit):
+    """Call ``emit()`` to emit into ``b``'s current region, at ``placement``
+    (one of ``PLACEMENTS``)."""
+    if placement == "in_scf_if":
+        with b.scf_if(b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))):
+            emit()
+    else:
+        emit()
+
+
 def _extra_yield(b, placement):
     """Emit an ``scf.yield`` of one i32 into ``b``'s current region, at
     ``placement`` (one of ``PLACEMENTS``)."""
-    if placement == "in_scf_if":
-        with b.scf_if(b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))):
-            b.scf_yield(b.const_i32(1))
-    else:
-        b.scf_yield(b.const_i32(1))
+    _emit_placed(b, placement, lambda: b.scf_yield(b.const_i32(1)))
 
 
 @pytest.mark.parametrize("placement", PLACEMENTS)
@@ -567,11 +574,12 @@ def test_a_loop_in_a_branch_keeps_its_own_yield():
     _assert_lowered(b.kernel)
 
 
-def _zero_trip_if_else_kernel(stray_yield):
-    """An unrolled loop of zero trips whose body holds an if/else without
-    results, its then branch holding a yield when ``stray_yield``."""
+def _zero_trip_if_else_kernel(stray_yield, placement="direct"):
+    """An unrolled loop of zero trips whose body holds, at ``placement`` (one
+    of ``PLACEMENTS``), an if/else without results, its then branch holding a
+    yield when ``stray_yield``."""
 
-    def fill(b, k):
+    def emit_if_else(b, k):
         then_ctx, else_ctx = b.scf_if_else(b.cmp_lt(k, b.thread_id_x())).__enter__()
         with then_ctx:
             if stray_yield:
@@ -579,14 +587,19 @@ def _zero_trip_if_else_kernel(stray_yield):
         with else_ctx:
             pass
 
+    def fill(b, k):
+        _emit_placed(b, placement, lambda: emit_if_else(b, k))
+
     return _carrying_loop_kernel("zero_trip_if_else", 0, fill, unroll=True)
 
 
-def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_if_else():
+@pytest.mark.parametrize("placement", PLACEMENTS)
+def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_if_else(placement):
     """An unrolled loop of zero trips lowers no body, yet the LLVM lowering
-    refuses the body's malformed if/else as the verifier and the HIP lowering
-    do."""
-    _assert_refused(_zero_trip_if_else_kernel(True), ValueError, STRAY_YIELD_MESSAGE)
+    refuses the body's malformed if/else, directly in the body or in an scf.if
+    within it, as the verifier and the HIP lowering do."""
+    kernel = _zero_trip_if_else_kernel(True, placement)
+    _assert_refused(kernel, ValueError, STRAY_YIELD_MESSAGE)
 
 
 def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_nested_loop():

@@ -358,6 +358,12 @@ def _drop_the_name(loop):
     del loop.attrs["iter_args"][0]["name"]
 
 
+def _make_the_name_a_number(loop):
+    # Non-zero, so only the check that the name is a string refuses it; a zero
+    # would also be refused as an empty name.
+    loop.attrs["iter_args"][0]["name"] = 5
+
+
 def _drop_the_type(loop):
     del loop.attrs["iter_args"][0]["type"]
 
@@ -395,6 +401,11 @@ UNTYPED_ACC_MESSAGE = (
         ),
         pytest.param(
             _drop_the_name, "scf.for iter_arg 0 metadata has no name", id="no_name"
+        ),
+        pytest.param(
+            _make_the_name_a_number,
+            "scf.for iter_arg 0 metadata has no name",
+            id="name_not_a_string",
         ),
         pytest.param(_drop_the_type, UNTYPED_ACC_MESSAGE, id="no_type"),
         pytest.param(
