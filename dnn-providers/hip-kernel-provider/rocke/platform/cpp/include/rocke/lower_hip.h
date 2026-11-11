@@ -12,8 +12,9 @@
  *
  * This is the HIP-source mirror of the LLVM-IR path: the same IR in, a
  * human-readable HIP TU out, byte-identical to the Python lowerer's output for
- * the default gfx950 arch. The only entry point is rocke_lower_kernel_to_hip();
- * the rest of the file is shared internal plumbing in lower_hip_internal.h.
+ * the default gfx950 arch. The entry points are rocke_lower_kernel_to_hip() and,
+ * for a kernel held as serialized IR text, rocke_lower_serialized_ir_to_hip();
+ * the lowerer's shared internal plumbing is in lower_hip_internal.h.
  *
  * Binds strictly to the FROZEN IR contract in rocke/ir.h. No new IR types are
  * introduced here -- only the arch seam (rocke_hip_arch_t) and the output struct
@@ -34,20 +35,21 @@ extern "C" {
 /* --------------------------------------------------------------- arch seam */
 
 /* The HIP path has no separate ISA backend class (it emits __builtin_amdgcn_*
- * directly), so only a handful of ArchTarget hardware facts drive arch-keyed
- * decisions. The full Python ArchTarget / MMA catalog is NOT ported; this is
- * the minimal subset the lowerer reads:
+ * directly). Which MMA atoms a target has comes from its ArchTarget MMA catalog
+ * (rocke_arch_target_from_gfx); this struct holds the few other hardware facts
+ * the lowerer reads:
  *
- *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous,
- *   - whether ds_read_*_tr_* exists (gfx950-class only),
- *   - whether WMMA is available (RDNA/gfx11+; never on CDNA/MFMA targets).
+ *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous, or
+ *     none where the target has no monolithic s_waitcnt (gfx1250),
+ *   - whether ds_read_*_tr_* exists (gfx950-class only).
  *
  * Resolve one from a gfx string with rocke_hip_arch_from_gfx(); the default is
  * gfx950, which reproduces the byte-identical CDNA baseline. */
 typedef enum rocke_hip_waitcnt_family
 {
     ROCKE_HIP_WAITCNT_GFX9_10 = 0, /* split VMCNT [3:0]+[15:14], lgkm [11:8]     */
-    ROCKE_HIP_WAITCNT_GFX11 /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_GFX11, /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_NONE /* no monolithic s_waitcnt (split wait counters) */
 } rocke_hip_waitcnt_family_t;
 
 typedef struct rocke_hip_arch
@@ -55,8 +57,6 @@ typedef struct rocke_hip_arch
     const char* gfx; /* canonical gfx string, e.g. "gfx950" */
     rocke_hip_waitcnt_family_t waitcnt_family; /* s_waitcnt immediate layout        */
     bool has_ds_read_tr; /* ds_read_b{64,128}_tr_b16 present   */
-    bool has_wmma; /* RDNA/gfx11+ WMMA instruction        */
-    const char* family; /* "cdna"/"rdna" for diagnostics       */
 } rocke_hip_arch_t;
 
 /* Resolve an arch seam from a gfx name (NULL => gfx950 default). Always returns
@@ -99,6 +99,22 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
                                          const rocke_kernel_def_t* kernel,
                                          const rocke_lower_hip_opts_t* opts,
                                          rocke_strbuf_t* out);
+
+/* Parse the serialized ck.dsl.ir/v1 kernel `ir_text` (rocke/ir_serialize.h)
+ * and lower it as rocke_lower_kernel_to_hip does with `arch` (NULL => gfx950)
+ * and every other option at its default: the route for a host that holds a
+ * kernel as text rather than as a KernelDef. On ROCKE_OK the source is appended
+ * to `out`. On any other status the reason -- the parser's or the lowerer's
+ * message, or one naming the step that failed; never empty -- is appended to
+ * `message`, and `out` is unspecified. NULL or empty `ir_text` is
+ * ROCKE_ERR_VALUE ("empty IR input"), and so is a NULL `out` ("no output
+ * buffer"). `message` is optional: NULL means "do not report the reason", and
+ * the status is the same as with a buffer. The caller owns and initialises
+ * each buffer it passes. */
+rocke_status_t rocke_lower_serialized_ir_to_hip(const char* ir_text,
+                                                const char* arch,
+                                                rocke_strbuf_t* out,
+                                                rocke_strbuf_t* message);
 
 #ifdef __cplusplus
 } /* extern "C" */

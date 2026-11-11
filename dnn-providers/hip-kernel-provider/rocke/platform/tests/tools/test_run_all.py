@@ -17,6 +17,8 @@ import sys
 
 import pytest
 
+from rocke.tests.engines import IR_LOWER_CLI_ENV
+
 
 @pytest.fixture
 def runner(monkeypatch):
@@ -28,6 +30,7 @@ def runner(monkeypatch):
     # and a leaked value would let these tests pass without exercising CTest.
     for var, _, _ in module.NATIVE_PARITY_TESTS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv(IR_LOWER_CLI_ENV, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
     monkeypatch.delenv("ROCKE_TEST_ENGINE_ARCHIVE", raising=False)
     monkeypatch.delenv("ROCKE_ONLINE_LIB", raising=False)
@@ -50,6 +53,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable.touch()
     ir_types = tmp_path / "Debug" / "rocke_ir_types"
     ir_types.touch()
+    float_format = tmp_path / "Debug" / "rocke_float_format"
+    float_format.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
     nontemporal.touch()
     unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
@@ -83,6 +88,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
                 {"name": "rocke_ir_types", "command": [str(ir_types)]},
+                {"name": "rocke_float_format", "command": [str(float_format)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
                 {
                     "name": "rocke_unsigned_int_ops",
@@ -127,6 +133,9 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
     assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
+    assert all(
+        env["ROCKE_FLOAT_FORMAT_TEST"] == str(float_format) for _, env in children
+    )
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
     )
@@ -515,6 +524,22 @@ def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "relative", ["tests/rocke_ir_lower_cli", "tests/Release/rocke_ir_lower_cli.exe"]
+)
+def test_built_hip_lowering_program_is_passed_to_pytest(runner, tmp_path, relative):
+    program = tmp_path / relative
+    program.parent.mkdir(parents=True)
+    program.touch()
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env[IR_LOWER_CLI_ENV] == str(program.resolve())
+
+
+def test_missing_hip_lowering_program_reports_the_skip(runner, tmp_path, capsys):
+    assert IR_LOWER_CLI_ENV not in runner.native_pytest_env(tmp_path, "Release")
+    assert "native HIP lowering program: SKIPPED" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("subdir", ["", "Release"])
 def test_existing_engine_archive_is_reused_by_pytest(runner, tmp_path, subdir):
     archive = tmp_path / subdir / "librocke_core.a"
@@ -649,7 +674,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
+        "foreach(name rocke_storage rocke_ir_types rocke_float_format rocke_nontemporal_hip\n"
         "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
         "             rocke_intexpr\n"
         "             rocke_param_facts\n"
@@ -680,6 +705,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
     assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
+    assert Path(env["ROCKE_FLOAT_FORMAT_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
     assert Path(env["ROCKE_INTEXPR_CLI"]).is_file()

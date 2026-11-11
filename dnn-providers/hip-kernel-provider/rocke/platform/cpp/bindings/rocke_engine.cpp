@@ -3073,10 +3073,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
 }
 
 /* lower_serialized_ir_hip(ir_text, arch): the HIP-source twin of
- * lower_serialized_ir -- parse, then rocke_lower_kernel_to_hip with its
- * defaults (prologue included, launch bounds from the kernel). Lets a test
- * compare the C++ HIP lowering of a Python-built kernel, and its refusals,
- * with rocke.core.lower_hip.lower_kernel_to_hip. */
+ * lower_serialized_ir, through rocke_lower_serialized_ir_to_hip (parse, then
+ * the HIP lowering with its defaults: prologue included, launch bounds from the
+ * kernel). Lets a test compare the C++ HIP lowering of a Python-built kernel,
+ * and its refusals, with rocke.core.lower_hip.lower_kernel_to_hip. A refusal,
+ * whether the parser's or the lowerer's, is a RuntimeError ending in
+ * "(status <rocke_status_t>): <message>". */
 std::string lower_serialized_ir_hip(const std::string& ir_text, const std::string& arch)
 {
     /* The target is required, as for lower_serialized_ir. */
@@ -3085,29 +3087,28 @@ std::string lower_serialized_ir_hip(const std::string& ir_text, const std::strin
         throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: lowering requires an "
                                  "explicit gfx target; pass arch=... (there is no default)");
     }
-    const char* a = arch.c_str();
-    rocke_ir_builder_t b = {};
-    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
-        &b, rocke_ir_builder_free);
-    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "lower_serialized_ir_hip", &b);
-
     rocke_strbuf_t text;
+    rocke_strbuf_t message;
     if(rocke_strbuf_init(&text, 0) != 0)
     {
         throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: output allocation failed");
     }
     std::unique_ptr<rocke_strbuf_t, decltype(&rocke_strbuf_free)> owned_text(&text,
                                                                              rocke_strbuf_free);
-    rocke_lower_hip_opts_t opts = {};
-    opts.arch = a;
-    const rocke_status_t st = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
+    if(rocke_strbuf_init(&message, 0) != 0)
+    {
+        throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: output allocation failed");
+    }
+    std::unique_ptr<rocke_strbuf_t, decltype(&rocke_strbuf_free)> owned_message(&message,
+                                                                                rocke_strbuf_free);
+    const rocke_status_t st
+        = rocke_lower_serialized_ir_to_hip(ir_text.c_str(), arch.c_str(), &text, &message);
     if(st != ROCKE_OK)
     {
-        const char* m = rocke_ir_builder_error(&b);
         throw std::runtime_error(std::string("rocke_engine.lower_serialized_ir_hip: lower failed "
                                              "for arch '")
-                                 + a + "' (status " + std::to_string((int)st)
-                                 + "): " + ((m && *m) ? m : "unknown lowering error"));
+                                 + arch + "' (status " + std::to_string((int)st)
+                                 + "): " + rocke_strbuf_cstr(&message));
     }
     return std::string(rocke_strbuf_cstr(&text));
 }
