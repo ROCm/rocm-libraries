@@ -11,10 +11,8 @@ gfx1250-strict job installs ROCm from pip wheels, and tox's packaging env never 
 Part 1 says what changes in which branch and repository. Part 2 records the
 decisions behind those changes. The decision log
 ([PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md)) records
-decisions 1–14 as Q121–Q134. `bindings_docs.md` refers to the design document
-"Python Bindings Packaging and Validation in TheRock" (standalone canonical
-distributions built against the installed ROCm, staged through TheRock, validated
-as shipped, with provenance), which is not part of this repository.
+decisions 1–14 as Q121–Q134. The TheRock packaging requirements this effort
+answers are written out below, with their status.
 
 **Status (2026-11-11):** every rocm-libraries branch in section 1.2, including the
 new R0 and R1, is implemented and validated per branch (section 1.5 lists where the
@@ -34,6 +32,31 @@ The table below is the state at the start of the review.
 | rocm-libraries `therock-ref` | `647a8c52a206` |
 | TheRock `main` | `f92083089` (pins rocm-libraries `2d3b6e98e4ef`) |
 | TheRock `users/alvasile/tensilelite_packaging` (local, rebased on `main`, unpushed) | `0abec119b` |
+
+## Packaging requirements this effort answers
+
+TheRock's design for Python packages that sit next to native ROCm components
+(Origami is the first implementation, TensileLite follows) asks for the
+requirements below. They are numbered P1–P8 so the rest of this document can refer
+to them.
+
+The motivating failure is Origami (ROCM-29472, ROCM-32106). ROCm shipped one native
+Origami library, and a separately installed `rocm-origami` Python package carried
+another version. Both exposed overlapping symbols with incompatible memory layouts,
+which corrupted the heap. TheRock's validation did not install the Python package
+that PyTorch CI used, so it did not reproduce the crash, and it was found during
+release-candidate testing.
+
+| # | Requirement | Status |
+| --- | --- | --- |
+| P1 | A Python package is a standalone, canonical distribution inside its super-repository. | Done for the `tensilelite` wheel (#11016). rocisa, its adaptor and the client are not Python distributions yet (F3, F4). |
+| P2 | `pip install path/to/project` works against the installed ROCm, and does not rebuild or replace the native libraries under test. | Done for `tensilelite`: plain pip, tox and sdist builds agree (decision 1). Kernel generation installs nothing into the build Python (#11022, decision 9). The client records the ROCm it was built against and is checked at run time (decision 14). rocisa and `stinkytofu` are still reached by path (F3, F4). |
+| P3 | A dedicated TheRock stage builds the wheel once and stages it with the SDK. | Not done. The wheel is built in hipBLASLt's CMake and shipped in `blas_test` (F1). |
+| P4 | Validation runs against the installed, shipped ROCm binaries, without rebuilding or substituting them. | Partly. T8–T10 and R1 test the installed wheel against the artifact's own components (decision 9). Pip-SDK and native-package validation is F2. |
+| P5 | Results carry provenance: SDK build, package version, native component versions, source revisions, Python version, test inputs and generated artifacts. | Partly. T11 records the wheel, the client's version and commit, the TheRock manifest's package version and commit, and the Python version. Native component versions beyond the manifest, test inputs and generated artifacts are not recorded (F7). |
+| P6 | For TensileLite, validation distinguishes tests of newly generated kernels from tests of the hipBLASLt binaries shipped in the SDK, so a pass on one is not read as a pass on the other. | Not done (F7). |
+| P7 | A native Python package evaluates the Python Stable ABI before adding per-Python-version builds. | Deferred with rocisa. F4 starts from the Stable ABI; if rocisa cannot use it, that is reviewed before any per-version build is added. |
+| P8 | The first implementation, Origami (rocm-libraries#10975, open), is the reference pattern that TensileLite reuses. | Not done. F1 must follow it (F8). |
 
 ---
 
@@ -689,7 +712,7 @@ land in any order.
 | **T8** test(tensilelite): installed-wheel runner (not yet wired to any job) | New `test_tensilelite.py` and `tensilelite_runner_test.py`: install the one `tensilelite` wheel; shim `PYTHONPATH` with only rocisa, its adaptor and stinkytofu; assert the import location; `--help` against the real root; no label parsing; run today's path unless `wheels/` exists and no unpacked `tensilelite/` remains. No compatibility-wheel phase (decision 13). | Validation runs the installed artifacts (decision 9); TheRock doesn't parse labels (decision 8) | T7 | Unused until T9; runs today's path until R1's wheel-only layout. Tests include `+devrocm…`, `+rocm…` and `+g<sha>` wheels. |
 | **T9** test: run the `tensilelite` job through the wheel runner | One `test_script` change in `fetch_test_configurations.py` | Starts testing the installed wheels for that job | T8 | Today's pin runs today's path |
 | **T10** test: run the `tensilelite-common` job through the wheel runner | One `test_script` change (`TEST_CATEGORY=hw-common`) | Both jobs then test the same artifacts | T8 | As T9 |
-| **T11** test(tensilelite): record provenance | Job summary and JUnit properties: wheel versions, client `--version`/`--source-revision` when present, manifest `rocm_package_version`/`the_rock_commit`, Python version | `bindings_docs.md` requires provenance (decision 9) | T8 | Missing values are recorded as absent |
+| **T11** test(tensilelite): record provenance | Job summary and JUnit properties: wheel versions, client `--version`/`--source-revision` when present, manifest `rocm_package_version`/`the_rock_commit`, Python version | Requirement P5 (decision 9) | T8 | Missing values are recorded as absent |
 | **T12** build(blas): exclude source-only TensileLite tests from `blas_test` | One `exclude` pattern in `artifact-blas.toml` | Source-tree contract tests don't belong in installed artifacts | — | The pattern matches nothing that shouldn't be excluded today |
 | **T13** test: TensileLite artifact-layout checks | `test_artifact_structure.py`: when `wheels/` exists, the `tensilelite` wheel and installed tests are in `blas_test`, no `source_only` tests, and the client is in `blas_test` only | Guards the layout the runner relies on and Q097 client ownership | — | Checks apply only when `wheels/` exists |
 | **T14** (after the submodule includes R1) test(tensilelite): remove the existing-path branch | Delete T8's existing-path branch and make T13's checks unconditional | Once the pinned rocm-libraries ships a wheel-only artifact (R1), that branch is dead code | Submodule includes R1, T8, T13 | Lands only after that bump; rebased onto `main` then |
@@ -784,8 +807,8 @@ code-generation `PYTHONPATH`).
 - **Target:** a standalone rocisa package built against the installed ROCm, using
   the Python stable ABI first, and linking the installed `libstinkytofu` rather than
   vendoring it.
-- **Why it matters:** this is the remaining gap against `bindings_docs.md`, and the
-  Origami-style risk of a duplicate native copy.
+- **Why it matters:** this is the remaining gap against requirements P1, P2 and P7,
+  and the Origami-style risk of a duplicate native copy.
 - **ROCm identity:** the rocisa package records the ROCm it was built against, using
   decision 4's sources: the manifest or `rocm_sdk_core` (full), or `.info/version`
   (base). It is checked against the runtime adapter with the same rules as the
@@ -812,6 +835,25 @@ Recording which TensileLite generated a kernel library belongs here, together wi
 the check that reads it, inside the library's own serialized metadata, not as a
 loose sidecar file. It becomes useful once generation and the wheel can come from
 different places (F1). This replaces the sidecar #11022 used to plan.
+
+### F7 — Say what each TensileLite job validates, and widen provenance (P5, P6)
+
+- The `tensilelite` and `tensilelite-common` jobs test kernels that the checkout's
+  own TensileLite generates. They do not test the hipBLASLt binaries shipped in the
+  SDK, and a pass on one must not be read as a pass on the other. The smallest fix
+  is a property in the job summary and the JUnit file, written by the T11 provenance
+  step, that names which of the two a job validates. Decide whether that belongs in
+  T11 or in a follow-up.
+- Provenance (T11) does not yet record native component versions beyond the TheRock
+  manifest, the test inputs or the generated artifacts. Decide which of these are
+  worth recording and what a failing job should attach.
+
+### F8 — Follow Origami's packaging stage (P8)
+
+Origami is the reference implementation of the TheRock Python packaging stage, and
+its PR (rocm-libraries#10975) is still open. Read it before designing F1's wheel
+stage, so the two stages use one pattern for building, staging and validating a
+wheel.
 
 ## 1.5 Implementation notes (2026-11-11)
 
@@ -872,7 +914,7 @@ Justification:
 - **Environment stamping produced inconsistent artifacts.** One local tox build of
   #11016 produced sdist `+rocm7.2.4` and wheel `+rocm9.9.9`. At the stack top, a plain
   `pip install path` fails outside tox.
-- **`bindings_docs.md` requires** `pip install path/to/project` to work against an
+- **Requirement P2** is that `pip install path/to/project` works against an
   installed SDK.
 - **`ROCM_VERSION` already means the HIP build version** (`Toolchain/Component.py`,
   set by CMake from `hip_VERSION`).
@@ -1062,7 +1104,7 @@ Justification:
 - **A dev wheel makes no ROCm claim.** `+g<sha>` says which source it came from, not
   which ROCm it was built for, so there is nothing to enforce.
 - **Failing dev wheels would break normal use:** every source install (the
-  `bindings_docs.md` requirement), every tox and CI lane, and TheRock CI before T1.
+  P2 requirement), every tox and CI lane, and TheRock CI before T1.
   That would contradict decision 6.
 - **Releases are kept apart from nightly and dev builds.** With full identities
   (decision 4), a nightly or `+devrocm` wheel is rejected on a release install, and
@@ -1234,8 +1276,8 @@ Justification:
 
 - **Tests must exercise the artifact.** With `PYTHONPATH` at the component root, the
   unpacked copy shadows the installed wheel, so the "installed wheel" test never
-  runs the wheel. `bindings_docs.md` requires validation against what ships, with
-  no substitution (the Origami lesson, ROCM-29472/ROCM-32106).
+  runs the wheel. Requirement P4 is validation against what ships, with no
+  substitution (the Origami lesson, ROCM-29472/ROCM-32106).
 - **Building must not modify the builder.** `pip install --force-reinstall` changes
   TheRock's shared build venv or a developer's Python, and can collide between
   builds. Develop already shows code generation needs no install.
@@ -1309,13 +1351,13 @@ Follow-up: F5 (section 1.4).
 - **Validation phases for the pip SDK and native packages** are F2.
 - **`rocisa_stinkytofu_adaptor` moves out of the source tree** before F1 (F3).
 - **rocisa packaging stays deferred (D6).** It is the remaining gap against
-  `bindings_docs.md`'s standalone-binding pattern (F4).
+  requirement P1, standalone packaging (F4).
 - **Checking generated kernel libraries against hipBLASLt's SHA** is parked (F6).
   The serialized format gained new fields in about 33 commits over 16 months,
   roughly 7 a month recently, so any cross-checkout guarantee would need the same
   whole-repo-SHA rule hipBLASLt already applies to tuning files.
 
-Follow-ups: F1–F6 (section 1.4).
+Follow-ups: F1–F8 (section 1.4).
 
 ## Decision 13 — Remove the compatibility package (Decided)
 
