@@ -53,7 +53,8 @@ issued a trip ahead. Two or more resident blocks per CU overlap one block's soft
 with another's gemms on the same SIMD; `qr_tdm` and `qr_tdm_sched` instead prefetch
 and schedule within a block.
 
-It has 16-, 64- and 128-row query tiles (d256/d512 have no 128-row tile); the tile rules
+It has 16-, 64- and 128-row query tiles (d256/d512 have no 128-row tile, and d32, whose V
+rows are narrower than 64 columns, no 16-row tile); the tile rules
 are `_gfx125_qr_tdm_pingpong_tiles` in `codegen/ops/fmha_fwd.py`. Q/K rows are staged at
 the head dim's own length (d32 is not padded to 64).
 
@@ -61,16 +62,19 @@ The LDS read schedule is chosen per head dim (`QrTdmPingPongLdsReadSchedule`,
 `GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE` in `codegen/ops/fmha_fwd.py`): prefetching
 the next K/V slice while the current slice's WMMAs run, and reading V's first slice
 before the softmax, each from the tile size on where its VGPRs leave the occupancy
-unchanged. Instance names carry `_sp<rows>` / `_vbs<rows>` for the parts that take effect
-on their tile.
+unchanged. Instance names carry `_sp<rows>` / `_vbs<rows>` for the configured parts that
+take effect on their tile. Independently of that switch, the 128-row tiles that run
+without a per-tile row max (no window mask, no bias, no dropout) always prefetch the next
+slice; their names do not show it.
 
 It supports masks, LSE, logits soft cap, elementwise bias and ALiBi, dropout (not on
 the 16-row tile), sink tokens, column-major V, batch and group mode. The one query it
 leaves to `qr_tdm_sched` is d128 with at least 128 query rows and fewer than two
 128-row query blocks per CU (`batch * nhead_q * max_seqlen_q < 256 * num_cus`), where a
-single resident block cannot overlap softmax and gemms. Among its head dims `qr_tdm` is
-generated for d128 only, as the fallback of the calls `qr_tdm_sched` refuses; skip goes
-to the generic `qr` pipeline.
+single resident block cannot overlap softmax and gemms. `qr_tdm` sits on the tiles behind
+pingpong's on every head dim and takes what pingpong and `qr_tdm_sched` leave: group-mode
+skip, head dims that are not multiples of 8 (pingpong's dcheck/dvcheck), and on d128 the
+calls `qr_tdm_sched` refuses. The FP16/BF16 inventories hold no generic `qr`.
 
 ### Basic TDM forward feature coverage
 
@@ -84,7 +88,9 @@ accept batch `skip_min_seqlen_q=true`; custom tune `filters.skip` applies only t
 group mode on this architecture.
 
 FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
-The existing D192/V128 bias/dropout and softcap-with-bias exclusions still apply.
+The existing D192/V128 bias/dropout exclusion still applies; the logits soft cap with a
+bias is generated for the TDM pipelines (`GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS`:
+scale_s, the soft cap, then the bias).
 FP8 and the split-KV/paged-KV APIs retain their separate inventories.
 
 ### Scheduled TDM forward pipeline
@@ -99,15 +105,14 @@ compile-time sink-token flag. The pipeline also implements D64/V64 and D192/V128
 geometries (described below), which are not generated on gfx125 since
 `qr_tdm_pingpong` serves those head dims.
 
-D128 uses a 128-by-128 Q/K sequence tile. Aligned batch K lengths use unpadded
-sequence traits; tails and group mode use padded traits. Generated scheduled sources
-enable expert scheduling mode.
+D128 uses a 128-by-128 Q/K sequence tile with padded sequence traits only (group
+lengths live in device memory, so dispatch could not prove them tile aligned).
+Generated scheduled sources enable expert scheduling mode.
 
 WG indexing follows the existing shared kernel rules. For batch BHSD square
-causal attention with one V tile and no dropout, sched D64/D128 visit the longest
+causal attention with one V tile and no dropout, sched D128 visits the longest
 Q tile across heads within each batch first, subject to the grouped XCD path
-described below. Sched D192 keeps the existing
-head-major remap; group mode does not enter this batch-local branch. The XCC
+described below; group mode does not enter this batch-local branch. The XCC
 mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
 is explicitly defined to a nonzero value. Its eight-XCC mapping assumptions
 must be checked on the target hardware before enabling it.
@@ -128,13 +133,17 @@ and no bias, dropout, LSE, sink, softcap, or quantization scale. Groups contain
 Larger sequences and other cases retain the existing mapping. The opt-in paired-XCC experiment,
 including its fallback order, takes precedence over this grouping.
 
-The non-causal XCD path is unchanged. The BHSD and general-grid XCD fallbacks
+The non-causal XCD path takes group mode too when the caller sets
+`fmha_fwd_args::uniform_seqlens` (the batches' query and key lengths about equal;
+the Python varlen API and the example runner set it when the longest lengths are
+within 1/8 of the means); otherwise group mode keeps the round-robin. The BHSD and general-grid XCD fallbacks
 have the same logical head-major order. They retain separate batch-first and
 tile-first arithmetic forms because merging them measured slower in the early
 gfx1250 standalone experiment.
 Both share the corrected Q/V decoding: masking reverses the Q dimension only.
 Unit tests check the complete mapping; GPU tests exercise `GetTileIndex()`
-thresholds and fallbacks. The launch interface and Kargs are unchanged.
+thresholds and fallbacks. The launch interface is unchanged; `fmha_fwd_args` and the
+group-mode Kargs carry the `uniform_seqlens` hint.
 
 The mapper's coordinate coverage does not expand a pipeline's supported head
 dimensions. In particular, the QR TDM paths still assume a single V tile when

@@ -309,6 +309,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(!kQuantized || kHwGemm1Scale,
                   "qr_tdm pipeline: a quantized run needs the scaled MMA in gemm1");
 
+    // the quantized entry points take no soft cap or dropout arguments
+    static_assert(!kQuantized || (!kHasLogitsSoftCap && !kHasDropout),
+                  "qr_tdm pipeline: softcap/dropout require nonquantized Q/K/V");
+
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
 

@@ -852,10 +852,13 @@ def qr_tdm_pingpong_double_v(tile: FmhaFwdTileSize, mask: str) -> bool:
 def qr_tdm_pingpong_effective_schedule(
     tile: FmhaFwdTileSize, pipeline: FmhaFwdPipeline
 ) -> FmhaFwdPipeline:
-    """The pipeline with the parts of its LDS read schedule that take effect on the tile,
-    as BlockFmhaPipelineQRKSVSTdmPingPong decides them (kPrefetchNextSlice,
+    """The pipeline with the parts of its configured LDS read schedule that take effect on
+    the tile, as BlockFmhaPipelineQRKSVSTdmPingPong decides them (kPrefetchNextSlice,
     kReadVBeforeSoftmax); the others are set to 0. Instance names and the rendered
-    QrTdmPingPongLdsReadSchedule then name the schedule the kernel runs."""
+    QrTdmPingPongLdsReadSchedule then name the configured parts the kernel runs. The
+    pipeline also prefetches the next slice on its 128-row tiles without a per-tile row
+    max (kSkipRowMax: no window mask, bias or dropout) whatever the schedule says; the
+    names do not show that."""
     sp = pipeline.F_pp_slice_prefetch
     vbs = pipeline.F_pp_v_before_softmax
     if not (sp > 0 and tile.F_bm0 >= max(sp, 64)):
@@ -1815,9 +1818,10 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
 
 
 # Measured bm0=64 -> bm0=128 crossover max_seqlen_q of qr_tdm on gfx1250 (fp16/bf16),
-# per head dim (hdim_q, hdim_v). Only d128 keeps qr_tdm among the head dims
-# qr_tdm_pingpong serves (see _gfx125_qr_tdm_serves); re-benchmark the value (do not
-# inherit it) when a head dim is added or the pipeline changes.
+# per head dim (hdim_q, hdim_v). Among the head dims qr_tdm_pingpong serves, only d128
+# runs qr_tdm on the calls pingpong takes too (the ones qr_tdm_sched refuses; see
+# _gfx125_qr_tdm_serves); re-benchmark the value (do not inherit it) when a head dim is
+# added or the pipeline changes.
 GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
     (128, 128): 128,
 }
@@ -1860,11 +1864,13 @@ GFX125_QR_TDM_PINGPONG_HDIMS = (
 
 
 def _gfx125_qr_tdm_serves(hdim_pair):
-    """Whether fp16/bf16 qr_tdm instances are generated for (hdim, hdim_v)
-    (get_hdim_tile_size_dict keeps qr_tdm's tiles for those pairs only). qr_tdm_pingpong takes every query of the head dims whose range is
-    unconditional, so qr_tdm stays only for the other pairs and for those whose queries
-    pingpong leaves to qr_tdm_sched, which falls back to qr_tdm for the calls it refuses
-    (e.g. a sink_ptr without sink tokens)."""
+    """Whether every fp16/bf16 qr_tdm variant is generated for (hdim, hdim_v).
+    qr_tdm_pingpong takes every query of the head dims whose range is unconditional, so
+    there qr_tdm only takes skip and the padded head dims off the 8-element vector (see
+    get_pipelines); all of its variants stay for the other pairs and for those whose
+    queries pingpong leaves to qr_tdm_sched, which falls back to qr_tdm for the calls it
+    refuses (e.g. a sink_ptr without sink tokens). get_hdim_tile_size_dict keeps a qr_tdm
+    tile for every pair."""
     return (
         hdim_pair not in GFX125_QR_TDM_PINGPONG_HDIMS
         or _gfx125_qr_tdm_pingpong_range(hdim_pair) != "true"
@@ -2310,7 +2316,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                             "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
                             "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
                         )
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=sched_constraint))  # fmt: skip
+                    # the padded specialization only (check_qr_tdm_sched_codegen_compatibility)
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=sched_constraint))  # fmt: skip
 
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:

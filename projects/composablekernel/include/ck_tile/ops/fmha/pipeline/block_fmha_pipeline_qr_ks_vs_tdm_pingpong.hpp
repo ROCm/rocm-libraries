@@ -10,6 +10,23 @@
 
 namespace ck_tile {
 
+namespace detail {
+// Whether a mask's rows can start their keys in later tiles: its IsLocal (a window) where it
+// has one, else true (a generic mask may). A C++17 detection idiom: ck_tile still builds as
+// C++17.
+template <typename Mask, typename = void>
+struct qr_tdm_mask_starts_rows_late : std::true_type
+{
+};
+template <typename Mask>
+struct qr_tdm_mask_starts_rows_late<Mask, std::void_t<decltype(Mask::IsLocal)>>
+    : std::bool_constant<Mask::IsLocal>
+{
+};
+template <typename Mask>
+inline constexpr bool qr_tdm_mask_starts_rows_late_v = qr_tdm_mask_starts_rows_late<Mask>::value;
+} // namespace detail
+
 /**
  * @brief How qr_tdm_pingpong schedules the LDS reads of the main-loop gemm operands
  *        (K for the QK gemm, V for the PV gemm). The code generator picks one per head
@@ -126,13 +143,11 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static_assert(!Base::kHasDropout || kNWarp == 1,
                   "qr_tdm_pingpong: dropout needs the QK gemm warps on M");
 
-    // The row sum of P: on the matrix unit when one gemm_1 warp tile of columns spans a
-    // row, i.e. the gemm_1 warps are all on M; the short-query tile spends them on N and
-    // takes an fp32 sum.
-    static constexpr bool kRowSumOnMatrixUnit =
-        BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 && !Base::kHasDropout;
-    // Without a per-tile row max (whole rows in one warp, the tiles with the matrix-unit
-    // row sum): P is taken against the running base m_base and its fp32 row sum, which l
+    // The gemm_1 warps are all on M (every tile but the short-query one, which spends them
+    // on N).
+    static constexpr bool kGemm1WarpsOnM = BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1;
+    // Without a per-tile row max (whole rows in one warp, gemm_1 warps all on M, no
+    // dropout): P is taken against the running base m_base and its fp32 row sum, which l
     // and the LSE need anyway, bounds every p. A tile whose sum stays at most
     // 2^kRebaseThreshold per thread needs no row max (v_max3 and a cross-lane sync ahead
     // of the exps). The rare tile over it, or with a row that has no base yet, goes the
@@ -140,17 +155,15 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // then sum the same fp32 P with and without the LSE, and the LSE store is all the
     // LSE adds. Each thread keeps its part of l; the lanes are synced once, after the
     // main loop.
-    static constexpr bool kRowMaxBySum = kRowSumOnMatrixUnit && kNWarp == 1;
+    static constexpr bool kRowMaxBySum = kGemm1WarpsOnM && kNWarp == 1 && !Base::kHasDropout;
     // A mask whose rows start their keys in later tiles (a window) leaves rows without a
     // base for most of a row's few tiles: those tiles take the row max anyway, and the
     // check only costs (gfx1250 d128 window 127 x 2048 keys: +3%); the row max then stays.
     static constexpr bool kMaskStartsRowsLate = []() {
         if constexpr(!FmhaMask::IsMasking)
             return false;
-        else if constexpr(requires { FmhaMask::IsLocal; })
-            return FmhaMask::IsLocal;
         else
-            return true;
+            return detail::qr_tdm_mask_starts_rows_late_v<FmhaMask>;
     }();
     // A bias keeps the row max as well: its per-score work leaves the check little to save,
     // and the fallback's second bias pass took the d160 ALiBi tile over 512 VGPRs.
@@ -299,38 +312,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         return rowsum;
     }
 
-    // l += rowsum(P) on the matrix unit (see GetRowSumBlockGemm), from the 16-bit P that
-    // gemm_1 consumes. The result comes back replicated across a warp tile's columns.
-    template <typename LTensor, typename PTile>
-    CK_TILE_DEVICE static void AccumulateRowSumOnMatrixUnit(LTensor& l, const PTile& p_tile)
-    {
-        constexpr auto gemm_rowsum = Policy::template GetRowSumBlockGemm<Problem>();
-        using RowSumGemm           = remove_cvref_t<decltype(gemm_rowsum)>;
-
-        // constant B operand of ones
-        auto ones = make_static_distributed_tensor<PDataType>(
-            make_static_tile_distribution(RowSumGemm::MakeBBlockDistributionEncode()));
-        set_tile(ones, type_convert<PDataType>(1.0f));
-
-        auto l_acc = RowSumGemm::MakeCBlockTile();
-        clear_tile(l_acc);
-
-        static_for<0, kN0 / kK1, 1>{}([&](auto i_k) {
-            gemm_rowsum(
-                l_acc,
-                get_slice_tile(p_tile, sequence<0, i_k * kK1>{}, sequence<kM0, (i_k + 1) * kK1>{}),
-                ones);
-        });
-
-        constexpr auto l_spans = decltype(l_acc)::get_distributed_spans();
-        sweep_tile_span(l_spans[I0], [&](auto idx0) {
-            SMPLComputeDataType row{0};
-            // every column carries the same row sum; the sweep only names a valid column
-            sweep_tile_span(l_spans[I1], [&](auto idx1) { row = l_acc[make_tuple(idx0, idx1)]; });
-            l(make_tuple(idx0)) += row;
-        });
-    }
-
     // The sink, mask/bias and LSE/O-finalization steps of qr_tdm's bodies, as
     // functions: the main loop below keeps only its own TDM scheduling and softmax
     // rescaling. qr_tdm keeps its inline copies; moving its bodies onto calls computes
@@ -339,13 +320,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // Scheduling groups that issue the WMMAs' B-operand reads kAheadWmma WMMAs ahead: a
     // prelude of kAheadWmma WMMAs' reads, then one WMMA and the reads of the WMMA
     // kAheadWmma later, alternating. A B fragment takes two ds reads and is shared by the
-    // warp's MIterPerWarp WMMAs (one K iteration per warp gemm). kLeadingWmma WMMAs
-    // without reads of their own (the matrix-unit row sum) that share the scheduling
-    // region go first.
-    template <index_t kMIterPerWarp,
-              index_t kNumWmma,
-              index_t kLeadingWmma = 0,
-              index_t kAheadWmma   = 2>
+    // warp's MIterPerWarp WMMAs (one K iteration per warp gemm).
+    template <index_t kMIterPerWarp, index_t kNumWmma, index_t kAheadWmma = 2>
     CK_TILE_DEVICE static void SchedReadsAheadOfWmma()
     {
         static_assert(kMIterPerWarp == 1 || kMIterPerWarp == 2,
@@ -353,8 +329,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         static_assert(kNumWmma >= 2);
         constexpr index_t kReadsPerWmma = 2 / kMIterPerWarp;
         constexpr index_t kAhead        = kAheadWmma < kNumWmma ? kAheadWmma : kNumWmma;
-        if constexpr(kLeadingWmma > 0)
-            __builtin_amdgcn_sched_group_barrier(LLVMSchedGroupMask::MFMA, kLeadingWmma, 0);
         __builtin_amdgcn_sched_group_barrier(
             LLVMSchedGroupMask::DS_READ, kAhead * kReadsPerWmma, 0);
         static_for<0, kNumWmma - kAhead, 1>{}([&](auto) {
@@ -699,10 +673,9 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
-        // init M, L (sink-aware: when sink_v is finite, pre-seed m/l). l normalises O; on
-        // the matrix unit it sums the 16-bit P that gemm_1 consumes. Without the row max
-        // (kRowMaxBySum) it is each thread's part of the fp32 sum, without the sink's
-        // seed, synced and seeded after the main loop.
+        // init M, L (sink-aware: when sink_v is finite, pre-seed m/l). l normalises O: the
+        // row sum of the fp32 P. Without the row max (kRowMaxBySum) it is each thread's part
+        // of that sum, without the sink's seed, synced and seeded after the main loop.
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
         // row max o_acc and l are normalised to; trails m by up to
@@ -1041,7 +1014,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             if constexpr(!kPrefetchNextSlice)
                 SchedReadsAheadOfWmma<Gemm0T::MIterPerWarp,
                                       Gemm0T::MIterPerWarp * Gemm0T::NIterPerWarp * k0_loops,
-                                      0,
                                       kReadAheadWmma>();
 
             // V_i's first slice (see kReadVBeforeSoftmax);
@@ -1344,9 +1316,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             }();
 
             // l{j}; o_acc is already in p's m_base frame.
-            if constexpr(kRowSumOnMatrixUnit && !kRowMaxBySum)
-                AccumulateRowSumOnMatrixUnit(l, p_tile);
-            if constexpr(!kRowSumOnMatrixUnit && !Base::kHasDropout)
+            if constexpr(!kRowMaxBySum && !Base::kHasDropout)
             {
                 const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
@@ -1411,43 +1381,33 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                   sequence<kM0, k1_loops * kK1>{}),
                    v_tile);
 
-            // V reads run ahead as for K above. Without the wait before gemm_1
-            // (double V) the row-sum WMMAs share its scheduling region; placing them
-            // first measured faster for d64 dense grids only (gfx1250: +4% at 128 x 1859
-            // keys, -1..5% on d64 masked and d128 grids), so the others leave them free.
+            // V reads run ahead as for K above.
             using Gemm1T = remove_cvref_t<decltype(gemm_1)>;
             static_assert(Gemm1T::WarpGemm::kK == kK1, "one K iteration per PV warp gemm");
-            constexpr index_t kRowSumWmma = kDoubleV && kRowSumOnMatrixUnit && !kRowMaxBySum &&
-                                                    !FmhaMask::IsMasking && kSubQKHeaddim <= 64
-                                                ? k1_loops * Gemm1T::MIterPerWarp
-                                                : 0;
             if constexpr(!kPrefetchNextSlice)
                 SchedReadsAheadOfWmma<Gemm1T::MIterPerWarp,
                                       Gemm1T::MIterPerWarp * Gemm1T::NIterPerWarp * k1_loops,
-                                      kRowSumWmma,
                                       kReadAheadWmma>();
 
         } while(++i_total_loops < num_total_loop);
 
         if constexpr(kRowMaxBySum)
         {
-            // the lanes' parts of the row, then the sink's seed in the m_base frame
+            // the lanes' parts of the row, then the sink's seed in the m_base frame: a finite
+            // sink_v (sink_ptr) seeded m whether or not kHasSink retains sink tokens
             ReduceRowSync(l, [](auto e0, auto e1) { return e0 + e1; });
-            if constexpr(kHasSink)
+            if(__builtin_isinf_sign(sink_v) >= 0)
             {
-                if(__builtin_isinf_sign(sink_v) >= 0)
-                {
-                    const auto sink_m      = SinkRowMax(sink_v, scale_s);
-                    constexpr auto l_spans = decltype(l)::get_distributed_spans();
-                    sweep_tile_span(l_spans[I0], [&](auto idx0) {
-                        constexpr auto i_idx = make_tuple(idx0);
-                        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                     BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
-                            l(i_idx) += exp2(sink_m - m_base[i_idx]);
-                        else
-                            l(i_idx) += exp2(scale_s * (sink_m - m_base[i_idx]));
-                    });
-                }
+                const auto sink_m      = SinkRowMax(sink_v, scale_s);
+                constexpr auto l_spans = decltype(l)::get_distributed_spans();
+                sweep_tile_span(l_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                 BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
+                        l(i_idx) += exp2(sink_m - m_base[i_idx]);
+                    else
+                        l(i_idx) += exp2(scale_s * (sink_m - m_base[i_idx]));
+                });
             }
         }
         if constexpr(kStoreLSE)

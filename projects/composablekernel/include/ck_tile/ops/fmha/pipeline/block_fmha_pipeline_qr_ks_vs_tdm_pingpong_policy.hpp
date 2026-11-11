@@ -264,39 +264,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPongPolicy : BlockFmhaPipelineQRKSVSTdmDefa
     {
         return MakePRegTileDistribution<Problem>();
     }
-
-    // Row sum of P on the matrix unit: P (M x kN0) times ones (kN0 x one warp tile), with
-    // the PV gemm's types and warp gemm, so the sum lands replicated in o_acc's layout.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetRowSumBlockGemm()
-    {
-        using PVBlockGemm = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
-        using WarpGemm    = typename PVBlockGemm::WarpGemm;
-
-        static_assert(Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1,
-                      "one warp tile of columns covers the row sum only with the gemm_1 "
-                      "warps all on M");
-
-        using GemmProblem = BlockGemmProblem<
-            typename Problem::PDataType,
-            typename Problem::VDataType,
-            typename Problem::OaccDataType,
-            Problem::kBlockSize,
-            TileGemmShape<
-                sequence<Problem::BlockFmhaShape::kM0, WarpGemm::kN, Problem::BlockFmhaShape::kK1>,
-                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
-
-        using BlockGemmPolicy =
-            BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::PDataType,
-                                                typename Problem::VDataType,
-                                                typename Problem::OaccDataType,
-                                                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                                                WarpGemm,
-                                                GemmLoopOrder::KMN>;
-
-        return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
-    }
 };
 
 } // namespace ck_tile

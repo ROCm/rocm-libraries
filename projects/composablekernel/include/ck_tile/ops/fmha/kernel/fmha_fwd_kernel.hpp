@@ -268,12 +268,11 @@ struct FmhaFwdKernel
     static constexpr index_t kAsyncOStoreBytes          = 16;
     static constexpr index_t kAsyncOStoreVec            = kAsyncOStoreBytes / sizeof(ODataType);
     static constexpr uint64_t kAsyncOTileSpanLimitBytes = uint64_t{1} << 32;
-    // Match qr_tdm plus the validated sched D64/D128 variants. Sched D192 keeps
-    // the existing head-major remap. GetTileIndex additionally requires batch
-    // BHSD, square causal attention, one V tile, and no dropout for this order.
+    // Match qr_tdm plus the validated sched D128 variant (the only one generated).
+    // GetTileIndex additionally requires batch BHSD, square causal attention, one V
+    // tile, and no dropout for this order.
     static constexpr bool kUseBatchLocalCausalOrder =
-        detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> || kIsTdmSchedD128 ||
-        (kPipelineName == "qr_tdm_sched" && FmhaPipeline::BlockFmhaShape::kQKHeaddim == 64);
+        detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> || kIsTdmSchedD128;
 
     // This family was measured without LSE output. Keep LSE-writing variants
     // on their existing mapping until their performance is validated separately.
