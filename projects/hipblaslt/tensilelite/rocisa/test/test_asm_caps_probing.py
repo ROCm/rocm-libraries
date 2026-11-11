@@ -65,6 +65,10 @@ def _script(path, body):
     return path
 
 
+def _runs(log):
+    return len(log.read_text().splitlines()) if log.exists() else 0
+
+
 def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
     # Python's signal handlers don't restart interrupted system calls, so a
     # timer going off while a probe waits for the assembler fails the wait with
@@ -76,3 +80,22 @@ def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
     uninterrupted = _probe(script, [(9, 4, 2)])
     assert all(c["SupportedISA"] == 1 for c in uninterrupted.values())
     assert _probe(script, [(9, 4, 2)], interval=0.001) == uninterrupted
+
+
+@pytest.mark.parametrize("isa", [(9, 4, 2), (11, 0, 0)], ids=["gfx942", "gfx1100"])
+def test_rejected_isa_stops_probing_after_the_empty_source(tmp_path, isa):
+    # Rejecting every source is what an assembler that doesn't know the ISA does.
+    # The empty source's command line rejects them all, so only probes with
+    # other options still run: gfx10+ wave32 probes, which leave out
+    # -mwavefrontsize64. debug runs every probe, for comparison.
+    log = tmp_path / "runs.log"
+    script = _script(tmp_path / "bin" / "amdclang++", f'echo run >> "{log}"\nexit 1\n')
+
+    everyProbe = _probe(script, [isa], debug=True)
+    allRuns = _runs(log)
+    assert _probe(script, [isa]) == everyProbe
+    runs = _runs(log) - allRuns
+    if isa[0] < 10:
+        assert runs == 1
+    else:
+        assert 1 < runs < 10 < allRuns
