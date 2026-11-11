@@ -382,17 +382,15 @@ protected:
     }
 
     /// The band of the model in tolerances.md, written out here and not taken from the library:
-    /// 2 * eps * |ref| + (sqrt(K) * u32 + lambda * eps) * sigma + minNormal.
+    /// with s = sqrt(K) * u32, (2 * eps + s) * |ref| + (s + lambda * eps) * sigma + minNormal.
     static double documentedBand(bool isHalf, double sigma, double reference)
     {
         const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
         const double lambda = isHalf ? 12.0 : 0.0;
         const double minNormal = std::ldexp(1.0, isHalf ? -14 : -126);
-        const double u32 = std::ldexp(1.0, -24);
-        const double atol
-            = (std::sqrt(static_cast<double>(K_ACCUMULATION)) * u32 + lambda * eps) * sigma
-              + minNormal;
-        return atol + 2.0 * eps * std::abs(reference);
+        const double s = std::sqrt(static_cast<double>(K_ACCUMULATION)) * std::ldexp(1.0, -24);
+        const double atol = (s + lambda * eps) * sigma + minNormal;
+        return atol + (2.0 * eps + s) * std::abs(reference);
     }
 
     /// The value the output type stores for `value`.
@@ -584,6 +582,8 @@ TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
         scale.accumulationLength = K_ACCUMULATION;
         scale.inputMeanSquare = 4.0; // x is 2.0 everywhere
         scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
+        scale.inputMean = 2.0;
+        scale.weightMean = 0.5;
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
 }

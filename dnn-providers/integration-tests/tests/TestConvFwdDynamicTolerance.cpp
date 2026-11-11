@@ -10,6 +10,7 @@
 #include <optional>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -18,7 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
-#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
+#include "harness/tolerance/ConvDynamicTolerance.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 namespace tol = hipdnn_integration_tests::tolerance;
@@ -281,12 +282,20 @@ Inputs defaultInputs(const GraphSpec& spec)
     return in;
 }
 
-// The error scale of the graph `spec` describes, given the statistics of `in`.
+// The error scale of the graph `spec` describes, given the statistics of `in`. The graph's one
+// convolution is a forward one, so a scale of another direction fails the test.
 std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     errorScale(const GraphSpec& spec, const Inputs& in)
 {
     flatbuffers::FlatBufferBuilder b;
-    return tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = tol::convErrorScale(buildGraph(b, spec), in.lookup());
+    if(!scale.has_value())
+    {
+        return std::nullopt;
+    }
+    using hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale;
+    EXPECT_TRUE(std::holds_alternative<ConvFpropErrorScale>(*scale));
+    return std::get<ConvFpropErrorScale>(*scale);
 }
 
 // The same, with the default inputs of `spec`.
@@ -635,45 +644,50 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
 
-// The two types differ by a factor of about 16,000 in atol (half carries the lambda term, bfloat16
-// does not) and by 8 the other way in rtol, so a swap of the dispatch shows in the values.
+// The three types differ in atol and rtol (half carries the lambda term, float a wider
+// summation-order term, and the epsilons differ), so a swap of the dispatch shows in the values.
 TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
 {
-    hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    sdk::ConvFpropErrorScale scale;
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
     scale.outputScale = 2.0;
 
-    const auto expectedHalf
-        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<half>(scale);
-    const auto expectedBfloat16
-        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<bfloat16>(scale);
-    ASSERT_NE(expectedHalf.atol, expectedBfloat16.atol);
-    ASSERT_NE(expectedHalf.rtol, expectedBfloat16.rtol);
-
-    const auto halfTolerance = tol::convFwdOutputTolerance(scale, DataType::HALF);
-    ASSERT_TRUE(halfTolerance.has_value());
-    EXPECT_DOUBLE_EQ(halfTolerance->atol, expectedHalf.atol);
-    EXPECT_DOUBLE_EQ(halfTolerance->rtol, expectedHalf.rtol);
-
-    const auto bfloat16Tolerance = tol::convFwdOutputTolerance(scale, DataType::BFLOAT16);
-    ASSERT_TRUE(bfloat16Tolerance.has_value());
-    EXPECT_DOUBLE_EQ(bfloat16Tolerance->atol, expectedBfloat16.atol);
-    EXPECT_DOUBLE_EQ(bfloat16Tolerance->rtol, expectedBfloat16.rtol);
+    const std::vector<std::pair<DataType, sdk::AbsRelTolerance>> expected
+        = {{DataType::FLOAT, sdk::calculateConvFpropOutputTolerance<float>(scale)},
+           {DataType::HALF, sdk::calculateConvFpropOutputTolerance<half>(scale)},
+           {DataType::BFLOAT16, sdk::calculateConvFpropOutputTolerance<bfloat16>(scale)}};
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        for(size_t j = i + 1; j < expected.size(); ++j)
+        {
+            ASSERT_NE(expected[i].second.atol, expected[j].second.atol);
+            ASSERT_NE(expected[i].second.rtol, expected[j].second.rtol);
+        }
+    }
+    for(const auto& [type, want] : expected)
+    {
+        const auto got = tol::convOutputTolerance(scale, type);
+        ASSERT_TRUE(got.has_value()) << EnumNameDataType(type);
+        EXPECT_DOUBLE_EQ(got->atol, want.atol) << EnumNameDataType(type);
+        EXPECT_DOUBLE_EQ(got->rtol, want.rtol) << EnumNameDataType(type);
+    }
 }
 
-TEST(TestConvFwdDynamicTolerance, OnlyLowPrecisionOutputsGetADynamicTolerance)
+TEST(TestConvFwdDynamicTolerance, OnlyFloatHalfAndBfloat16OutputsGetADynamicTolerance)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::FLOAT).has_value());
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::DOUBLE).has_value());
+    EXPECT_TRUE(tol::convOutputTolerance(scale, DataType::FLOAT).has_value());
+    EXPECT_FALSE(tol::convOutputTolerance(scale, DataType::DOUBLE).has_value());
+    EXPECT_FALSE(tol::convOutputTolerance(scale, DataType::INT8).has_value());
 }
 
-// The harness asks hasDynamicToleranceFor() before it scans any input, and convFwdOutputTolerance()
+// The harness asks hasDynamicToleranceFor() before it scans any input, and convOutputTolerance()
 // answers for the same types: the two agree for every element type.
 TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFunction)
 {
@@ -684,12 +698,13 @@ TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFu
     for(const auto type : EnumValuesDataType())
     {
         EXPECT_EQ(tol::hasDynamicToleranceFor(type),
-                  tol::convFwdOutputTolerance(scale, type).has_value())
+                  tol::convOutputTolerance(scale, type).has_value())
             << EnumNameDataType(type);
     }
+    EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::FLOAT));
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::HALF));
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::BFLOAT16));
-    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::FLOAT));
+    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::DOUBLE));
 }
 
 // ── Recipe and host moments ─────────────────────────────────────────────────
@@ -700,6 +715,7 @@ TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAUniformDraw)
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-1.0f, 3.0f));
     EXPECT_DOUBLE_EQ(m.meanSquare, 7.0 / 3.0);
     EXPECT_DOUBLE_EQ(m.maxAbs, 3.0);
+    EXPECT_DOUBLE_EQ(m.mean, 1.0);
 }
 
 // The negative end is the larger one: the largest magnitude is |lo|, not |hi|.
@@ -708,6 +724,7 @@ TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfADrawWithTheLargerNegativeEnd)
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-2.0f, 1.0f));
     EXPECT_DOUBLE_EQ(m.meanSquare, 1.0);
     EXPECT_DOUBLE_EQ(m.maxAbs, 2.0);
+    EXPECT_DOUBLE_EQ(m.mean, -0.5);
 }
 
 TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAFixedValue)
@@ -715,6 +732,7 @@ TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAFixedValue)
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::fixed(-0.5f));
     EXPECT_DOUBLE_EQ(m.meanSquare, 0.25);
     EXPECT_DOUBLE_EQ(m.maxAbs, 0.5);
+    EXPECT_DOUBLE_EQ(m.mean, -0.5);
 }
 
 // A value list repeats over the elements, so its moments are the list's own: 3, -4 has mean
@@ -725,11 +743,13 @@ TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAValueList)
         hipdnn_integration_tests::FillRecipe::values(std::vector<int64_t>{3, -4}));
     EXPECT_DOUBLE_EQ(ints.meanSquare, 12.5);
     EXPECT_DOUBLE_EQ(ints.maxAbs, 4.0);
+    EXPECT_DOUBLE_EQ(ints.mean, -0.5);
 
     const auto doubles = tol::recipeMoments(
         hipdnn_integration_tests::FillRecipe::values(std::vector<double>{0.5, -1.5}));
     EXPECT_DOUBLE_EQ(doubles.meanSquare, 1.25);
     EXPECT_DOUBLE_EQ(doubles.maxAbs, 1.5);
+    EXPECT_DOUBLE_EQ(doubles.mean, -0.5);
 }
 
 // A ramp 1, 2, 3, 4 has mean square 7.5 and largest magnitude 4: neither equals a constant's,
@@ -749,6 +769,7 @@ TEST(TestConvFwdDynamicTolerance, HostMomentsOfAPackedRampInEveryElementType)
         ASSERT_TRUE(m.has_value()) << EnumNameDataType(dataType);
         EXPECT_DOUBLE_EQ(m->meanSquare, 7.5) << EnumNameDataType(dataType);
         EXPECT_DOUBLE_EQ(m->maxAbs, 4.0) << EnumNameDataType(dataType);
+        EXPECT_DOUBLE_EQ(m->mean, 2.5) << EnumNameDataType(dataType);
     }
 }
 
@@ -799,7 +820,7 @@ TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteRecipeIsNotModeled)
                 return tol::recipeMoments(uid == badUid ? badRecipe
                                                         : FillRecipe::free(-1.0f, 1.0f));
             };
-            EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value())
+            EXPECT_FALSE(tol::convErrorScale(buildGraph(b, spec), lookup).has_value())
                 << "bad uid " << badUid;
         }
     }
@@ -820,4 +841,5 @@ TEST(TestConvFwdDynamicTolerance, HostMomentsSkipTheGapsOfAStridedTensor)
     ASSERT_TRUE(m.has_value());
     EXPECT_DOUBLE_EQ(m->meanSquare, 91.0 / 6.0); // 1, 4, 9, 16, 25, 36
     EXPECT_DOUBLE_EQ(m->maxAbs, 6.0);
+    EXPECT_DOUBLE_EQ(m->mean, 3.5);
 }

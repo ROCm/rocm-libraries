@@ -10,6 +10,8 @@
 #include <limits>
 #include <random>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -1243,7 +1245,19 @@ double exactDot(const DotProblem& p)
     return acc;
 }
 
-ConvFpropErrorScale scaleOf(const DotProblem& p)
+// The statistics of a dot problem: K and the mean squares and means of its two operands. The
+// draws of makeDotProblem() have a zero mean.
+struct DotScale
+{
+    uint64_t k = 0;
+    double firstMeanSquare = 0.0;
+    double secondMeanSquare = 0.0;
+    double outputScale = 1.0;
+    double firstMean = 0.0;
+    double secondMean = 0.0;
+};
+
+DotScale scaleOf(const DotProblem& p)
 {
     double xx = 0.0;
     double ww = 0.0;
@@ -1252,12 +1266,11 @@ ConvFpropErrorScale scaleOf(const DotProblem& p)
         xx += static_cast<double>(p.x[i]) * static_cast<double>(p.x[i]);
         ww += static_cast<double>(p.w[i]) * static_cast<double>(p.w[i]);
     }
-    ConvFpropErrorScale s;
-    s.accumulationLength = p.x.size();
-    s.inputMeanSquare = xx / static_cast<double>(p.x.size());
-    s.weightMeanSquare = ww / static_cast<double>(p.x.size());
-    return s;
+    return {p.x.size(), xx / static_cast<double>(p.x.size()), ww / static_cast<double>(p.x.size())};
 }
+
+// K = 144 and mean squares 1/3, so sigma = 4.
+constexpr DotScale UNIFORM_144{144, 1.0 / 3.0, 1.0 / 3.0};
 
 template <typename T>
 bool withinTolerance(double impl, double ref, const AbsRelTolerance& tol)
@@ -1269,31 +1282,82 @@ bool withinTolerance(double impl, double ref, const AbsRelTolerance& tol)
     return std::abs(implT - refT) <= tol.atol + tol.rtol * std::abs(refT);
 }
 
+using ConvDirection = hipdnn_test_sdk::utilities::conv::detail::ConvDirection;
+
+// One direction of the convolution and one output type. Every direction grades one output
+// element, a dot product of two operands, with the same model; the operands are x and w forward,
+// dy and w for dgrad, x and dy for wrw.
+template <ConvDirection Direction, typename Out>
+struct OutputCase
+{
+    using OutputType = Out;
+    static constexpr ConvDirection DIRECTION = Direction;
+
+    static AbsRelTolerance tolerance(const DotScale& s)
+    {
+        if constexpr(Direction == ConvDirection::FPROP)
+        {
+            return calculateConvFpropOutputTolerance<Out>(ConvFpropErrorScale{s.k,
+                                                                              s.firstMeanSquare,
+                                                                              s.secondMeanSquare,
+                                                                              s.outputScale,
+                                                                              s.firstMean,
+                                                                              s.secondMean});
+        }
+        else if constexpr(Direction == ConvDirection::DGRAD)
+        {
+            return calculateConvDgradOutputTolerance<Out>(ConvDgradErrorScale{s.k,
+                                                                              s.firstMeanSquare,
+                                                                              s.secondMeanSquare,
+                                                                              s.outputScale,
+                                                                              s.firstMean,
+                                                                              s.secondMean});
+        }
+        else
+        {
+            return calculateConvWrwOutputTolerance<Out>(ConvWrwErrorScale{s.k,
+                                                                          s.firstMeanSquare,
+                                                                          s.secondMeanSquare,
+                                                                          s.outputScale,
+                                                                          s.firstMean,
+                                                                          s.secondMean});
+        }
+    }
+};
+
 } // namespace
 
-template <typename T>
-class ConvFpropOutputToleranceFixture : public ::testing::Test
+template <typename Case>
+class ConvOutputToleranceFixture : public ::testing::Test
 {
 };
 
-using ConvFpropOutputTypes = ::testing::Types<half, bfloat16>;
-TYPED_TEST_SUITE(ConvFpropOutputToleranceFixture, ConvFpropOutputTypes, );
+using ConvOutputCases = ::testing::Types<OutputCase<ConvDirection::FPROP, float>,
+                                         OutputCase<ConvDirection::FPROP, half>,
+                                         OutputCase<ConvDirection::FPROP, bfloat16>,
+                                         OutputCase<ConvDirection::DGRAD, float>,
+                                         OutputCase<ConvDirection::DGRAD, half>,
+                                         OutputCase<ConvDirection::DGRAD, bfloat16>,
+                                         OutputCase<ConvDirection::WRW, float>,
+                                         OutputCase<ConvDirection::WRW, half>,
+                                         OutputCase<ConvDirection::WRW, bfloat16>>;
+TYPED_TEST_SUITE(ConvOutputToleranceFixture, ConvOutputCases, );
 
 // A tree-ordered sum and the exact sum, each rounded once to the output type, stay within the
-// tolerance of the reference's sequential sum at every reduction length. Both sides are rounded
-// to the output type before they are compared, and with these draws the three float sums round to
-// the same value in every seeded case, so this checks that the three summation orders agree after
-// rounding; it does not constrain the width of the tolerance (it also passes at atol = rtol = 0).
-// ConstantsAtAFixedScale and the near-zero cases below do that.
-TYPED_TEST(ConvFpropOutputToleranceFixture, CorrectSumsInAnyOrderPass)
+// tolerance of the reference's sequential sum at every reduction length. For half and bfloat16
+// the three float sums round to the same value in every seeded case, so this checks that the
+// summation orders agree after rounding; for float, which keeps the summation error, the
+// summation-order term carries it. ConstantsAtAFixedScale and the near-zero cases below pin the
+// width.
+TYPED_TEST(ConvOutputToleranceFixture, CorrectSumsInAnyOrderPass)
 {
-    using T = TypeParam;
+    using T = typename TypeParam::OutputType;
     for(const uint64_t k : {uint64_t{16}, uint64_t{1152}, uint64_t{65536}})
     {
         for(unsigned seed = 0; seed < 32; ++seed)
         {
             const auto p = makeDotProblem<T>(k, seed);
-            const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
+            const auto tol = TypeParam::tolerance(scaleOf(p));
             const auto ref = static_cast<double>(sequentialDot(p));
             const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
             EXPECT_TRUE(withinTolerance<T>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
@@ -1302,12 +1366,29 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, CorrectSumsInAnyOrderPass)
     }
 }
 
+template <typename Case>
+class ConvSingleTermOutputToleranceFixture : public ::testing::Test
+{
+};
+
+// Every case but bfloat16 wrw: its lambda of 24, which MIOpen's split reductions need, is about
+// 2 at this scale and hides a single product of up to 1 (tolerances.md, limits).
+using ConvSingleTermOutputCases = ::testing::Types<OutputCase<ConvDirection::FPROP, float>,
+                                                   OutputCase<ConvDirection::FPROP, half>,
+                                                   OutputCase<ConvDirection::FPROP, bfloat16>,
+                                                   OutputCase<ConvDirection::DGRAD, float>,
+                                                   OutputCase<ConvDirection::DGRAD, half>,
+                                                   OutputCase<ConvDirection::DGRAD, bfloat16>,
+                                                   OutputCase<ConvDirection::WRW, float>,
+                                                   OutputCase<ConvDirection::WRW, half>>;
+TYPED_TEST_SUITE(ConvSingleTermOutputToleranceFixture, ConvSingleTermOutputCases, );
+
 // Leaving out the largest of 1152 products (an error of up to about 1: one whole filter tap is
 // C = 128 such products, with a standard deviation of about 3.8) is detected. The old worst-case
 // bound passes it always, and the fixed 0.1 passes it for about 44 % of draws.
-TYPED_TEST(ConvFpropOutputToleranceFixture, MissingTermFails)
+TYPED_TEST(ConvSingleTermOutputToleranceFixture, MissingTermFails)
 {
-    using T = TypeParam;
+    using T = typename TypeParam::OutputType;
     const uint64_t k = 1152;
     int detected = 0;
     for(unsigned seed = 0; seed < 32; ++seed)
@@ -1321,7 +1402,7 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, MissingTermFails)
                 largest = i;
             }
         }
-        const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
+        const auto tol = TypeParam::tolerance(scaleOf(p));
         const auto withoutLargest = static_cast<double>(pairwiseDot(p, 0, k, largest));
         const auto ref = static_cast<double>(sequentialDot(p));
         detected += withinTolerance<T>(withoutLargest, ref, tol) ? 0 : 1;
@@ -1329,33 +1410,12 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, MissingTermFails)
     EXPECT_EQ(detected, 32);
 }
 
-// The tolerance at a typical output, relative to that output, does not grow with the reduction
-// length: the property the worst-case bound lacks. Only sqrt(K) * u32 and minNormal / sigma
-// depend on K, and between K = 16 and K = 2^20 they move the width by under 0.5 %; 5 % leaves
-// room for that but not for growth as sqrt(K), which would be 256-fold.
-TYPED_TEST(ConvFpropOutputToleranceFixture, WidthRelativeToOutputIndependentOfK)
-{
-    using T = TypeParam;
-    const auto widthAt = [](uint64_t k) {
-        ConvFpropErrorScale s;
-        s.accumulationLength = k;
-        s.inputMeanSquare = 1.0 / 3.0;
-        s.weightMeanSquare = 1.0 / 3.0;
-        const double sigma = std::sqrt(static_cast<double>(k)) / 3.0;
-        const auto tol = calculateConvFpropOutputTolerance<T>(s);
-        return (tol.atol + tol.rtol * sigma) / sigma;
-    };
-    EXPECT_LT(widthAt(uint64_t{1} << 20), 1.05 * widthAt(16));
-}
-
 // With zero inputs only a difference below the smallest normal number passes: hardware that
 // flushes denormals is not failed, any other difference is.
-TYPED_TEST(ConvFpropOutputToleranceFixture, ZeroInputsGradeOnlyDenormals)
+TYPED_TEST(ConvOutputToleranceFixture, ZeroInputsGradeOnlyDenormals)
 {
-    using T = TypeParam;
-    ConvFpropErrorScale s;
-    s.accumulationLength = 144;
-    const auto tol = calculateConvFpropOutputTolerance<T>(s);
+    using T = typename TypeParam::OutputType;
+    const auto tol = TypeParam::tolerance(DotScale{144, 0.0, 0.0});
     const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
     EXPECT_TRUE(withinTolerance<T>(0.5 * minNormal, 0.0, tol));
     EXPECT_FALSE(withinTolerance<T>(2.0 * minNormal, 0.0, tol));
@@ -1365,15 +1425,15 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ZeroInputsGradeOnlyDenormals)
 // products in a different order (sequential against tree) differ by a random walk of roundings
 // of about 0.4 * sqrt(K) * u32 * sigma, which only the summation-order term of atol covers. For
 // bfloat16 that term is all of atol, so removing it fails this test.
-TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrderTerm)
+TYPED_TEST(ConvOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrderTerm)
 {
-    using T = TypeParam;
+    using T = typename TypeParam::OutputType;
     for(const uint64_t k : {uint64_t{1152}, uint64_t{65536}})
     {
         for(unsigned seed = 0; seed < 32; ++seed)
         {
             const auto p = makeCancellingProblem<T>(k, seed);
-            const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
+            const auto tol = TypeParam::tolerance(scaleOf(p));
             const auto ref = static_cast<double>(sequentialDot(p));
             const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
             EXPECT_TRUE(withinTolerance<T>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
@@ -1381,10 +1441,205 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrder
     }
 }
 
+// A fused multiply by a scale scales the typical output, and with it atol; rtol, a fraction of
+// the reference itself, stays. Only the magnitude counts.
+TYPED_TEST(ConvOutputToleranceFixture, OutputScaleWidensAtolNotRtol)
+{
+    using T = typename TypeParam::OutputType;
+    const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
+    auto s = UNIFORM_144;
+    const auto unit = TypeParam::tolerance(s);
+
+    s.outputScale = 2.0;
+    const auto doubled = TypeParam::tolerance(s);
+    EXPECT_NEAR(doubled.atol - minNormal, 2.0 * (unit.atol - minNormal), 1e-9 * doubled.atol);
+    EXPECT_DOUBLE_EQ(doubled.rtol, unit.rtol);
+
+    s.outputScale = -2.0;
+    const auto negative = TypeParam::tolerance(s);
+    EXPECT_DOUBLE_EQ(negative.atol, doubled.atol);
+
+    s.outputScale = 0.5;
+    const auto halved = TypeParam::tolerance(s);
+    EXPECT_NEAR(halved.atol - minNormal, 0.5 * (unit.atol - minNormal), 1e-9 * halved.atol);
+}
+
+// A scale that does not describe a convolution is rejected, not graded with a tolerance that is
+// zero, not a number or infinite.
+TYPED_TEST(ConvOutputToleranceFixture, InvalidScaleIsRejected)
+{
+    ASSERT_NO_THROW(TypeParam::tolerance(UNIFORM_144));
+
+    EXPECT_THROW(TypeParam::tolerance(DotScale{}), std::invalid_argument);
+
+    auto zeroLength = UNIFORM_144;
+    zeroLength.k = 0;
+    EXPECT_THROW(TypeParam::tolerance(zeroLength), std::invalid_argument);
+
+    auto negativeMoment = UNIFORM_144;
+    negativeMoment.firstMeanSquare = -1.0;
+    EXPECT_THROW(TypeParam::tolerance(negativeMoment), std::invalid_argument);
+
+    auto nanMoment = UNIFORM_144;
+    nanMoment.secondMeanSquare = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_THROW(TypeParam::tolerance(nanMoment), std::invalid_argument);
+
+    auto infiniteScale = UNIFORM_144;
+    infiniteScale.outputScale = std::numeric_limits<double>::infinity();
+    EXPECT_THROW(TypeParam::tolerance(infiniteScale), std::invalid_argument);
+}
+
+// An atol beyond the largest value of the output type means the output itself overflows.
+TYPED_TEST(ConvOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
+{
+    DotScale s{uint64_t{1} << 40, 1e36, 1e36};
+    EXPECT_THROW(TypeParam::tolerance(s), std::overflow_error);
+
+    // The mean squares are finite, but their product overflows a double.
+    s.firstMeanSquare = 1e300;
+    s.secondMeanSquare = 1e300;
+    EXPECT_THROW(TypeParam::tolerance(s), std::overflow_error);
+
+    // Finite statistics whose product overflows against a zero factor: infinity times zero is
+    // not a number, which no range check rejects.
+    s.firstMeanSquare = 1e300;
+    s.secondMeanSquare = 0.0;
+    EXPECT_THROW(TypeParam::tolerance(s), std::overflow_error);
+
+    s.firstMeanSquare = 1e300;
+    s.secondMeanSquare = 1e300;
+    s.outputScale = 0.0;
+    EXPECT_THROW(TypeParam::tolerance(s), std::overflow_error);
+}
+
+namespace
+{
+
+// The calibrated lambda and m of each case, written out here so that a change of the constants
+// in the header shows as a failing test.
+struct Allowances
+{
+    double lambda;
+    double m;
+};
+
+template <typename Case>
+constexpr Allowances calibratedAllowances()
+{
+    using T = typename Case::OutputType;
+    constexpr auto DIRECTION = Case::DIRECTION;
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return {32.0, 4.0};
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return {DIRECTION == ConvDirection::WRW ? 36.0 : 12.0, 1.0};
+    }
+    else if constexpr(DIRECTION == ConvDirection::FPROP)
+    {
+        return {0.0, 1.0};
+    }
+    else if constexpr(DIRECTION == ConvDirection::DGRAD)
+    {
+        return {6.0, 1.0};
+    }
+    else
+    {
+        return {24.0, 1.0};
+    }
+}
+
+} // namespace
+
+// The calibrated constants at one scale: K = 144, mean squares 1/3, so sigma = 4. With
+// s = m * sqrt(144) * u32, rtol is 2 * eps + s and atol is (s + lambda * eps) * 4 + minNormal.
+TYPED_TEST(ConvOutputToleranceFixture, ConstantsAtAFixedScale)
+{
+    using T = typename TypeParam::OutputType;
+    const auto tol = TypeParam::tolerance(UNIFORM_144);
+
+    const auto allowances = calibratedAllowances<TypeParam>();
+    const auto eps = static_cast<double>(std::numeric_limits<T>::epsilon());
+    const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
+    const double summation = allowances.m * 12.0 * std::ldexp(1.0, -24);
+    const double expectedRtol = 2.0 * eps + summation;
+    const double expectedAtol = (summation + allowances.lambda * eps) * 4.0 + minNormal;
+    EXPECT_NEAR(tol.rtol, expectedRtol, 1e-12 * expectedRtol);
+    EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
+}
+
+// Inputs with a nonzero mean do not cancel: the output grows as K * mean(a) * mean(b), not as
+// sqrt(K). sigma follows: with 144 products of operands that are 1 everywhere (mean square 1,
+// mean 1) sigma is sqrt(144 + 144 * 143) = 144, the output itself, where the zero-mean formula
+// would give 12.
+TYPED_TEST(ConvOutputToleranceFixture, MeansOfTheInputsWidenTheTypicalOutput)
+{
+    using T = typename TypeParam::OutputType;
+    const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
+    DotScale zeroMean{144, 1.0, 1.0};
+    const auto spread = TypeParam::tolerance(zeroMean);
+
+    DotScale constant = zeroMean;
+    constant.firstMean = 1.0;
+    constant.secondMean = 1.0;
+    const auto withMeans = TypeParam::tolerance(constant);
+    EXPECT_NEAR(
+        withMeans.atol - minNormal, 12.0 * (spread.atol - minNormal), 1e-9 * withMeans.atol);
+    EXPECT_DOUBLE_EQ(withMeans.rtol, spread.rtol);
+
+    // Only the product of the means counts: a zero mean on one side leaves sigma alone.
+    DotScale oneSided = zeroMean;
+    oneSided.firstMean = 1.0;
+    EXPECT_DOUBLE_EQ(TypeParam::tolerance(oneSided).atol, spread.atol);
+
+    DotScale nanMean = zeroMean;
+    nanMean.secondMean = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_THROW(TypeParam::tolerance(nanMean), std::invalid_argument);
+}
+
+template <typename Case>
+class ConvLowPrecisionOutputToleranceFixture : public ::testing::Test
+{
+};
+
+using ConvLowPrecisionOutputCases = ::testing::Types<OutputCase<ConvDirection::FPROP, half>,
+                                                     OutputCase<ConvDirection::FPROP, bfloat16>,
+                                                     OutputCase<ConvDirection::DGRAD, half>,
+                                                     OutputCase<ConvDirection::DGRAD, bfloat16>,
+                                                     OutputCase<ConvDirection::WRW, half>,
+                                                     OutputCase<ConvDirection::WRW, bfloat16>>;
+TYPED_TEST_SUITE(ConvLowPrecisionOutputToleranceFixture, ConvLowPrecisionOutputCases, );
+
+// For half and bfloat16 the tolerance at a typical output, relative to that output, does not grow
+// with the reduction length: the property the worst-case bound lacks. Only sqrt(K) * u32 and
+// minNormal / sigma depend on K, and between K = 16 and K = 2^20 they move the width by under
+// 0.5 %; 5 % leaves room for that but not for growth as sqrt(K), which would be 256-fold. (A float
+// output keeps its summation error, which does grow as sqrt(K) relative to the output.)
+TYPED_TEST(ConvLowPrecisionOutputToleranceFixture, WidthRelativeToOutputIndependentOfK)
+{
+    const auto widthAt = [](uint64_t k) {
+        const double sigma = std::sqrt(static_cast<double>(k)) / 3.0;
+        const auto tol = TypeParam::tolerance(DotScale{k, 1.0 / 3.0, 1.0 / 3.0});
+        return (tol.atol + tol.rtol * sigma) / sigma;
+    };
+    EXPECT_LT(widthAt(uint64_t{1} << 20), 1.05 * widthAt(16));
+}
+
+template <typename Case>
+class ConvHalfOutputToleranceFixture : public ::testing::Test
+{
+};
+
+using ConvHalfOutputCases = ::testing::Types<OutputCase<ConvDirection::FPROP, half>,
+                                             OutputCase<ConvDirection::DGRAD, half>,
+                                             OutputCase<ConvDirection::WRW, half>>;
+TYPED_TEST_SUITE(ConvHalfOutputToleranceFixture, ConvHalfOutputCases, );
+
 // Half kernels that keep partial sums in half differ from the float reference by about
-// 0.3 * eps * sigma near zero. The lambda term allows that for half; without it (lambda 0, as
-// bfloat16 has) the same implementation fails.
-TEST(TestConvFpropOutputToleranceFp16, HalfPrecisionPartialSumsPass)
+// 0.3 * eps * sigma near zero. The lambda term allows that; the summation-order term alone, all
+// that float accumulation explains, does not.
+TYPED_TEST(ConvHalfOutputToleranceFixture, HalfPrecisionPartialSumsPass)
 {
     // K/2 is not a multiple of the block, so the blocks of the cancelling half do not mirror
     // those of the first and their rounding errors do not cancel.
@@ -1392,121 +1647,20 @@ TEST(TestConvFpropOutputToleranceFp16, HalfPrecisionPartialSumsPass)
     for(unsigned seed = 0; seed < 8; ++seed)
     {
         const auto p = makeCancellingProblem<half>(k, seed);
-        const auto tol = calculateConvFpropOutputTolerance<half>(scaleOf(p));
+        const auto tol = TypeParam::tolerance(scaleOf(p));
         const auto ref = static_cast<double>(sequentialDot(p));
         const auto blocked = static_cast<double>(blockedHalfDot(p, 8));
         EXPECT_TRUE(withinTolerance<half>(blocked, ref, tol)) << "seed=" << seed;
 
         // Check on the test itself: the half partial sums really are beyond what float
-        // accumulation order explains, which is all that bfloat16's tolerance holds.
-        const auto floatOnly = calculateConvFpropOutputTolerance<bfloat16>(scaleOf(p));
-        EXPECT_GT(std::abs(blocked - ref), floatOnly.atol) << "seed=" << seed;
+        // accumulation order explains (sqrt(K) * u32 * sigma).
+        const auto s = scaleOf(p);
+        const double sigma
+            = std::sqrt(static_cast<double>(k) * s.firstMeanSquare * s.secondMeanSquare);
+        const double summationOnly
+            = std::sqrt(static_cast<double>(k)) * std::ldexp(1.0, -24) * sigma;
+        EXPECT_GT(std::abs(blocked - ref), summationOnly) << "seed=" << seed;
     }
-}
-
-// The calibrated constants at one scale: K = 144, mean squares 1/3, so sigma = 4. rtol is
-// 2 eps; atol is (12 * u32 + lambda * eps) * 4 + minNormal with lambda 12 for half and 0 for
-// bfloat16.
-TYPED_TEST(ConvFpropOutputToleranceFixture, ConstantsAtAFixedScale)
-{
-    using T = TypeParam;
-    constexpr bool IS_HALF = std::is_same_v<T, half>;
-    ConvFpropErrorScale s;
-    s.accumulationLength = 144;
-    s.inputMeanSquare = 1.0 / 3.0;
-    s.weightMeanSquare = 1.0 / 3.0;
-    const auto tol = calculateConvFpropOutputTolerance<T>(s);
-
-    const double eps = std::ldexp(1.0, IS_HALF ? -10 : -7);
-    const double minNormal = std::ldexp(1.0, IS_HALF ? -14 : -126);
-    const double lambda = IS_HALF ? 12.0 : 0.0;
-    const double expectedAtol = (12.0 * std::ldexp(1.0, -24) + lambda * eps) * 4.0 + minNormal;
-    EXPECT_NEAR(tol.rtol, 2.0 * eps, 1e-12 * eps);
-    EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
-}
-
-// A fused multiply by a scale scales the typical output, and with it atol; rtol, a fraction of
-// the reference itself, stays. Only the magnitude counts.
-TYPED_TEST(ConvFpropOutputToleranceFixture, OutputScaleWidensAtolNotRtol)
-{
-    using T = TypeParam;
-    const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
-    ConvFpropErrorScale s;
-    s.accumulationLength = 144;
-    s.inputMeanSquare = 1.0 / 3.0;
-    s.weightMeanSquare = 1.0 / 3.0;
-    const auto unit = calculateConvFpropOutputTolerance<T>(s);
-
-    s.outputScale = 2.0;
-    const auto doubled = calculateConvFpropOutputTolerance<T>(s);
-    EXPECT_NEAR(doubled.atol - minNormal, 2.0 * (unit.atol - minNormal), 1e-9 * doubled.atol);
-    EXPECT_DOUBLE_EQ(doubled.rtol, unit.rtol);
-
-    s.outputScale = -2.0;
-    const auto negative = calculateConvFpropOutputTolerance<T>(s);
-    EXPECT_DOUBLE_EQ(negative.atol, doubled.atol);
-
-    s.outputScale = 0.5;
-    const auto halved = calculateConvFpropOutputTolerance<T>(s);
-    EXPECT_NEAR(halved.atol - minNormal, 0.5 * (unit.atol - minNormal), 1e-9 * halved.atol);
-}
-
-// A scale that does not describe a convolution is rejected, not graded with a tolerance that is
-// zero, not a number or infinite.
-TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidScaleIsRejected)
-{
-    using T = TypeParam;
-    ConvFpropErrorScale valid;
-    valid.accumulationLength = 144;
-    valid.inputMeanSquare = 1.0 / 3.0;
-    valid.weightMeanSquare = 1.0 / 3.0;
-    ASSERT_NO_THROW(calculateConvFpropOutputTolerance<T>(valid));
-
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(ConvFpropErrorScale{}),
-                 std::invalid_argument);
-
-    auto zeroLength = valid;
-    zeroLength.accumulationLength = 0;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(zeroLength), std::invalid_argument);
-
-    auto negativeMoment = valid;
-    negativeMoment.inputMeanSquare = -1.0;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(negativeMoment), std::invalid_argument);
-
-    auto nanMoment = valid;
-    nanMoment.weightMeanSquare = std::numeric_limits<double>::quiet_NaN();
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(nanMoment), std::invalid_argument);
-
-    auto infiniteScale = valid;
-    infiniteScale.outputScale = std::numeric_limits<double>::infinity();
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(infiniteScale), std::invalid_argument);
-}
-
-// An atol beyond the largest value of the output type means the output itself overflows.
-TYPED_TEST(ConvFpropOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
-{
-    using T = TypeParam;
-    ConvFpropErrorScale s;
-    s.accumulationLength = uint64_t{1} << 40;
-    s.inputMeanSquare = 1e36;
-    s.weightMeanSquare = 1e36;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
-
-    // The mean squares are finite, but their product overflows a double.
-    s.inputMeanSquare = 1e300;
-    s.weightMeanSquare = 1e300;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
-
-    // Finite statistics whose product overflows against a zero factor: infinity times zero is
-    // not a number, which no range check rejects.
-    s.inputMeanSquare = 1e300;
-    s.weightMeanSquare = 0.0;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
-
-    s.inputMeanSquare = 1e300;
-    s.weightMeanSquare = 1e300;
-    s.outputScale = 0.0;
-    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
 }
 
 // C/groups times the filter volume, for 1D, 2D and 3D weights.
@@ -1534,4 +1688,65 @@ TEST(TestConvFpropAccumulationLength, RejectsANegativeExtent)
 {
     EXPECT_THROW(convFpropAccumulationLength({32, -1}), std::invalid_argument);
     EXPECT_THROW(convFpropAccumulationLength({32, 4, -3}), std::invalid_argument);
+}
+
+// Output channels of a group times the taps that reach one dx element. Stride 2 with dilation 1
+// lets every other tap reach it: 2 of 3, 2 of 4, 3 of 5. Stride 3: 1 of 3, 2 of 4.
+TEST(TestConvDgradAccumulationLength, CountsTheTapsThatReachAnElement)
+{
+    EXPECT_EQ(convDgradAccumulationLength({32, 4, 3, 3}, 1, {1, 1}, {1, 1}), 32u * 9u);
+    EXPECT_EQ(convDgradAccumulationLength({32, 4, 3, 3}, 2, {1, 1}, {1, 1}), 16u * 9u);
+    EXPECT_EQ(convDgradAccumulationLength({32, 4, 3, 4}, 1, {2, 2}, {1, 1}), 32u * 2u * 2u);
+    EXPECT_EQ(convDgradAccumulationLength({32, 4, 5}, 1, {2}, {1}), 32u * 3u);
+    EXPECT_EQ(convDgradAccumulationLength({32, 4, 3, 4}, 1, {3, 3}, {1, 1}), 32u * 1u * 2u);
+    EXPECT_EQ(convDgradAccumulationLength({32, 4}, 1, {}, {}), 32u);
+}
+
+// The taps reach residues r * d modulo s, which repeat every s / gcd(s, d) taps: a dilation that
+// shares the stride's factor lets more of them reach one element.
+TEST(TestConvDgradAccumulationLength, DilationSharingTheStridesFactorReachesMoreTaps)
+{
+    EXPECT_EQ(convDgradAccumulationLength({8, 4, 3}, 1, {2}, {2}), 8u * 3u);
+    EXPECT_EQ(convDgradAccumulationLength({8, 4, 4}, 1, {4}, {2}), 8u * 2u);
+    EXPECT_EQ(convDgradAccumulationLength({8, 4, 4}, 1, {4}, {3}), 8u * 1u);
+}
+
+TEST(TestConvDgradAccumulationLength, ReturnsZeroForAZeroExtent)
+{
+    EXPECT_EQ(convDgradAccumulationLength({0, 4, 3}, 1, {1}, {1}), 0u);
+    EXPECT_EQ(convDgradAccumulationLength({8, 4, 0}, 1, {1}, {1}), 0u);
+}
+
+TEST(TestConvDgradAccumulationLength, RejectsParametersThatDoNotDescribeAConvolution)
+{
+    EXPECT_THROW(convDgradAccumulationLength({32}, 1, {}, {}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, -4, 3}, 1, {1}, {1}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 0, {1}, {1}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 3, {1}, {1}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 1, {1, 1}, {1}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 1, {1}, {}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 1, {0}, {1}), std::invalid_argument);
+    EXPECT_THROW(convDgradAccumulationLength({32, 4, 3}, 1, {1}, {0}), std::invalid_argument);
+}
+
+// The batch times the spatial volume of dy, for 1D, 2D and 3D.
+TEST(TestConvWrwAccumulationLength, MultipliesTheBatchByTheDyVolume)
+{
+    EXPECT_EQ(convWrwAccumulationLength({4, 32}), 4u);
+    EXPECT_EQ(convWrwAccumulationLength({4, 32, 7}), 28u);
+    EXPECT_EQ(convWrwAccumulationLength({4, 32, 7, 5}), 140u);
+    EXPECT_EQ(convWrwAccumulationLength({4, 32, 7, 5, 3}), 420u);
+}
+
+TEST(TestConvWrwAccumulationLength, ReturnsZeroForAZeroExtent)
+{
+    EXPECT_EQ(convWrwAccumulationLength({0, 32, 7}), 0u);
+    EXPECT_EQ(convWrwAccumulationLength({4, 32, 0}), 0u);
+}
+
+TEST(TestConvWrwAccumulationLength, RejectsDyWithoutAChannelDimensionOrANegativeExtent)
+{
+    EXPECT_THROW(convWrwAccumulationLength({}), std::invalid_argument);
+    EXPECT_THROW(convWrwAccumulationLength({4}), std::invalid_argument);
+    EXPECT_THROW(convWrwAccumulationLength({4, -1}), std::invalid_argument);
 }
