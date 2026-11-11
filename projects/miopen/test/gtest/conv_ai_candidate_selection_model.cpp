@@ -829,8 +829,11 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
                 << arch << "_" << solver
                 << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
         }
-    if(present == 0)
-        GTEST_SKIP() << "No shipped config-embedding tables installed at " << db;
+    // This suite is compiled only with MIOPEN_ENABLE_AI_KERNEL_TUNING (see the guard at the top of
+    // the file), so the shipped tables must be installed. A missing set is a packaging bug -- fail
+    // rather than skip, otherwise a build that dropped the .bin artifacts stays green.
+    EXPECT_GT(present, 0) << "no config-embedding tables installed at " << db
+                          << " (shipped .bin artifacts missing while AI kernel tuning is enabled)";
 }
 
 // The loader fails closed on a malformed table (bad magic, unknown version, size/row mismatch):
