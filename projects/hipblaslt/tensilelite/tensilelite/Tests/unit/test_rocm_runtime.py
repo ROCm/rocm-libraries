@@ -766,8 +766,8 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_ROCM_VERSION_VALIDATION", True)
     monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
+    monkeypatch.setattr(_rocm, "_not_checked_warned", False)
 
 
 def _validated(version, kind="full"):
@@ -831,3 +831,155 @@ def test_client_build_rocm_major_mismatch_fails(fresh_warnings, build_rocm, sele
 def test_client_build_rocm_unknown_warns_once(fresh_warnings, build_rocm, selected):
     with pytest.warns(_runtime.ClientRocmWarning, match="could not be checked"):
         _runtime.check_client_build_rocm(build_rocm, _validated(selected), Path("/c"))
+
+
+# ---------------------------------------------------------------------------
+# Strict validation of release-labelled wheels (decisions 4 and 5)
+# ---------------------------------------------------------------------------
+
+_CHANNELS = {
+    "release": ("5.0.0+rocm7.12.0", "7.12.0"),
+    "rc": ("5.0.0+rocm7.12.0rc2", "7.12.0rc2"),
+    "nightly": ("5.0.0+rocm7.12.0a20261021", "7.12.0a20261021"),
+    "dev": (f"5.0.0+devrocm7.12.0.dev0.{_SHA}", f"7.12.0.dev0+{_SHA}"),
+}
+
+
+def _therock_root(tmp_path, monkeypatch, manifest):
+    root = _root(tmp_path, "7.12.0")
+    _manifest(root, manifest)
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+    return root
+
+
+@pytest.mark.parametrize("wheel_channel", sorted(_CHANNELS))
+@pytest.mark.parametrize("installed_channel", sorted(_CHANNELS))
+def test_labelled_wheels_match_only_their_own_channel(
+    tmp_path, monkeypatch, wheel_channel, installed_channel
+):
+    _therock_root(tmp_path, monkeypatch, _CHANNELS[installed_channel][1])
+    wheel = _CHANNELS[wheel_channel][0]
+
+    if wheel_channel == installed_channel:
+        _rocm.validate_distribution("tensilelite", wheel)
+    else:
+        with pytest.raises(_rocm.TensileLiteRuntimeError, match="release mismatch"):
+            _rocm.validate_distribution("tensilelite", wheel)
+
+
+@pytest.mark.parametrize(
+    ("manifest", "wheel", "ok"),
+    [
+        # The manifest's '+' becomes '.' in the label.
+        (f"7.12.0.dev0+{_SHA}", f"5.0.0+devrocm7.12.0.dev0.{_SHA}", True),
+        # Stage reuse: the baseline run's manifest, this run's wheel.
+        (f"7.12.0.dev0+{_SHA}", f"5.0.0+devrocm7.12.0.dev0.{_OTHER}", True),
+        (f"7.12.0.dev0+{_SHA}.asan", f"5.0.0+devrocm7.12.0.dev0.{_OTHER}", False),
+        (f"7.12.0.dev0+{_SHA}.asan", f"5.0.0+devrocm7.12.0.dev0.{_OTHER}.asan", True),
+        ("7.12.0.dev0", "5.0.0+rocm7.12.0a20261021", False),
+        ("7.12.0.dev0", "5.0.0+rocm7.12.0", False),
+        # A commit-less custom dev identity still matches a commit-labelled one.
+        ("7.12.0.dev0", f"5.0.0+devrocm7.12.0.dev0.{_SHA}", True),
+    ],
+)
+def test_dev_identities_ignore_only_their_commit_token(tmp_path, monkeypatch, manifest, wheel, ok):
+    _therock_root(tmp_path, monkeypatch, manifest)
+
+    if ok:
+        _rocm.validate_distribution("tensilelite", wheel)
+    else:
+        with pytest.raises(_rocm.TensileLiteRuntimeError, match="release mismatch"):
+            _rocm.validate_distribution("tensilelite", wheel)
+
+
+def test_development_wheel_warns_once_and_continues(tmp_path, monkeypatch):
+    import warnings
+
+    _therock_root(tmp_path, monkeypatch, "7.12.0rc9")
+
+    with pytest.warns(_rocm.RocmNotCheckedWarning, match="not checked") as record:
+        result = _rocm.validate_distribution("tensilelite", f"5.0.0+g{_SHA}")
+    assert result.version == "7.12.0rc9"
+    assert "7.12.0rc9" in str(record[0].message)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _rocm.validate_distribution("tensilelite", f"5.0.0+g{_SHA}.dirty")
+
+
+def test_labelled_wheel_does_not_warn(tmp_path, monkeypatch):
+    import warnings
+
+    _therock_root(tmp_path, monkeypatch, "7.12.0")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.12.0")
+
+
+@pytest.mark.parametrize(
+    "therock_version",
+    [
+        "7.12.0",
+        "7.12.0rc2",
+        "7.12.0a20261021",
+        f"7.12.0.dev0+{_SHA}",
+        "7.12.0a20261021+asan",
+        "10.1.0a20260811+bkc.20260814",
+        "7.12.0.dev0+sha.asan",
+    ],
+)
+@pytest.mark.parametrize("installed_as", ["manifest", "python-sdk", "therock-ci"])
+def test_stamped_label_round_trips_through_runtime_validation(
+    tmp_path, monkeypatch, therock_version, installed_as
+):
+    """The label release_metadata stamps for a TheRock version passes the
+    runtime check against the same version as the installed ROCm reports it."""
+    import runpy
+
+    metadata = runpy.run_path(str(Path(tensilelite.__file__).parents[1] / "release_metadata.py"))
+    label = metadata["distribution_version"](_SHA, therock_version)
+
+    if installed_as == "manifest":
+        root = _root(tmp_path, therock_version.split("a")[0].split("rc")[0].split(".dev")[0].split("+")[0])
+        _manifest(root, therock_version)
+        monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+        monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+    elif installed_as == "python-sdk":
+        monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: therock_version)
+        monkeypatch.setattr(_rocm, "_python_sdk_location", lambda: tmp_path)
+        monkeypatch.setattr(_rocm, "_python_sdk_executable_search_paths", lambda: (tmp_path,))
+    else:
+        _graph_path(tmp_path, monkeypatch)
+        monkeypatch.setenv("TENSILELITE_ROCM_ADAPTER", "therock-ci")
+        monkeypatch.setenv("THEROCK_PACKAGE_VERSION", therock_version)
+
+    result = _rocm.validate_distribution("tensilelite", label)
+
+    assert result.version == _rocm._canonical_rocm_version(therock_version)
+
+
+@pytest.mark.parametrize(("build_rocm", "selected", "kind"), [
+    ("7.11.0 full", "7.12.0", "full"),
+    ("7.12.0rc1 full", "7.12.0", "full"),
+    ("7.11.0 base", "7.12.0rc1", "full"),
+])
+def test_client_build_rocm_mismatch_fails_for_labelled_packages(
+    fresh_warnings, build_rocm, selected, kind
+):
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="released for a specific ROCm"):
+        _runtime.check_client_build_rocm(
+            build_rocm, _validated(selected, kind), Path("/c"), strict=True
+        )
+
+
+def test_client_build_rocm_major_mismatch_message_wins_when_strict(fresh_warnings):
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="different major ROCm version"):
+        _runtime.check_client_build_rocm("6.4.0 full", _validated("7.12.0"), Path("/c"), strict=True)
+
+
+def test_client_build_rocm_unknown_still_warns_for_labelled_packages(fresh_warnings):
+    with pytest.warns(_runtime.ClientRocmWarning, match="could not be checked"):
+        _runtime.check_client_build_rocm(
+            "unknown unknown", _validated("7.12.0"), Path("/c"), strict=True
+        )
