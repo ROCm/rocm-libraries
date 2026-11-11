@@ -1,1 +1,5 @@
 {% extends "device_select.cpp.jinja2" %}
+
+{% block benchmark_type %}
+using benchmark_type = device_select_unique_by_key_benchmark<key_type, value_type, config>;
+{% endblock %}
