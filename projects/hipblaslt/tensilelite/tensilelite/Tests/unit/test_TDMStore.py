@@ -134,7 +134,6 @@ def test_disabled_is_not_validated():
 
 _OUTPUT = "TDMStoreInst supports fp32 D, and bf16 and fp16 D converted from fp32 accumulators"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
-_ACROSS_TILES = "TDMStoreInst does not support ReuseAcrossPersistent"
 _CLUSTER_BARRIER = "TDMStoreInst requires the cluster barrier with persistent multicast"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
@@ -148,7 +147,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
-  (dict(_STREAMK, ReuseAcrossPersistent=1), _ACROSS_TILES),
   (dict(_STREAMK, ClusterDim=[2, 1], ClusterBarrier=False), _CLUSTER_BARRIER),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
@@ -172,11 +170,16 @@ def test_rejects_unsupported(overrides, reason):
   dict(_STREAMK, ClusterDim=[2, 1], Multicast=False, ClusterBarrier=False),
   dict(_STREAMK, PrefetchAcrossPersistent=1),
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1},
-], ids=["dp", "sk4", "sk5", "dp_cluster", "sk3_cluster", "sk3_cluster_no_multicast", "sk3_pap", "dp_pap"])
+  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1},
+  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1,
+   "PrefetchAcrossPersistent": 1},
+], ids=["dp", "sk4", "sk5", "dp_cluster", "sk3_cluster", "sk3_cluster_no_multicast", "sk3_pap", "dp_pap", "dp_rap",
+        "dp_rap_pap"])
 def test_accepts_persistent_policies(overrides):
   """Every non-atomic persistent policy stores the tiles it completes directly to D: DataParallel, and
   StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid,
-  also in spatial clusters, whose multicast waits on the cluster barrier, and with PrefetchAcrossPersistent."""
+  also in spatial clusters, whose multicast waits on the cluster barrier, and with PrefetchAcrossPersistent and
+  ReuseAcrossPersistent."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -765,6 +768,22 @@ def test_pap_stages_after_the_main_loop(gp_gfx1250, gfx1250_iim, assembler, caps
   last = max(i for i in range(first) if _code(lines[i]).startswith("v_wmma"))
   if vectors:
     assert not any(_code(line).startswith("s_wait_tensorcnt") for line in lines[last:first]), lines[last:first]
+
+
+_RAP = dict(_PAP, ReuseAcrossPersistent=1, DepthU=256, AssertSummationElementMultiple=256, SourceSwap=True)
+_FP8_FP32D = {"DataType": "F8", "MacDataTypeA": "F8", "MacDataTypeB": "F8", "DestDataType": "S"}
+
+
+@pytest.mark.parametrize("pap", [0, 1])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys, level, pap):
+  """ReuseAcrossPersistent keeps A in VGPRs from one DataParallel tile to the next: the RAP candidate, fp32 D
+  from fp8 inputs at MT64x256, generates within the register budget at every level, with and without
+  PrefetchAcrossPersistent."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 128, 1, 1, 2, 8, 2, 2], TDMStoreInst=level,
+                       ProblemType=_FP8_FP32D, **dict(_RAP, PrefetchAcrossPersistent=pap))
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["ReuseAcrossPersistent"] and asm and "tensor_store_from_lds " in asm
 
 
 def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):

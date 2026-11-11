@@ -88,7 +88,8 @@ def tdmStoreRejectReason(state):
   persistent multicast uses the cluster barrier, which Solution derives together with it.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
-  epilogue's memory token.
+  epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
+  staged tile overwrites nothing it reuses.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or
@@ -111,8 +112,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
     return "TDMStoreInst does not support atomic StreamK"
-  if state["ReuseAcrossPersistent"]:
-    return "TDMStoreInst does not support ReuseAcrossPersistent"
   if persistentMulticast(state) and not state.get("ClusterBarrier", True):
     return "TDMStoreInst requires the cluster barrier with persistent multicast"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
