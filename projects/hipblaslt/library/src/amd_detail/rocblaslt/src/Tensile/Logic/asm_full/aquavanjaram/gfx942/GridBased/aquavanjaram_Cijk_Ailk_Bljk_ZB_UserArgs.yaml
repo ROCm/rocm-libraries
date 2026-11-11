@@ -2,6 +2,7 @@ MinimumRequiredVersion: 5.0.0
 ScheduleName: aquavanjaram
 ArchitectureName: gfx942
 CUCount: null
+UseKdTree: true
 DeviceNames: [Device 0049, Device 0050]
 ProblemType:
   ActivationComputeDataType: 3
@@ -59985,4 +59986,3 @@ RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
 LibraryType: GridBased
-UseKdTree: true
