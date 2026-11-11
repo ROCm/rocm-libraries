@@ -13,7 +13,9 @@ Exit 0 only if tree(top) == tree(TIP).
 """
 import argparse
 import datetime
+import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -24,6 +26,7 @@ from splitlib import (
     NULL_SHA,
     CatFile,
     SplitError,
+    clean_env,
     contained,
     die,
     enc,
@@ -74,6 +77,8 @@ class Builder:
                 self.renamed_from.setdefault(r["old_path"], []).append(r)
         self.cat = CatFile(repo)
         self._lines = {}
+        self._hashed = {}
+        self._hasher = None
         self._base_entry = {}
         self._tip_entry = {}
         wanted = (
@@ -105,11 +110,44 @@ class Builder:
         return self._lines[key]
 
     def hash_blob(self, data):
-        return (
-            git(self.repo, "hash-object", "-w", "--stdin", "--no-filters", input=data)
-            .decode()
-            .strip()
-        )
+        """Write data as a blob and return its id, through one long-lived hash-object process."""
+        key = hashlib.sha256(data).digest()
+        if key in self._hashed:
+            return self._hashed[key]
+        if self._hasher is None:
+            self._hash_dir = tempfile.mkdtemp(prefix="split-blobs-")
+            self._hasher = subprocess.Popen(
+                [
+                    "git",
+                    "-C",
+                    self.repo,
+                    "hash-object",
+                    "-w",
+                    "--no-filters",
+                    "--stdin-paths",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                env=clean_env(None),
+            )
+        path = os.path.join(self._hash_dir, "blob")
+        with open(path, "wb") as f:
+            f.write(data)
+        self._hasher.stdin.write(enc(path) + b"\n")
+        self._hasher.stdin.flush()
+        sha = self._hasher.stdout.readline().decode().strip()
+        os.remove(path)
+        if len(sha) not in (40, 64):
+            raise SplitError("git hash-object failed")
+        self._hashed[key] = sha
+        return sha
+
+    def close(self):
+        self.cat.close()
+        if self._hasher is not None:
+            self._hasher.stdin.close()
+            self._hasher.wait()
+            os.rmdir(self._hash_dir)
 
     def stored(self, rel):
         full = contained(self.run, rel)
@@ -349,7 +387,7 @@ def main():
             )
             parent = sha
     finally:
-        b.cat.close()
+        b.close()
         try:
             os.remove(index)
             os.rmdir(tmpdir)
