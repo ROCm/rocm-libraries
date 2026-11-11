@@ -6,6 +6,7 @@
 """Characterization tests for the ROCm-coupled package boundary."""
 
 from importlib.metadata import version
+import re
 
 import pytest
 
@@ -14,14 +15,20 @@ import tensilelite
 pytestmark = pytest.mark.unit
 
 
+# Development builds are labelled with their commit; only TheRock builds carry a
+# ROCm identity, as +rocm<identity> or +devrocm<identity>.
+_LABEL = r"(g[0-9a-f]{40}(\.dirty)?|(dev)?rocm[0-9a-z.]+)"
+
+
 def test_distribution_version():
     assert tensilelite.__version__ == version("tensilelite")
-    assert "+rocm" in tensilelite.__version__
 
 
 def test_generator_version_is_independent():
     assert tensilelite.GENERATOR_VERSION == "5.0.0"
-    assert tensilelite.__version__.startswith(tensilelite.GENERATOR_VERSION + "+rocm")
+    assert re.fullmatch(
+        re.escape(tensilelite.GENERATOR_VERSION) + r"(\+" + _LABEL + r")?", tensilelite.__version__
+    ), tensilelite.__version__
 
 
 def test_runtime_details_are_not_public():
