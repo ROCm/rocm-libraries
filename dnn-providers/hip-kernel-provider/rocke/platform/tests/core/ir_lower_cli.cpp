@@ -1,22 +1,27 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/ir_lower_cli.cpp -- family-agnostic IR-artifact lowering tool.
+ * tests/core/ir_lower_cli.cpp -- family-agnostic IR-artifact lowering tool.
  *
  * Reads serialized `ck.dsl.ir/v1` text (from a file argument, or stdin when no
  * file is given), parses it back into a KernelDef with rocke_ir_parse, lowers it
  * with rocke_lower_kernel_to_llvm, and writes the resulting AMDGPU LLVM IR text
  * to stdout. This is the keystone of the single-lowerer path: an author can
  * serialize IR in any front end, and this tool reproduces the exact .ll the
- * engine would emit -- with no per-family C builder involved.
+ * engine would emit -- with no per-family C builder involved. With --hip it
+ * lowers with rocke_lower_kernel_to_hip instead and writes the HIP source, as
+ * rocke_engine.lower_serialized_ir_hip returns it.
  *
  * Usage:
- *   ir_lower_cli [arch] [ir_file]
+ *   ir_lower_cli [--hip] [arch] [ir_file]
+ *     --hip    lower to HIP source rather than LLVM IR.
  *     arch     ISA target gfx string; defaults to "gfx950".
  *     ir_file  path to serialized IR; "-" or omitted reads stdin.
  *
  * On any parse or lowering failure a clean message is written to stderr and the
- * process exits nonzero. The engine's extern "C" boundary already converts every
+ * process exits nonzero. The message ends "(status <code>): <engine message>",
+ * the form rocke_engine's errors take, so a caller reads the engine's status
+ * and message the same way from either. The engine's extern "C" boundary already converts every
  * internal failure (including raised exceptions) into a status code and an error
  * string, so this tool never aborts/terminates -- it only reports and exits.
  */
@@ -25,9 +30,16 @@
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
 
 namespace
 {
@@ -45,21 +57,67 @@ std::string read_all(FILE* f)
     return text;
 }
 
+// Lower `kernel` to HIP source for `arch` with the defaults
+// rocke_engine.lower_serialized_ir_hip uses, and write it to stdout.
+int lower_to_hip(rocke_ir_builder_t* b, const rocke_kernel_def_t* kernel, const char* arch)
+{
+    rocke_strbuf_t text;
+    if(rocke_strbuf_init(&text, 0) != 0)
+    {
+        std::fprintf(stderr, "ir_lower_cli: output allocation failed\n");
+        return 1;
+    }
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = arch;
+    const rocke_status_t st = rocke_lower_kernel_to_hip(b, kernel, &opts, &text);
+    if(st != ROCKE_OK)
+    {
+        const char* msg = rocke_ir_builder_error(b);
+        std::fprintf(stderr,
+                     "ir_lower_cli: lower failed for arch '%s' (status %d): %s\n",
+                     arch,
+                     (int)st,
+                     (msg && *msg) ? msg : "unknown lowering error");
+        rocke_strbuf_free(&text);
+        return 1;
+    }
+    const char* source = rocke_strbuf_cstr(&text);
+    std::fwrite(source, 1, std::strlen(source), stdout);
+    rocke_strbuf_free(&text);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     const char* arch = "gfx950";
     const char* ir_path = nullptr;
+    bool hip = false;
 
-    // argv[1] = arch (optional), argv[2] = ir file (optional, "-" = stdin).
-    if(argc >= 2 && std::strcmp(argv[1], "-") != 0)
+#ifdef _WIN32
+    // The engine's text and messages pass through unchanged: no CRLF
+    // translation on any stream.
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
+
+    // argv[1] = --hip (optional), then arch (optional), then ir file
+    // (optional, "-" = stdin).
+    int positional = 1;
+    if(argc > positional && std::strcmp(argv[positional], "--hip") == 0)
     {
-        arch = argv[1];
+        hip = true;
+        ++positional;
     }
-    if(argc >= 3 && std::strcmp(argv[2], "-") != 0)
+    if(argc > positional && std::strcmp(argv[positional], "-") != 0)
     {
-        ir_path = argv[2];
+        arch = argv[positional];
+    }
+    if(argc > positional + 1 && std::strcmp(argv[positional + 1], "-") != 0)
+    {
+        ir_path = argv[positional + 1];
     }
 
     std::string ir_text;
@@ -105,6 +163,13 @@ int main(int argc, char** argv)
                      (msg && *msg) ? msg : "unknown parse error");
         rocke_ir_builder_free(&b);
         return 1;
+    }
+
+    if(hip)
+    {
+        const int exit_code = lower_to_hip(&b, kernel, arch);
+        rocke_ir_builder_free(&b);
+        return exit_code;
     }
 
     // Lower the parsed kernel to LLVM IR for the requested arch. The _ex variant
