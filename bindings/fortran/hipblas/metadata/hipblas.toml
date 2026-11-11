@@ -1,0 +1,111 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the hipblas C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+
+["hipblas{S,D,Sc,Dz}asum"]
+result = "scalar-pointer-mode"
+
+# No H: __half has no Fortran type, so hipblasH* take their scalars as type(c_ptr).
+["hipblas{S,D,Bf}dot"]
+result = "scalar-pointer-mode"
+
+["hipblas{C,Z}dotc"]
+result = "scalar-pointer-mode"
+
+["hipblas{C,Z}dotu"]
+result = "scalar-pointer-mode"
+
+["hipblas{S,D,C,Z}gels"]
+deviceInfo = "scalar-device"
+info = "scalar-host"
+
+["hipblas{S,D,C,Z}gels{Batched,StridedBatched}"]
+info = "scalar-host"
+
+["hipblas{S,D,C,Z}geqrf{,Batched,StridedBatched}"]
+info = "scalar-host"
+
+[hipblasGetProperty]
+value = "scalar-host"
+
+["hipblas{S,D,C,Z}getrf"]
+info = "scalar-device"
+
+["hipblas{S,D,C,Z}getrfBatched"]
+ipiv = "always-c-ptr"
+
+["hipblas{S,D,C,Z}getriBatched"]
+ipiv = "always-c-ptr"
+
+["hipblas{S,D,C,Z}getrs{,StridedBatched}"]
+info = "scalar-host"
+
+["hipblas{S,D,C,Z}getrsBatched"]
+ipiv = "always-c-ptr"
+info = "scalar-host"
+
+["hipblasI{s,d,c,z}amax"]
+result = "scalar-pointer-mode"
+
+["hipblasI{s,d,c,z}amin"]
+result = "scalar-pointer-mode"
+
+["hipblas{S,D,Sc,Dz}nrm2"]
+result = "scalar-pointer-mode"
+
+["hipblas{S,D,C,Z,Cs,Zd}rot{,Batched,StridedBatched}"]
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
+
+["hipblas{S,D,C,Z}rotg"]
+a = "scalar-pointer-mode"
+b = "scalar-pointer-mode"
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
+
+["hipblas{S,D,C,Z}rotgStridedBatched"]
+a = "1d"
+b = "1d"
+c = "1d"
+s = "1d"
+
+["hipblas{S,D}rotmg"]
+d1 = "scalar-pointer-mode"
+d2 = "scalar-pointer-mode"
+x1 = "scalar-pointer-mode"
+y1 = "scalar-pointer-mode"
+
+["hipblas{S,D}rotmgStridedBatched"]
+d1 = "1d"
+d2 = "1d"
+x1 = "1d"
+y1 = "1d"
+
+# Values per batch entry and rotm's param are buffers in host or device memory per
+# the pointer mode: devptr keeps the hipfort forms that take them as type(c_ptr).
+# getrfStridedBatched's info, one per batch entry on the device, likewise.
+
+["hipblas{S,D}dotStridedBatched"]
+result = "devptr"
+
+["hipblas{C,Z}dot{c,u}StridedBatched"]
+result = "devptr"
+
+["hipblas{S,D,Sc,Dz}{asum,nrm2}StridedBatched"]
+result = "devptr"
+
+["hipblasI{s,d,c,z}am{ax,in}StridedBatched"]
+result = "devptr"
+
+["hipblas{S,D}rotm{,StridedBatched}"]
+param = "devptr"
+
+["hipblas{S,D,C,Z}getrfStridedBatched"]
+info = "devptr"
