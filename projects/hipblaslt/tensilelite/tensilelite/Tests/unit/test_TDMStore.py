@@ -77,9 +77,10 @@ def _state(**overrides):
   return state
 
 
-@pytest.mark.parametrize("dest", ["b", "h"])
-def test_accepts_bf16_and_fp16(dest):
-  assert tdmStoreRejectReason(_state(DestDataType=DataType(dest))) is None
+@pytest.mark.parametrize("dest, hpa", [("b", True), ("h", True), ("s", True), ("s", False)])
+def test_accepts_output_types(dest, hpa):
+  """fp32 D, with or without HighPrecisionAccumulate, and bf16 and fp16 D converted from fp32 accumulators."""
+  assert tdmStoreRejectReason(_state(DestDataType=DataType(dest), HighPrecisionAccumulate=hpa)) is None
 
 
 def test_accepts_non_atomic_streamk3():
@@ -129,7 +130,7 @@ def test_disabled_is_not_validated():
   assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
-_OUTPUT = "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
+_OUTPUT = "TDMStoreInst supports fp32 D, and bf16 and fp16 D converted from fp32 accumulators"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _ACROSS_TILES = "TDMStoreInst does not support ReuseAcrossPersistent"
 _CLUSTER_BARRIER = "TDMStoreInst requires the cluster barrier with persistent multicast"
@@ -139,7 +140,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
 
 @pytest.mark.parametrize("overrides, reason", [
-  ({"DestDataType": DataType("s")}, _OUTPUT),
+  ({"DestDataType": DataType("d")}, _OUTPUT),
   ({"HighPrecisionAccumulate": False}, _OUTPUT),
   ({"ComputeDataType": DataType("h")}, _OUTPUT),
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
@@ -226,28 +227,36 @@ def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
 @pytest.mark.parametrize("atomic", [False, True])
 def test_stores_final_d_predicate(accumulation, atomic):
   """A block writes D's final elements unless it is atomic or a GSU workspace store, and tdmStoreBlocks lets
-  such a block store through the TDM block when its elements are narrower than 4 bytes."""
+  such a block, of 16-bit or fp32 elements, store through the TDM block."""
   final = not atomic and accumulation in (None, "PartialsBuffer")
   assert storesFinalD({"_GlobalAccumulation": accumulation}, atomic) == final
   for bpe in (2, 4):
-    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe)) == (final and bpe < 4), bpe
+    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe)) == final, bpe
 
 
 @pytest.mark.parametrize("level", _LEVELS)
-def test_four_byte_elements_keep_buffer_store(level):
-  """fp32 elements, such as GSU>1 partials at the compute type, never go through the TDM block."""
-  assert _blocks(level, bpe=4) == set()
-  assert _blocks(level, edge=False, vectorWidths=(8,), bpe=4) == set()
+def test_fp32_final_store_uses_the_tdm_block(level):
+  """A final store of fp32 D picks the blocks a 16-bit one picks."""
+  assert _blocks(level, bpe=4) == _blocks(level)
+  assert _blocks(level, edge=False, vectorWidths=(8,), bpe=4) == _blocks(level, edge=False, vectorWidths=(8,))
+
+
+@pytest.mark.parametrize("accumulation, atomic", [("MultipleBuffer", False), ("MultipleBufferSingleKernel", False),
+                                                  (None, True)])
+def test_gsu_partials_keep_buffer_store_at_fp32(accumulation, atomic):
+  """GSU>1 partials, at the compute type, and atomic stores keep buffer_store."""
+  assert _blocks(3, accumulation=accumulation, atomic=atomic, bpe=4) == set()
 
 
 def test_streamk_final_store_uses_the_tdm_block():
   assert _blocks(2, accumulation="PartialsBuffer") == {8, 1}
 
 
+@pytest.mark.parametrize("dest, bpe", [("h", 2), ("s", 4)])
 @pytest.mark.parametrize("level", [0] + _LEVELS)
-def test_lds_bytes_of_the_staged_tile(level):
-  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "ProblemType": {"DestDataType": DataType("h")}}
-  assert tdmStoreLdsBytes(state) == (256 * 128 * 2 if level else 0)
+def test_lds_bytes_of_the_staged_tile(level, dest, bpe):
+  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "ProblemType": {"DestDataType": DataType(dest)}}
+  assert tdmStoreLdsBytes(state) == (256 * 128 * bpe if level else 0)
 
 
 def test_store_modifiers_follow_the_hints_of_d():
@@ -545,6 +554,21 @@ def test_store_vector_width_16_splits_32_byte_vectors(gp_gfx1250, gfx1250_iim, a
   assert sol["StoreVectorWidth"] == 16
   for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
     lines = [line for line in _tdmBlock(asm, beta, {1: 1, 2: 16, 3: 16}[level]).splitlines() if tag in line]
+    assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
+    coords = Counter(re.search(r"%s \((\d+), (\d+)\)" % tag, line).groups() for line in lines)
+    assert set(coords.values()) == {2}, (beta, lines[:4])
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_wide_vectors_split_into_16_byte_ds_ops(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """fp32 D from bf16 inputs at StoreVectorWidth 8 stages 32-byte D vectors, which dsStore writes as two 16-byte
+  stores, and with beta != 0 reads each C vector back with two 16-byte DS loads. The staged tile is 4 bytes per
+  element."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=8, ProblemType={"DestDataType": "S"})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 4
+  for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
+    lines = [line for line in _tdmBlock(asm, beta, {1: 1, 2: 8, 3: 8}[level]).splitlines() if tag in line]
     assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
     coords = Counter(re.search(r"%s \((\d+), (\d+)\)" % tag, line).groups() for line in lines)
     assert set(coords.values()) == {2}, (beta, lines[:4])

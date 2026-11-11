@@ -78,7 +78,7 @@ def tdmStoreRejectReason(state):
 
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
-  tensor_store_from_lds per wave. That needs bf16 or fp16 D converted from fp32 accumulators, written
+  tensor_store_from_lds per wave. That needs fp32 D, or bf16 or fp16 D converted from fp32 accumulators, written
   directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than atomic StreamK, which
   stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
   split evenly across the waves.
@@ -101,9 +101,10 @@ def tdmStoreRejectReason(state):
     return None
 
   pt = state["ProblemType"]
-  if not (pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()) or not pt["HighPrecisionAccumulate"] \
-      or not pt["ComputeDataType"].isSingle():
-    return "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
+  sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
+  if not pt["ComputeDataType"].isSingle() \
+      or not (pt["DestDataType"].isSingle() or (sixteenBit and pt["HighPrecisionAccumulate"])):
+    return "TDMStoreInst supports fp32 D, and bf16 and fp16 D converted from fp32 accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
@@ -156,10 +157,12 @@ def tdmStoreBlocks(kernel, edge, atomic, bpe, vectorWidths):
   narrowest one; without edge the one block is unmasked, NonEdge, and generateBetaModules picks the
   NonEdge path of a store with edge the same way, with edge=False. In a picked block the TDM block
   replaces the store; it is generated like the NonEdge path (widest vector width, no per-element
-  mask). Only a block that storesFinalD, of elements narrower than 4 bytes (bpe), uses it: not a GSU
-  or StreamK partial-tile store, and not fp32, whose staged tile would be twice the 16-bit one.
+  mask). Only a block that storesFinalD uses it, not a GSU or StreamK partial-tile store, and it stages
+  D at the size of D (bpe).
   """
-  paths = TDM_STORE_PATHS[kernel["TDMStoreInst"]] if storesFinalD(kernel, atomic) and bpe < 4 else ()
+  paths = TDM_STORE_PATHS[kernel["TDMStoreInst"]] if storesFinalD(kernel, atomic) else ()
+  assert not paths or "ProblemType" not in kernel or bpe == int(kernel["ProblemType"]["DestDataType"].numBytes()), \
+    "a TDM store block stages D at the size of D"
   storeVectorWidth = max(vectorWidths)
   blocks = {"EdgeM": {w for w in vectorWidths if w < storeVectorWidth} | {min(vectorWidths)},
             "EdgeN": {storeVectorWidth}} if edge else {"NonEdge": {storeVectorWidth}}
@@ -247,17 +250,24 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
 
 
 def emitTDMStoreStaging(gwb, stagedElements) -> Module:
-  """Write this batch's packed D elements to their (M, N) position in the staged tile."""
+  """Write this batch's packed D elements to their (M, N) position in the staged tile.
+
+  dsStore writes at most 32 bytes, as two 16-byte stores, so a wider vector, such as fp32 at store vector
+  width 16, is staged 32 bytes at a time.
+  """
   from .PackData import formatting
   module = Module("TDMStoreStaging")
   kw = gwb.parentWriter
   bps = kw.states.bpeCexternal * gwb.gwvw
-  numRegs = max(1, bps // kw.states.bpr)
+  width = min(bps, 32)
+  numRegs = max(1, width // kw.states.bpr)
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1)
-    module.add(dsStore(bps, dstAddr=vgpr(addr), src=vgpr(formatting(sumIdx, "ValuC+", kw.states.c.startVgprValu), numRegs),
-                       ds=DSModifiers(offset=offset), comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
-                       memToken=MemTokenData([_stagedTileToken(gwb)])))
+    for piece in range(bps // width):
+      src = vgpr(formatting(sumIdx + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
+      module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
+                         comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
+                         memToken=MemTokenData([_stagedTileToken(gwb)])))
   return module
 
 
