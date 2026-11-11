@@ -14,10 +14,11 @@ Importing this package needs only the standard library and NumPy.
     strategy.tell([Observation(t, space.key(t.genome), Status.OK, value=ms)])
 """
 
-from .factory import STRATEGY_NAMES, make_strategy
+from .build_aware import BuildPreference, attach_build_preference
+from .factory import DEFAULT_PORTFOLIO, STRATEGY_NAMES, make_strategy
 from .params import Param, SearchSpace
 from .portfolio import WarmStart
-from .stats import NoiseModel
+from .stats import NoiseModel, Race, holm
 from .surrogate import TablePrior
 from .trial import Fidelity, Observation, Status, Trial
 
@@ -27,8 +28,13 @@ ORIGIN_SHA = "61501dd46f68c196f16cfe3282bd979dbd0746ae"
 __all__ = [
     "ORIGIN_SHA",
     "STRATEGY_NAMES",
+    "DEFAULT_PORTFOLIO",
+    "BuildPreference",
+    "attach_build_preference",
     "Fidelity",
     "NoiseModel",
+    "Race",
+    "holm",
     "Observation",
     "Param",
     "SearchSpace",

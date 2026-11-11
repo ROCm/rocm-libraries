@@ -31,7 +31,7 @@ from .trial import Trial
 
 __all__ = ["DEFAULT_PORTFOLIO", "STRATEGY_NAMES", "make_strategy", "warm_starts"]
 
-STRATEGY_NAMES = ("random", "exhaustive", "de", "hill", "tpe", "gp", "portfolio")
+STRATEGY_NAMES = ("random", "exhaustive", "de", "hill", "tpe", "gp", "coupled_tpe", "portfolio")
 DEFAULT_PORTFOLIO = ("hill", "gp", "de")
 
 
@@ -149,9 +149,20 @@ def make_strategy(
             de = DifferentialEvolution(space, seed, init=init, **de_opts)
         return de
     if name == "tpe":
+        pool = opts.pop("candidate_pool", "sampled")
+        if pool not in ("sampled", "listed"):
+            raise ValueError("TPE candidate_pool must be sampled or listed")
+        if pool == "listed":
+            from .listed_tpe import ListedTPE
+
+            return ListedTPE(space, seed, prior=prior, init=init, **opts)
         return TPE(space, seed, prior=prior, init=init, **opts)
     if name == "gp":
         return GPEI(space, seed, prior=prior, init=init, **opts)
+    if name == "coupled_tpe":
+        from .coupled_tpe import CoupledTPE
+
+        return CoupledTPE(space, seed, prior=prior, init=init, **opts)
     # hill: the first warm start is the start point, the rest follow it.
     if "start" not in opts:
         opts["start"] = init[0] if init else None

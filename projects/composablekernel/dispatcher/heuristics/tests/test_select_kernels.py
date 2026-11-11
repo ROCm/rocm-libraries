@@ -98,6 +98,37 @@ def test_select_keeps_top_k_and_breaks_ties_on_name():
     )
 
 
+@pytest.mark.parametrize("limit, expected", [(None, 2), (0, 3), (1, 1), (100, 3)])
+def test_prior_coverage_does_not_spend_more_warm_slots(limit, expected):
+    stub = _Stub({"ka": 5.0, "kb": 7.0, "kc": 5.0, "kd": 1.0})
+    picks, rows = sk.select(_candidates(), stub, 2, ranked_top_k=limit)
+    assert picks["1024x1024x512"] == ["kb", "ka"]
+    first = [r for r in rows if r["problem"] == "1024x1024x512"]
+    assert len(first) == expected
+    assert [r["rank"] for r in first] == list(range(1, expected + 1))
+
+
+def test_diverse_picks_separate_vector_siblings_without_changing_prior():
+    candidates = _candidates()
+    candidates["pairs"] = {"1024x1024x512": ["ka", "kd", "kb", "kc"]}
+    stub = _Stub({"ka": 10.0, "kd": 9.0, "kb": 8.0, "kc": 7.0})
+    plain, rows = sk.select(candidates, stub, 2, ranked_top_k=0)
+    diverse, same_rows = sk.select(candidates, stub, 2, ranked_top_k=0, family_cap=1)
+    assert plain == {"1024x1024x512": ["ka", "kd"]}
+    assert diverse == {"1024x1024x512": ["ka", "kb"]}
+    assert rows == same_rows and len(rows) == 4
+    all_picks, _ = sk.select(candidates, stub, 4, family_cap=1)
+    assert all_picks["1024x1024x512"] == ["ka", "kb", "kc", "kd"]
+
+
+@pytest.mark.parametrize("options", [
+    {"top_k": 0}, {"top_k": 2, "ranked_top_k": -1}, {"top_k": 2, "family_cap": -1},
+])
+def test_invalid_selection_limits_are_rejected(options):
+    with pytest.raises(ValueError):
+        sk.select(_candidates(), _Stub({}), **options)
+
+
 @pytest.mark.parametrize(
     "spec, candidates, ok",
     [
@@ -117,7 +148,8 @@ def test_model_must_fit_the_run(spec, candidates, ok):
 
 
 @pytest.mark.skipif(not FP16_MODEL.exists(), reason="in-tree fp16 model not present")
-def test_end_to_end_with_an_in_tree_model(tmp_path):
+@pytest.mark.parametrize("full_prior", [False, True])
+def test_end_to_end_with_an_in_tree_model(tmp_path, full_prior):
     cand = tmp_path / "candidates.json"
     cand.write_text(json.dumps(_candidates()))
     out_pairs, out_ranked = tmp_path / "picks.json", tmp_path / "picks.csv"
@@ -125,12 +157,15 @@ def test_end_to_end_with_an_in_tree_model(tmp_path):
         "--candidates", str(cand), "--model_dir", str(FP16_MODEL), "--top_k", "2",
         "--out_pairs", str(out_pairs), "--out_ranked", str(out_ranked),
     ]  # fmt: skip
+    if full_prior:
+        argv += ["--ranked_top_k", "0", "--family_cap", "1"]
     assert sk.main(argv) == 0
     picks = json.loads(out_pairs.read_text())
     assert set(picks) == set(_candidates()["pairs"])
     assert all(len(v) == 2 for v in picks.values())
     ranked = pd.read_csv(out_ranked)
-    assert list(ranked.columns) == sk.RANKED_FIELDS and len(ranked) == 4
+    assert list(ranked.columns) == sk.RANKED_FIELDS
+    assert len(ranked) == (5 if full_prior else 4)
     # A second run writes the same picks.
     first = out_pairs.read_text()
     assert sk.main(argv) == 0 and out_pairs.read_text() == first

@@ -54,6 +54,19 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
 ## CK files
 
 - `__init__.py`: lean exports and `ORIGIN_SHA`.
+- `listed_tpe.py`: optional TPE acquisition over every listed candidate,
+  with randomized ties and the unchanged upstream density/prior/protocol.
+  Select with `options={"candidate_pool": "listed"}` for `tpe`; the default
+  sampled pool and upstream trial parity remain unchanged.
+- `coupled_tpe.py`: opt-in `coupled_tpe` strategy combining univariate-to-multivariate
+  shrinkage Parzen estimation (log-geometric ordinal kernels and dimension-scaled
+  Aitchison-Aitken categorical kernels), expected-improvement linear quantile weights,
+  joint-only pending batch repulsion, and surrogate-ranked local trust-region moves.
+- `build_aware.py`: optional, evaluator-owned reuse context for TPE/GP/coupled_tpe scored
+  pools, also attachable to portfolio model members. Prefer a successfully
+  built or planned key within a top acquisition-rank band, with cost-blind
+  exploration. It does not alter startup, legality, pending trials or
+  observations; the evaluator refreshes context before each ask.
 - `_compat.py`: `stable_json_hash`, `Knobs` and `KnobAxis`, copied unchanged
   (docstrings included) from upstream `rocke/dispatch/core.py` and
   `rocke/dispatch/tuning/axes.py`; the tests compare the three definitions
@@ -110,6 +123,11 @@ is listed here.
    different searches (in a replay of the GEMM search, 8-10 of 100 seeds,
    by up to 12.5 points of the best kernel's speed). The parity check gives
    upstream's TPE the same keys in sorted order.
+6. `surrogate.py`: an optional `build_preference` chooses from the already
+   scored TPE/GP pool before a trial is created. None is the default and
+   retains the original acquisition winner and random-number sequence.
+   The evaluator owns availability; after restoring strategy state it must
+   reattach/refresh context. The preference's diagnostics are not policy state.
 
 ## Notes for drivers
 

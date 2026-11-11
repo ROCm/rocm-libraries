@@ -390,6 +390,8 @@ class GemmSearchAdapter:
             "vector_fallback": not a.no_vector_fallback,
             "tune_c_vector_width": a.tune_c_vector_width,
             "devices": self.devices,
+            "timing_environment": {k: v for k, v in sorted(self.base_env.items())
+                                   if k.startswith("CK_TILE_BENCH_")},
             "measurement": {"verify": True, "verify_tol": a.verify_tol,
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
                             "timeout_s": f"kernel_timeout + ceil(2*M*N*K / {flops:g} "
