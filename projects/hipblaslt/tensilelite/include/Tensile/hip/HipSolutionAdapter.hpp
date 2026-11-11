@@ -49,9 +49,10 @@ namespace TensileLite
             // be tested without a GPU or process-wide HIP symbol interposition.
             struct ModuleApi
             {
-                decltype(&hipModuleLoad)   load         = hipModuleLoad;
-                decltype(&hipModuleUnload) unload       = hipModuleUnload;
-                decltype(&hipGetLastError) getLastError = hipGetLastError;
+                decltype(&hipModuleLoad)     load         = hipModuleLoad;
+                decltype(&hipModuleUnload)   unload       = hipModuleUnload;
+                decltype(&hipGetLastError)   getLastError = hipGetLastError;
+                decltype(&hipModuleLoadData) loadData     = hipModuleLoadData;
             };
 
             SolutionAdapter();

@@ -32,10 +32,13 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -45,6 +48,34 @@ namespace TensileLite
 {
     namespace hip
     {
+        namespace
+        {
+            // hipModuleLoad opens the file by its narrow path, so it fails for a
+            // path Windows will only open in verbatim form (see LongPath.hpp).
+            // Such a file is read here and loaded from memory instead.
+            hipError_t loadModuleFile(SolutionAdapter::ModuleApi const& api,
+                                      hipModule_t*                      module,
+                                      std::string const&                path)
+            {
+                auto const openPath = longPathSafe(path);
+                if(!isVerbatimPath(openPath))
+                    return api.load(module, path.c_str());
+
+                std::ifstream file(openPath, std::ios::binary | std::ios::ate);
+                if(!file)
+                    return hipErrorFileNotFound;
+                auto const size = file.tellg();
+                if(size <= 0)
+                    return hipErrorInvalidImage;
+                std::vector<char> image(static_cast<size_t>(size));
+                file.seekg(0);
+                file.read(image.data(), static_cast<std::streamsize>(image.size()));
+                if(!file)
+                    return hipErrorFileNotFound;
+                return api.loadData(module, image.data());
+            }
+        } // namespace
+
         SolutionAdapter::SolutionAdapter()
             : m_debug(Debug::Instance().printKernelArguments())
             , m_debugSkipLaunch(Debug::Instance().skipKernelLaunch())
@@ -203,7 +234,7 @@ namespace TensileLite
             Debug::Instance().markerStart("loadCodeObjectFile", path);
             hipModule_t module;
 
-            hipError_t error = m_moduleApi.load(&module, path.c_str());
+            hipError_t error = loadModuleFile(m_moduleApi, &module, path);
             if(error != hipSuccess)
             {
                 Debug::Instance().markerStop();
@@ -332,7 +363,7 @@ namespace TensileLite
             // replaced between this check and the load.
             bool codeObjectFitsInFile(std::string const& path)
             {
-                std::ifstream file(path, std::ios::binary);
+                std::ifstream file(longPathSafe(path), std::ios::binary);
                 if(!file)
                     return true;
                 file.seekg(0, std::ios::end);
@@ -472,7 +503,7 @@ namespace TensileLite
             hipError_t  error;
             try
             {
-                error = m_moduleApi.load(&module, path.c_str());
+                error = loadModuleFile(m_moduleApi, &module, path);
             }
             catch(std::exception const& e)
             {
@@ -699,7 +730,7 @@ namespace TensileLite
             for(int i = 0; i < extraCopies; ++i)
             {
                 hipModule_t module;
-                hipError_t  error = m_moduleApi.load(&module, path.c_str());
+                hipError_t  error = loadModuleFile(m_moduleApi, &module, path);
                 if(error != hipSuccess)
                 {
                     std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path

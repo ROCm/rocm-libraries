@@ -12,6 +12,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/concurrent_handles_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/long_path_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_format_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gfx950_mx_scale_layout_gtest.cpp
