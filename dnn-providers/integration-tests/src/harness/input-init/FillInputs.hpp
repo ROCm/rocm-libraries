@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/input-init/TensorAliases.hpp"
 
@@ -132,9 +133,10 @@ private:
 ///
 /// After the fill, the O and stats inputs of each SDPA backward node are replaced by
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
-/// recipe they were filled with; with a `device` filler that forward runs on the
-/// device. Likewise the index input of each max-pooling resample
-/// backward node is replaced by the argmax of a forward (see
+/// recipe they were filled with. `referenceExecutors` runs that forward: with a `device`
+/// filler on the GPU executor unless it gives the graph up, else on the CPU one. A graph
+/// without such a node never asks it for an executor. Likewise the index input of each
+/// max-pooling resample backward node is replaced by the argmax of a forward (see
 /// deriveResampleBackwardIndex()). A node whose forward cannot be derived makes the
 /// result unsupported, with the reason.
 ///
@@ -148,6 +150,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
+                      IReferenceExecutors& referenceExecutors,
                       DeviceInputFiller* device,
                       const std::vector<TensorAlias>& aliases = {});
 

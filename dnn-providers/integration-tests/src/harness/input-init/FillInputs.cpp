@@ -716,6 +716,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
+                      IReferenceExecutors& referenceExecutors,
                       DeviceInputFiller* device,
                       const std::vector<TensorAlias>& aliases)
 {
@@ -846,8 +847,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         {
             continue;
         }
-        if(auto why = deriveSdpaBackwardForwardOutputs(
-               graph, *sdpaBackward, inputs, ownedUids, /*onDevice=*/device != nullptr))
+        if(auto why = deriveSdpaBackwardForwardOutputs(graph,
+                                                       *sdpaBackward,
+                                                       inputs,
+                                                       ownedUids,
+                                                       referenceExecutors,
+                                                       /*onDevice=*/device != nullptr))
         {
             const auto* name = node.name();
             return FillResult::unsupported(

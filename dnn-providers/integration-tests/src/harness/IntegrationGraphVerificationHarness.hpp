@@ -31,6 +31,7 @@
 
 #include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
@@ -472,8 +473,10 @@ protected:
         }
 
         // No device filler: these tests read the tensors on the host through const
-        // accessors, which cannot migrate device-generated data.
-        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes, nullptr);
+        // accessors, which cannot migrate device-generated data. An input derived from a
+        // forward is computed on the CPU reference executor.
+        auto fillResult = fillInputs(
+            fb, bundle.tensors, leafInputUids, _inputFillRecipes, referenceExecutors(), nullptr);
         if(!fillResult.filled)
         {
             return fillResult;
@@ -594,10 +597,37 @@ public:
         executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    // The reference executors of these tests, each built on first use: the one TestConfig
+    // names runs the reference graph, and fillInputs() runs the forwards it derives inputs
+    // from on the CPU one. Built from the factory, not taken from the bundle harness's
+    // pool, which the unit-test binary does not link.
+    class ReferenceExecutors : public IReferenceExecutors
+    {
+    public:
+        IReferenceGraphExecutor& get(ReferenceExecutorType type) override
+        {
+            auto& executor = type == ReferenceExecutorType::GPU ? _gpu : _cpu;
+            if(executor == nullptr)
+            {
+                executor = ReferenceGraphExecutorFactory::create(type);
+            }
+            return *executor;
+        }
+
+    private:
+        std::unique_ptr<IReferenceGraphExecutor> _cpu;
+        std::unique_ptr<IReferenceGraphExecutor> _gpu;
+    };
+
+    static ReferenceExecutors& referenceExecutors()
+    {
+        static ReferenceExecutors s_executors;
+        return s_executors;
+    }
+
     static IReferenceGraphExecutor& getReferenceExecutor()
     {
-        static auto executor = ReferenceGraphExecutorFactory::createFromConfig();
-        return *executor;
+        return referenceExecutors().get(TestConfig::get().getReferenceExecutorType());
     }
 
     std::string getOutputTensorName(int64_t tensorId)

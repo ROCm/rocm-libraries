@@ -20,9 +20,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
-#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -47,24 +45,12 @@ const fb::TensorAttributes* findTensor(const fb::Graph& graph, int64_t uid)
     return nullptr;
 }
 
-// Whether the process sees a HIP device. The unit tests run where it does not.
+// Whether the process sees a HIP device. A DeviceInputFiller is built without one, so a
+// fill with a filler can still have no device to run the GPU forward on.
 bool deviceVisible()
 {
     int count = 0;
     return hipGetDeviceCount(&count) == hipSuccess && count > 0;
-}
-
-// The executors are stateless plan registries; build each once per process.
-CpuReferenceGraphExecutorAdapter& cpuExecutor()
-{
-    static CpuReferenceGraphExecutorAdapter s_executor;
-    return s_executor;
-}
-
-gpu_graph_executor::GpuReferenceGraphExecutor& gpuExecutor()
-{
-    static gpu_graph_executor::GpuReferenceGraphExecutor s_executor;
-    return s_executor;
 }
 
 // The SDPA forward graph whose outputs are the backward node's O and stats: one forward
@@ -167,6 +153,7 @@ std::optional<std::string>
                                      const fb::SdpaBackwardAttributes& attributes,
                                      InputTensorMap& inputs,
                                      const std::vector<int64_t>& ownedUids,
+                                     IReferenceExecutors& referenceExecutors,
                                      bool onDevice)
 {
     const auto isOwned = [&ownedUids](int64_t uid) {
@@ -279,7 +266,7 @@ std::optional<std::string>
     std::string gpuReason;
     if(onDevice && deviceVisible())
     {
-        auto& gpu = gpuExecutor();
+        auto& gpu = referenceExecutors.get(ReferenceExecutorType::GPU);
         if(gpu.isApplicable(fwd.buffer.data(), fwd.buffer.size()))
         {
             try
@@ -314,7 +301,7 @@ std::optional<std::string>
         }
     }
 
-    auto& cpu = cpuExecutor();
+    auto& cpu = referenceExecutors.get(ReferenceExecutorType::CPU);
     if(!cpu.isApplicable(fwd.buffer.data(), fwd.buffer.size()))
     {
         return "no reference executor models its forward graph"
