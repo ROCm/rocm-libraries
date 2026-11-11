@@ -60,6 +60,7 @@ jobs:
             projects/hipblaslt/scripts
             projects/hipblaslt/tensilelite
             shared/origami
+            shared/arch
             shared/stinkytofu
           sparse-checkout-cone-mode: true
 

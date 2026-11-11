@@ -20,22 +20,11 @@ using hardware_t = origami::hardware_t;
 using namespace nanobind::literals;
 
 NB_MODULE(origami, m) {
-  nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
-      .value("gfx90a", hardware_t::architecture_t::gfx90a)
-      .value("gfx942", hardware_t::architecture_t::gfx942)
-      .value("gfx950", hardware_t::architecture_t::gfx950)
-      .value("gfx1200", hardware_t::architecture_t::gfx1200)
-      .value("gfx1201", hardware_t::architecture_t::gfx1201)
-      .value("gfx1170", hardware_t::architecture_t::gfx1170)
-      .value("gfx1171", hardware_t::architecture_t::gfx1171)
-      .value("gfx1100", hardware_t::architecture_t::gfx1100)
-      .value("gfx1101", hardware_t::architecture_t::gfx1101)
-      .value("gfx1150", hardware_t::architecture_t::gfx1150)
-      .value("gfx1151", hardware_t::architecture_t::gfx1151)
-      .value("gfx1152", hardware_t::architecture_t::gfx1152)
-      .value("gfx1153", hardware_t::architecture_t::gfx1153)
-      .value("gfx1250", hardware_t::architecture_t::gfx1250)
-      .export_values();
+  auto architectures = nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t");
+  for (auto architecture : hardware_t::supported_architectures()) {
+    architectures.value(rocm::arch::name(architecture), architecture);
+  }
+  architectures.export_values();
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
       .value("Float", origami::data_type_t::Float)

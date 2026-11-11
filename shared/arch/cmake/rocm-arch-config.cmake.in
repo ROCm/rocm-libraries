@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+set_property(GLOBAL PROPERTY ROCM_ARCH_PYTHON_DIRECTORY
+    "@PACKAGE_CMAKE_INSTALL_DATADIR@/rocm-arch/python")
+include("${CMAKE_CURRENT_LIST_DIR}/rocm-arch-catalog.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/rocm-arch-functions.cmake")
+if(NOT TARGET rocm::arch)
+    include("${CMAKE_CURRENT_LIST_DIR}/rocm-arch-targets.cmake")
+endif()
+check_required_components(rocm-arch)

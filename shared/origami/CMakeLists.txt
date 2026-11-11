@@ -5,15 +5,19 @@ cmake_minimum_required(VERSION 3.25.2)
 
 project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+                              "${CMAKE_CURRENT_SOURCE_DIR}/../arch/cmake")
 
 include(dependencies)
+
+include(rocm-arch-dependency)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build Origami libraries as shared vs static." ON)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
+option(ORIGAMI_BUILD_ARCH_TESTING "Build host-only architecture identity tests." ${ORIGAMI_BUILD_TESTING})
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
@@ -112,7 +116,7 @@ target_include_directories(
     origami-headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_link_libraries(origami-headers INTERFACE hip::host)
+target_link_libraries(origami-headers INTERFACE hip::host rocm::arch)
 
 set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
 
@@ -135,6 +139,13 @@ target_sources(
 )
 
 target_link_libraries(origami PRIVATE hip::host)
+
+if(ORIGAMI_BUILD_ARCH_TESTING)
+    enable_testing()
+    add_executable(origami-arch-test tests/test_architecture.cpp)
+    target_link_libraries(origami-arch-test PRIVATE roc::origami)
+    add_test(NAME origami-arch-identity COMMAND origami-arch-test)
+endif()
 
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)
@@ -197,6 +208,10 @@ else()
         DEPENDS
         PACKAGE
         hip
+        PACKAGE
+        rocm-arch
+        0.4
+        CONFIG
         NAMESPACE
         roc::
     )

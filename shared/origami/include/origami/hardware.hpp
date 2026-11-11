@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <rocm/arch/catalog.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -48,76 +50,57 @@ namespace origami {
  */
 class ORIGAMI_EXPORT hardware_t {
  public:
-  /**
-   * @brief Enumeration of supported GPU architectures.
-   *
-   */
-  enum class architecture_t {
-    gfx90a,
-    gfx942,
-    gfx950,
-    gfx1200,
-    gfx1201,
-    gfx1170,
-    gfx1171,
-    gfx1100,
-    gfx1101,
-    gfx1150,
-    gfx1151,
-    gfx1152,
-    gfx1153,
-    gfx1250,
-    Count
+  using architecture_t = rocm::arch::architecture_t;
+
+ private:
+  // Known processors without an Origami hardware model. Generic targets are
+  // already separate from the shared processor identity type.
+  inline static constexpr architecture_t excluded_architectures[] = {
+    architecture_t::gfx803, architecture_t::gfx900, architecture_t::gfx906,
+    architecture_t::gfx908, architecture_t::gfx90c, architecture_t::gfx1030,
+    architecture_t::gfx1102, architecture_t::gfx1250_strict,
   };
 
-  /**
-   * @brief Convert architecture name string to architecture_t enum.
-   *
-   * @param str Architecture name as string (e.g., "gfx90a", "gfx942")
-   * @return architecture_t Corresponding enum value, or Count if not recognized
-   */
+ public:
+  static constexpr auto const& known_architectures() noexcept {
+    return rocm::arch::architectures;
+  }
+
+  static constexpr bool is_supported_architecture(architecture_t architecture) noexcept {
+    if (!rocm::arch::name(architecture)) return false;
+    for (auto excluded : excluded_architectures) {
+      if (architecture == excluded) return false;
+    }
+    return true;
+  }
+
+  /** Shared processor identities minus explicit model exclusions. */
+  static constexpr auto supported_architectures() noexcept {
+    constexpr auto count = [] {
+      size_t result = 0;
+      for (auto architecture : rocm::arch::architecture_ids) {
+        if (is_supported_architecture(architecture)) ++result;
+      }
+      return result;
+    }();
+    std::array<architecture_t, count> result{};
+    size_t index = 0;
+    for (auto architecture : rocm::arch::architecture_ids) {
+      if (is_supported_architecture(architecture)) result[index++] = architecture;
+    }
+    return result;
+  }
+
+  /** Exact lookup restricted to processors with an Origami hardware model. */
   static constexpr architecture_t arch_name_to_enum(std::string_view str) noexcept {
-    if (str == "gfx90a") return architecture_t::gfx90a;
-    if (str == "gfx942") return architecture_t::gfx942;
-    if (str == "gfx950") return architecture_t::gfx950;
-    if (str == "gfx1200") return architecture_t::gfx1200;
-    if (str == "gfx1201") return architecture_t::gfx1201;
-    if (str == "gfx1170") return architecture_t::gfx1170;
-    if (str == "gfx1171") return architecture_t::gfx1171;
-    if (str == "gfx1100") return architecture_t::gfx1100;
-    if (str == "gfx1101") return architecture_t::gfx1101;
-    if (str == "gfx1150") return architecture_t::gfx1150;
-    if (str == "gfx1151") return architecture_t::gfx1151;
-    if (str == "gfx1152") return architecture_t::gfx1152;
-    if (str == "gfx1153") return architecture_t::gfx1153;
-    if (str == "gfx1250") return architecture_t::gfx1250;
+    for (auto architecture : supported_architectures()) {
+      if (str == rocm::arch::name(architecture)) return architecture;
+    }
     return architecture_t::Count;
   }
 
-  /**
-   * @brief Convert architecture_t to string (e.g. for logging).
-   *
-   * @param a Architecture enum value
-   * @return std::string_view Corresponding string value
-   */
-  static constexpr std::string_view arch_enum_to_name(architecture_t a) noexcept {
-    switch (a) {
-      case architecture_t::gfx90a: return "gfx90a";
-      case architecture_t::gfx942: return "gfx942";
-      case architecture_t::gfx950: return "gfx950";
-      case architecture_t::gfx1200: return "gfx1200";
-      case architecture_t::gfx1201: return "gfx1201";
-      case architecture_t::gfx1170: return "gfx1170";
-      case architecture_t::gfx1171: return "gfx1171";
-      case architecture_t::gfx1100: return "gfx1100";
-      case architecture_t::gfx1101: return "gfx1101";
-      case architecture_t::gfx1150: return "gfx1150";
-      case architecture_t::gfx1151: return "gfx1151";
-      case architecture_t::gfx1152: return "gfx1152";
-      case architecture_t::gfx1153: return "gfx1153";
-      case architecture_t::gfx1250: return "gfx1250";
-      default: return "unknown";
-    }
+  static constexpr std::string_view arch_enum_to_name(architecture_t architecture) noexcept {
+    return is_supported_architecture(architecture) ? rocm::arch::name(architecture) : "unknown";
   }
 
   /**
@@ -327,12 +310,11 @@ class ORIGAMI_EXPORT hardware_t {
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
         // TODO: Update with real gfx1250 constants when available
-        auto c                       = get_gfx950_arch_constants(std::nullopt);
-        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
-        c.simds_per_cu               = 4;
-        c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
-        return c;
+        const auto c = get_gfx950_arch_constants(std::nullopt);
+        // Construct the tuple directly so this model is constexpr in C++17.
+        return {c.mem1_perf_ratio, NO_MALL_AVAILABLE, c.mem3_perf_ratio,
+                c.parallel_mi_cu, std::make_tuple(0, 0.016, 0), c.mem_clock_ratio,
+                4, 0};  // RDNA4 has no L1D between vcache and L2
       }
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
     }
@@ -1162,3 +1144,10 @@ class ORIGAMI_EXPORT hardware_t {
 ORIGAMI_EXPORT std::size_t resolve_num_cus(std::int64_t requested_num_cus,
                                            std::size_t hardware_num_cus);
 }  // namespace origami
+
+static_assert([] {
+  for (auto architecture : origami::hardware_t::supported_architectures()) {
+    if (origami::hardware_t::get_arch_constants(architecture).parallel_mi_cu == 0) return false;
+  }
+  return true;
+}(), "A shared architecture needs an Origami model or an explicit exclusion");

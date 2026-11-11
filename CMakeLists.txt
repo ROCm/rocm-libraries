@@ -50,6 +50,7 @@ set(DEFAULT_COMPONENTS
 
 set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
+    arch
     # dnn
     hipdnn
     hipdnn-integration-tests
@@ -149,6 +150,9 @@ endif()
 unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
+# The architecture catalog is a required foundation for every component build.
+add_subdirectory(shared/arch)
+
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT mxdatagenerator

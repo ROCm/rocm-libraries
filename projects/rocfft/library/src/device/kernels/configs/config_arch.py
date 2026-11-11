@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 from enum import Enum
+from rocm_arch import architectures
 
 
 class lds_config(Enum):
@@ -26,22 +27,16 @@ class lds_config(Enum):
     SIZE_160KiB = 160 * 1024
 
 
-class supported_arch(Enum):
-    GFX_GENERIC = "gfx_generic"
-    GFX_803 = "gfx803"
-    GFX_900 = "gfx900"
-    GFX_906 = "gfx906"
-    GFX_908 = "gfx908"
-    GFX_90A = "gfx90a"
-    GFX_942 = "gfx942"
-    GFX_950 = "gfx950"
-    GFX_1030 = "gfx1030"
-    GFX_1100 = "gfx1100"
-    GFX_1101 = "gfx1101"
-    GFX_1102 = "gfx1102"
-    GFX_1150 = "gfx1150"
-    GFX_1151 = "gfx1151"
-    GFX_1152 = "gfx1152"
-    GFX_1153 = "gfx1153"
-    GFX_1200 = "gfx1200"
-    GFX_1201 = "gfx1201"
+# Architecture identity comes from the common catalog. Tuned configuration
+# availability remains in the per-kernel configuration records.
+def _enum_name(name):
+    return "GFX_" + name[3:].upper().replace("-", "_")
+
+
+_members = {"GFX_GENERIC": "gfx_generic"}
+for _name in architectures():
+    _member = _enum_name(_name)
+    if _member in _members:
+        raise ValueError(f"Architecture enum name collision: {_name}")
+    _members[_member] = _name
+supported_arch = Enum("supported_arch", _members, module=__name__)

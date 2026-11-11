@@ -13,6 +13,7 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
@@ -63,6 +64,7 @@
 "project: hipfft":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipfft/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "project: hiprand":
 - changed-files:
@@ -110,6 +112,7 @@
 "project: rocfft":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocfft/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "project: rocprim-deprecated":
 - changed-files:
@@ -150,6 +153,7 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "shared: stinkytofu":
 - changed-files:

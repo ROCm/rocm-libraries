@@ -189,7 +189,7 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
                                              size_t L2_capacity,
                                              int compute_clock_khz,
                                              std::optional<int> pci_chip_id) {
-  if (arch == architecture_t::Count) {
+  if (!is_supported_architecture(arch)) {
     throw std::runtime_error("Attempting to create hardware for unsupported architecture");
   }
 
@@ -310,41 +310,14 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1101:
     case architecture_t::gfx1151:
       return true;
-    case architecture_t::gfx1150:
-    case architecture_t::gfx1152:
-    case architecture_t::gfx1153:
-    case architecture_t::gfx1170:
-    case architecture_t::gfx1171:
-    case architecture_t::gfx1250:
-    case architecture_t::Count:
-      // Count is not a valid architecture, this is to silence compiler warning
+    default:
       return false;
   }
 }
 
 bool hardware_t::has_native_TF32() const {
-  switch (arch) {
-    case architecture_t::gfx942:
-      return true;
-    case architecture_t::gfx90a:
-    case architecture_t::gfx950:
-    case architecture_t::gfx1200:
-    case architecture_t::gfx1201:
-    case architecture_t::gfx1170:
-    case architecture_t::gfx1171:
-    case architecture_t::gfx1100:
-    case architecture_t::gfx1101:
-    case architecture_t::gfx1150:
-    case architecture_t::gfx1151:
-    case architecture_t::gfx1152:
-    case architecture_t::gfx1153:
-    case architecture_t::gfx1250:
-    case architecture_t::Count:
-      // Count is not a valid architecture, this is to silence compiler warning
-      return false;
-  }
+  return arch == architecture_t::gfx942;
 }
-
 
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');

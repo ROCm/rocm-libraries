@@ -54,6 +54,7 @@ add_subdirectory( generator )
 # Make it possible to let install.sh control this ?
 set( kgen ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py )
 set( kgendeps ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_arch.py
               ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
               ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
               ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
@@ -61,6 +62,16 @@ set( kgendeps ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
               ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_2d_single.py
               ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_pp_3d.py
               ${CMAKE_SOURCE_DIR}/library/src/device/generator.py )
+
+# Use the same catalog package that configured CMake, including its Python view.
+get_property(_arch_python GLOBAL PROPERTY ROCM_ARCH_PYTHON_DIRECTORY)
+file(GLOB _arch_python_definitions CONFIGURE_DEPENDS "${_arch_python}/rocm_arch/architectures/*.json")
+list(APPEND kgendeps "${_arch_python}/rocm_arch/__init__.py" ${_arch_python_definitions})
+if(WIN32)
+  set(_arch_pythonpath "${_arch_python};$ENV{PYTHONPATH}")
+else()
+  set(_arch_pythonpath "${_arch_python}:$ENV{PYTHONPATH}")
+endif()
 
 # create list of all N files that will initialize function pool
 if( ROCFFT_FUNCTION_POOL_N LESS 1 )
@@ -76,12 +87,14 @@ endforeach()
 
 add_custom_command(OUTPUT function_pool.cpp
   OUTPUT ${FUNCTION_POOLS}
-  COMMAND ${Python3_EXECUTABLE} ${kgen}
+  COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${_arch_pythonpath}"
+  ${Python3_EXECUTABLE} ${kgen}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
   --num-files=${ROCFFT_FUNCTION_POOL_N}
   generate $<TARGET_FILE:stockham_gen>
   DEPENDS stockham_gen ${kgendeps}
   COMMENT "Generator producing device kernels for rocfft-device"
+  VERBATIM
 )
 
 # add virtual build target for generated kernels
