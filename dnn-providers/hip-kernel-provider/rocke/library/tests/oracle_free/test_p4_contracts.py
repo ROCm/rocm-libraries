@@ -29,7 +29,6 @@ import struct
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from fractions import Fraction
@@ -102,6 +101,7 @@ from ._p4_analytical import (
     gamma,
     head_scale_margin,
     is_f32,
+    logit_preserving_reads,
     mul_rn,
     mutation_separation,
     next_down,
@@ -122,6 +122,7 @@ from ._p4_analytical import (
     tier_a_exposure,
     tier_b_exposure,
     tier_b_row,
+    uncast_probability_bits,
     visited_tiles,
 )
 from ._p4_capture_audit import audit_captures, format_audit
@@ -459,11 +460,11 @@ def _lowered_quick_case(case: UniformCase) -> str:
 
 
 # Per tile body: 64 keys over two lane halves give one 32-term lane chain, one
-# shuffle, one rescale combine and one alpha. The causal kernel has one KV
-# loop; the window-64 kernel splits it into three phases.
-_TILE_BODIES: Mapping[str, int] = {
-    case.case_id: 3 if case.mask == "window" else 1 for case in UNIFORM_QUICK_CASES
-}
+# shuffle, one rescale combine and one alpha. Both quick kernels have one KV
+# loop: the window kernel splits its loop into three phases only when the
+# window spans the query block (W / block_n >= block_m / block_n), and window
+# 64 on 128x64 tiles does not.
+_TILE_BODIES = 1
 _LANE_CHAIN = 32
 _OUTPUT_CASTS = 32  # D = 64 over two 32-wide output tiles, 16 per lane
 
@@ -473,7 +474,7 @@ def test_ir_contract_pins_the_dense_path_model(case: UniformCase) -> None:
     model = classify_dense_path(_lowered_quick_case(case), case.dtype)
     assert not model.violations, f"{_REDERIVE}: " + "; ".join(model.violations)
 
-    bodies = _TILE_BODIES[case.case_id]
+    bodies = _TILE_BODIES
     assert model.counts["exp2_alpha"] == bodies
     assert model.counts["combine"] == bodies
     assert model.counts["shuffle"] == bodies
@@ -1103,8 +1104,19 @@ def _single_rounded_fp16(o: np.float32, r: np.float32) -> int:
     return int(np.float16(np.float64(o) * np.float64(r)).view(np.uint16))
 
 
-# The Phase 4 capture: row 207, head 0, folded, background dimensions 16..63.
+# The H4/4 Phase 4 capture: row 207, head 0, folded, background dimensions
+# 16..63 of the FP16 causal identity case.
 _COUNTEREXAMPLE = {"o": 0x3A83E800, "r": 0x3E7BB1A4, "single": 0x0C0D, "double": 0x0C0E}
+# An FP16 causal identity case with the quick head scales. It is outside the
+# quick matrix, whose FP16 kernel is the window one: there the two epilogue
+# roundings store the same bits at every coordinate. Head 0 has the captured
+# logit and V scale, so row 207 reproduces the counterexample.
+_FP16_CAUSAL = P4Case(
+    UniformCase(1, 256, 256, 8, 2, 64, "fp16", "causal"),
+    P4Fixture.IDENTITY,
+    *P4_HEAD_SCALES["periodic"],
+    block_m=128,
+)
 
 
 def test_epilogue_hull_holds_both_roundings_of_the_captured_counterexample() -> None:
@@ -1310,12 +1322,24 @@ def test_p4_case_rejects_inexact_or_unsupported_configurations(kwargs, match) ->
         P4Case(**arguments)
 
 
+def _kv_rows(case: P4Case, k: np.ndarray, *, interleaved: bool = False) -> np.ndarray:
+    """K ``[B, Sk, Hkv, D]`` as each query head reads it, ``[B, Sk, Hq, D]``:
+    KV head ``h // (Hq / Hkv)``, or ``h % Hkv`` under the interleaved map."""
+    heads = np.arange(case.base.nhead_q)
+    groups = case.base.nhead_k
+    index = heads % groups if interleaved else heads // (case.base.nhead_q // groups)
+    return k[:, :, index, :]
+
+
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_generators_are_exact_and_match_the_score_model(case: P4Case) -> None:
     q, k = p4_query_key(case)
     for values in (q, k):
         encode_bits(values, case.dtype)  # raises if any value would round
-    dots = np.einsum("bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64))
+    assert k.shape[2] == case.base.nhead_k < case.base.nhead_q == q.shape[2]
+    dots = np.einsum(
+        "bqhd,bkhd->bhqk", q.astype(np.float64), _kv_rows(case, k).astype(np.float64)
+    )
     for head in range(case.base.nhead_q):
         expected = np.array(
             [
@@ -1337,21 +1361,34 @@ def test_visited_tiles_follow_the_kernel_block_schedule() -> None:
         (0, 1, 2, 3),
         (0, 1, 2, 3),
     ]
-    assert [tuple(visited_tiles(window, q)) for q in (0, 63, 64, 127, 255)] == [
-        (0,),
-        (0,),
+    assert [tuple(visited_tiles(window, q)) for q in (0, 63, 127, 128, 255)] == [
         (0, 1),
         (0, 1),
-        (2, 3),
+        (0, 1),
+        (1, 2, 3),
+        (1, 2, 3),
     ]
     for case in (causal, window):
         for row in range(256):
             first, last = legal_interval(case.base, row)
             tiles = visited_tiles(case, row)
             assert tiles[0] * 64 <= first and last < (tiles[-1] + 1) * 64
-    # Row 64t+63 of the window kernel starts on a fully masked tile (case B).
-    first, _ = legal_interval(window.base, 127)
-    assert first == 64 == visited_tiles(window, 127)[1] * 64
+    # Rows 127 and 191..254 of the window kernel start on one fully masked
+    # tile, row 255 on two (lemma M); every other row's first tile holds a key.
+    leading = {}
+    for row in range(256):
+        first, _ = legal_interval(window.base, row)
+        leading[row] = first // 64 - visited_tiles(window, row)[0]
+    rows_with = {
+        count: {row for row, found in leading.items() if found == count}
+        for count in set(leading.values())
+    }
+    assert set(rows_with) == {0, 1, 2}
+    assert rows_with[1] == {127, *range(191, 255)}
+    assert rows_with[2] == {255}
+    for row in range(256):
+        first, _ = legal_interval(causal.base, row)
+        assert first // 64 == visited_tiles(causal, row)[0]
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -1457,10 +1494,9 @@ def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
     """``IR_EXACT`` is the double-rounded alternative and ``ARTIFACT_EXACT`` the
     named artifact's per-site choice; BF16 has one alternative. At the
     captured counterexample the two FP16 roundings differ, so the artifact
-    rule is observable there."""
-    fp16 = next(
-        c for c in P4_QUICK_CASES if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
-    )
+    rule is observable there. On the quick FP16 cases they agree (at every
+    coordinate; sampled here), so a quick capture cannot show a site rule."""
+    fp16 = _FP16_CAUSAL
     double, single = epilogue_alternatives(fp16, "folded", 207, 0)
     assert int(double[16]) == _COUNTEREXAMPLE["double"]
     assert int(single[16]) == _COUNTEREXAMPLE["single"]
@@ -1474,6 +1510,38 @@ def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
     for row in (0, 127, 255):
         double, single = epilogue_alternatives(bf16, "folded", row, 1)
         np.testing.assert_array_equal(double, single)
+    for quick in (c for c in P4_QUICK_CASES if c.dtype == "fp16"):
+        for row in (0, 127, 207, 255):
+            for head in (0, 4):
+                double, single = epilogue_alternatives(quick, "folded", row, head)
+                np.testing.assert_array_equal(double, single)
+
+
+# Block, tile and window edges of both quick kernels.
+_CAST_ROWS = (0, 6, 63, 64, 127, 128, 191, 255)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_probability_cast_is_the_only_distance_from_the_target(case: P4Case) -> None:
+    """T3: the IR-exact path stores the certified target at every row-max
+    coordinate, whose probability is exactly 1. Elsewhere it can store a
+    neighbor, and the probability cast alone moves it: the same path with PV
+    reading the uncast FP32 weights stores the target everywhere."""
+    off_target = 0
+    for exposure in P4_EXPOSURES:
+        center, radius, _ = tier_a_exposure(case, exposure)
+        for row in _CAST_ROWS:
+            for head in range(case.base.nhead_q):
+                target = center[0, row, head]
+                row_max = radius[0, row, head] == 1
+                compared = radius[0, row, head] > 0
+                stored = emulate_row(case, exposure, row, head)
+                uncast = uncast_probability_bits(case, exposure, row, head)
+                where = (exposure, row, head)
+                assert np.array_equal(stored[row_max], target[row_max]), where
+                assert np.array_equal(uncast[compared], target[compared]), where
+                off_target += int(np.count_nonzero(stored != target))
+    assert off_target > 0
 
 
 @pytest.mark.parametrize(
@@ -1492,18 +1560,20 @@ def test_emulation_modes_refuse_ambiguous_arguments(kwargs, match) -> None:
 
 
 def test_epilogue_artifacts_name_their_code_objects() -> None:
-    """Each named artifact gives a compiler, both quick code objects by digest
-    and its single-rounded store elements; digests resolve back to it."""
-    digests = set()
+    """Each named artifact gives a compiler, its quick code objects by digest
+    (FP16 and BF16 in pairs, one pair per quick matrix it compiled) and its
+    single-rounded store elements; digests resolve back to it."""
+    digests = []
     for name, artifact in P4_EPILOGUE_ARTIFACTS.items():
         assert artifact.compiler and artifact.evidence
         assert artifact.single_lanes <= {0, 1, 2, 3}
-        assert sorted(dtype for dtype, _ in artifact.code_objects) == ["bf16", "fp16"]
+        dtypes = Counter(dtype for dtype, _ in artifact.code_objects)
+        assert set(dtypes) == {"bf16", "fp16"} and dtypes["bf16"] == dtypes["fp16"]
         for dtype, digest in artifact.code_objects:
             assert re.fullmatch(r"[0-9a-f]{64}", digest)
             assert epilogue_artifact_for(dtype, digest) == name
-            digests.add(digest)
-    assert len(digests) == 2 * len(P4_EPILOGUE_ARTIFACTS)
+            digests.append(digest)
+    assert len(digests) == len(set(digests))
     assert epilogue_artifact_for("fp16", "0" * 64) is None
 
 
@@ -1617,6 +1687,19 @@ def test_head_scales_keep_their_committed_separation(family: str) -> None:
     assert margin == P4_HEAD_SCALE_MARGIN[family] > 0
 
 
+def test_two_families_separate_every_wrong_head_pair() -> None:
+    """A read of a wrong (Q head, KV head) pair keeps the logit of one family
+    only as a compound read (both wrong), and never in both families, so the
+    quick matrix separates what ``P4_HEAD_SCALE_MARGIN`` does not bound."""
+    periodic = set(logit_preserving_reads("periodic"))
+    walsh = set(logit_preserving_reads("walsh"))
+    assert periodic == {(0, 1, 1), (1, 0, 1), (4, 5, 0), (5, 4, 0)}
+    assert walsh == {(head, (head + 4) % 8, 1 - head // 4) for head in range(8)}
+    assert not periodic & walsh
+    for head, q_head, kv in periodic | walsh:
+        assert q_head != head and kv != head // 4
+
+
 # ---------------------------------------------------------------------------
 # Mutation separation (T5, DT4, invariant I5).
 # ---------------------------------------------------------------------------
@@ -1644,7 +1727,8 @@ def test_mutation_applicability_follows_fixture_and_mask() -> None:
 def _mutated_query_key(
     case: P4Case, mutation: P4Mutation
 ) -> tuple[np.ndarray, np.ndarray, range]:
-    """The Q and K a mutated kernel reads, and the keys they are defined for."""
+    """The Q and, per query head, the K a mutated kernel reads, and the keys
+    they are defined for."""
     q, k = p4_query_key(case)
     keys = range(case.base.seqlen_k)
     if mutation is P4Mutation.Q_HEAD_ROTATE:
@@ -1666,12 +1750,14 @@ def _mutated_query_key(
         block = int(mutation.value.rsplit("_", 1)[1])
         q = q.copy()
         q[..., 16 * block : 16 * (block + 1)] = 0.0
-    return q, k, keys
+    interleaved = mutation is P4Mutation.KV_GROUP_INTERLEAVE
+    return q, _kv_rows(case, k, interleaved=interleaved), keys
 
 
 _SCORE_MUTATIONS = (
     P4Mutation.Q_HEAD_ROTATE,
     P4Mutation.K_HEAD_ROTATE,
+    P4Mutation.KV_GROUP_INTERLEAVE,
     P4Mutation.K_ROW_PLUS_ONE,
     P4Mutation.K_ROW_MINUS_ONE,
     P4Mutation.INVERSE_SHIFT,
@@ -1689,9 +1775,10 @@ _SCORE_MUTATIONS = (
 )
 def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
     """The closed-form mutated scores equal the exact QK dot products of the
-    inputs a mutated kernel would read (heads rotated, K rows off by one, the
-    cyclic K transposed, the Walsh sign dropped or one 16-dimension block of
-    the contraction skipped). Scale mutations change only the score scale."""
+    inputs a mutated kernel would read (heads rotated, the KV group map
+    interleaved, K rows off by one, the cyclic K transposed, the Walsh sign
+    dropped or one 16-dimension block of the contraction skipped). Scale
+    mutations change only the score scale."""
     for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
         q, k, keys = _mutated_query_key(case, mutation)
         dots = np.einsum(
@@ -1747,7 +1834,8 @@ def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
     correct: set[Fraction] = set()
     rounded = set()
     for case in P4_QUICK_CASES:
-        correct |= _dot_products(*p4_query_key(case))
+        q, k = p4_query_key(case)
+        correct |= _dot_products(q, _kv_rows(case, k))
         for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
             values = _dot_products(*_mutated_query_key(case, mutation)[:2])
             if any(round_f32(v * SCORE_SCALE) != v * SCORE_SCALE for v in values):
@@ -1976,7 +2064,8 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
             relaxed_low, relaxed_high = _relaxed("basis@0", q, h)
             return _normal(c, r) and (relaxed_low[d] < lo or relaxed_high[d] > hi)
 
-        where, low, _, _, _ = _find("basis@0", range(128, 160), widened)
+        # On this case a 2-ULP exponential moves Tier B at row 34 only.
+        where, low, _, _, _ = _find("basis@0", range(32, 40), widened)
         relaxed_low, relaxed_high = _relaxed("basis@0", where[1], where[2])
         dim = where[3]
         return "basis@0", where, int(
@@ -2123,7 +2212,7 @@ def test_records_cover_every_coordinate_and_serialize() -> None:
 # Replayable capture audit (exact epilogue union, position rule, Tier B).
 # ---------------------------------------------------------------------------
 
-_AUDIT_CASE = _LABEL_CASE  # FP16 identity: holds the captured counterexample
+_AUDIT_CASE = _FP16_CAUSAL  # holds the captured counterexample
 _AUDIT_ROWS = (0, 64, 207)
 _AUDIT_ARTIFACT = "rocm-7.13.0"
 
@@ -2278,9 +2367,12 @@ def test_observations_never_change_the_enclosures() -> None:
 
 
 def test_calibration_scope_is_all_quick_cases_or_none() -> None:
-    """No partial ratification: the calibrated case set is exactly the quick
-    matrix, one entry per dtype holding that dtype's cases, with the same
-    dispatch fingerprint as the uniform (P3) entries."""
+    """No partial ratification: the table is empty (a matrix whose capture has
+    not been audited, so the gate fails closed) or its case set is exactly the
+    quick matrix, one entry per dtype holding that dtype's cases, with the
+    same dispatch fingerprint as the uniform (P3) entries."""
+    if not P4_CALIBRATION:
+        return
     quick = {case.case_id for case in P4_QUICK_CASES}
     calibrated = {
         case_id for entry in P4_CALIBRATION.values() for case_id in entry.case_ids

@@ -228,7 +228,11 @@ scales were chosen by a maximin search so that every wrong Q-head read, every
 wrong K-head read and the interleaved GQA map (`h mod Hkv` instead of
 `h // (Hq/Hkv)`, which moves K and V together) changes some stored value by at
 least 94 (periodic) or 188 (Walsh) target ULPs; a CPU contract recomputes the
-committed margin. No two heads of one KV group share a logit, so a swap of two
+committed margin. The margin bounds single wrong reads. A compound read (wrong
+Q head and wrong K head at one output head) can keep the logit of one family,
+never of both; the two families together separate every such read by at least
+54 target ULPs, and a CPU contract checks that no read keeps both logits. No
+two heads of one KV group share a logit, so a swap of two
 query heads inside a group, invisible to the uniform lane because they share a
 V scale, is visible here. Causal rows contain masked distinguished keys
 (`k = q + 64j`), so any mask leak is visible. Window-64 rows straddle two KV
@@ -269,6 +273,22 @@ and checks that the denominator combine is never fused.
 
 **Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
 radius, is diagnostic: it names the failure class, never the verdict.
+
+Tier B is not always `{q(y*)}`, for two reasons a CPU contract checks:
+
+- The kernel casts each probability to FP16/BF16 for the PV MFMA and sums the
+  uncast FP32 values in the denominator. Where the probability is not exactly
+  1 this moves the stored value to a neighbor of `q(y*)` at about 31% of the
+  quick matrix's sub-max coordinates (15% of the nonstructural ones), never by
+  more than one target ULP. Row-max coordinates store `q(y*)`. The same path
+  without the cast stores `q(y*)` everywhere.
+- The denominator bound holds for any summation order. At 1,830 coordinates
+  it spans a rounding boundary and Tier B has two values; at all but one of
+  them the kernel's lane order can store only one.
+
+On the quick matrix the two FP16 epilogue roundings of A-F store the same bits
+at every coordinate, so a quick capture cannot show a compiler's site rule;
+the ISA contract can.
 
 ### Policy and failure labels
 
@@ -313,11 +333,15 @@ The kernel is also launched once with scale `1` instead of `1/sqrt(D)` on the
 
 ### Calibration
 
-`P4_CALIBRATION` has one entry per dtype, keyed like the uniform table. A
+`P4_CALIBRATION` is the ratified table the gate reads, one entry per dtype,
+keyed like the uniform table. A
 `P4CalibrationEntry` names the policy (`tier_b`), the assumption versions, the
 literal case IDs and the uniform lane's dispatch fingerprint. It has no width,
 ULP or tolerance field, so no measurement can enlarge Tier B. A CPU contract
-requires the calibrated case set to equal `P4_QUICK_CASES`, split by dtype.
+requires the calibrated case set to equal `P4_QUICK_CASES`, split by dtype, or
+the table to be empty. A re-derived matrix starts with an empty table: the
+lane then writes its records and fails closed until that matrix's capture has
+been audited and its entries installed.
 Changing a fixture, a head scale or a quick shape changes the case IDs, and the
 gate fails closed with the re-ratification remedy. Skip and failure semantics
 are the uniform lane's.

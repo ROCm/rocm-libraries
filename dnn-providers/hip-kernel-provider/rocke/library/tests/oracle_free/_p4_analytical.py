@@ -306,12 +306,12 @@ def cast_single_or_double_hull(
 
 @dataclass(frozen=True)
 class EpilogueArtifact:
-    """A compiled pair of quick kernels whose FP16 epilogue was read from ISA.
+    """Quick kernels of one compiler whose FP16 epilogue was read from ISA.
 
     ``single_lanes`` are the output dimensions ``d mod 4`` (the element of each
-    four-half store) that the FP16 code object computes with
+    four-half store) that every FP16 code object computes with
     ``v_fma_mix{lo,hi}_f16``, single rounding; the other elements are an FP32
-    multiply then ``v_cvt_f16_f32``. Neither BF16 code object has a mixed
+    multiply then ``v_cvt_f16_f32``. No BF16 code object has a mixed
     instruction. Each code object is named by the SHA-256 of the HSACO that
     ``launch_attention_dense`` compiles, so a record can say which one ran."""
 
@@ -333,11 +333,18 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
                 "+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3"
             ),
             code_objects=(
+                # FP16 causal 128x64 and BF16 window 64x64 (the H4/4 matrix).
                 ("fp16", "ba92c6283870841e1e8405ac07ea04f294a25c15e8704e9a493a46807f43ac3d"),
                 ("bf16", "e34c0c0287fcf41f71f7a4cec2dc00758194beb090c4a2131aef21ad6ccebfad"),
+                # FP16 window 128x64 and BF16 causal 128x64 (the GQA matrix).
+                ("fp16", "de82f8b3bbf0b7403e6deddcedb9571bed6dcb0735a241219432d4d383c9db65"),
+                ("bf16", "e9bd3b49a4d51636c5e76cf2a10d5f96afbf040f58bac48333dbe2669257126c"),
             ),
             single_lanes=frozenset({0, 1}),
-            evidence="ISA, and every coordinate of both Phase 4 gfx942 captures",
+            evidence=(
+                "ISA of all four objects; every coordinate of the H4/4 and the "
+                "GQA gfx942 captures (no GQA coordinate tests the site rule)"
+            ),
         ),
         "rocm-7.1.0": EpilogueArtifact(
             compiler=(
@@ -881,7 +888,10 @@ def row_trace(
 
     The running max is exact (``max`` does not round). Each ``v_exp_f32`` is its
     candidate interval; each tile's 64 weights are summed in any order
-    (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``. ``OMIT_RESCALE``
+    (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``. The order-agnostic
+    bound is far wider than the kernel's two 32-term lane chains can reach: on
+    the quick matrix it is what makes a Tier B set two-valued, and the second
+    value is one that lane order cannot store. ``OMIT_RESCALE``
     fixes ``alpha = 1``; ``DENOMINATOR_PLUS_ONE`` adds a logit-0 key's weight to
     the last tile's sum, never to the accumulator. ``e_ulps`` loosens A-E for
     failure attribution only."""
@@ -1218,6 +1228,27 @@ def emulate_row(
     return np.array(bits, dtype=np.uint16)
 
 
+def uncast_probability_bits(
+    case: P4Case, exposure: str, query: int, head: int
+) -> np.ndarray:
+    """Stored bits of the IR-exact path with the probability cast removed: PV
+    reads the FP32 weights the denominator sums.
+
+    Not a kernel realization. The kernel's PV operand is ``q_T(p~)``, and that
+    cast is the only step that moves a stored value off the certified target
+    (T3); this path isolates it."""
+    accumulator, reciprocal = _emulate_path(
+        case, exposure, query, head, None, None, cast_probability=False
+    )
+    return np.array(
+        [
+            _store_bits(value, reciprocal, case.dtype, single=False)
+            for value in accumulator
+        ],
+        dtype=np.uint16,
+    )
+
+
 def epilogue_alternatives(
     case: P4Case, exposure: str, query: int, head: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1254,12 +1285,16 @@ def _emulate_path(
     head: int,
     rng: np.random.Generator | None,
     mutation: P4Mutation | None,
+    *,
+    cast_probability: bool = True,
 ) -> tuple[np.ndarray, np.float32]:
     """FP32 accumulator row and reciprocal before the output epilogue.
 
     Without ``rng``: the documented lane order, ``E = RN(2**x)`` and an RN MFMA
     accumulate. With ``rng``: a random summation tree per tile, an ``E``
-    candidate per call and a directed rounding per MFMA addition."""
+    candidate per call and a directed rounding per MFMA addition.
+    ``cast_probability=False`` feeds PV the uncast FP32 weight, which the
+    kernel never does (see :func:`uncast_probability_bits`)."""
     exponent = v_exponent(case, head, mutation)
     scale = np.float32(2.0**exponent)
 
@@ -1315,8 +1350,12 @@ def _emulate_path(
             key = exposure_key(case, exposure, dim, tile)
             if key is None:
                 continue
-            cast = target_value(_cast_bits(weights[key - start], case.dtype), case.dtype)
-            product = np.float32(float(cast)) * scale
+            weight = weights[key - start]
+            if cast_probability:
+                weight = np.float32(
+                    float(target_value(_cast_bits(weight, case.dtype), case.dtype))
+                )
+            product = np.float32(weight * scale)
             if product == 0:
                 continue
             if accumulator[dim] == 0:
@@ -1441,9 +1480,11 @@ def head_scale_margin(
     ``c_h a_h' / a_h``; reading K of KV head ``g'``, ``c_h b_g' / b_g`` with
     its own V scale. The interleaved map ``h % Hkv`` changes K and V together
     at every head where it differs from ``h // (Hq / Hkv)``: the logit ratio is
-    the K-read one and the V exponent becomes ``h % Hkv``. A map that changes
-    several heads is separated at least as well as its best single change, so
-    single changes bound every wrong map."""
+    the K-read one and the V exponent becomes ``h % Hkv``. A map that makes
+    one such change at several heads is separated at least as well as its best
+    single change. A compound read, wrong Q head and wrong K head at one
+    output head, is not bounded by this margin: see
+    :func:`logit_preserving_reads`."""
     worst: int | None = None
     heads = len(q_scales)
     groups = len(k_scales)
@@ -1480,6 +1521,28 @@ def head_scale_margin(
                     )
                 )
     return 0 if worst is None else worst
+
+
+def logit_preserving_reads(family: str) -> tuple[tuple[int, int, int], ...]:
+    """Wrong ``(output head, Q head, KV head)`` reads that leave the committed
+    family's logit unchanged: ``a_h' b_g' == a_h b_g(h)``.
+
+    No single wrong read does (every ``a_h`` and every ``b_g`` is distinct), so
+    each entry is a compound read, and with the output's own V it stores the
+    correct value in that family. Each family has some; no read is in both, so
+    the two families together separate every wrong ``(Q head, KV head)`` pair.
+    The smaller cross-family gap, 54 target ULPs on the BF16 causal kernel and
+    378 on the FP16 window kernel, is below ``P4_HEAD_SCALE_MARGIN``."""
+    q_scales, k_scales = P4_HEAD_SCALES[family]
+    group = len(q_scales) // len(k_scales)
+    return tuple(
+        (head, q_head, kv)
+        for head in range(len(q_scales))
+        for q_head in range(len(q_scales))
+        for kv in range(len(k_scales))
+        if (q_head, kv) != (head, head // group)
+        and q_scales[q_head] * k_scales[kv] == q_scales[head] * k_scales[head // group]
+    )
 
 
 def search_head_scales(
@@ -2294,13 +2357,10 @@ class P4CalibrationEntry:
         return tuple(problems)
 
 
-# PROVISIONAL (GQA re-derivation, 2026-11-10): these entries name the GQA quick
-# matrix and its dispatch-resolved 128x64 identity, but no gfx942 capture of
-# this matrix has been audited yet. Ratification is the Phase 5 step of
-# P4errGQA.tex; until then the entries only keep the CPU contracts consistent.
-# Case ids are literal, so changing a fixture, its head scales or the quick
-# shapes fails closed instead of following silently. The dispatch fingerprint
-# is the uniform (P3) one; a contract checks it.
+# Ratified on gfx942. Case ids are literal, so changing a fixture, its head
+# scales or the quick shapes fails closed instead of following silently; a
+# re-derived matrix gets its entries only after its own capture is audited.
+# The dispatch fingerprint is the uniform (P3) one; a contract checks it.
 P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType(
     {
         ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
