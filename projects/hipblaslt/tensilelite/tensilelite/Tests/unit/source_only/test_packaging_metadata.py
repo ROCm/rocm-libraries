@@ -152,9 +152,28 @@ def test_wheel_rebuild_depends_on_top_level_runtime_modules():
 def test_cmake_wheel_builds_use_isolated_source_trees():
     cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
 
-    assert cmake.count("scripts/stage_release_source.py") >= 4
+    assert cmake.count("scripts/stage_release_source.py") >= 2
     assert '"${_tensilelite_canonical_source}"' in cmake
-    assert '"${_tensilelite_compatibility_source}/compat"' in cmake
+    assert "compat" not in cmake.replace("__HIP_HCC_COMPAT_MODE__", "")
+
+
+def test_cmake_wheel_build_gets_the_configure_commit_and_no_rocm():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    recipe = cmake.split("# Build the hermetic tensilelite release wheel", 1)[1].split(
+        "\nendif()", 1
+    )[0]
+
+    # The staged copy is not owned by git, so the commit must be passed in, and
+    # the wheel must record the same commit as the client from this configure.
+    assert '"TENSILELITE_SOURCE_REVISION=${TENSILELITE_CLIENT_SOURCE_REVISION}"' in recipe
+    assert '"SOURCE_DATE_EPOCH=${TENSILELITE_SOURCE_DATE_EPOCH}"' in recipe
+    assert '--expected-source-revision "${TENSILELITE_CLIENT_SOURCE_REVISION}"' in recipe
+    assert "ROCM_PATH" not in recipe
+    assert ".info/version" not in recipe
+    # A new commit renames and restamps the wheel even if no TensileLite file
+    # changed, so the build must depend on the configure's identity.
+    assert "file(CONFIGURE OUTPUT \"${_tensilelite_wheel_identity}\"" in recipe
+    assert '"${_tensilelite_wheel_identity}"\n' in recipe.split("DEPENDS", 1)[1]
 
 
 def test_removed_source_autobuild_option_is_not_referenced():

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import configparser
 from email.parser import Parser
 from pathlib import Path
@@ -42,21 +43,6 @@ _CANONICAL_REQUIREMENTS = {
     ("pandas", ""),
     ("pyyaml", ""),
 }
-_COMPATIBILITY_SCRIPTS = {
-    "Tensile": "tensilelite_tensile_compat.commands:tensile",
-    "TensileBenchmarkCluster": "tensilelite_tensile_compat.commands:benchmark_cluster",
-    "TensileCreateLibrary": "tensilelite_tensile_compat.commands:create_library",
-    "TensileGenerateSummations": "tensilelite_tensile_compat.commands:generate_summations",
-    "TensileGetPath": "tensilelite_tensile_compat.commands:get_path",
-    "TensileLibLogicToYaml": "tensilelite_tensile_compat.commands:logic_to_yaml",
-    "TensileLogic": "tensilelite_tensile_compat.commands:logic",
-    "TensileMergeLibrary": "tensilelite_tensile_compat.commands:merge_library",
-    "TensileRetuneLibrary": "tensilelite_tensile_compat.commands:retune_library",
-    "TensileUpdateLibrary": "tensilelite_tensile_compat.commands:update_library",
-    "TensileVerifyStinkyElfText": "tensilelite_tensile_compat.commands:verify_stinky_elf",
-}
-
-
 def _archive(wheel: Path):
     archive = zipfile.ZipFile(wheel)
     names = set(archive.namelist())
@@ -93,16 +79,49 @@ def _forbidden(names: set[str]) -> list[str]:
     )
 
 
-def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -> list[str]:
+_EXPECTED_SCRIPTS = {
+    "tensilelite": "tensilelite.cli:main",
+    "tensilelite-configure-client": "tensilelite_configure_client:main",
+}
+_BUILD_INFO = "tensilelite/_build_info.py"
+
+
+def _stamped_revision(archive: zipfile.ZipFile, names: set[str]):
+    """Return (found, revision) for the wheel's tensilelite/_build_info.py."""
+    if _BUILD_INFO not in names:
+        return False, None
+    tree = ast.parse(archive.read(_BUILD_INFO).decode())
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "SOURCE_REVISION"
+        ):
+            return True, ast.literal_eval(node.value)
+    return True, ...
+
+
+def validate(
+    wheel: Path,
+    source_root: Path,
+    expected_version: str,
+    expected_source_revision: str | None = None,
+) -> list[str]:
+    """Return the problems with a tensilelite release wheel; empty when valid.
+
+    ``expected_source_revision`` is the commit the wheel must carry in its
+    ``_build_info.py``; ``"none"`` requires the wheel to record no commit, and
+    ``None`` skips the check.
+    """
     problems = []
     try:
         archive, names, metadata, wheel_metadata, scripts = _archive(wheel)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         return [str(exc)]
     with archive:
-        expected_name = "tensilelite" if mode == "canonical" else "tensilelite-tensile-compat"
-        filename_name = "tensilelite" if mode == "canonical" else "tensilelite_tensile_compat"
-        expected_filename = f"{filename_name}-{expected_version}-py3-none-any.whl"
+        expected_name = "tensilelite"
+        expected_filename = f"tensilelite-{expected_version}-py3-none-any.whl"
         if wheel.name != expected_filename:
             problems.append(f"filename must be {expected_filename}, got {wheel.name}")
         if canonicalize_name(metadata["Name"]) != expected_name:
@@ -121,117 +140,105 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
         if bound_clients:
             problems.append("wheel must not contain client bindings: " + ", ".join(bound_clients))
 
+        found, stamped = _stamped_revision(archive, names)
+        if not found:
+            problems.append(f"missing {_BUILD_INFO}")
+        elif stamped is ...:
+            problems.append(f"{_BUILD_INFO} does not define SOURCE_REVISION")
+        elif expected_source_revision is not None:
+            expected = None if expected_source_revision == "none" else expected_source_revision
+            if stamped != expected:
+                problems.append(
+                    f"source revision must be {expected_source_revision}, "
+                    f"got {stamped or 'none'}"
+                )
+
         requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
-        if mode == "canonical":
-            leaked_compat = sorted(
-                name for name in names if name.startswith("tensilelite_tensile_compat/")
+        # The legacy Tensile* command names are gone; the tensilelite command
+        # family is the only command surface.
+        if scripts != _EXPECTED_SCRIPTS:
+            problems.append(f"unexpected console scripts: {scripts}")
+        for module in ("_tensilelite_client_binding.py", "tensilelite_configure_client.py"):
+            if module not in names:
+                problems.append(f"missing top-level module: {module}")
+        expected_headers = {f"tensilelite/Source/{name}" for name in _HEADERS}
+        if expected_headers - names:
+            problems.append(f"missing headers: {sorted(expected_headers - names)}")
+        for resource in (
+            "tensilelite/logic/known_bugs.yaml",
+            "tensilelite/ductile/config/defaults.yaml",
+        ):
+            if resource not in names:
+                problems.append(f"missing resource: {resource}")
+        custom_kernel_root = source_root / "tensilelite/CustomKernels"
+        source_kernels = {
+            "tensilelite/CustomKernels/"
+            + path.relative_to(custom_kernel_root).as_posix()
+            for path in custom_kernel_root.rglob("*.s")
+        }
+        wheel_kernels = {
+            name for name in names if name.startswith("tensilelite/CustomKernels/")
+        }
+        if source_kernels != wheel_kernels:
+            problems.append("custom-kernel resource set does not match the source tree")
+        rocisa = [req for req in requirements if canonicalize_name(req.name) == "rocisa"]
+        if rocisa:
+            problems.append(
+                f"wheel must not declare source-provisioned rocisa, got {rocisa}"
             )
-            if leaked_compat:
-                problems.append(
-                    "canonical wheel contains compatibility package entries:\n  "
-                    + "\n  ".join(leaked_compat)
-                )
-            expected_scripts = {
-                "tensilelite": "tensilelite.cli:main",
-                "tensilelite-configure-client": "tensilelite_configure_client:main",
-            }
-            if scripts != expected_scripts:
-                problems.append(f"unexpected canonical console scripts: {scripts}")
-            for module in ("_tensilelite_client_binding.py", "tensilelite_configure_client.py"):
-                if module not in names:
-                    problems.append(f"missing top-level module: {module}")
-            expected_headers = {f"tensilelite/Source/{name}" for name in _HEADERS}
-            if expected_headers - names:
-                problems.append(f"missing headers: {sorted(expected_headers - names)}")
-            for resource in (
-                "tensilelite/logic/known_bugs.yaml",
-                "tensilelite/ductile/config/defaults.yaml",
+        mandatory = {
+            (canonicalize_name(requirement.name), str(requirement.specifier))
+            for requirement in requirements
+            if requirement.marker is None
+        }
+        if mandatory != _CANONICAL_REQUIREMENTS:
+            problems.append(
+                "runtime dependencies must be exactly "
+                f"{sorted(_CANONICAL_REQUIREMENTS)}, got {sorted(mandatory)}"
+            )
+        extras = set(metadata.get_all("Provides-Extra", []))
+        if extras != set(_OPTIONAL_REQUIREMENTS):
+            problems.append(
+                "extras must be exactly "
+                f"{sorted(_OPTIONAL_REQUIREMENTS)}, got {sorted(extras)}"
+            )
+        marked_requirements = {
+            canonicalize_name(requirement.name)
+            for requirement in requirements
+            if requirement.marker is not None
+        }
+        if marked_requirements != set(_OPTIONAL_REQUIREMENTS.values()):
+            problems.append(
+                "optional dependencies must be exactly "
+                f"{sorted(_OPTIONAL_REQUIREMENTS.values())}, "
+                f"got {sorted(marked_requirements)}"
+            )
+        for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
+            matches = [req for req in requirements if canonicalize_name(req.name) == dependency]
+            if extra not in extras or not any(
+                req.marker and req.marker.evaluate({"extra": extra}) for req in matches
             ):
-                if resource not in names:
-                    problems.append(f"missing resource: {resource}")
-            custom_kernel_root = source_root / "tensilelite/CustomKernels"
-            source_kernels = {
-                "tensilelite/CustomKernels/"
-                + path.relative_to(custom_kernel_root).as_posix()
-                for path in custom_kernel_root.rglob("*.s")
-            }
-            wheel_kernels = {
-                name for name in names if name.startswith("tensilelite/CustomKernels/")
-            }
-            if source_kernels != wheel_kernels:
-                problems.append("custom-kernel resource set does not match the source tree")
-            rocisa = [req for req in requirements if canonicalize_name(req.name) == "rocisa"]
-            if rocisa:
-                problems.append(
-                    f"canonical wheel must not declare source-provisioned rocisa, got {rocisa}"
-                )
-            mandatory = {
-                (canonicalize_name(requirement.name), str(requirement.specifier))
-                for requirement in requirements
-                if requirement.marker is None
-            }
-            if mandatory != _CANONICAL_REQUIREMENTS:
-                problems.append(
-                    "canonical runtime dependencies must be exactly "
-                    f"{sorted(_CANONICAL_REQUIREMENTS)}, got {sorted(mandatory)}"
-                )
-            extras = set(metadata.get_all("Provides-Extra", []))
-            if extras != set(_OPTIONAL_REQUIREMENTS):
-                problems.append(
-                    "canonical extras must be exactly "
-                    f"{sorted(_OPTIONAL_REQUIREMENTS)}, got {sorted(extras)}"
-                )
-            marked_requirements = {
-                canonicalize_name(requirement.name)
-                for requirement in requirements
-                if requirement.marker is not None
-            }
-            if marked_requirements != set(_OPTIONAL_REQUIREMENTS.values()):
-                problems.append(
-                    "canonical optional dependencies must be exactly "
-                    f"{sorted(_OPTIONAL_REQUIREMENTS.values())}, "
-                    f"got {sorted(marked_requirements)}"
-                )
-            for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
-                matches = [req for req in requirements if canonicalize_name(req.name) == dependency]
-                if extra not in extras or not any(
-                    req.marker and req.marker.evaluate({"extra": extra}) for req in matches
-                ):
-                    problems.append(f"missing optional dependency {dependency} for extra {extra}")
-        else:
-            leaked_canonical = sorted(name for name in names if name.startswith("tensilelite/"))
-            if leaked_canonical:
-                problems.append(
-                    "compatibility wheel contains canonical package entries:\n  "
-                    + "\n  ".join(leaked_canonical)
-                )
-            if scripts != _COMPATIBILITY_SCRIPTS:
-                problems.append(f"unexpected compatibility console scripts: {scripts}")
-            canonical = [
-                req for req in requirements if canonicalize_name(req.name) == "tensilelite"
-            ]
-            expected_pin = f"tensilelite=={expected_version}"
-            if len(canonical) != 1 or str(canonical[0]) != expected_pin:
-                problems.append(f"compatibility dependency must be {expected_pin}, got {canonical}")
-            if len(requirements) != 1:
-                problems.append(
-                    f"compatibility wheel must declare only {expected_pin}, got {requirements}"
-                )
+                problems.append(f"missing optional dependency {dependency} for extra {extra}")
     return problems
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", required=True, choices=("canonical", "compatibility"))
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--expected-version", required=True)
+    parser.add_argument(
+        "--expected-source-revision",
+        help="commit the wheel's _build_info.py must record, or 'none'",
+    )
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
-    problems = validate(args.wheel, args.mode, args.source_root, args.expected_version)
+    problems = validate(
+        args.wheel, args.source_root, args.expected_version, args.expected_source_revision
+    )
     if problems:
         print("Invalid TensileLite release wheel:\n" + "\n".join(problems), file=sys.stderr)
         return 1
-    print(f"Valid {args.mode} TensileLite release wheel: {args.wheel}")
+    print(f"Valid TensileLite release wheel: {args.wheel}")
     return 0
 
 
