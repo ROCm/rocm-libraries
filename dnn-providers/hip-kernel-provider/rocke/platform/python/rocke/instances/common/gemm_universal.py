@@ -2274,6 +2274,49 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             a_par_row_static = lds_parity * block_m if _prefetch else 0
             b_par_row_static = lds_parity * block_n if _prefetch else 0
         new_accs: List[Value] = list(iter_vars)
+        import os as _os_fl
+
+        _fl = _os_fl.environ.get("ROCKE_EXP_FRAG_LOOKAHEAD")
+        if _fl is not None:
+            # EXPERIMENT (uncommitted): stream fragment loads D WMMAs ahead of
+            # first use (across k-atoms) instead of loading a whole k-atom up front.
+            _D = int(_fl)
+
+            def _ld(kind, kk, i):
+                kb = b.const_i32(kk * t.warp_tile_k)
+                if kind == "a":
+                    r = b.add(warp_m_off, b.const_i32(i * t.warp_tile_m + a_par_row_static))
+                    if a_par_row_v is not None:
+                        r = b.add(r, a_par_row_v)
+                    return _emit_frag_smem_load(A_src, a_row_in_atom, a_k_in_atom, r, kb, a_per_lane)
+                r = b.add(warp_n_off, b.const_i32(i * t.warp_tile_n + b_par_row_static))
+                if b_par_row_v is not None:
+                    r = b.add(r, b_par_row_v)
+                return _emit_frag_smem_load(B_src, b_col_in_atom, b_k_in_atom, r, kb, b_per_lane)
+
+            mmas = [(kk, mi, ni) for kk in range(k_atoms) for mi in range(mfmas_m) for ni in range(mfmas_n)]
+            order, seen = [], set()
+            for j, (kk, mi, ni) in enumerate(mmas):
+                for key in (("a", kk, mi), ("b", kk, ni)):
+                    if key not in seen:
+                        seen.add(key)
+                        order.append((j, key))
+            frags, p, sig_done, refill_done = {}, 0, after_last_reads is None, after_first_row is None
+            refill_after = (k_atoms - 1) * mfmas_m * mfmas_n + mfmas_n - 1
+            for j, (kk, mi, ni) in enumerate(mmas):
+                while p < len(order) and order[p][0] <= j + _D:
+                    key = order[p][1]
+                    frags[key] = _ld(*key)
+                    p += 1
+                if not sig_done and p == len(order):
+                    after_last_reads()
+                    sig_done = True
+                flat = mi * mfmas_n + ni
+                new_accs[flat] = _emit_mma(b, op, frags[("a", kk, mi)], frags[("b", kk, ni)], new_accs[flat])
+                if not refill_done and sig_done and j >= refill_after:
+                    after_first_row()
+                    refill_done = True
+            return new_accs
         for kk in range(k_atoms):
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
             a_rows = []
