@@ -443,3 +443,70 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
+  ########################################
+  # PrefetchAcrossPersistent with StreamK 3 and DataParallel and PrefetchGlobalRead 1 and 2: the next
+  # tile's loads write the main-loop buffers during the epilogue, so the staged tile lies after them.
+  # MT64x64 gives each workgroup several tiles, with M-edge, N-edge and corner tiles.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - PrefetchAcrossPersistent: [1]
+        - StaggerU: [0]
+        - TDMStoreInst: [0, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
+  ########################################
+  # PrefetchAcrossPersistent with bias and ScaleAlphaVec: the vectors take their own region after the
+  # main-loop buffers, and the staged tile follows them.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - PrefetchAcrossPersistent: [1]
+        - StaggerU: [0]
+        - Groups:
+          - - StreamKForceDPOnly: [1]
+              TDMStoreInst: [0, 2, 3]
+            - StreamKForceDPOnly: [0]
+              TDMStoreInst: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
