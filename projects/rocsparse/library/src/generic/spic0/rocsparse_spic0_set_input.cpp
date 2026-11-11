@@ -110,7 +110,9 @@ try
             rocsparse_status_invalid_value);
         spic0_descr->get_boost()->set_tol(data);
         spic0_descr->get_boost()->set_tol_pointer_mode(handle->pointer_mode);
-        spic0_descr->get_boost()->set_tol_datatype(rocsparse_datatype_f64_r);
+        spic0_descr->get_boost()->set_tol_datatype(data_size_in_bytes == sizeof(float)
+                                                       ? rocsparse_datatype_f32_r
+                                                       : rocsparse_datatype_f64_r);
         return rocsparse_status_success;
     }
 

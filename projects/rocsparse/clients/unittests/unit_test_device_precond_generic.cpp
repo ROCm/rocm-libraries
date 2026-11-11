@@ -710,9 +710,8 @@ namespace
         expect_size_error(A::set(handle, descr, A::input(In::boost_val), &value, 1));
         expect_size_error(A::set(handle, descr, A::input(In::sing_tol), &value, 1));
 
-        // Valid inputs: the boost tolerance may be given as a float or a double. spilu0
-        // and spildlt0 record a sizeof(float) tolerance as f32 and read it as a float.
-        // spic0 records the datatype as f64 whatever the size, and never reads its boost
+        // Valid inputs: the boost tolerance may be given as a float or a double, and a
+        // sizeof(float) tolerance is recorded as f32. spic0 never reads its boost
         // (AISPARSE-927). It is only validated here, no factorization of this test uses it.
         const float ftol = 1.0f;
         EXPECT_EQ(A::set(handle, descr, A::input(In::boost_tol), &ftol, sizeof(float)),
