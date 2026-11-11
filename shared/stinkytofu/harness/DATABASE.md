@@ -34,7 +34,7 @@ One Markdown file per entry, with frontmatter:
 name: <short-slug>
 kind: pattern | insight | finding | threshold | procedure | memory
 status: candidate | confirmed     # not used by memories
-source: <PR or issue number, page id, experiment id, or person>
+source: <page URL, repo file path, PR or issue number, experiment id, or person; may be empty for a memory>
 source_revision: <the page's revision number when the entry was written, if the source is a page>
 confirmed_by: <name>              # set by a human, together with status
 last_verified: <date>
@@ -44,11 +44,20 @@ What it is, how to detect it (for patterns), why it matters, and the evidence.
 ```
 
 `index.md` has one line per entry: `- [<title>](<path>) — <one-line hook> | <kind> | <status>`.
-When an entry comes from a page that can change, check the page's revision number (the count of saved
-edits, not a release number) when you use the entry. If it is higher than `source_revision`, tell the
-developer what changed and ask whether to update the entry.
-Do not update it on your own. If you cannot reach the page, say so once and use the entry as it is.
-An entry with no `source` is not accepted in review. `last_verified` shows which entries are going
+**Entries from a page.** When you are about to use an entry that has `source_revision`, check the
+page's revision number (the count of saved edits, not a release number) with whatever access you have.
+`source` gives the page address.
+- Same revision: use the entry as it is and say nothing.
+- Higher revision: read the page now and compare it with the entry's facts. List what is changed, new,
+  or removed. Tell the developer, and recommend either "a fact in the entry changed, update it" or "the
+  edits are in other sections, no change needed". If the developer agrees, propose the updated entry as
+  a candidate with the new revision and today's date in `last_verified`. If not, keep the old entry.
+- Cannot reach the page: say so once and use the entry as it is.
+
+A source can be a page, a file in a repo, a PR or issue, an experiment, or a person. Only a page needs
+`source_revision`. If the source is a file in this repo, point to it and read it when needed, and do
+not copy it into the entry. A memory (what a run learned) may have no source. Any other entry with no
+`source` is not accepted in review. `last_verified` shows which entries are going
 stale.
 
 An entry's `status` is `candidate` (a hit warns the developer) or `confirmed` (a hit rejects
