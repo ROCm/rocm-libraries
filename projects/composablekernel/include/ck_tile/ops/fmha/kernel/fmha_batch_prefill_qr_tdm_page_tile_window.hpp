@@ -61,8 +61,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     index_t token_stride_     = 0;
     const int32_t* page_row_  = nullptr;
     long_index_t page_stride_ = 0;
-    index_t page_capacity_    = 0;
-    index_t total_pages_      = 0;
     PageIds page_id_{};
     BottomTensorIndex origin_ = {0, 0};
 
@@ -110,14 +108,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 clamp<long_index_t>(seqlen_k_ - fragment_origin, 0, kFragmentRows));
             if(valid_rows <= 0)
                 return result; // absent: no table read, dummy id, zero rows
-            const index_t logical_page = static_cast<index_t>(fragment_origin / kFragmentRows);
-            if(logical_page >= page_capacity_ || page_row_ == nullptr)
-                __builtin_trap();
+            const index_t logical_page  = static_cast<index_t>(fragment_origin / kFragmentRows);
             const index_t physical_page = page_row_[logical_page];
-            if(physical_page < 0 || physical_page >= total_pages_)
-                __builtin_trap();
-            result.physical_page = physical_page;
-            result.valid_rows    = valid_rows;
+            result.physical_page        = physical_page;
+            result.valid_rows           = valid_rows;
         }
         else if constexpr(PageSize_ == 64)
         {
@@ -131,12 +125,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 return result;
             const index_t logical_page =
                 static_cast<index_t>(tile_origin / PageSize_) + page_in_tile;
-            if(logical_page >= page_capacity_ || page_row_ == nullptr)
-                __builtin_trap();
             const index_t physical_page = page_row_[logical_page];
-            if(physical_page < 0 || physical_page >= total_pages_)
-                __builtin_trap();
-            result.physical_page = physical_page;
+            result.physical_page        = physical_page;
         }
         else
         {
@@ -146,14 +136,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 static_cast<index_t>(clamp<long_index_t>(seqlen_k_ - tile_origin, 0, 128));
             if(valid_rows <= 0)
                 return result;
-            const index_t logical_page = static_cast<index_t>(tile_origin / PageSize_);
-            if(logical_page >= page_capacity_ || page_row_ == nullptr)
-                __builtin_trap();
+            const index_t logical_page  = static_cast<index_t>(tile_origin / PageSize_);
             const index_t physical_page = page_row_[logical_page];
-            if(physical_page < 0 || physical_page >= total_pages_)
-                __builtin_trap();
-            result.physical_page = physical_page;
-            result.valid_rows    = valid_rows;
+            result.physical_page        = physical_page;
+            result.valid_rows           = valid_rows;
         }
         return result;
     }
@@ -226,9 +212,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         if(lane < valid_pages && lane < 8)
         {
             const long_index_t first_page = tile_origin / kFragmentRows;
-            if(first_page < 0 || first_page >= page_capacity_ || page_row_ == nullptr)
-                __builtin_trap();
-            const auto* first_id = page_row_ + static_cast<long_index_t>(first_page);
+            const auto* first_id          = page_row_ + static_cast<long_index_t>(first_page);
             // The active lane set and the published row count must agree with the
             // per-fragment validity the consumer derives, including a valid
             // prefix of 1..16 rows in the final fragment.
@@ -326,8 +310,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             const index_t physical_page = raw_ids.owned[kFragment].physical_page;
             if(result.owned[kFragment].valid_rows > 0)
             {
-                if(physical_page < 0 || physical_page >= total_pages_)
-                    __builtin_trap();
                 result.owned[kFragment].physical_page = physical_page;
             }
             else
@@ -351,12 +333,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             return 0;
         if(tile_index < 0 || tile_index >= num_total_loop)
             return 0;
-        // No per-tile bounds traps. check_loop_invariants() checks first_origin >= 0 and
-        // 128-aligned before the loop. tile_index < num_total_loop (precondition: num_total_loop
-        // is derived from this window's seqlen_k_ through the mask tile range) puts
-        // logical_origin inside seqlen_k_. The kernel prologue checks page_count <=
-        // page_capacity_, positive strides and num_total_pages > 0. The loaded physical id is
-        // range-checked in complete_page_id_from_value_scalar.
+        // tile_index < num_total_loop (precondition: num_total_loop is derived from this window's
+        // seqlen_k_ through the mask tile range) puts logical_origin inside seqlen_k_; the origin
+        // is non-negative and 128-aligned (the mask's tile range), and the table holds a valid id
+        // for every page an attended key falls in (the launch contract).
         const long_index_t logical_origin =
             static_cast<long_index_t>(first_origin) + static_cast<long_index_t>(tile_index) * 128;
         const index_t logical_page = static_cast<index_t>(logical_origin / PageSize_);
@@ -441,23 +421,9 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         PageIds result{};
         if(valid_tokens <= 0)
             return result;
-        // One unsigned compare covers both physical_page < 0 and >= total_pages_, given
-        // total_pages_ > 0 (kernel prologue).
-        if(static_cast<uint32_t>(physical_page) >= static_cast<uint32_t>(total_pages_))
-            __builtin_trap();
         result.owned[0].physical_page = physical_page;
         result.owned[0].valid_rows    = valid_tokens;
         return result;
-    }
-
-    // Loop-invariant preconditions of the steady-state page-id queue and TDM issue, checked
-    // once before the KV loop instead of on every tile. The window origin starts at
-    // first_origin and only moves by whole 128-token tiles (the page-tile pipeline has no
-    // sinks).
-    CK_TILE_DEVICE void check_loop_invariants(index_t first_origin) const
-    {
-        if(seqlen_k_ <= 0 || first_origin < 0 || first_origin % 128 != 0 || page_row_ == nullptr)
-            __builtin_trap();
     }
 
     // D64 M64 TDM/LDS ordering workaround (kDrainLdsBeforeTdmIssue of the TDM-sched policy): the
@@ -867,9 +833,9 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
 
         // Missing terminal prefetches use physical page zero and a zero-row
         // descriptor. They still issue the scheduled TDM for tensor waits.
-        // The origin preconditions (seqlen_k > 0, origin >= 0, 128-aligned) are checked once by
-        // check_loop_invariants(). Column 0 holds by construction: both windows are created and
-        // moved with column 0, and the issue below uses only origin_[0].
+        // The origin is non-negative and 128-aligned (the mask's tile range). Column 0 holds by
+        // construction: both windows are created and moved with column 0, and the issue below uses
+        // only origin_[0].
 
         // The core already supplies the correct ordinary DRAM distribution and window
         // lengths, and this path must FORWARD them instead of rebuilding one. It applies
@@ -954,8 +920,6 @@ make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                                     source.token_stride_,
                                                                     source.page_row_,
                                                                     source.page_stride_,
-                                                                    source.page_capacity_,
-                                                                    source.total_pages_,
                                                                     source.page_id_,
                                                                     origin};
 }

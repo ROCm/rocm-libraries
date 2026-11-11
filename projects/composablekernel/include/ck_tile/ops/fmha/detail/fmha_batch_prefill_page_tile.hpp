@@ -207,9 +207,6 @@ struct FmhaBatchPrefillLinearPageTileWriter
 
         constexpr index_t kBoxWidth = detail::CheckBoxWidth<LdsWindow, HeadDim>();
 
-        if(page_stride <= 0 || token_stride <= 0)
-            __builtin_trap();
-
         const index_t wave = get_warp_id();
         if(wave >= kWaves)
             return;
@@ -273,8 +270,6 @@ struct FmhaBatchPrefillLinearPageTileWriter
             const index_t present_rows = kPerWavePage ? wave_rows : tile_rows;
             const index_t physical_page =
                 present_rows > 0 ? ids.owned[kFragment].physical_page : index_t{0};
-            if(physical_page < 0)
-                __builtin_trap();
 
             // Full 64-bit pointer rebase; never a 32-bit pool-relative offset. The
             // P>=128 distribution's (4,32) warp factor already contributes the

@@ -481,9 +481,6 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
             (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
         const index_t physical_seqlen_k_start = logical_seqlen_k_start;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
-        // Per-tile origin and table-bound checks are proven by these invariants instead.
-        k_dram_block_window_tmp.check_loop_invariants(kv_load_start);
-
         // Bias tile window (prefill path)
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
         auto bias_dram_window =

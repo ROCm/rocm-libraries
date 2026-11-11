@@ -656,7 +656,7 @@ bool IsMarkerPage(Values values, int page, int pages)
 
 // Block-table entries past each sequence's last page. By default every row has two spare
 // entries holding an in-range page that no sequence reads; Poisoned holds an invalid page id
-// instead, so a read through a spare entry traps in the kernel's page-id range check.
+// instead, so a read through a spare entry reads outside the pool (a wrong output or a fault).
 struct TableOptions
 {
     int spare_entries  = 2;
@@ -1385,10 +1385,10 @@ TYPED_TEST(PageTileForward, MaskedByBias)
     }
 }
 
-// The kernel must not read block-table entries past a sequence's last page. Poisoned spare
-// entries make such a read trap; a tight stride (no spare entries) makes the longest row end at
-// the end of its table row. Both change only entries the kernel must not read, so the output must
-// be bitwise equal to the default table's.
+// The kernel must not read block-table entries past a sequence's last page. Poisoned spare entries
+// make such a read go outside the pool; a tight stride (no spare entries) makes the longest row end
+// at the end of its table row. Both change only entries the kernel must not read, so the output
+// must be bitwise equal to the default table's.
 TYPED_TEST(PageTileForward, SpareTableEntries)
 {
     const std::vector<Case> shapes = {

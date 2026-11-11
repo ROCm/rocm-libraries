@@ -211,10 +211,10 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
 
     // Host-side launch contract: the dynamic LDS request above, the runtime arguments the kernel
     // specialises on (page size, head dimensions, mask direction) and the page geometry and tables
-    // it relies on. The device keeps its own traps on the strides, the page count and the table
-    // pointers for a launch that bypasses this check. Call before every launch; throws
-    // std::invalid_argument and launches nothing on a violation (the generated launchers report it
-    // and return -1).
+    // it relies on. The device trusts its arguments and the page table, as the other FMHA kernels
+    // do: a launch that bypasses this check must meet the same contract. Call before every launch;
+    // throws std::invalid_argument and launches nothing on a violation (the generated launchers
+    // report it and return -1).
     CK_TILE_HOST static void CheckLaunch(const Kargs& kargs, index_t dynamic_smem_bytes)
     {
         auto require = [](bool ok, const char* what) {
@@ -251,8 +251,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             require(kargs.lse_ptr != nullptr, "lse_ptr is null");
         if constexpr(kVectorizedKV)
         {
-            // The token stride is implied by the layout: stride_k/stride_v are not read, but the
-            // device traps on non-positive strides. A page-head holds P x D elements.
+            // The token stride is implied by the layout: stride_k/stride_v are not read, but they
+            // must be positive as in the linear layout. A page-head holds P x D elements.
             require(kargs.stride_k > 0 && kargs.stride_v > 0, "K/V token stride not positive");
             require(static_cast<long_index_t>(kargs.batch_stride_k) >=
                             static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) *
@@ -289,8 +289,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             // The KV split takes no mask or a bottom-right mask without a left window: the
             // dispatch routes only those to it, and this check refuses the rest. The device shifts
             // each sequence's window to its split's key range, a shift that depends on that
-            // sequence's KV length and so cannot be checked here; it keeps the general shift, with
-            // its traps on a top-left corner and on a left window the shift cannot keep.
+            // sequence's KV length; it keeps the general shift, which is exact for these masks.
             if constexpr(KvSplits_ == 2)
                 require(kargs.mask_type != GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT &&
                             kargs.window_size_left < 0,
@@ -361,15 +360,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             if(sglang_pages > 0)
             {
                 const int32_t last_page_len = kargs.page_table.kv_last_page_lens[i_batch];
-                if(page_start < 0 || last_page_len <= 0 ||
-                   last_page_len > FmhaPipeline::kPageBlockSize || kargs.stride_k <= 0 ||
-                   kargs.stride_v <= 0 || kargs.batch_stride_k <= 0 || kargs.batch_stride_v <= 0 ||
-                   kargs.num_total_pages <= 0)
-                    __builtin_trap();
                 kargs.seqlen_k = (sglang_pages - 1) * FmhaPipeline::kPageBlockSize + last_page_len;
             }
-            else if(sglang_pages < 0)
-                __builtin_trap();
             page_row = kargs.page_table.kv_page_indices + page_start;
         }
         else
@@ -382,28 +374,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             const long_index_t first_page =
                 static_cast<long_index_t>(i_batch) * kargs.page_table.batch_stride_block_table;
             page_row = kargs.page_table.block_table_ptr + first_page;
-            if(kargs.seqlen_k > 0)
-            {
-                const index_t page_count = (kargs.seqlen_k - 1) / FmhaPipeline::kPageBlockSize + 1;
-                if(kargs.stride_k <= 0 || kargs.stride_v <= 0 || kargs.batch_stride_k <= 0 ||
-                   kargs.batch_stride_v <= 0 || kargs.page_table.batch_stride_block_table <= 0 ||
-                   kargs.num_total_pages <= 0 ||
-                   page_count > kargs.page_table.batch_stride_block_table || first_page < 0)
-                    __builtin_trap();
-            }
         }
-        // Table entries the window may index for this sequence.
-        index_t page_capacity = [&]() {
-            if constexpr(kSglangTable)
-                return sglang_pages;
-            else
-                return kargs.page_table.batch_stride_block_table;
-        }();
         if constexpr(KvSplits_ == 2)
         {
             static_assert(!kSglangTable);
-            if(kargs.seqlen_k < 0)
-                __builtin_trap();
+            // Table entries of this sequence's row.
+            const index_t page_capacity      = kargs.page_table.batch_stride_block_table;
             const long_index_t orig_seqlen_k = kargs.seqlen_k;
             // N0-aligned split starts preserve all original shuffled physical page IDs.
             const long_index_t span =
@@ -418,27 +394,18 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             const index_t raw_skip_pages = begin / FmhaPipeline::kPageBlockSize;
             const index_t skip_pages =
                 split_length == 0 ? min(raw_skip_pages, page_capacity) : raw_skip_pages;
-            if(skip_pages > page_capacity)
-                __builtin_trap();
             kargs.seqlen_k = split_length;
             if constexpr(FmhaMask::IsMasking)
             {
                 // The split sees KV [begin, begin + seqlen_k) of the original keys: shift the
                 // window so that the mask stays in the original coordinates (bottom-right only).
-                if(kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
-                    __builtin_trap();
                 const index_t shift = static_cast<index_t>(orig_seqlen_k - begin - kargs.seqlen_k);
                 if(kargs.window_size_right >= 0)
                     kargs.window_size_right += shift;
                 if(kargs.window_size_left >= 0)
-                {
-                    if(kargs.window_size_left < shift)
-                        __builtin_trap();
                     kargs.window_size_left -= shift;
-                }
             }
             page_row += skip_pages;
-            page_capacity -= skip_pages;
         }
         const auto* q_ptr = reinterpret_cast<const QDataType*>(kargs.q_ptr) +
                             query_start * kargs.stride_q +
@@ -485,8 +452,6 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             kargs.stride_k,
             page_row,
             static_cast<long_index_t>(kargs.batch_stride_k),
-            page_capacity,
-            kargs.num_total_pages,
             {},
             {0, 0}};
         const auto v_window = FmhaBatchPrefillQrTdmPageTileWindow<VDataType,
@@ -503,8 +468,6 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             kargs.stride_v,
             page_row,
             static_cast<long_index_t>(kargs.batch_stride_v),
-            page_capacity,
-            kargs.num_total_pages,
             {},
             {0, 0}};
 
