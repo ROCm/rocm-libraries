@@ -2709,8 +2709,8 @@ def build_unified_attention_2d_tiled(
     # offsets) address a bf16/fp16 K/V copy by its page
     # (_attention_paged_kv_copies), with the page base in ``voffset``. Tiles of
     # one page stay on the paged-KV descriptor, which addresses each lane's own
-    # row: page copies measured no faster there, with rows up to 8% slower. The
-    # K slices of the sliced ring stay on the descriptor too (see
+    # row: page copies are no faster there and slower on some rows. The K
+    # slices of the sliced ring stay on the descriptor too (see
     # ``_issue_k_slice_load_runtime``).
     page_copies = PagedKVCopies(
         b,
