@@ -193,10 +193,14 @@ struct GemmPipelineAgBgCrCompTDMV4
         return 1;
     }
     static constexpr bool skipCheckValidLaunchParams = true;
-    /// MxGemmKernel runs this pipeline on its operand pointers and M, N, K (Operands) and the
-    /// tile origin (MakeCoords), not on tile windows, at k_batch == 1 on packed operands.
-    static constexpr bool kRawOperands = true;
-    using Operands                     = mx_tdm_v4::Operands;
+    /// The scales are K-major, [ceil(K / 128)][MN] int32 packs of four E8M0 scales: the kernel's
+    /// scale windows are (MN, K / 128) views of that layout.
+    static constexpr bool kKMajorScales = true;
+    /// Runs k_batch == 1 only.
+    static constexpr bool kSupportsSplitK = false;
+    /// The cluster multicast takes grid x as N tiles and grid y as M tiles
+    /// (GemmTile2DNMajorPartitioner).
+    static constexpr bool kGridXWalksN = true;
     using Coords                       = mx_tdm_v4::Coords;
 
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
@@ -1150,15 +1154,64 @@ struct GemmPipelineAgBgCrCompTDMV4
         }
     };
 
-    /// Runs the K loop of the workgroup's tile and returns its C block tile. `smem` is
-    /// GetSmemSize() bytes of LDS.
-    CK_TILE_DEVICE auto operator()(const mx_tdm_v4::Operands& p,
-                                   const mx_tdm_v4::Coords& c,
-                                   CK_TILE_LDS_ADDR uint8_t* smem) const
+    /// The workgroup's tile of the M x N x K problem: A and B are the (M, K) and (N, K) windows
+    /// of their tiles, the scales (M, K / 128) and (N, K / 128) windows of K-major packs. The TDM
+    /// loads read the operands from the windows' buffers and clip at the unpadded extents; the
+    /// tile origin is the A and B windows'. num_loop is unused: the K tile count and the K tail
+    /// come from K and the shape traits. `p_smem` is GetSmemSize() bytes of LDS.
+    template <typename AsDramBlockWindowTmp,
+              typename AElementFunction,
+              typename BsDramBlockWindowTmp,
+              typename BElementFunction,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp>
+    CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const AElementFunction&,
+                                   const BsDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   const BElementFunction&,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   [[maybe_unused]] index_t num_loop,
+                                   void* p_smem) const
     {
+        static_assert(std::is_same_v<AElementFunction, element_wise::PassThrough> &&
+                          std::is_same_v<BElementFunction, element_wise::PassThrough>,
+                      "comp_tdm_v4 reads A and B as stored");
+        static_assert(std::tuple_size_v<AsDramBlockWindowTmp> == 1 &&
+                          std::tuple_size_v<BsDramBlockWindowTmp> == 1 &&
+                          std::tuple_size_v<ScaleADramBlockWindowTmp> == 1 &&
+                          std::tuple_size_v<ScaleBDramBlockWindowTmp> == 1,
+                      "comp_tdm_v4 runs single A and B tensors");
         CBlockTile c_block_tile;
-        Run run(p, c, smem);
+#if defined(__gfx125__)
+        const auto& a_window = a_dram_block_window_tmp[number<0>{}];
+        const auto& b_window = b_dram_block_window_tmp[number<0>{}];
+        const auto bytes     = [](const auto& window) {
+            return reinterpret_cast<const uint8_t*>(
+                window.get_bottom_tensor_view().get_buffer_view().p_data_);
+        };
+        const auto a_lengths =
+            detail::tdm_real_lengths(a_window.get_bottom_tensor_view().get_tensor_descriptor());
+        const auto b_lengths =
+            detail::tdm_real_lengths(b_window.get_bottom_tensor_view().get_tensor_descriptor());
+        const mx_tdm_v4::Operands operands{bytes(a_window),
+                                           bytes(b_window),
+                                           bytes(scale_a_window[number<0>{}]),
+                                           bytes(scale_b_window[number<0>{}]),
+                                           a_lengths[number<0>{}],
+                                           b_lengths[number<0>{}],
+                                           a_lengths[number<1>{}]};
+        const auto coords = MakeCoords(a_window.get_window_origin()[number<0>{}],
+                                       b_window.get_window_origin()[number<0>{}]);
+        Run run(operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
         run.Main(c_block_tile.get_thread_buffer().template get_as<CVec>());
+#else
+        ignore = a_dram_block_window_tmp;
+        ignore = b_dram_block_window_tmp;
+        ignore = scale_a_window;
+        ignore = scale_b_window;
+        ignore = p_smem;
+#endif
         return c_block_tile;
     }
 };

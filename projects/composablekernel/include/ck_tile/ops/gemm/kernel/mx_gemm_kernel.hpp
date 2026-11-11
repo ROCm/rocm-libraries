@@ -365,62 +365,81 @@ struct MxGemmKernel
     using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
 
     template <typename T>
-    using has_raw_operands = decltype(T::kRawOperands);
-    /// A pipeline that reads A, B and the scales from their pointers and M, N, K
-    /// (Pipeline::Operands) and its tile from MakeCoords(i_m, i_n), not from tile windows
-    /// (comp_tdm_v4). Its epilogue stores the accumulators as E = alpha * acc + beta * Ds[0]
-    /// (MxAlphaBetaEpilogue), so the arguments carry alpha and beta. It runs at k_batch == 1 on
-    /// packed operands: IsSupportedArgument rejects the rest.
-    static constexpr bool kRawOperands = []() {
-        if constexpr(is_detected<has_raw_operands, MxGemmPipeline>{})
-            return MxGemmPipeline::kRawOperands;
+    using has_k_major_scales = decltype(T::kKMajorScales);
+    template <typename T>
+    using has_grid_x_walks_n = decltype(T::kGridXWalksN);
+    template <typename T>
+    using has_launch_threads = decltype(T::kThreads);
+    template <typename T>
+    using has_kernel_name = decltype(T::GetKernelName());
+    template <typename T>
+    using has_alpha_beta = decltype(T::kAlphaBeta);
+
+    /// The pipeline reads K-major scales, [ceil(K / 128)][MN] int32 packs (comp_tdm_v4): the
+    /// scale windows view that layout, and the A pointers are not shifted to the M tile.
+    static constexpr bool kKMajorScales = []() {
+        if constexpr(is_detected<has_k_major_scales, MxGemmPipeline>{})
+            return MxGemmPipeline::kKMajorScales;
         else
             return false;
     }();
+    /// The epilogue stores E = alpha * acc + beta * Ds[0] (MxAlphaBetaEpilogue): the arguments
+    /// carry alpha and beta, at k_batch == 1 on packed operands (IsSupportedArgument).
+    static constexpr bool kAlphaBeta = []() {
+        if constexpr(is_detected<has_alpha_beta, EpiloguePipeline>{})
+            return EpiloguePipeline::kAlphaBeta;
+        else
+            return false;
+    }();
+    /// The pipeline sets the launch's threads and cluster (its tuning), not the tile shape.
+    static constexpr bool kPipelineLaunch = is_detected<has_launch_threads, MxGemmPipeline>{};
 
-    static constexpr bool CheckRawOperandsConfig()
+    static constexpr bool CheckPipelineConfig()
     {
-        if constexpr(kRawOperands)
+        if constexpr(kPipelineLaunch)
         {
             static_assert(TilePartitioner::MPerBlock == MxGemmPipeline::kTileM &&
                               TilePartitioner::NPerBlock == MxGemmPipeline::kTileN &&
                               TilePartitioner::KPerBlock == MxGemmPipeline::kTileK,
                           "MX GEMM: the tile partitioner's tile must be the pipeline's");
+        }
+        if constexpr(is_detected<has_grid_x_walks_n, MxGemmPipeline>{})
+        {
             static_assert(
-                std::is_same_v<
-                    TilePartitioner,
-                    GemmTile2DNMajorPartitioner<typename TilePartitioner::BlockGemmShape>>,
-                "MX GEMM: a raw-operand pipeline walks N tiles along grid x and M tiles along "
-                "grid y, with its cluster over both, as GemmTile2DNMajorPartitioner");
+                !MxGemmPipeline::kGridXWalksN ||
+                    std::is_same_v<
+                        TilePartitioner,
+                        GemmTile2DNMajorPartitioner<typename TilePartitioner::BlockGemmShape>>,
+                "MX GEMM: the pipeline walks N tiles along grid x and M tiles along grid y, with "
+                "its cluster over both, as GemmTile2DNMajorPartitioner");
+        }
+        if constexpr(kAlphaBeta)
+        {
             static_assert(std::is_same_v<typename EpiloguePipeline::Pipeline, MxGemmPipeline>,
                           "MX GEMM: the epilogue must store this pipeline's accumulators");
         }
         return true;
     }
-    static_assert(CheckRawOperandsConfig());
+    static_assert(CheckPipelineConfig());
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
-        if constexpr(kRawOperands)
+        if constexpr(is_detected<has_kernel_name, MxGemmPipeline>{})
             return MxGemmPipeline::GetKernelName();
         else
             return BaseKernel::GetName();
     }
 
-    /// A raw-operand pipeline gives its launch's threads; the others are sized for the device's
-    /// wave.
     CK_TILE_HOST static auto BlockSize()
     {
-        if constexpr(kRawOperands)
+        if constexpr(kPipelineLaunch)
             return dim3(MxGemmPipeline::kThreads);
         else
             return BaseKernel::BlockSize();
     }
 
-    /// A raw-operand pipeline's cluster is its tuning's, x along N tiles and y along M tiles (the
-    /// grid of GemmTile2DNMajorPartitioner); the others' is the tile shape's.
     static constexpr bool ClusterLaunch = []() {
-        if constexpr(kRawOperands)
+        if constexpr(kPipelineLaunch)
             return MxGemmPipeline::kHasCluster;
         else
             return BaseKernel::ClusterLaunch;
@@ -428,7 +447,7 @@ struct MxGemmKernel
 
     CK_TILE_HOST static constexpr auto ClusterSize()
     {
-        if constexpr(kRawOperands)
+        if constexpr(kPipelineLaunch)
             return dim3(
                 MxGemmPipeline::kClusterX, MxGemmPipeline::kClusterY, MxGemmPipeline::kClusterZ);
         else
@@ -540,7 +559,7 @@ struct MxGemmKernel
     // A / E / A-scale base pointers by the M tile and clamps kargs.M, so those descriptors span
     // at most one M tile however large M is.
     static constexpr bool kOffsetPtrsByTileCoords =
-        !kRawOperands &&
+        !kKMajorScales &&
         std::is_same_v<tensor_layout::gemm::RowMajor,
                        remove_cvref_t<std::tuple_element_t<0, AsLayout>>> &&
         std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
@@ -582,11 +601,11 @@ struct MxGemmKernel
         return integer_divide_ceil(K, BlockScaleSize * KXdlPackEff);
     }
 
-    using HostArgs = std::conditional_t<kRawOperands,
+    using HostArgs = std::conditional_t<kAlphaBeta,
                                         MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>,
                                         MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>>;
     using KernelArgs =
-        std::conditional_t<kRawOperands,
+        std::conditional_t<kAlphaBeta,
                            MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>,
                            MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>>;
 
@@ -614,7 +633,7 @@ struct MxGemmKernel
     CK_TILE_HOST static constexpr MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>
     MakeKernelArgs(const MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>& hostArgs)
     {
-        static_assert(kRawOperands, "MX GEMM: alpha and beta need an MxAlphaBetaEpilogue pipeline");
+        static_assert(kAlphaBeta, "MX GEMM: alpha and beta need an MxAlphaBetaEpilogue");
         return MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>{hostArgs.as_ptr,
                                                                              hostArgs.bs_ptr,
                                                                              hostArgs.as_scale_ptr,
@@ -633,11 +652,11 @@ struct MxGemmKernel
                                                                              hostArgs.k_batch};
     }
 
-    /// For a raw-operand pipeline: nullptr if this instance runs `kargs`, else why not.
+    /// With alpha and beta: nullptr if this instance runs `kargs`, else why not.
     CK_TILE_HOST static const char*
     GetUnsupportedReason(const MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
     {
-        static_assert(kRawOperands, "MX GEMM: GetUnsupportedReason is the raw-operand check");
+        static_assert(kAlphaBeta, "MX GEMM: GetUnsupportedReason checks alpha / beta arguments");
         if(kargs.k_batch != 1)
             return "k_batch must be 1";
         if(kargs.stride_As[0] != kargs.K || kargs.stride_Bs[0] != kargs.K)
@@ -1017,6 +1036,64 @@ struct MxGemmKernel
             number<NumBTensor>{});
     }
 
+    /// K-major scales, [ceil(K / 128)][MN] int32 packs, as the (MN, packs) view of the tile at
+    /// block_idx: one pack holds the four E8M0 scales of 128 K.
+    template <index_t TileMN, std::size_t NumTensor>
+    CK_TILE_DEVICE static auto
+    MakeKMajorScaleBlockWindow(const std::array<ScalePtrType, NumTensor>& scale_ptr,
+                               const index_t mn,
+                               const index_t K,
+                               const index_t block_idx)
+    {
+        const auto desc =
+            make_naive_tensor_descriptor(make_tuple(mn, GetScalePacksK(K)), make_tuple(1, mn));
+        return generate_tuple(
+            [&](auto i) {
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::global>(scale_ptr[i], desc),
+                    make_tuple(
+                        number<TileMN>{},
+                        number<TilePartitioner::KPerBlock / (BlockScaleSize * KXdlPackEff)>{}),
+                    {block_idx, 0});
+            },
+            number<static_cast<index_t>(NumTensor)>{});
+    }
+
+    /// The UniversalGemmKernel arguments of `kargs`, for its window makers.
+    CK_TILE_DEVICE static const typename BaseKernel::KernelArgs&
+    BaseArgs(const MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
+    {
+        return kargs;
+    }
+    CK_TILE_DEVICE static typename BaseKernel::KernelArgs
+    BaseArgs(const MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
+    {
+        return {kargs.as_ptr,
+                kargs.bs_ptr,
+                kargs.ds_ptr,
+                kargs.e_ptr,
+                kargs.M,
+                kargs.N,
+                kargs.K,
+                kargs.stride_As,
+                kargs.stride_Bs,
+                kargs.stride_Ds,
+                kargs.stride_E,
+                kargs.k_batch};
+    }
+
+    /// The epilogue of this launch: with alpha and beta, set from the arguments.
+    CK_TILE_DEVICE static EpiloguePipeline MakeEpilogue([[maybe_unused]] const KernelArgs& kargs)
+    {
+        EpiloguePipeline epilogue{};
+        if constexpr(kAlphaBeta)
+        {
+            epilogue.alpha = kargs.alpha;
+            epilogue.beta  = kargs.beta;
+        }
+        return epilogue;
+    }
+
     template <memory_operation_enum DstInMemOp>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
@@ -1082,12 +1159,13 @@ struct MxGemmKernel
         const auto& as_block_window = [&]() {
             if constexpr(MxGemmPipeline::Preshuffle)
             {
-                return BaseKernel::MakeABlockWindows(as_ptr_, kargs, kargs.K, block_idx_m_);
+                return BaseKernel::MakeABlockWindows(
+                    as_ptr_, BaseArgs(kargs), kargs.K, block_idx_m_);
             }
             else
             {
                 return BaseKernel::MakeABlockWindows(
-                    as_ptr_, kargs, splitk_batch_offset.splitted_k, block_idx_m_);
+                    as_ptr_, BaseArgs(kargs), splitk_batch_offset.splitted_k, block_idx_m_);
             }
         }();
         const auto& bs_block_window = [&]() {
@@ -1098,18 +1176,28 @@ struct MxGemmKernel
             else
             {
                 return BaseKernel::MakeBBlockWindows(
-                    bs_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
+                    bs_ptr, BaseArgs(kargs), splitk_batch_offset.splitted_k, block_idx_n);
             }
         }();
         const auto& ds_block_window =
-            BaseKernel::MakeDBlockWindows(ds_ptr, kargs, block_idx_m_, block_idx_n);
+            BaseKernel::MakeDBlockWindows(ds_ptr, BaseArgs(kargs), block_idx_m_, block_idx_n);
 
         // Create scale block windows. For split-K (k_batch > 1), k_elem_offset advances the
         // scale origin into the correct packed-K slice for this k_id; otherwise it is zero.
-        const auto& scale_a_block_window =
-            MakeScaleABlockWindow(as_scale_ptr, kargs, block_idx_m_, k_elem_offset);
-        const auto& scale_b_block_window =
-            MakeScaleBBlockWindow(bs_scale_ptr, kargs, block_idx_n, k_elem_offset);
+        const auto& scale_a_block_window = [&]() {
+            if constexpr(kKMajorScales)
+                return MakeKMajorScaleBlockWindow<TilePartitioner::MPerBlock>(
+                    as_scale_ptr, kargs.M, kargs.K, block_idx_m_);
+            else
+                return MakeScaleABlockWindow(as_scale_ptr, kargs, block_idx_m_, k_elem_offset);
+        }();
+        const auto& scale_b_block_window = [&]() {
+            if constexpr(kKMajorScales)
+                return MakeKMajorScaleBlockWindow<TilePartitioner::NPerBlock>(
+                    bs_scale_ptr, kargs.N, kargs.K, block_idx_n);
+            else
+                return MakeScaleBBlockWindow(bs_scale_ptr, kargs, block_idx_n, k_elem_offset);
+        }();
 
         const index_t num_loop =
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
@@ -1129,45 +1217,8 @@ struct MxGemmKernel
         // and also rejected up front in IsSupportedArgument.
         // if(k_batch == 1)
         auto c_block_window = BaseKernel::template MakeCBlockWindows<DstInMemOp>(
-            e_ptr, kargs, block_idx_m_, block_idx_n);
-        EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
-    }
-
-    /// The raw-operand pipeline on this workgroup's tile. It reads the operands from kargs: k_batch
-    /// is 1 (IsSupportedArgument), so the split-K offsets are 0.
-    CK_TILE_DEVICE static void
-    RunRawOperandsGemm(EDataType* e_ptr, void* smem_ptr, const KernelArgs& kargs)
-    {
-#if defined(__gfx125__)
-        // The tile from the partitioner, not GetTileCoordinates: its amd_wave_read_first_lane
-        // hides that the origin is a multiple of the tile, and the epilogue's addressing grows.
-        const auto [i_m, i_n] = TilePartitioner::GetOutputTileIndex(
-            static_cast<index_t>(blockIdx.x), static_cast<index_t>(blockIdx.y));
-        const auto coords = MxGemmPipeline::MakeCoords(i_m * TilePartitioner::MPerBlock,
-                                                       i_n * TilePartitioner::NPerBlock);
-        const typename MxGemmPipeline::Operands operands{
-            static_cast<const uint8_t*>(kargs.as_ptr[0]),
-            static_cast<const uint8_t*>(kargs.bs_ptr[0]),
-            static_cast<const uint8_t*>(kargs.as_scale_ptr[0]),
-            static_cast<const uint8_t*>(kargs.bs_scale_ptr[0]),
-            kargs.M,
-            kargs.N,
-            kargs.K};
-        const auto c_block_tile = MxGemmPipeline{}(
-            operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(smem_ptr));
-        EpiloguePipeline{}(kargs.ds_ptr[0],
-                           e_ptr,
-                           kargs.M,
-                           kargs.N,
-                           kargs.alpha,
-                           kargs.beta,
-                           coords,
-                           c_block_tile);
-#else
-        ignore = e_ptr;
-        ignore = smem_ptr;
-        ignore = kargs;
-#endif
+            e_ptr, BaseArgs(kargs), block_idx_m_, block_idx_n);
+        MakeEpilogue(kargs)(c_block_window, c_block_tile, ds_block_window, smem_ptr);
     }
 
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
@@ -1180,11 +1231,7 @@ struct MxGemmKernel
                                        const index_t block_idx_m,
                                        const index_t block_idx_n)
     {
-        if constexpr(kRawOperands)
-        {
-            RunRawOperandsGemm(e_ptr, smem_ptr, kargs);
-        }
-        else if(kargs.k_batch == 1)
+        if(!BaseKernel::kPipelineSupportsSplitK || kargs.k_batch == 1)
         {
             RunGemm<memory_operation_enum::set>(as_ptr,
                                                 bs_ptr,

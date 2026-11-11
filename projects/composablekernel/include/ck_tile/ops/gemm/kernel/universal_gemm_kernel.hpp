@@ -284,9 +284,8 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_grid_2d = decltype(T::kGrid2D);
-    /// The workgroup's tile comes from blockIdx.x and blockIdx.y: with a cluster, or with a
-    /// partitioner whose GridSize is 2D without one (kGrid2D, GemmTile2DNMajorPartitioner).
-    static constexpr bool kTileIndex2D = ClusterLaunch || []() {
+    /// The partitioner's GridSize is 2D without a cluster (GemmTile2DNMajorPartitioner).
+    static constexpr bool kPartitionerGrid2D = []() {
         if constexpr(is_detected<has_grid_2d, TilePartitioner>{})
             return TilePartitioner::kGrid2D;
         else
@@ -434,6 +433,13 @@ struct UniversalGemmKernel
         template <typename KArgs>
         __device__ SplitKBatchOffset(const KArgs& kargs, const index_t k_id = blockIdx.z)
         {
+            if constexpr(!kPipelineSupportsSplitK)
+            {
+                as_k_split_offset.fill(0);
+                bs_k_split_offset.fill(0);
+                splitted_k = kargs.K;
+                return;
+            }
             constexpr auto K1     = TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{});
             const index_t num_all = amd_wave_read_first_lane(
                 kargs.K / K1); // num of all loops not including potential tail
@@ -527,6 +533,17 @@ struct UniversalGemmKernel
             return GemmPipeline::kPlainGemmOnly;
         else
             return false;
+    }();
+
+    template <typename T>
+    using has_split_k = decltype(T::kSupportsSplitK);
+    /// False for a pipeline that only runs k_batch == 1: SplitKBatchOffset is then the whole K
+    /// with no offset, and IsSupportedArgument rejects k_batch != 1.
+    static constexpr bool kPipelineSupportsSplitK = []() {
+        if constexpr(is_detected<has_split_k, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsSplitK);
+        else
+            return true;
     }();
 
     template <typename T>
@@ -794,7 +811,7 @@ struct UniversalGemmKernel
         // for a k_batch beyond the K-step count, where SplitKBatchOffset yields a negative
         // splitted_k and the A/B descriptor extents underflow, and for an epilogue with no split-K
         // store path at all, where RunGemm can only trap.
-        if constexpr(!EpilogueSupportsSplitK)
+        if constexpr(!EpilogueSupportsSplitK || !kPipelineSupportsSplitK)
         {
             if(kargs.k_batch != 1)
             {
@@ -1637,32 +1654,44 @@ struct UniversalGemmKernel
     template <typename KArgs>
     CK_TILE_DEVICE static auto GetTileCoordinates(const KArgs& kargs) -> tuple<index_t, index_t>
     {
-        index_t iM, iN;
-
-        if constexpr(kTileIndex2D)
+        if constexpr(kPartitionerGrid2D)
         {
-            // Cluster launch or a 2D partitioner: use 2D block indexing
-            const auto blockIdX = amd_wave_read_first_lane(blockIdx.x);
-            const auto blockIdY = amd_wave_read_first_lane(blockIdx.y);
-            const auto [tile_m, tile_n] =
-                TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdX, blockIdY);
-            iM = tile_m;
-            iN = tile_n;
+            // The workgroup ids are wave-uniform already: amd_wave_read_first_lane would hide
+            // from LLVM that the tile origin is a multiple of the tile.
+            const auto [tile_m, tile_n] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(
+                static_cast<index_t>(blockIdx.x), static_cast<index_t>(blockIdx.y));
+            return make_tuple(tile_m * TilePartitioner::MPerBlock,
+                              tile_n * TilePartitioner::NPerBlock);
         }
         else
         {
-            // Regular launch: use 1D block indexing
-            const auto blockId = amd_wave_read_first_lane(blockIdx.x);
-            const auto [tile_m, tile_n] =
-                TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
-            iM = tile_m;
-            iN = tile_n;
+            index_t iM, iN;
+
+            if constexpr(ClusterLaunch)
+            {
+                // Cluster launch: use 2D block indexing
+                const auto blockIdX = amd_wave_read_first_lane(blockIdx.x);
+                const auto blockIdY = amd_wave_read_first_lane(blockIdx.y);
+                const auto [tile_m, tile_n] =
+                    TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdX, blockIdY);
+                iM = tile_m;
+                iN = tile_n;
+            }
+            else
+            {
+                // Regular launch: use 1D block indexing
+                const auto blockId = amd_wave_read_first_lane(blockIdx.x);
+                const auto [tile_m, tile_n] =
+                    TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
+                iM = tile_m;
+                iN = tile_n;
+            }
+
+            const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
+            const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
+
+            return make_tuple(i_m, i_n);
         }
-
-        const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
-        const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
-
-        return make_tuple(i_m, i_n);
     }
 
     // Helper functions for persistent kernel with cluster support

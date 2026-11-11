@@ -294,18 +294,30 @@ struct MxAlphaBetaEpilogue
         });
     }
 
-    CK_TILE_DEVICE void operator()(const void* c,
-                                   void* d,
-                                   index_t M,
-                                   index_t N,
-                                   float alpha,
-                                   float beta,
-                                   const mx_tdm_v4::Coords& co,
-                                   const typename Pipeline::CBlockTile& c_block_tile) const
+    /// D = alpha * acc + beta * C; MxGemmKernel sets them from its arguments.
+    float alpha                      = 1.0f;
+    float beta                       = 0.0f;
+    static constexpr bool kAlphaBeta = true;
+
+    /// Stores the C block tile into D's tile window, reading C (Ds[0]) only for beta != 0. The
+    /// windows give the pointers, the unpadded M and N and the tile origin.
+    template <typename ODramWindow, typename DsDramWindows>
+    CK_TILE_DEVICE void operator()(ODramWindow& out_dram_window,
+                                   const typename Pipeline::CBlockTile& c_block_tile,
+                                   const DsDramWindows& ds_dram_windows,
+                                   void* /*p_smem*/) const
     {
-        const CBuffer& acc = c_block_tile.get_thread_buffer();
-        const auto* c_bits = static_cast<const Storage*>(c);
-        auto* d_bits       = static_cast<Storage*>(d);
+        static_assert(std::tuple_size_v<DsDramWindows> == 1, "C is the single Ds tensor");
+        const auto& out_view       = out_dram_window.get_bottom_tensor_view();
+        const auto lengths         = detail::tdm_real_lengths(out_view.get_tensor_descriptor());
+        const index_t M            = lengths[number<0>{}];
+        const index_t N            = lengths[number<1>{}];
+        const auto origin          = out_dram_window.get_window_origin();
+        const mx_tdm_v4::Coords co = Pipeline::MakeCoords(origin[number<0>{}], origin[number<1>{}]);
+        const CBuffer& acc         = c_block_tile.get_thread_buffer();
+        const auto* c_bits         = reinterpret_cast<const Storage*>(
+            ds_dram_windows[number<0>{}].get_bottom_tensor_view().get_buffer_view().p_data_);
+        auto* d_bits = reinterpret_cast<Storage*>(out_view.get_buffer_view().p_data_);
         // GW_B0 / GW_B1.
         if(beta == 0.0f)
             Store<false>(c_bits, d_bits, M, N, alpha, beta, co, acc);
