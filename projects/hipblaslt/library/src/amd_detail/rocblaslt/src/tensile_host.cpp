@@ -34,9 +34,9 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "alpha_mode_logging.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
@@ -1301,7 +1301,7 @@ namespace
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
             problem.swizzleTensorB() ? "--swizzleB" : "",
-            problem.useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem),
             problem.useGradient() ? "--gradient" : "",
             problem.useE() ? "--use_e" : "",
             problem.useBias() ? "--bias_vector" : "",
@@ -1427,7 +1427,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1544,7 +1546,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1668,7 +1672,7 @@ namespace
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
             problem.gemms[0].swizzleTensorB() ? "--swizzleB" : "",
-            problem.gemms[0].useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem.gemms[0]),
             problem.gemms[0].useGradient() ? "--gradient" : "",
             problem.gemms[0].useE() ? "--use_e" : "",
             problem.gemms[0].useBias() ? "--bias_vector" : "",
@@ -1828,7 +1832,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
@@ -1974,7 +1980,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
@@ -3358,43 +3366,18 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The mapping filenames carry `processor`, the name the runtime
-                // reports for this device -- which is the compiler target the kernels in
-                // it were built for, including gfx1250-strict. The subdir is revisioned:
-                // an A0 part reporting gfx1250 loads library/gfx1250v0/, with no fallback.
+                // builds). Both the subdir and the mapping filenames carry `processor`,
+                // the name the runtime reports for this device -- which is the compiler
+                // target the kernels in it were built for, including a silicon-revision
+                // variant such as gfx1250-strict.
                 {
-                    int asicRevision = -1;
-                    if(processor == "gfx1250")
-                    {
-                        hipDeviceProp_t deviceProperties;
-                        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
-                        asicRevision = deviceProperties.asicRevision;
-                    }
-                    const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
-                    auto processor_path     = path / libArch;
+                    auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
-                        path = std::move(processor_path);
-                    }
-                    else if(libArch != processor)
-                    {
-                        auto master = processor_path / ("TensileLibrary_" + processor);
-                        if(!std::filesystem::exists(master.string() + ".dat")
-                           && !std::filesystem::exists(master.string() + ".dat.zlib")
-                           && !std::filesystem::exists(master.string() + ".yaml"))
-                            std::cerr << "\nrocblaslt error: " << processor
-                                      << " device with asicRevision 0 (A0) needs the " << libArch
-                                      << " GEMM library, but " << processor_path
-                                      << " holds no Tensile library. Build with the "
-                                      << libArch << " subtree (the default for -a " << processor
-                                      << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a "
-                                      << processor << "-strict build. Not falling back to "
-                                      << (path / processor)
-                                      << ": its kernels give wrong results on A0." << std::endl;
                         path = std::move(processor_path);
                     }
                 }
