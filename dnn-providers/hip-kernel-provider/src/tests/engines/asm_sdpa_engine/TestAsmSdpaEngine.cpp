@@ -1,13 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
@@ -18,6 +23,7 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestAsmSdpaEngine : public ::testing::Test
 {
@@ -30,6 +36,19 @@ protected:
         _engine.addPlanBuilder(std::make_unique<SdpaFwdPlanBuilder>());
     }
 };
+
+TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
+{
+    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
+    hipdnnPluginConstData_t result;
+    _engine.getDetails(_handle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
+                                                                                     result.size);
+    EXPECT_THAT(
+        details.behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 {
@@ -65,6 +84,38 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
         strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
+    auto builder
+        = sdpa::withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
+                                  {"q", "k", "v", "o"});
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());

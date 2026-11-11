@@ -1,0 +1,74 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {},
+      "expected_failures": {
+        "conv_direct_fwd_gstream_wmma/gfx1250/bf16_c16_s1": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_direct_fwd_gstream_wmma/gfx1250/fp16_c56_s2_ps": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {},
+      "expected_failures": {
+        "conv_direct_fwd_gstream_wmma/gfx1250/bf16_c16_s1": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_direct_fwd_gstream_wmma/gfx1250/fp16_c56_s2_ps": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "conv_direct_fwd_gstream_wmma/gfx1250/bf16_c16_s1": {
+          "arch": "gfx1250",
+          "bytes": 114069,
+          "family": "conv_direct_fwd_gstream_wmma",
+          "kernel_name": "direct_fwd_gstream_wmma_f3x3_p1_c16k16_wk2_wp2_tk2_tp2_tw16_wa4_st2_pf_bf16",
+          "sha256": "f9bbd57a313f915045bb3badfd7ac55edaf75ac977776e4a79b6fb969bda350f",
+          "status": "ok"
+        },
+        "conv_direct_fwd_gstream_wmma/gfx1250/fp16_c56_s2_ps": {
+          "arch": "gfx1250",
+          "bytes": 399749,
+          "family": "conv_direct_fwd_gstream_wmma",
+          "kernel_name": "direct_fwd_gstream_wmma_f3x3_p1_str2_c56k56_wk4_wp1_tk2_tp4_tw16_wa4_st2_ps_pf",
+          "sha256": "3b5abf7f2469b4c6fd417161b5e68a812e96e7237585b256d3770de8862db318",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "conv_direct_fwd_gstream_wmma/gfx1250/bf16_c16_s1": {
+          "arch": "gfx1250",
+          "bytes": 114069,
+          "family": "conv_direct_fwd_gstream_wmma",
+          "kernel_name": "direct_fwd_gstream_wmma_f3x3_p1_c16k16_wk2_wp2_tk2_tp2_tw16_wa4_st2_pf_bf16",
+          "sha256": "f9bbd57a313f915045bb3badfd7ac55edaf75ac977776e4a79b6fb969bda350f",
+          "status": "ok"
+        },
+        "conv_direct_fwd_gstream_wmma/gfx1250/fp16_c56_s2_ps": {
+          "arch": "gfx1250",
+          "bytes": 399749,
+          "family": "conv_direct_fwd_gstream_wmma",
+          "kernel_name": "direct_fwd_gstream_wmma_f3x3_p1_str2_c56k56_wk4_wp1_tk2_tp4_tw16_wa4_st2_ps_pf",
+          "sha256": "3b5abf7f2469b4c6fd417161b5e68a812e96e7237585b256d3770de8862db318",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

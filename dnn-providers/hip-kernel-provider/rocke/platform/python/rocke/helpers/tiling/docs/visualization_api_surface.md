@@ -100,8 +100,8 @@ label per cell (the C-body trick). `atom`, `addr_fn`, `detail_first` refine bord
 ## 4. Composite views
 
 ### `MmaTee.from_mma(mma, **overrides)` (or the dataclass with `a_enc`/`b_enc`/`c_enc`/`atom_shape`)
-The A (left wing) / B (top wing) -> **derived C** tee in one figure. `from_mma` fills canonical refs +
-dtypes from the atom; override `a_enc=`/`b_enc=` to render a non-canonical (interleaved) operand. Inside the
+The A (left wing) / B (top wing) -> **derived C** tee in one figure. `from_mma` fills canonical refs from the
+atom and per-operand dtypes from the TileMma (its A, B and result dtypes); override `a_enc=`/`b_enc=` to render a non-canonical (interleaved) operand. Inside the
 tee the **B and C wings are transposed** (tid horizontal) to align K/N -- this is the ONLY place a register
 file is transposed. Knobs: `issue_order` (C register grouping), `show_logical_inputs`/`show_static`,
 `trace_a`/`trace_b`, `show_diagnostics` (soundness/K-match banner). `.render(out_dir, name)` -> path;

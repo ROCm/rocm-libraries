@@ -29,7 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -50,7 +52,7 @@ void testing_spsm_csr_reuse_descr_bad_arg(const Arguments& argus)
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern for a
 // single (transA, fill mode, diagonal type, algorithm) configuration: set the
 // fill-mode / diagonal-type attributes on the shared sparse-matrix descriptor,
-// query hipsparseSpSM_bufferSize, hipMalloc a fresh externalBuffer of that
+// query hipsparseSpSM_bufferSize, allocate a fresh externalBuffer of that
 // size, create a fresh SpSM descriptor, run hipsparseSpSM_analysis and
 // hipsparseSpSM_solve. When called repeatedly with the same configuration on
 // the same matA, the wrapper must continue to return correct results despite
@@ -114,10 +116,9 @@ static void call_spsm(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-    hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL));
+    hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+    hipsparseLocalDnMat C1(m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL);
+    hipsparseLocalDnMat C2(m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL);
 
     hipsparseSpSMDescr_t descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
@@ -136,8 +137,8 @@ static void call_spsm(hipsparseHandle_t&     handle,
                                                    descr,
                                                    &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -224,11 +225,7 @@ static void call_spsm(hipsparseHandle_t&     handle,
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -292,11 +289,8 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                 CHECK_HIPSPARSE_ERROR(hipsparseSpMatSetAttribute(
                     matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-                hipsparseDnMatDescr_t B, C;
-                CHECK_HIPSPARSE_ERROR(
-                    hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-                CHECK_HIPSPARSE_ERROR(
-                    hipsparseCreateDnMat(&C, m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL));
+                hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+                hipsparseLocalDnMat C(m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL);
 
                 for(hipsparseSpSMAlg_t alg : algs)
                 {
@@ -320,15 +314,12 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
 
                     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
                 }
-
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C));
             }
         }
     }
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(buffer_size_max), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Step 2: repeatedly loop over every configuration and run SpSM analysis /
     // solve with the shared buffer, never calling bufferSize again. Verify each
@@ -354,11 +345,8 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(dC, hC.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
 
-                        hipsparseDnMatDescr_t B, C;
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&C, m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL));
+                        hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+                        hipsparseLocalDnMat C(m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL);
 
                         hipsparseSpSMDescr_t descr;
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
@@ -421,15 +409,11 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                         }
 
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C));
                     }
                 }
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>
@@ -483,9 +467,7 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     const std::vector<hipsparseOperation_t> ops
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
@@ -550,9 +532,6 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
                                      diags,
                                      algs,
                                      number_of_passes);
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

@@ -60,6 +60,25 @@ inline std::vector<LayernormTestCase> getLayernormSmall5DTestCases()
     };
 }
 
+// P1 (dtype orthogonality): the datatype only enters through per-element load/store conversion,
+// so reduced-precision (Standard tier) runs need only one case per layout/optional-tensor state.
+// Every distinct shape/layout is a separate ~0.45 s HipRTC compile (~0.95 s for bwd).
+inline std::vector<LayernormTestCase> getLayernormSmall4DDtypeTestCases()
+{
+    return {
+        {{2, 2, 3, 2}, 2, true, TensorLayout::NCHW},
+        {{2, 2, 3, 2}, 2, false, TensorLayout::NHWC},
+    };
+}
+
+inline std::vector<LayernormTestCase> getLayernormSmall5DDtypeTestCases()
+{
+    return {
+        {{2, 2, 3, 2, 2}, 3, true, TensorLayout::NCDHW},
+        {{2, 2, 3, 2, 2}, 3, false, TensorLayout::NDHWC},
+    };
+}
+
 inline std::vector<LayernormTestCase> getLayernormMedium4DTestCases()
 {
     // Imported from MIOpen
@@ -73,52 +92,25 @@ inline std::vector<LayernormTestCase> getLayernormMedium4DTestCases()
 
 inline std::vector<LayernormTestCase> getLayernormMedium5DTestCases()
 {
-    // Imported from MIOpen
+    // Imported from MIOpen, culled (P3). These cases normalize only the last dimension, so
+    // INNER_SIZE is that dimension (< LOCAL_SIZE) and the kernel loop runs once for every shape;
+    // shapes differ only in OUTER_SIZE and, for NDHWC with C > 1, STRIDE = C. Each distinct
+    // shape is a separate ~0.45 s HipRTC compile.
+    //   {32,1,14,14,14}: C=1 (NDHWC memory-identical to NCDHW)
+    //   {32,32,6,6,6} and {32,32,6,4,12}: C=32 (NDHWC STRIDE 32)
     return {
-        {{32, 1, 32, 32, 32}, 4, false, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
         {{32, 1, 14, 14, 14}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 14, 14, 14}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 12, 12, 12}, 4, false, TensorLayout::NCDHW},
         {{32, 32, 6, 6, 6}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 6, 10, 27}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 4, 6, 11}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 2, 2, 3}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 14, 12, 29}, 4, false, TensorLayout::NCDHW},
         {{32, 32, 6, 4, 12}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 4, 2, 2}, 4, false, TensorLayout::NCDHW},
-        {{32, 1, 32, 32, 32}, 4, true, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
         {{32, 1, 14, 14, 14}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 14, 14, 14}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 12, 12, 12}, 4, true, TensorLayout::NCDHW},
         {{32, 32, 6, 6, 6}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 6, 10, 27}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 4, 6, 11}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 2, 2, 3}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 14, 12, 29}, 4, true, TensorLayout::NCDHW},
         {{32, 32, 6, 4, 12}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 4, 2, 2}, 4, true, TensorLayout::NCDHW},
-        {{32, 1, 32, 32, 32}, 4, false, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
         {{32, 1, 14, 14, 14}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 14, 14, 14}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 12, 12, 12}, 4, false, TensorLayout::NDHWC},
         {{32, 32, 6, 6, 6}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 6, 10, 27}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 4, 6, 11}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 2, 2, 3}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 14, 12, 29}, 4, false, TensorLayout::NDHWC},
         {{32, 32, 6, 4, 12}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 4, 2, 2}, 4, false, TensorLayout::NDHWC},
-        {{32, 1, 32, 32, 32}, 4, true, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
         {{32, 1, 14, 14, 14}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 14, 14, 14}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 12, 12, 12}, 4, true, TensorLayout::NDHWC},
         {{32, 32, 6, 6, 6}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 6, 10, 27}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 4, 6, 11}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 2, 2, 3}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 14, 12, 29}, 4, true, TensorLayout::NDHWC},
         {{32, 32, 6, 4, 12}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 4, 2, 2}, 4, true, TensorLayout::NDHWC},
     };
 }
 
@@ -135,104 +127,24 @@ inline std::vector<LayernormTestCase> getLayernormLarge4DTestCases()
 
 inline std::vector<LayernormTestCase> getLayernormLarge5DTestCases()
 {
-    // Imported from MIOpen
+    // Imported from MIOpen, culled (P3). As for the medium catalog, only the last dimension is
+    // normalized, so each shape runs the same single-iteration loop and differs only in
+    // OUTER_SIZE and STRIDE; each distinct shape is a separate HipRTC compile.
+    //   {32,2,32,57,125} and {1,3,16,240,320}: C>1 (NDHWC STRIDE = C)
+    //   {256,1,32,32,32}: C=1 (NDHWC memory-identical to NCDHW)
     return {
-        {{256, 1, 32, 32, 32}, 4, false, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, false, TensorLayout::NCDHW},
-        {{256, 32, 12, 12, 12}, 4, false, TensorLayout::NCDHW},
-        {{256, 32, 6, 6, 6}, 4, false, TensorLayout::NCDHW},
-        {{512, 1, 32, 32, 32}, 4, false, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, false, TensorLayout::NCDHW},
-        {{512, 32, 12, 12, 12}, 4, false, TensorLayout::NCDHW},
-        {{512, 32, 6, 6, 6}, 4, false, TensorLayout::NCDHW},
-        {{32, 2, 32, 57, 125},
-         4,
-         false,
-         TensorLayout::NCDHW}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
-        {{1, 3, 8, 240, 320}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, false, TensorLayout::NCDHW}, // 3D convet on video
-        {{256, 1, 32, 32, 32}, 4, true, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, true, TensorLayout::NCDHW},
-        {{256, 32, 12, 12, 12}, 4, true, TensorLayout::NCDHW},
-        {{256, 32, 6, 6, 6}, 4, true, TensorLayout::NCDHW},
-        {{512, 1, 32, 32, 32}, 4, true, TensorLayout::NCDHW}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, true, TensorLayout::NCDHW},
-        {{512, 32, 12, 12, 12}, 4, true, TensorLayout::NCDHW},
-        {{512, 32, 6, 6, 6}, 4, true, TensorLayout::NCDHW},
-        {{32, 2, 32, 57, 125},
-         4,
-         true,
-         TensorLayout::NCDHW}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
-        {{1, 3, 8, 240, 320}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, true, TensorLayout::NCDHW}, // 3D convet on video
-        {{256, 1, 32, 32, 32}, 4, false, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, false, TensorLayout::NDHWC},
-        {{256, 32, 12, 12, 12}, 4, false, TensorLayout::NDHWC},
-        {{256, 32, 6, 6, 6}, 4, false, TensorLayout::NDHWC},
-        {{512, 1, 32, 32, 32}, 4, false, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, false, TensorLayout::NDHWC},
-        {{512, 32, 12, 12, 12}, 4, false, TensorLayout::NDHWC},
-        {{512, 32, 6, 6, 6}, 4, false, TensorLayout::NDHWC},
-        {{32, 2, 32, 57, 125},
-         4,
-         false,
-         TensorLayout::NDHWC}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
-        {{1, 3, 8, 240, 320}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, false, TensorLayout::NDHWC}, // 3D convet on video
-        {{256, 1, 32, 32, 32}, 4, true, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, true, TensorLayout::NDHWC},
-        {{256, 32, 12, 12, 12}, 4, true, TensorLayout::NDHWC},
-        {{256, 32, 6, 6, 6}, 4, true, TensorLayout::NDHWC},
-        {{512, 1, 32, 32, 32}, 4, true, TensorLayout::NDHWC}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, true, TensorLayout::NDHWC},
-        {{512, 32, 12, 12, 12}, 4, true, TensorLayout::NDHWC},
-        {{512, 32, 6, 6, 6}, 4, true, TensorLayout::NDHWC},
-        {{32, 2, 32, 57, 125},
-         4,
-         true,
-         TensorLayout::NDHWC}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
-        {{1, 3, 8, 240, 320}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, true, TensorLayout::NDHWC}, // 3D convet on video
-        {{32, 32, 14, 25, 59}, 4, false, TensorLayout::NCDHW},
-        {{32, 32, 32, 28, 62},
-         4,
-         false,
-         TensorLayout::NCDHW}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{16, 32, 6, 50, 50}, 4, false, TensorLayout::NCDHW}, // Multi-view 3D convnet
-        {{32, 32, 14, 25, 59}, 4, true, TensorLayout::NCDHW},
-        {{32, 32, 32, 28, 62},
-         4,
-         true,
-         TensorLayout::NCDHW}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{16, 32, 6, 50, 50}, 4, true, TensorLayout::NCDHW}, // Multi-view 3D convnet
-        {{32, 32, 14, 25, 59}, 4, false, TensorLayout::NDHWC},
-        {{32, 32, 32, 28, 62},
-         4,
-         false,
-         TensorLayout::NDHWC}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{16, 32, 6, 50, 50}, 4, false, TensorLayout::NDHWC}, // Multi-view 3D convnet
-        {{32, 32, 14, 25, 59}, 4, true, TensorLayout::NDHWC},
-        {{32, 32, 32, 28, 62},
-         4,
-         true,
-         TensorLayout::NDHWC}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{16, 32, 6, 50, 50}, 4, true, TensorLayout::NDHWC}, // Multi-view 3D convnet
+        {{32, 2, 32, 57, 125}, 4, false, TensorLayout::NCDHW},
+        {{1, 3, 16, 240, 320}, 4, false, TensorLayout::NCDHW},
+        {{256, 1, 32, 32, 32}, 4, false, TensorLayout::NCDHW},
+        {{32, 2, 32, 57, 125}, 4, true, TensorLayout::NCDHW},
+        {{1, 3, 16, 240, 320}, 4, true, TensorLayout::NCDHW},
+        {{256, 1, 32, 32, 32}, 4, true, TensorLayout::NCDHW},
+        {{32, 2, 32, 57, 125}, 4, false, TensorLayout::NDHWC},
+        {{1, 3, 16, 240, 320}, 4, false, TensorLayout::NDHWC},
+        {{256, 1, 32, 32, 32}, 4, false, TensorLayout::NDHWC},
+        {{32, 2, 32, 57, 125}, 4, true, TensorLayout::NDHWC},
+        {{1, 3, 16, 240, 320}, 4, true, TensorLayout::NDHWC},
+        {{256, 1, 32, 32, 32}, 4, true, TensorLayout::NDHWC},
     };
 }
 

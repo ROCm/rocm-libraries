@@ -9,6 +9,9 @@ This tool takes benchmark timing data and produces:
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
 3. A UHD descriptor (`<stem>.uhd.json`) for the shared plugin-SDK runtime (RFC 0019 §4)
 
+`train --adapter linear_data` produces a RelLin per-configuration linear model and the
+`LinearDataAdapter` artifact instead ([below](#the-linear_data-adapter-rellin)).
+
 Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
 reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
 names the engine it serves.
@@ -176,6 +179,11 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
 | `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
 | `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
+| `--early-exit` | No | `auto` (default), `none`, or `TREES:KEEP[,TREES:KEEP...]`: the catalog-ranking early-exit schedule written into `model.bin` (see [Early exit](#early-exit)) |
+| `--adapter` | No | Model family: `tree_data` (default) or `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)). `generate` takes the same flag |
+| `--key-features` | No | `linear_data`: the features whose values together identify a kernel configuration (default: every `$kernel.*` reference in the signature) |
+| `--family-features` | No | `linear_data`: a coarser key whose family fit scores a configuration never seen in training (default: none) |
+| `--ridge` / `--min-rows` | No | `linear_data`: ridge strength (default `1e-2`) and the row count below which a configuration is shrunk harder (default `10`) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -210,12 +218,13 @@ fitted on it models the wrong engine behaviour without any number looking wrong.
 
 `promote` copies the descriptor and artifact into the UED's directory — under
 `heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
-metric-less ranker — and binds it under `<role>.<arch>`. `sort_kernel_catalog` and
-`predict_engine` bind a **list** per arch, one UHD per `score.metric` (RFC 0019 §3.1):
-the incoming UHD replaces only the bound UHD of its own metric (read from the bound UHD
-itself, which must therefore be installed in the tree) and otherwise joins the list; a
-single id is converted to a list. `predict_applicable_kernels` stays a single id. It
-preserves other model references and authored knobs.
+metric-less ranker — and binds it under `<role>.<arch>`. Every role binds a **list** per
+arch (RFC 0019 §3.1): `sort_kernel_catalog` and `predict_engine` hold one UHD per
+`score.metric`, and `predict_applicable_kernels`, the candidate generators for future JIT
+spaces, follows the same rule. The incoming UHD replaces only the bound UHD of its own
+metric (a metric-less one replaces the metric-less one; the metric is read from the bound
+UHD itself, which must therefore be installed in the tree) and otherwise joins the list; a
+single id is converted to a list. It preserves other model references and authored knobs.
 
 **One UUID is one model, under every arch key that binds it.** Promoting a model already
 installed elsewhere in the tree for another arch binds the installed copy (no second
@@ -872,6 +881,26 @@ cannot consume candidate metadata. An engine-level query takes no constraint, so
 configuration-level query, not an L1 one.
 The example feature set demonstrates the workflow, not an accuracy recommendation.
 
+An engine-level measurement is one graph, so by default each graph is its own
+`hipdnn_bench` process, and an engine whose setup is costly pays it for every graph:
+MIOpen loading its CK grouped-convolution library takes about 11 s of a ~17 s graph on
+gfx1151. `--bench-batch N` hands the bench N graphs at a time as a `--graph-list` (one
+path per line); one process and one handle measure them in turn, each graph with its own
+graph, plan and buffers, and write one JSON line per graph naming it as `graph_path`. A
+batch is killed once it goes `--bench-timeout` seconds without finishing a graph. Graphs a
+batch leaves unanswered (it crashed or stalled on one of them) or answers with a failure
+(an earlier graph may have left the device or handle broken) are measured again one per
+process, so a graph is recorded as failed only when it fails on its own. `--plugin-dir`
+may name the engine's plugin library rather than a directory, so the bench loads only that
+plugin and no other provider's setup. Catalog sweeps (L2) are not batched: a sweep already
+measures every candidate of its graph in one process.
+
+```bash
+hipdnn_bench --graph-list graphs.txt --engine-name MIOPEN_ENGINE \
+    --plugin-dir <plugin dir>/miopen_plugin.dll \
+    --collect-immediate --ranking-metric tflops
+```
+
 Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-less
 JSON inputs. It records the physical device ID, selector revision, commands,
 constraints, warmup, timing statistics, and disjoint training/evaluation graph-device
@@ -1076,6 +1105,131 @@ files cross attention correctly) is marked `excluded_by_constraints`: no engine 
 
 L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
 
+## Slotted engines (RFC 0021)
+
+A UED that declares `slots` selects one kernel per slot, in slot order. Everything above
+holds for an unslotted engine, and for each slot of a slotted one unless stated here.
+
+| | Unslotted | Slotted |
+|---|---|---|
+| Candidate id | the kernel id | per-slot kernel ids in slot order, `prep=<id>\|dkdv=<id>\|dq=<id>` |
+| Knob id | `<field>` | `<slot>.<field>` |
+| Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
+| Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
+| Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
+| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0` and `1.1`) |
+
+**Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
+slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
+the reference program (every slot at its first kernel in kernel-id order) is every slot's row,
+a candidate that varies exactly one slot is that slot's row, any other is empty. A slot's
+ranker therefore learns whole-program times with the other slots held at their reference
+kernels. These training reference picks can differ from the runtime's; the RFC's
+separability assumption covers the difference. A reference program that fails to time fails
+the sweep; no row is dropped and no other kernel substitutes. `ws.*` workspace tokens
+describe the engine's buffer, not the problem, and never reach a training row.
+
+```bash
+hipdnn_bench --graph g.json --engine-name <engine> --plugin-dir <dir> --sweep > sweep.csv
+python -m uhd_gen.dataset add --into store --csv sweep.csv --engine <engine> --engine-id <id> \
+    --arch gfx950 --selector-revision <rev> --collected-at <timestamp>
+python -m uhd_gen.dataset export --from store --purpose training --slot dkdv --out dkdv.json
+python -m uhd_gen generate --dataset store --slot dkdv --no-promote --target avgTimeMs \
+    --objective min --features q.seqlen kernel.tile --eval-fraction 0.25 \
+    --descriptor-tree <tree> --engine <UED name> --arch gfx950 \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features --output-dir out/dkdv
+python -m uhd_gen promote --model-dir out/dkdv/model --descriptor-tree <tree> \
+    --engine <UED name> --role sort_kernel_catalog --arch gfx950 --corpus out/dkdv/corpus.json \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features
+python -m uhd_gen knobs --input sweep.csv --slot dkdv
+```
+
+`--slot <name>` takes one slot's rows and rewrites them as an unslotted corpus: `kernel` is the
+slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
+`$kernel.<field>` signature), and the other slots' columns, `slot_reference` and `ws.*` are
+dropped. `generate --slot` also records the slot's provenance (`trained_against` with `slot`
+and that slot's KMD, from `--descriptor-tree` and `--engine`), and `train` writes a model whose
+`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise). The dataset is a
+published one, so `generate` needs `--no-promote` and `--features` (or `--feature-signature`),
+needs at least five training problems plus held-out ones, and leaves installing to `promote`.
+
+`dataset export`, `generate` and `knobs` accept `--slot`, and each refuses a corpus that is
+not a slotted sweep; `generate` also needs `--dataset`. `generate` refuses to collect
+measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep with
+`hipdnn_bench`, add the CSV, train per slot, and `promote` each model.
+
+A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
+loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
+`--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
+explicit other target, such as `avgTimeMs`.
+
+**Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
+`heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
+engine. `promote` refuses a `sort_kernel_catalog` model that records no slot, names a slot
+the engine lacks, declares `score.metric`, has a `kernel.<field>` feature outside the slot's
+KMD fields and knobs, or reads a shared-workspace token (`$ws.*`); it also refuses the
+`predict_applicable_kernels` role (slots carry none). `--remove-knob NAME` edits the knobs of the model's slot only.
+
+**Tests.** The slot tests (`tests/test_promote_slots.py`, `test_slot_ranker_install.py`,
+`test_slotted_sweep.py`) import pandas, pyarrow and lightgbm, which CI does not install: they
+skip there and run only locally.
+
+## The `linear_data` adapter (RelLin)
+
+`python -m uhd_gen train --adapter linear_data ...` fits one ridge regression per kernel
+configuration instead of a tree ensemble. It is a cheap alternative for a small catalog:
+about 220 ns per candidate at run time (one hash lookup and one dot product over 31 basis
+terms, catalogs of 17-255 candidates sharing their problem features). Whether it ranks as
+well as a tree model depends on the catalog; compare the two with `evaluate` before
+choosing it.
+
+What it predicts. A candidate's score is its **log slowdown against the best candidate of
+the same problem**, `log t - log min t` (or `log max v - log v` for a rate such as TFLOPS),
+so **lower is better** whatever the corpus holds. The descriptor therefore always declares
+`objective: min`, no `score` block and no metric, and the runtime refuses a `linear_data`
+UHD that declares otherwise (RFC 0019 §7.5). Consequences for `train`:
+
+- `--target` and `--objective` name the corpus's own label and its direction (defaults:
+  `tflops`, `max`); the manifest records them and `evaluate` ranks measured values in that
+  direction.
+- `--metric`, `--calibrated`, `--group-by-feature` and `--role predict_engine` are refused:
+  the score is in no physical unit and is not comparable across engines.
+- The target is relative to the best candidate of a problem, so the corpus needs problem
+  identity: `--group-by`, or a `benchmark` column.
+
+How it fits (`rellin.py`).
+
+- The **key** is the feature slots identifying a configuration: by default every
+  `$kernel.*` reference of the (pruned) signature, or `--key-features`. Every other varying
+  feature is a **basis term**, standardized over its finite training values, and
+  `log1p`-transformed when those are non-negative and reach above 64.
+- Each configuration's coefficients are a ridge fit (`--ridge`, default `1e-2`) shrunk toward
+  its family's (`--family-features`) and, through the family, toward a fit on every row. A
+  configuration with fewer than `--min-rows` (10) rows is shrunk much harder.
+- The **guard**: each basis term is clamped to the range it took in training (an infinite
+  value included), and a measured configuration's prediction is floored at the smallest
+  slowdown it showed in training, so a measured configuration that was never the best cannot
+  be extrapolated into the winner. That holds for measured configurations only: a family or
+  the global fit, which describes configurations the corpus never measured, floors at 0, so
+  an unmeasured configuration can tie or beat a measured winner.
+
+`model.bin` is a `LinearModel` (`linear_model.fbs`, identifier `HLIN`). Loading it checks, in
+order: the digest, the identifier, the FlatBuffers verifier, `features_hash`, then the model's
+own bounds (every index in range, coefficient and key lengths, finiteness, `scale > 0`,
+`lo <= hi`, unique keys, a global entry). `artifact.load_linear_artifact` repeats those checks
+offline with the runtime's reasons, `promote` runs it before installing, and `evaluate`
+scores the shipped bytes through `evaluate._linear_scorer`, which `TestLinearDataAdapter`
+pins against the C++ adapter on a shared fixture. A linear model can be installed for
+`sort_kernel_catalog` only, and an installed one is never replaced in place by another id's
+promotion (only a `predict_engine` model has that path, and a linear model cannot be one).
+
+```bash
+python -m uhd_gen train --adapter linear_data \
+    --input bench.csv --provenance prov.json \
+    --features kernel.tile kernel.stages q.size \
+    --group-by benchmark device --target avgTimeMs --objective min \
+    --output-dir ./uhd_output
+```
 ## Output
 
 `train` generates:
@@ -1083,7 +1237,7 @@ L1 (`predict_engine`) models only: within-X% is a per-row error, which is what a
 ```
 output_dir/
 ├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
-├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter)
 └── train_manifest.json # training provenance
 ```
 
@@ -1159,10 +1313,10 @@ sha256sum model.bin   # equals tree_data.hash, and equals it again on the next c
   `double` and `bool`. A runtime built before `split_leaf` reads only this one: `train` and
   `generate` write it with `--model-encoding node_arrays`.
 
-The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
-tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
-type a later schema adds) is refused by name ("stored as integer array type N, which this
-runtime cannot read") rather than read as another type.
+The runtime reads both. It decodes either one, at load, into the same compiled form, so
+scoring speed does not depend on the encoding. A tag it does not know (a type a later
+schema adds) is refused by name ("stored as integer array type N, which this runtime
+cannot read") rather than read as another type.
 
 Measured on a 500-tree, 127-leaf model with 54 features:
 
@@ -1179,6 +1333,54 @@ below 1.2e-38) is refused when the model is written, with the advice to use
 `--leaf-precision float64`, rather than stored as `inf` or `0`. Thresholds are never
 rounded: a split compares against the value LightGBM chose.
 
+### How the runtime walks a tree
+
+`TreeDataAdapter` compares ranks, not values. At load it sorts each feature's distinct split
+thresholds into a table and stores, per split, its threshold's position `r` there. A row is
+mapped once to positions, one binary search per feature the model reads (a catalog's rows
+share their problem features, so `scoreBatch` reuses the previous row's position when a value
+repeats), and every split then compares two integers: `x <= t[r]` exactly when fewer than
+`r + 1` thresholds lie below `x`, and `x < t[r]` exactly when fewer than `r + 1` lie at or
+below it. NaN and features past a short row's end take the split's default direction.
+Decisions, leaf values and summation order are a direct walk's, so scores are bit for bit
+the same. A compiled split is 16 bytes. On the shipped gfx942 conv fwd model (500 trees ×
+127 leaves), ranking catalogs of 17-400 candidates took 1.8-2.0× less time than the walk
+it replaced, with identical scores.
+
+### Early exit
+
+`GbdtModel.early_exit` is an optional schedule of `(trees, keep)` stages for ranking a
+whole catalog: `scoreBatch` sums the first `trees` trees for every candidate still in,
+keeps the `keep` best in the UHD objective's direction (ties keep the earlier row), and
+goes on; the last stage's survivors are scored by the whole model. A pruned candidate
+carries its partial sum, ranks after every usable fully scored candidate (later stages
+first, then by that sum) and reports no estimate. Stages must increase in `trees` and
+decrease in `keep`; a malformed schedule is refused, and a grouped model's is ignored.
+Single-row scoring (`score()`, `predict_engine`) always uses every tree. A runtime that
+predates the field ignores it and scores every candidate fully, which is still correct.
+
+`train --early-exit auto` chooses a schedule for a `sort_kernel_catalog` model from
+out-of-fold predictions of its cross-validation folds, so it never ranks rows a model was
+trained on. It tries one- and two-stage schedules over prefixes of 5-100 trees and
+shortlists of 8-32, and keeps the one doing the fewest tree walks whose mean top-1 regret
+is within 0.02 points, and p95 within 0.2 points, of scoring every candidate fully; none
+if no schedule saves at least 20% of the walks. The candidates' figures are recorded in
+`train_manifest.json` `early_exit`.
+`--early-exit 30:16` or `10:32,40:8` writes a schedule as given. It is refused for a
+calibrated model (a pruned candidate carries no estimate), a grouped one (whose runtime
+ignores the schedule) and `predict_engine` (which scores one row with every tree).
+`--early-exit none` (the default for those models) writes none.
+`evaluate` applies the stored schedule exactly as the runtime does, so its regret is
+the shipped model's.
+
+A schedule is part of `model.bin`, so adding, changing or removing one changes
+`tree_data.hash` and, through the ranker's identity, the engine's selector revision
+(`engineSelectorRevision`; RFC 0019 [Section 8.1](../../docs/rfcs/0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)).
+A `predict_engine` estimate that records the old revision in `trained_against` is then
+unavailable until it is retrained against the new one. `auto` is the default, so
+regenerating an eligible catalog ranker has this effect even when its trees come out the
+same: pass `--early-exit none` when the engine's estimates are not retrained alongside it.
+
 ## Generated FlatBuffers bindings
 
 `model.bin` is written through flatc-generated Python bindings that
@@ -1188,7 +1390,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
 ├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
-└── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
+├── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
+└── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1201,7 +1404,8 @@ does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
 
 ```bash
 python projects/hipdnn/scripts/run_flatc.py \
-    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs
+    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs
 ```
 
 That command emits both the C++ header and these bindings from one invocation, so

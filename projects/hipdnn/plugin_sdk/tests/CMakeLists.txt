@@ -65,15 +65,19 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCustomLibraryAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestInlineExpressions.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestKernelFeatureRows.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestLinearDataAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestNativeAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestScoreTransform.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTableAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapterSplitLeaf.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapterScoring.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestSha256.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdAdapters.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestEnginePredictor.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdParser.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdCandidateOrdering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
@@ -84,14 +88,19 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericTargets.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelDefinition.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelIngestorStateManager.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedStateManager.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedWinnerRecords.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestStagedApplicability.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedEngine.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlotProgramBenchmark.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBenchmarkPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerLineGolden.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:DigitGroupingLocale.cpp>
 )
@@ -127,14 +136,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
     )
 
-    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
-    # the training inputs beside it stay in the source tree.
+    # The committed uhd_gen output TestUhdGeneratedModel loads, and the trained_against
+    # conformance corpus TestUhdParser runs. Only what the tests read; the training inputs
+    # beside them stay in the source tree.
     set(_uhd_fixture_subdir "uhd_generated_fixtures")
     set(_uhd_fixture_files
         tile_selector.uhd.json
         model.bin
         dtype_selector/dtype_selector.uhd.json
         dtype_selector/model.bin
+        conformance/trained_against_slots.json
     )
     set(_uhd_fixture_outputs "")
     foreach(_file IN LISTS _uhd_fixture_files)
@@ -163,10 +174,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
 
+    # The golden winner shard TestWinnerLineGolden decodes. The IngestorGenerator's
+    # variant_reduce tests read the same file from the source tree.
+    set(_winner_golden_subdir "winner_line_golden")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../tools/cmake/StageFiles.cmake)
+    hipdnn_tools_stage_files(hipdnn_plugin_sdk_test_winner_golden
+        "${HIPDNN_TEST_DATA_DIR}/${_winner_golden_subdir}"
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/IngestorGenerator/tests/fixtures/winner_lines_golden.jsonl"
+        INSTALL_DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_winner_golden_subdir}")
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_winner_golden)
+
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
         HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
         HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
-        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
+        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}"
+        HIPDNN_WINNER_GOLDEN_SUBDIR="${_winner_golden_subdir}")
 endif()
 
 target_link_libraries(
