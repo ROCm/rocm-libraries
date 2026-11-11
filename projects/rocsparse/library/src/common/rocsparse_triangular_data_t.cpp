@@ -65,11 +65,61 @@ void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that
                     }
                 }
                 rocsparse::triangular_info_t::copy(&this->m_data[i], src);
+                this->rewire_storage(this->m_data[i], src, that);
             }
         }
 
         this->m_pivot_info->copy_pivot_info_async(that->m_pivot_info, stream);
         THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+    }
+}
+
+void rocsparse::triangular_data_t::set_storage(
+    const rocsparse::idnvec_descr_t*                diag_indices,
+    const rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern)
+{
+    this->m_diag_indices                = diag_indices;
+    this->m_transposed_sparsity_pattern = transposed_sparsity_pattern;
+}
+
+void rocsparse::triangular_data_t::attach_storage(
+    rocsparse::triangular_info_t*                   trm_info,
+    const rocsparse::idnvec_descr_t*                diag_indices,
+    const rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern)
+{
+    if(this->m_diag_indices == nullptr || this->m_transposed_sparsity_pattern == nullptr
+       || diag_indices != this->m_diag_indices
+       || transposed_sparsity_pattern != this->m_transposed_sparsity_pattern)
+    {
+        delete trm_info;
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
+
+    trm_info->set_diag_ind(this->m_diag_indices);
+    trm_info->set_transposed(this->m_transposed_sparsity_pattern);
+}
+
+void rocsparse::triangular_data_t::rewire_storage(rocsparse::triangular_info_t*       dst,
+                                                  const rocsparse::triangular_info_t* src,
+                                                  const triangular_data_t*            that)
+{
+    if(this->m_diag_indices == nullptr || that->m_diag_indices == nullptr)
+    {
+        return;
+    }
+
+    if(src->get_diag_ind() == that->m_diag_indices)
+    {
+        dst->set_diag_ind(this->m_diag_indices);
+    }
+
+    const rocsparse::transposed_sparsity_pattern_t* src_transposed
+        = that->m_transposed_sparsity_pattern;
+    if(src->get_transposed() == src_transposed)
+    {
+        const rocsparse::transposed_sparsity_pattern_t* dst_transposed
+            = this->m_transposed_sparsity_pattern;
+        dst->set_transposed(dst_transposed);
     }
 }
 
@@ -137,7 +187,7 @@ rocsparse_indextype rocsparse::triangular_data_t::get_indextype_J() const
     for(int i = 0; i < 4; ++i)
     {
         if(this->m_data[i] != nullptr)
-            return this->m_data[i]->get_index_indextype();
+            return this->m_data[i]->get_row_map()->get_indextype();
     }
     return rocsparse_indextype_i32;
 }

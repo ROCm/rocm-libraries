@@ -139,7 +139,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     }
 
     info->get_bsrsv_info();
-    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
         handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
 
     return rocsparse_status_success;

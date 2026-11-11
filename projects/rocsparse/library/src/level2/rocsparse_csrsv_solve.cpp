@@ -168,18 +168,19 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         const int64_t            csrt_val_stride   = A->nnz;
         const rocsparse_datatype csrt_val_datatype = A->data_type;
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_strided_batched(handle,
-                                                                   A->batch_count,
-                                                                   A->nnz,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->batch_stride,
-                                                                   csrt_val_datatype,
-                                                                   csrt_val,
-                                                                   csrt_val_stride,
-                                                                   A->row_type,
-                                                                   csrsv->get_transposed_perm(),
-                                                                   rocsparse_index_base_zero)));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::gthr_strided_batched(handle,
+                                             A->batch_count,
+                                             A->nnz,
+                                             A->data_type,
+                                             A->const_val_data,
+                                             A->batch_stride,
+                                             csrt_val_datatype,
+                                             csrt_val,
+                                             csrt_val_stride,
+                                             A->row_type,
+                                             csrsv->get_transposed()->get_perm()->get_values(),
+                                             rocsparse_index_base_zero)));
 
 #ifndef ROCSPARSE_WITH_TRSM_REFACTORING
         if(trans == rocsparse_operation_conjugate_transpose)
@@ -189,8 +190,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         }
 
 #endif
-        local_row_data        = csrsv->get_transposed_row_ptr();
-        local_col_data        = csrsv->get_transposed_col_ind();
+        local_row_data        = csrsv->get_transposed()->get_row_ptr()->get_values();
+        local_col_data        = csrsv->get_transposed()->get_col_ind()->get_values();
         local_val_data        = csrt_val;
         local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
         switch(fill_mode)
@@ -267,7 +268,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                             y->inc,
                             y->batch_stride,
                             done_array,
-                            csrsv->get_row_map(),
+                            csrsv->get_row_map()->get_values(),
                             0,
                             numeric_exact_position->get_position(),
                             1,

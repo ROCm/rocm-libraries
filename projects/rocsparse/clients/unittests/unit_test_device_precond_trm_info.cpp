@@ -36,6 +36,7 @@
 #include "unit_test_device_precond_common.hpp"
 
 #include "rocsparse_mat_info.hpp"
+#include "rocsparse_transposed_sparsity_pattern.hpp"
 #include "rocsparse_triangular_data_t.hpp"
 #include "rocsparse_triangular_info_t.hpp"
 
@@ -71,43 +72,56 @@ namespace
 
     // A triangular_info_t of order m = 4 with nnz = 6 and 32-bit indices whose five device arrays
     // are filled with `base`, `base + 1`, ...
-    void fill_trm_info(rocsparse::triangular_info_t& info, int32_t base)
+    // Diagonal and transposed arrays a triangular_info_t refers to; they must outlive it.
+    struct trm_storage
+    {
+        rocsparse::idnvec_descr_t                diag_ind;
+        rocsparse::transposed_sparsity_pattern_t transposed;
+    };
+
+    void fill_trm_info(rocsparse::triangular_info_t& info, trm_storage& storage, int32_t base)
     {
         const int32_t m   = 4;
         const int32_t nnz = 6;
         info.set_m(m);
         info.set_nnz(nnz);
         info.set_max_nnz(3);
-        info.set_offset_indextype(rocsparse_indextype_i32);
-        info.set_index_indextype(rocsparse_indextype_i32);
-        auto fill = [&](void** slot, int32_t count, int32_t first) {
+        auto fill_idnvec = [&](rocsparse::idnvec_descr_t* v, int32_t count, int32_t first) {
+            ASSERT_EQ(v->create_async(count, rocsparse_indextype_i32, nullptr),
+                      rocsparse_status_success);
             std::vector<int32_t> host(static_cast<size_t>(count));
             for(int32_t i = 0; i < count; ++i)
                 host[i] = first + i;
-            *slot = make_device_array(host);
-            ASSERT_NE(*slot, nullptr);
+            ASSERT_EQ(hipMemcpy(v->get_values(),
+                                host.data(),
+                                host.size() * sizeof(int32_t),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
         };
-        fill(info.get_ref_row_map(), m, base);
-        fill(info.get_ref_diag_ind(), m, base + 10);
-        fill(info.get_ref_transposed_perm(), nnz, base + 20);
-        fill(info.get_ref_transposed_row_ptr(), m + 1, base + 30);
-        fill(info.get_ref_transposed_col_ind(), nnz, base + 40);
+        fill_idnvec(info.get_row_map(), m, base);
+        fill_idnvec(&storage.diag_ind, m, base + 10);
+        fill_idnvec(storage.transposed.get_perm(), nnz, base + 20);
+        fill_idnvec(storage.transposed.get_row_ptr(), m + 1, base + 30);
+        fill_idnvec(storage.transposed.get_col_ind(), nnz, base + 40);
+        info.set_diag_ind(&storage.diag_ind);
+        info.set_transposed(&storage.transposed);
     }
 
     void expect_same_arrays(rocsparse::triangular_info_t& a, rocsparse::triangular_info_t& b)
     {
         const size_t m   = static_cast<size_t>(a.get_m());
         const size_t nnz = static_cast<size_t>(a.get_nnz());
-        EXPECT_EQ(read_device_array<int32_t>(a.get_row_map(), m),
-                  read_device_array<int32_t>(b.get_row_map(), m));
-        EXPECT_EQ(read_device_array<int32_t>(a.get_diag_ind(), m),
-                  read_device_array<int32_t>(b.get_diag_ind(), m));
-        EXPECT_EQ(read_device_array<int32_t>(a.get_transposed_perm(), nnz),
-                  read_device_array<int32_t>(b.get_transposed_perm(), nnz));
-        EXPECT_EQ(read_device_array<int32_t>(a.get_transposed_row_ptr(), m + 1),
-                  read_device_array<int32_t>(b.get_transposed_row_ptr(), m + 1));
-        EXPECT_EQ(read_device_array<int32_t>(a.get_transposed_col_ind(), nnz),
-                  read_device_array<int32_t>(b.get_transposed_col_ind(), nnz));
+        EXPECT_EQ(read_device_array<int32_t>(a.get_row_map()->get_values(), m),
+                  read_device_array<int32_t>(b.get_row_map()->get_values(), m));
+        EXPECT_EQ(read_device_array<int32_t>(a.get_diag_ind()->get_values(), m),
+                  read_device_array<int32_t>(b.get_diag_ind()->get_values(), m));
+        EXPECT_EQ(read_device_array<int32_t>(a.get_transposed()->get_perm()->get_values(), nnz),
+                  read_device_array<int32_t>(b.get_transposed()->get_perm()->get_values(), nnz));
+        EXPECT_EQ(
+            read_device_array<int32_t>(a.get_transposed()->get_row_ptr()->get_values(), m + 1),
+            read_device_array<int32_t>(b.get_transposed()->get_row_ptr()->get_values(), m + 1));
+        EXPECT_EQ(read_device_array<int32_t>(a.get_transposed()->get_col_ind()->get_values(), nnz),
+                  read_device_array<int32_t>(b.get_transposed()->get_col_ind()->get_values(), nnz));
     }
 
     // The four storage slots of a trm data holder: no-transpose / transpose times lower /
@@ -350,41 +364,26 @@ TEST_F(PrecondTrmInfo, trm_info_accessors)
     EXPECT_EQ(info.get_m(), 0);
     EXPECT_EQ(info.get_nnz(), 0);
     EXPECT_EQ(info.get_max_nnz(), 0);
-    EXPECT_EQ(info.get_row_map(), nullptr);
+    EXPECT_EQ(info.get_row_map()->get_values(), nullptr);
     EXPECT_EQ(info.get_diag_ind(), nullptr);
-    EXPECT_EQ(info.get_transposed_perm(), nullptr);
-    EXPECT_EQ(info.get_transposed_row_ptr(), nullptr);
-    EXPECT_EQ(info.get_transposed_col_ind(), nullptr);
-    EXPECT_EQ(info.get_row_ptr(), nullptr);
-    EXPECT_EQ(info.get_col_ind(), nullptr);
+    EXPECT_EQ(info.get_transposed(), nullptr);
     EXPECT_EQ(info.get_descr(), nullptr);
 
-    const int32_t marker[2] = {0, 0};
     info.set_m(11);
     info.set_nnz(22);
     info.set_max_nnz(33);
-    info.set_row_ptr(&marker[0]);
-    info.set_col_ind(&marker[1]);
     info.set_descr(d.descr);
-    info.set_offset_indextype(rocsparse_indextype_i64);
-    info.set_index_indextype(rocsparse_indextype_i32);
     EXPECT_EQ(info.get_m(), 11);
     EXPECT_EQ(info.get_nnz(), 22);
     EXPECT_EQ(info.get_max_nnz(), 33);
-    EXPECT_EQ(info.get_row_ptr(), &marker[0]);
-    EXPECT_EQ(info.get_col_ind(), &marker[1]);
     EXPECT_EQ(info.get_descr(), d.descr);
-    EXPECT_EQ(info.get_offset_indextype(), rocsparse_indextype_i64);
-    EXPECT_EQ(info.get_index_indextype(), rocsparse_indextype_i32);
 
     // The same through a constant reference.
     const rocsparse::triangular_info_t& cinfo = info;
     EXPECT_EQ(cinfo.get_m(), 11);
-    EXPECT_EQ(cinfo.get_row_map(), nullptr);
+    EXPECT_EQ(cinfo.get_row_map()->get_values(), nullptr);
     EXPECT_EQ(cinfo.get_diag_ind(), nullptr);
-    EXPECT_EQ(cinfo.get_transposed_perm(), nullptr);
-    EXPECT_EQ(cinfo.get_transposed_row_ptr(), nullptr);
-    EXPECT_EQ(cinfo.get_transposed_col_ind(), nullptr);
+    EXPECT_EQ(cinfo.get_transposed(), nullptr);
 
     // destroy() accepts both a live object and a null pointer.
     rocsparse::triangular_info_t::destroy(new rocsparse::triangular_info_t());
@@ -393,17 +392,20 @@ TEST_F(PrecondTrmInfo, trm_info_accessors)
 
 TEST_F(PrecondTrmInfo, trm_info_copy_and_assignment)
 {
+    trm_storage                  source_storage;
+    trm_storage                  other_storage;
     rocsparse::triangular_info_t source;
-    fill_trm_info(source, 100);
-    ASSERT_NE(source.get_row_map(), nullptr);
+    fill_trm_info(source, source_storage, 100);
+    ASSERT_NE(source.get_row_map()->get_values(), nullptr);
 
-    // Copy construction duplicates the device arrays.
+    // Copy construction duplicates the owned arrays and shares the referenced ones.
     rocsparse::triangular_info_t copy(source);
     EXPECT_EQ(copy.get_m(), source.get_m());
     EXPECT_EQ(copy.get_nnz(), source.get_nnz());
     EXPECT_EQ(copy.get_max_nnz(), source.get_max_nnz());
-    EXPECT_NE(copy.get_row_map(), source.get_row_map());
-    EXPECT_NE(copy.get_transposed_col_ind(), source.get_transposed_col_ind());
+    EXPECT_NE(copy.get_row_map()->get_values(), source.get_row_map()->get_values());
+    EXPECT_EQ(copy.get_diag_ind(), source.get_diag_ind());
+    EXPECT_EQ(copy.get_transposed(), source.get_transposed());
     expect_same_arrays(source, copy);
 
     // Assignment to an info of the same size allocates what the destination lacks ...
@@ -411,16 +413,14 @@ TEST_F(PrecondTrmInfo, trm_info_copy_and_assignment)
     empty.set_m(source.get_m());
     empty.set_nnz(source.get_nnz());
     empty.set_max_nnz(source.get_max_nnz());
-    empty.set_offset_indextype(rocsparse_indextype_i32);
-    empty.set_index_indextype(rocsparse_indextype_i32);
     empty = source;
-    ASSERT_NE(empty.get_row_map(), nullptr);
-    ASSERT_NE(empty.get_transposed_row_ptr(), nullptr);
+    ASSERT_NE(empty.get_row_map()->get_values(), nullptr);
+    ASSERT_EQ(empty.get_transposed(), source.get_transposed());
     expect_same_arrays(source, empty);
 
     // ... and overwrites the arrays of a destination that has them.
     rocsparse::triangular_info_t other;
-    fill_trm_info(other, 500);
+    fill_trm_info(other, other_storage, 500);
     other = source;
     expect_same_arrays(source, other);
 
@@ -429,8 +429,6 @@ TEST_F(PrecondTrmInfo, trm_info_copy_and_assignment)
     smaller.set_m(source.get_m() - 1);
     smaller.set_nnz(source.get_nnz());
     smaller.set_max_nnz(source.get_max_nnz());
-    smaller.set_offset_indextype(rocsparse_indextype_i32);
-    smaller.set_index_indextype(rocsparse_indextype_i32);
     EXPECT_ANY_THROW(smaller = source);
 }
 
@@ -469,6 +467,7 @@ TEST_F(PrecondTrmInfo, mat_info_trm_slots_of_every_routine)
 // same triangular_info_t.
 TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
 {
+    trm_storage                         storages[4];
     rocsparse::triangular_data_t        empty;
     const rocsparse::triangular_data_t& const_empty = empty;
     EXPECT_EQ(empty.get_indextype_J(), rocsparse_indextype_i32);
@@ -479,7 +478,8 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     {
         rocsparse::triangular_data_t wide;
         auto*                        info = new rocsparse::triangular_info_t();
-        info->set_index_indextype(rocsparse_indextype_i64);
+        ASSERT_EQ(info->get_row_map()->create_async(1, rocsparse_indextype_i64, nullptr),
+                  rocsparse_status_success);
         wide.set(rocsparse_operation_transpose, rocsparse_fill_mode_upper, info);
         EXPECT_EQ(wide.get_indextype_J(), rocsparse_indextype_i64);
         EXPECT_EQ(wide.get(rocsparse_operation_transpose, rocsparse_fill_mode_upper), info);
@@ -489,8 +489,8 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     rocsparse::triangular_data_t source;
     auto*                        lower = new rocsparse::triangular_info_t();
     auto*                        trans = new rocsparse::triangular_info_t();
-    fill_trm_info(*lower, 10);
-    fill_trm_info(*trans, 200);
+    fill_trm_info(*lower, storages[0], 10);
+    fill_trm_info(*trans, storages[1], 200);
     source.set(rocsparse_operation_none, rocsparse_fill_mode_lower, lower);
     source.set(rocsparse_operation_transpose, rocsparse_fill_mode_upper, trans);
 
@@ -508,13 +508,13 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     expect_same_arrays(*trans, *copied_trans);
     copy.copy(nullptr, handle->stream);
 
-    // Two slots may alias the same triangular_info_t: releasing one slot keeps it alive for
-    // the other, a copy preserves the aliasing, and the holder frees it once.
+    // Two slots may alias the same triangular_info_t: releasing one slot keeps it alive for the
+    // other, a copy preserves the aliasing, and the holder frees it once.
     rocsparse::triangular_data_t holder;
     auto*                        shared = new rocsparse::triangular_info_t();
     auto*                        own    = new rocsparse::triangular_info_t();
-    fill_trm_info(*shared, 30);
-    fill_trm_info(*own, 40);
+    fill_trm_info(*shared, storages[2], 30);
+    fill_trm_info(*own, storages[3], 40);
     holder.set(rocsparse_operation_none, rocsparse_fill_mode_lower, shared);
     holder.set(rocsparse_operation_transpose, rocsparse_fill_mode_upper, shared);
     holder.set(rocsparse_operation_none, rocsparse_fill_mode_upper, own);

@@ -478,11 +478,11 @@ namespace rocsparse
             reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
 
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
             static_cast<J>(A->block_dim),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()->get_values()),
             reinterpret_cast<J*>(numeric_exact->get_position()),
             numeric_exact->get_stride(),
             A->descr->base,

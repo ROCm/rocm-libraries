@@ -363,18 +363,19 @@ rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle      
 {
 
     // Gather values
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_strided_batched(handle,
-                                                               target->batch_count,
-                                                               source->nnz,
-                                                               source->data_type,
-                                                               source->const_val_data,
-                                                               source->batch_stride,
-                                                               source->data_type,
-                                                               target->val_data,
-                                                               target->batch_stride,
-                                                               trm_info->get_offset_indextype(),
-                                                               trm_info->get_transposed_perm(),
-                                                               rocsparse_index_base_zero)));
+    RETURN_IF_ROCSPARSE_ERROR(
+        (rocsparse::gthr_strided_batched(handle,
+                                         target->batch_count,
+                                         source->nnz,
+                                         source->data_type,
+                                         source->const_val_data,
+                                         source->batch_stride,
+                                         source->data_type,
+                                         target->val_data,
+                                         target->batch_stride,
+                                         trm_info->get_transposed()->get_perm()->get_indextype(),
+                                         trm_info->get_transposed()->get_perm()->get_values(),
+                                         rocsparse_index_base_zero)));
 
     return rocsparse_status_success;
 }
@@ -580,6 +581,8 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
 
     rocsparse::triangular_info_t* trm_info
         = A->info->get_triangular_data()->get(op_A, A->descr->fill_mode);
+    rocsparse::transposed_sparsity_pattern_t* transposed
+        = A->info->get_transposed_sparsity_pattern(trm_info->get_transposed());
 
     _rocsparse_spmat_descr At_st(rocsparse_format_csr,
                                  A_batch_count,
@@ -590,13 +593,13 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  buf,
                                  buf,
                                  (A->batch_stride > 0) ? A->nnz : 0,
-                                 trm_info->get_offset_indextype(),
-                                 trm_info->get_transposed_row_ptr(),
-                                 trm_info->get_transposed_row_ptr(),
+                                 transposed->get_row_ptr()->get_indextype(),
+                                 transposed->get_row_ptr()->get_values(),
+                                 transposed->get_row_ptr()->get_values(),
                                  0,
-                                 trm_info->get_index_indextype(),
-                                 trm_info->get_transposed_col_ind(),
-                                 trm_info->get_transposed_col_ind(),
+                                 transposed->get_col_ind()->get_indextype(),
+                                 transposed->get_col_ind()->get_values(),
+                                 transposed->get_col_ind()->get_values(),
                                  0,
                                  A->descr->base,
                                  nullptr,
@@ -708,7 +711,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                      rhs,
                                      done_array,
                                      done_array_stride,
-                                     trm_info->get_row_map(),
+                                     trm_info->get_row_map()->get_values(),
                                      numeric_exact_position->get_position(),
                                      1,
                                      fill_mode,

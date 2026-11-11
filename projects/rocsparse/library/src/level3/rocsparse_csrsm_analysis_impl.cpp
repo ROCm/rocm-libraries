@@ -115,7 +115,7 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
         handle, trans_A, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
 
     return rocsparse_status_success;

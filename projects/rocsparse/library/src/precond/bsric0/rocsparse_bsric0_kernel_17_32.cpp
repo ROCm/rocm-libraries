@@ -447,27 +447,28 @@ namespace rocsparse
         const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
         auto          numeric_exact = bsric0_info->get_singularity_numeric_exact();
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_17_32<MAX_NNZB>),
-                                           dim3(rocsparse::get_grid_size_x(handle, A->rows, 2),
-                                                rocsparse::get_grid_size_y(handle, A_batch_count)),
-                                           dim3(2, 32),
-                                           0,
-                                           handle->stream,
-                                           A->block_dir,
-                                           static_cast<J>(A->rows),
-                                           A_batch_count,
-                                           reinterpret_cast<const I*>(A->const_row_data),
-                                           reinterpret_cast<const J*>(A->const_col_data),
-                                           reinterpret_cast<T*>(A->val_data),
-                                           A->batch_stride,
-                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-                                           static_cast<J>(A->block_dim),
-                                           done_array,
-                                           done_array_stride,
-                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(numeric_exact->get_position()),
-                                           numeric_exact->get_stride(),
-                                           A->descr->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsric0_kernel_17_32<MAX_NNZB>),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, 2),
+                 rocsparse::get_grid_size_y(handle, A_batch_count)),
+            dim3(2, 32),
+            0,
+            handle->stream,
+            A->block_dir,
+            static_cast<J>(A->rows),
+            A_batch_count,
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
+            static_cast<J>(A->block_dim),
+            done_array,
+            done_array_stride,
+            reinterpret_cast<const J*>(trm_info->get_row_map()->get_values()),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            A->descr->base);
 
         return rocsparse_status_success;
     }

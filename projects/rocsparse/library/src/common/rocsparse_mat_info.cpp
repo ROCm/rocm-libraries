@@ -385,6 +385,8 @@ void _rocsparse_mat_info::release_trm_data_if_unused()
        && this->m_bsric0_info == nullptr && this->m_ellsv_info == nullptr)
     {
         this->m_triangular_data.clear();
+        this->m_diag_ind->free();
+        this->m_transposed->free();
     }
 }
 
@@ -393,6 +395,8 @@ void _rocsparse_mat_info::release_trm_data_if_unused()
 //
 void _rocsparse_mat_info::duplicate_trdata(rocsparse_mat_info src, hipStream_t stream)
 {
+    this->m_diag_ind->copy(*src->m_diag_ind);
+    this->m_transposed->copy(*src->m_transposed);
     this->m_triangular_data.copy(&src->m_triangular_data, stream);
     THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact->copy_singular_info_async(
         src->m_singularity_numeric_exact, stream));
@@ -493,7 +497,16 @@ std::shared_ptr<_rocsparse_ellsv_info> _rocsparse_mat_info::get_shared_ellsv_inf
 _rocsparse_mat_info::_rocsparse_mat_info()
     : m_singularity_numeric_exact(new rocsparse::singular_info_t())
     , m_singularity_numeric_near(new rocsparse::singular_info_t())
+    , m_diag_ind(new rocsparse::idnvec_descr_t())
+    , m_transposed(new rocsparse::transposed_sparsity_pattern_t())
 {
+    this->m_triangular_data.set_storage(this->m_diag_ind, this->m_transposed);
+}
+
+rocsparse::transposed_sparsity_pattern_t* _rocsparse_mat_info::get_transposed_sparsity_pattern(
+    const rocsparse::transposed_sparsity_pattern_t* transposed)
+{
+    return (transposed == this->m_transposed) ? this->m_transposed : nullptr;
 }
 
 _rocsparse_mat_info::~_rocsparse_mat_info()
@@ -546,9 +559,15 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
         this->set_sorted_coo2csr_info(nullptr);
     }
 
+    delete this->m_diag_ind;
+    this->m_diag_ind = nullptr;
+
     delete this->m_singularity_numeric_exact;
     this->m_singularity_numeric_exact = nullptr;
 
     delete this->m_singularity_numeric_near;
     this->m_singularity_numeric_near = nullptr;
+
+    delete this->m_transposed;
+    this->m_transposed = nullptr;
 }

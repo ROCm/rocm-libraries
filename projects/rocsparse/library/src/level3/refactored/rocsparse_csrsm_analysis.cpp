@@ -92,18 +92,18 @@ rocsparse_status rocsparse::csrsm_analysis(rocsparse_handle            handle,
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(handle,
-                                                                    op_A,
-                                                                    M,
-                                                                    A->nnz,
-                                                                    A->descr,
-                                                                    A->data_type,
-                                                                    A->const_val_data,
-                                                                    A->row_type,
-                                                                    A->const_row_data,
-                                                                    A->col_type,
-                                                                    A->const_col_data,
-                                                                    buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(handle,
+                                                             op_A,
+                                                             M,
+                                                             A->nnz,
+                                                             A->descr,
+                                                             A->data_type,
+                                                             A->const_val_data,
+                                                             A->row_type,
+                                                             A->const_row_data,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             buffer));
 
     return rocsparse_status_success;
 }

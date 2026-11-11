@@ -33,21 +33,6 @@ rocsparse::triangular_info_t::~triangular_info_t()
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
     WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_map));
-    this->row_map = nullptr;
-
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->diag_ind));
-    this->diag_ind = nullptr;
-
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_perm));
-    this->transposed_perm = nullptr;
-
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_row_ptr));
-    this->transposed_row_ptr = nullptr;
-
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_col_ind));
-    this->transposed_col_ind = nullptr;
 }
 
 void rocsparse::triangular_info_t::set_max_nnz(const int64_t value)
@@ -59,79 +44,35 @@ int64_t rocsparse::triangular_info_t::get_max_nnz() const
     return this->max_nnz;
 }
 
-const void* rocsparse::triangular_info_t::get_row_map() const
-{
-    return this->row_map;
-}
-
-void* rocsparse::triangular_info_t::get_row_map()
-{
-    return this->row_map;
-}
-
-void** rocsparse::triangular_info_t::get_ref_row_map()
+const rocsparse::idnvec_descr_t* rocsparse::triangular_info_t::get_row_map() const
 {
     return &this->row_map;
 }
 
-const void* rocsparse::triangular_info_t::get_diag_ind() const
+rocsparse::idnvec_descr_t* rocsparse::triangular_info_t::get_row_map()
+{
+    return &this->row_map;
+}
+
+const rocsparse::idnvec_descr_t* rocsparse::triangular_info_t::get_diag_ind() const
 {
     return this->diag_ind;
 }
 
-void* rocsparse::triangular_info_t::get_diag_ind()
+void rocsparse::triangular_info_t::set_diag_ind(const rocsparse::idnvec_descr_t* value)
 {
-    return this->diag_ind;
+    this->diag_ind = value;
 }
 
-void** rocsparse::triangular_info_t::get_ref_diag_ind()
+const rocsparse::transposed_sparsity_pattern_t* rocsparse::triangular_info_t::get_transposed() const
 {
-    return &this->diag_ind;
+    return this->transposed;
 }
 
-const void* rocsparse::triangular_info_t::get_transposed_perm() const
+void rocsparse::triangular_info_t::set_transposed(
+    const rocsparse::transposed_sparsity_pattern_t* value)
 {
-    return this->transposed_perm;
-}
-
-void* rocsparse::triangular_info_t::get_transposed_perm()
-{
-    return this->transposed_perm;
-}
-
-void** rocsparse::triangular_info_t::get_ref_transposed_perm()
-{
-    return &this->transposed_perm;
-}
-
-const void* rocsparse::triangular_info_t::get_transposed_row_ptr() const
-{
-    return this->transposed_row_ptr;
-}
-
-void* rocsparse::triangular_info_t::get_transposed_row_ptr()
-{
-    return this->transposed_row_ptr;
-}
-
-void** rocsparse::triangular_info_t::get_ref_transposed_row_ptr()
-{
-    return &this->transposed_row_ptr;
-}
-
-const void* rocsparse::triangular_info_t::get_transposed_col_ind() const
-{
-    return this->transposed_col_ind;
-}
-
-void* rocsparse::triangular_info_t::get_transposed_col_ind()
-{
-    return this->transposed_col_ind;
-}
-
-void** rocsparse::triangular_info_t::get_ref_transposed_col_ind()
-{
-    return &this->transposed_col_ind;
+    this->transposed = value;
 }
 
 void rocsparse::triangular_info_t::set_m(const int64_t value)
@@ -152,24 +93,6 @@ int64_t rocsparse::triangular_info_t::get_nnz() const
     return this->nnz;
 }
 
-void rocsparse::triangular_info_t::set_row_ptr(const void* const value)
-{
-    this->row_ptr = value;
-}
-const void* rocsparse::triangular_info_t::get_row_ptr()
-{
-    return this->row_ptr;
-}
-
-void rocsparse::triangular_info_t::set_col_ind(const void* const value)
-{
-    this->col_ind = value;
-}
-const void* rocsparse::triangular_info_t::get_col_ind()
-{
-    return this->col_ind;
-}
-
 const _rocsparse_mat_descr* rocsparse::triangular_info_t::get_descr() const
 {
     return this->descr;
@@ -177,24 +100,6 @@ const _rocsparse_mat_descr* rocsparse::triangular_info_t::get_descr() const
 void rocsparse::triangular_info_t::set_descr(const _rocsparse_mat_descr* const value)
 {
     this->descr = value;
-}
-
-rocsparse_indextype rocsparse::triangular_info_t::get_offset_indextype() const
-{
-    return this->index_type_I;
-}
-rocsparse_indextype rocsparse::triangular_info_t::get_index_indextype() const
-{
-    return this->index_type_J;
-}
-
-void rocsparse::triangular_info_t::set_offset_indextype(const rocsparse_indextype value)
-{
-    this->index_type_I = value;
-}
-void rocsparse::triangular_info_t::set_index_indextype(const rocsparse_indextype value)
-{
-    this->index_type_J = value;
 }
 
 void rocsparse::triangular_info_t::destroy(rocsparse::triangular_info_t* const p_that)
@@ -209,62 +114,18 @@ rocsparse::triangular_info_t::triangular_info_t() {}
 
 rocsparse::triangular_info_t::triangular_info_t(const rocsparse::triangular_info_t& that)
 {
-
-    this->max_nnz      = that.max_nnz;
-    this->m            = that.m;
-    this->nnz          = that.nnz;
-    this->index_type_I = that.index_type_I;
-    this->index_type_J = that.index_type_J;
+    this->max_nnz = that.max_nnz;
+    this->m       = that.m;
+    this->nnz     = that.nnz;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
-    this->descr   = that.descr;
-    this->row_ptr = that.row_ptr;
-    this->col_ind = that.col_ind;
+    this->descr = that.descr;
 
-    const size_t I_size = rocsparse::indextype_sizeof(that.index_type_I);
-    const size_t J_size = rocsparse::indextype_sizeof(that.index_type_J);
+    this->row_map.copy(that.row_map);
 
-    if(that.row_map != nullptr)
-    {
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->row_map, J_size * that.m));
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
-    }
-
-    if(that.diag_ind != nullptr)
-    {
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->diag_ind), I_size * that.m));
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_perm != nullptr)
-    {
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_perm), I_size * that.nnz));
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_perm,
-                                               that.transposed_perm,
-                                               I_size * that.nnz,
-                                               hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_row_ptr != nullptr)
-    {
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_row_ptr), I_size * (that.m + 1)));
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_row_ptr,
-                                               that.transposed_row_ptr,
-                                               I_size * (that.m + 1),
-                                               hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_col_ind != nullptr)
-    {
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_col_ind), J_size * that.nnz));
-
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_col_ind,
-                                               that.transposed_col_ind,
-                                               J_size * that.nnz,
-                                               hipMemcpyDeviceToDevice));
-    }
+    // Not owned either: the triangular data rewires them to its own storage after a copy.
+    this->diag_ind   = that.diag_ind;
+    this->transposed = that.transposed;
 }
 
 rocsparse::triangular_info_t&
@@ -274,83 +135,19 @@ rocsparse::triangular_info_t&
     invalid |= (this->max_nnz != that.max_nnz);
     invalid |= (this->m != that.m);
     invalid |= (this->nnz != that.nnz);
-    invalid |= (this->index_type_I != that.index_type_I);
-    invalid |= (this->index_type_J != that.index_type_J);
     if(invalid)
     {
         THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
-    const size_t I_size = rocsparse::indextype_sizeof(that.index_type_I);
-    const size_t J_size = rocsparse::indextype_sizeof(that.index_type_J);
-
-    if(that.row_map != nullptr)
+    if(that.row_map.get_values() != nullptr)
     {
-        if(this->row_map == nullptr)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->row_map), J_size * that.m));
-        }
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
+        this->row_map.copy(that.row_map);
     }
 
-    if(that.diag_ind != nullptr)
-    {
-        if(this->diag_ind == nullptr)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->diag_ind), I_size * that.m));
-        }
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_perm != nullptr)
-    {
-        if(this->transposed_perm == nullptr)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_perm), I_size * that.nnz));
-        }
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_perm,
-                                               that.transposed_perm,
-                                               I_size * that.nnz,
-                                               hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_row_ptr != nullptr)
-    {
-        if(this->transposed_row_ptr == nullptr)
-        {
-            THROW_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&(this->transposed_row_ptr), I_size * (that.m + 1)));
-        }
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_row_ptr,
-                                               that.transposed_row_ptr,
-                                               I_size * (that.m + 1),
-                                               hipMemcpyDeviceToDevice));
-    }
-
-    if(that.transposed_col_ind != nullptr)
-    {
-        if(this->transposed_col_ind == nullptr)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_col_ind), J_size * that.nnz));
-        }
-        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_col_ind,
-                                               that.transposed_col_ind,
-                                               J_size * that.nnz,
-                                               hipMemcpyDeviceToDevice));
-    }
-
-    this->max_nnz      = that.max_nnz;
-    this->m            = that.m;
-    this->nnz          = that.nnz;
-    this->index_type_I = that.index_type_I;
-    this->index_type_J = that.index_type_J;
-
-    // Not owned by the info struct. Just pointers to externally allocated memory
-    this->descr   = that.descr;
-    this->row_ptr = that.row_ptr;
-    this->col_ind = that.col_ind;
+    this->diag_ind   = that.diag_ind;
+    this->transposed = that.transposed;
+    this->descr      = that.descr;
     return *this;
 }
 

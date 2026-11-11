@@ -52,7 +52,7 @@ namespace rocsparse
         stream,                                                                      \
         dir,                                                                         \
         nnzb,                                                                        \
-        (const rocsparse_int*)trm_info->get_transposed_perm(),                       \
+        (const rocsparse_int*)trm_info->get_transposed()->get_perm()->get_values(),  \
         bsr_val,                                                                     \
         bsrt_val,                                                                    \
         block_dim)
@@ -126,7 +126,7 @@ namespace rocsparse
         Xt,                                                                            \
         static_cast<rocsparse::bsrsm_offset_t<W_>>(ldimX),                             \
         done_array,                                                                    \
-        (const rocsparse_int*)trm_info->get_row_map(),                                 \
+        (const rocsparse_int*)trm_info->get_row_map()->get_values(),                   \
         (rocsparse_int*)info->get_triangular_data()->get_pivot_info()->get_position(), \
         descr->base,                                                                   \
         descr->diag_type,                                                              \
@@ -273,9 +273,11 @@ namespace rocsparse
 
             LAUNCH_BSRSM_GTHR(256, 64, block_dim);
 
-            local_bsr_row_ptr = (const rocsparse_int*)trm_info->get_transposed_row_ptr();
-            local_bsr_col_ind = (const rocsparse_int*)trm_info->get_transposed_col_ind();
-            local_bsr_val     = (const T*)bsrt_val;
+            local_bsr_row_ptr
+                = (const rocsparse_int*)trm_info->get_transposed()->get_row_ptr()->get_values();
+            local_bsr_col_ind
+                = (const rocsparse_int*)trm_info->get_transposed()->get_col_ind()->get_values();
+            local_bsr_val = (const T*)bsrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
                                                                  : rocsparse_fill_mode_lower;

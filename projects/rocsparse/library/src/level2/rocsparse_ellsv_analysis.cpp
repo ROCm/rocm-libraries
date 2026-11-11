@@ -43,14 +43,15 @@ namespace rocsparse
     static bool ellsv_trm_info_matches(const rocsparse::triangular_info_t* trm_info,
                                        rocsparse_const_spmat_descr         A)
     {
-        if(trm_info == nullptr || trm_info->get_row_map() == nullptr)
+        if(trm_info == nullptr || trm_info->get_row_map()->get_values() == nullptr)
         {
             return false;
         }
 
         // The analysis only levels the sparsity pattern, so a cached result stays
         // valid whatever the values are.
-        return trm_info->get_m() == A->rows && trm_info->get_index_indextype() == A->col_type
+        return trm_info->get_m() == A->rows
+               && trm_info->get_row_map()->get_indextype() == A->col_type
                && trm_info->get_descr() == A->descr;
     }
 
@@ -255,12 +256,8 @@ namespace rocsparse
 
         info->set_m(m);
         info->set_descr(descr);
-        info->set_offset_indextype(ell_col_ind_indextype);
-        info->set_index_indextype(ell_col_ind_indextype);
-
-        const size_t num_bytes
-            = rocsparse::indextype_sizeof(ell_col_ind_indextype) * static_cast<size_t>(m);
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(info->get_ref_row_map(), num_bytes, stream));
+        RETURN_IF_ROCSPARSE_ERROR(
+            info->get_row_map()->create_async(m, ell_col_ind_indextype, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         bool     sleep  = false;
@@ -276,21 +273,21 @@ namespace rocsparse
 
         // Levelling only reads the sparsity pattern, so the values and their type
         // play no part here.
-#define GELLSV_ANALYSIS_DISPATCH(ITYPE)                                      \
-    rocsparse::ellsv_analysis_dispatch<ITYPE>(handle,                        \
-                                              sleep,                         \
-                                              wfsize,                        \
-                                              static_cast<ITYPE>(m),         \
-                                              static_cast<ITYPE>(n),         \
-                                              static_cast<ITYPE>(ell_width), \
-                                              ell_col_ind,                   \
-                                              idx_base,                      \
-                                              descr->fill_mode,              \
-                                              descr->diag_type,              \
-                                              ell_col_ind_indextype,         \
-                                              info->get_row_map(),           \
-                                              pivot_info->get_position(),    \
-                                              buffer_size,                   \
+#define GELLSV_ANALYSIS_DISPATCH(ITYPE)                                          \
+    rocsparse::ellsv_analysis_dispatch<ITYPE>(handle,                            \
+                                              sleep,                             \
+                                              wfsize,                            \
+                                              static_cast<ITYPE>(m),             \
+                                              static_cast<ITYPE>(n),             \
+                                              static_cast<ITYPE>(ell_width),     \
+                                              ell_col_ind,                       \
+                                              idx_base,                          \
+                                              descr->fill_mode,                  \
+                                              descr->diag_type,                  \
+                                              ell_col_ind_indextype,             \
+                                              info->get_row_map()->get_values(), \
+                                              pivot_info->get_position(),        \
+                                              buffer_size,                       \
                                               temp_buffer)
 
         switch(ell_col_ind_indextype)
@@ -319,20 +316,23 @@ namespace rocsparse
     }
 }
 
-rocsparse::triangular_info_t*
-    rocsparse::triangular_data_t::create(rocsparse_handle          handle,
-                                         rocsparse_operation       trans,
-                                         int64_t                   m,
-                                         int64_t                   n,
-                                         const rocsparse_mat_descr descr,
-                                         rocsparse_indextype       ell_col_ind_indextype,
-                                         const void*               ell_col_ind,
-                                         int64_t                   ell_width,
-                                         rocsparse_index_base      idx_base,
-                                         size_t                    buffer_size,
-                                         void*                     temp_buffer)
+rocsparse::triangular_info_t* rocsparse::triangular_data_t::create(
+    rocsparse::idnvec_descr_t*                diag_indices,
+    rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
+    rocsparse_handle                          handle,
+    rocsparse_operation                       trans,
+    int64_t                                   m,
+    int64_t                                   n,
+    const rocsparse_mat_descr                 descr,
+    rocsparse_indextype                       ell_col_ind_indextype,
+    const void*                               ell_col_ind,
+    int64_t                                   ell_width,
+    rocsparse_index_base                      idx_base,
+    size_t                                    buffer_size,
+    void*                                     temp_buffer)
 {
     rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
+    this->attach_storage(trm_info, diag_indices, transposed_sparsity_pattern);
 
     THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(handle,
                                                         m,
@@ -349,19 +349,24 @@ rocsparse::triangular_info_t*
     return trm_info;
 }
 
-rocsparse_status rocsparse::triangular_data_t::recreate(rocsparse_handle          handle,
-                                                        rocsparse_operation       trans,
-                                                        int64_t                   m,
-                                                        int64_t                   n,
-                                                        const rocsparse_mat_descr descr,
-                                                        rocsparse_indextype  ell_col_ind_indextype,
-                                                        const void*          ell_col_ind,
-                                                        int64_t              ell_width,
-                                                        rocsparse_index_base idx_base,
-                                                        size_t               buffer_size,
-                                                        void*                temp_buffer)
+rocsparse_status rocsparse::triangular_data_t::recreate(
+    rocsparse::idnvec_descr_t*                diag_indices,
+    rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
+    rocsparse_handle                          handle,
+    rocsparse_operation                       trans,
+    int64_t                                   m,
+    int64_t                                   n,
+    const rocsparse_mat_descr                 descr,
+    rocsparse_indextype                       ell_col_ind_indextype,
+    const void*                               ell_col_ind,
+    int64_t                                   ell_width,
+    rocsparse_index_base                      idx_base,
+    size_t                                    buffer_size,
+    void*                                     temp_buffer)
 {
-    return this->recreate(trans,
+    return this->recreate(diag_indices,
+                          transposed_sparsity_pattern,
+                          trans,
                           descr->fill_mode,
                           handle,
                           trans,
@@ -478,17 +483,17 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
         p_ellsv_info[0] = ei;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(handle,
-                                                                    trans,
-                                                                    A->rows,
-                                                                    A->cols,
-                                                                    descr,
-                                                                    A->col_type,
-                                                                    A->const_col_data,
-                                                                    A->ell_width,
-                                                                    A->idx_base,
-                                                                    buffer_size,
-                                                                    temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(handle,
+                                                             trans,
+                                                             A->rows,
+                                                             A->cols,
+                                                             descr,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             A->ell_width,
+                                                             A->idx_base,
+                                                             buffer_size,
+                                                             temp_buffer));
 
     return rocsparse_status_success;
 }

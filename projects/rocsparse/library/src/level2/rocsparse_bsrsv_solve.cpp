@@ -32,18 +32,19 @@
 
 namespace rocsparse
 {
-#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>), \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                \
-                                       dim3(wfsize, bsize / wfsize),                         \
-                                       0,                                                    \
-                                       stream,                                               \
-                                       dir,                                                  \
-                                       nnzb,                                                 \
-                                       (rocsparse_int*)trm_info->get_transposed_perm(),      \
-                                       bsr_val,                                              \
-                                       bsrt_val,                                             \
-                                       block_dim)
+#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                 \
+        dim3((wfsize * nnzb - 1) / bsize + 1),                                \
+        dim3(wfsize, bsize / wfsize),                                         \
+        0,                                                                    \
+        stream,                                                               \
+        dir,                                                                  \
+        nnzb,                                                                 \
+        (rocsparse_int*)trm_info->get_transposed()->get_perm()->get_values(), \
+        bsr_val,                                                              \
+        bsrt_val,                                                             \
+        block_dim)
 
 #define LAUNCH_BSRSV_GTHR(bsize, wfsize, dim) \
     if(dim <= 2)                              \
@@ -108,7 +109,7 @@ namespace rocsparse
         x,                                                                             \
         y,                                                                             \
         done_array,                                                                    \
-        (rocsparse_int*)trm_info->get_row_map(),                                       \
+        (rocsparse_int*)trm_info->get_row_map()->get_values(),                         \
         (rocsparse_int*)info->get_triangular_data()->get_pivot_info()->get_position(), \
         descr->base,                                                                   \
         descr->diag_type,                                                              \
@@ -131,7 +132,7 @@ namespace rocsparse
         x,                                                                             \
         y,                                                                             \
         done_array,                                                                    \
-        (rocsparse_int*)trm_info->get_row_map(),                                       \
+        (rocsparse_int*)trm_info->get_row_map()->get_values(),                         \
         (rocsparse_int*)info->get_triangular_data()->get_pivot_info()->get_position(), \
         descr->base,                                                                   \
         descr->diag_type,                                                              \
@@ -183,7 +184,7 @@ namespace rocsparse
         x,                                                                             \
         y,                                                                             \
         done_array,                                                                    \
-        (rocsparse_int*)trm_info->get_row_map(),                                       \
+        (rocsparse_int*)trm_info->get_row_map()->get_values(),                         \
         (rocsparse_int*)info->get_triangular_data()->get_pivot_info()->get_position(), \
         descr->base,                                                                   \
         descr->diag_type,                                                              \
@@ -206,7 +207,7 @@ namespace rocsparse
         x,                                                                             \
         y,                                                                             \
         done_array,                                                                    \
-        (rocsparse_int*)trm_info->get_row_map(),                                       \
+        (rocsparse_int*)trm_info->get_row_map()->get_values(),                         \
         (rocsparse_int*)info->get_triangular_data()->get_pivot_info()->get_position(), \
         descr->base,                                                                   \
         descr->diag_type,                                                              \
@@ -422,9 +423,11 @@ namespace rocsparse
             // Gather transposed values
             LAUNCH_BSRSV_GTHR(256, 64, block_dim);
 
-            local_bsr_row_ptr = (rocsparse_int*)trm_info->get_transposed_row_ptr();
-            local_bsr_col_ind = (rocsparse_int*)trm_info->get_transposed_col_ind();
-            local_bsr_val     = (T*)bsrt_val;
+            local_bsr_row_ptr
+                = (rocsparse_int*)trm_info->get_transposed()->get_row_ptr()->get_values();
+            local_bsr_col_ind
+                = (rocsparse_int*)trm_info->get_transposed()->get_col_ind()->get_values();
+            local_bsr_val = (T*)bsrt_val;
 
             switch(fill_mode)
             {

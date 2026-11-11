@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,9 @@
 
 #pragma once
 
+#include "rocsparse_idnvec_descr.hpp"
 #include "rocsparse_mat_descr.hpp"
+#include "rocsparse_transposed_sparsity_pattern.hpp"
 
 namespace rocsparse
 {
@@ -40,23 +42,16 @@ namespace rocsparse
         // maximum non-zero entries per row
         int64_t max_nnz{0};
 
-        // device array to hold row permutation
-        void* row_map{nullptr};
-        // device array to hold pointer to diagonal entry
-        void* diag_ind{nullptr};
-        // device pointers to hold transposed data
-        void* transposed_perm{nullptr};
-        void* transposed_row_ptr{nullptr};
-        void* transposed_col_ind{nullptr};
+        // row permutation
+        rocsparse::idnvec_descr_t row_map;
+        // position of the diagonal entry of each row
+        const rocsparse::idnvec_descr_t*                diag_ind{};
+        const rocsparse::transposed_sparsity_pattern_t* transposed{};
 
         // some data to verify correct execution
         int64_t                     m{0};
         int64_t                     nnz{0};
         const _rocsparse_mat_descr* descr{nullptr};
-        const void*                 row_ptr{nullptr};
-        const void*                 col_ind{nullptr};
-        rocsparse_indextype         index_type_I{(rocsparse_indextype)-1};
-        rocsparse_indextype         index_type_J{(rocsparse_indextype)-1};
 
     public:
         triangular_info_t(const triangular_info_t&);
@@ -70,36 +65,17 @@ namespace rocsparse
         int64_t get_m() const;
         void    set_m(int64_t);
 
-        const void* get_row_map() const;
-        void*       get_row_map();
-        void**      get_ref_row_map();
-        const void* get_diag_ind() const;
-        void*       get_diag_ind();
-        void**      get_ref_diag_ind();
+        const rocsparse::idnvec_descr_t* get_row_map() const;
+        rocsparse::idnvec_descr_t*       get_row_map();
 
-        const void* get_transposed_perm() const;
-        void*       get_transposed_perm();
-        void**      get_ref_transposed_perm();
-        const void* get_transposed_row_ptr() const;
-        void*       get_transposed_row_ptr();
-        void**      get_ref_transposed_row_ptr();
+        const rocsparse::idnvec_descr_t* get_diag_ind() const;
+        void                             set_diag_ind(const rocsparse::idnvec_descr_t*);
 
-        const void* get_transposed_col_ind() const;
-        void*       get_transposed_col_ind();
-        void**      get_ref_transposed_col_ind();
-
-        const void* get_row_ptr();
-        void        set_row_ptr(const void*);
-
-        const void* get_col_ind();
-        void        set_col_ind(const void*);
+        const rocsparse::transposed_sparsity_pattern_t* get_transposed() const;
+        void set_transposed(const rocsparse::transposed_sparsity_pattern_t*);
 
         const _rocsparse_mat_descr* get_descr() const;
         void                        set_descr(const _rocsparse_mat_descr*);
-        rocsparse_indextype         get_offset_indextype() const;
-        rocsparse_indextype         get_index_indextype() const;
-        void                        set_offset_indextype(rocsparse_indextype);
-        void                        set_index_indextype(rocsparse_indextype);
 
         int64_t get_nnz() const;
         void    set_nnz(int64_t);

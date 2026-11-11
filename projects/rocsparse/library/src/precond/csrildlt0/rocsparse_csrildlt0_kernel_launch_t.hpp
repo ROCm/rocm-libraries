@@ -107,7 +107,7 @@ namespace rocsparse
             A->batch_count,
             reinterpret_cast<const T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
             reinterpret_cast<floating_data_t<T>*>(diag),
             static_cast<int64_t>(A->rows));
 

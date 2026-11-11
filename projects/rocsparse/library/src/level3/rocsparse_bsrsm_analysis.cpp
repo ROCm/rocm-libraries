@@ -170,7 +170,7 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
     }
 
     info->get_bsrsm_info();
-    RETURN_IF_ROCSPARSE_ERROR(info->get_triangular_data()->recreate(
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
         handle, trans_A, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
 
     return rocsparse_status_success;
