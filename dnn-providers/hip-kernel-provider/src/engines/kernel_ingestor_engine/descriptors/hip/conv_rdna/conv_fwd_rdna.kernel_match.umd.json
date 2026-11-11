@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "4eca87aa-649d-45c3-b7d9-fcb0ae6d1ba1",
+  "name": "hip_conv_fwd_rdna: the kernel serves the graph's family, dtype, layout and tile",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.hip_conv_fwd_rdna.kernel_match"
+}
