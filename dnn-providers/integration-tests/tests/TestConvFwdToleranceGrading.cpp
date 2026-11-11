@@ -73,6 +73,7 @@ enum class Topology
 {
     PLAIN, ///< conv -> y
     VARIANT3, ///< conv -> mul(y, scale) -> add(bias) -> relu -> out, as the Variant3 bundles
+    VARIANT2, ///< conv -> add(bias) -> relu -> out, as develop's Variant2 bundles
 };
 
 enum class ScaleSource
@@ -137,6 +138,7 @@ std::string graphJson(const Spec& spec)
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
+    const bool topology3 = spec.topology == Topology::VARIANT3;
 
     std::ostringstream convNode;
     convNode << R"({"compute_data_type": ")" << spec.convCompute
@@ -151,7 +153,7 @@ std::string graphJson(const Spec& spec)
         tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", dtype, false),
         tensorJson(Y_UID, "y", yDims, yStrides, plain ? dtype : spec.intermediateType, !plain),
     };
-    if(!plain)
+    if(topology3)
     {
         std::string scaleExtra;
         if(spec.scaleSource == ScaleSource::BAKED)
@@ -168,9 +170,19 @@ std::string graphJson(const Spec& spec)
             "relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, spec.pointwiseCompute));
         tensors.push_back(tensorJson(
             SCALE_UID, "scale", "[1, 1, 1, 1]", "[1, 1, 1, 1]", dtype, false, scaleExtra));
-        tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
         tensors.push_back(
             tensorJson(MUL_OUT_UID, "mul_out", yDims, yStrides, spec.intermediateType, true));
+    }
+    else if(!plain)
+    {
+        nodes.push_back(
+            pointwiseJson("add", "add", Y_UID, BIAS_UID, ADD_OUT_UID, spec.pointwiseCompute));
+        nodes.push_back(
+            pointwiseJson("relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, "float"));
+    }
+    if(!plain)
+    {
+        tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
         tensors.push_back(
             tensorJson(BIAS_UID, "bias", "[1, 8, 1, 1]", "[8, 1, 1, 1]", dtype, false));
         tensors.push_back(
@@ -574,6 +586,27 @@ TEST_F(TestConvFwdToleranceGradingFixture,
                                 {eps, 1.0, 1.0}, // the multiply's result, an operand of the add
                                 {eps, afterAdd, 1.0}, // the add's result
                                 {eps, afterAdd, 1.0}}; // the add's result, an operand of the relu
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
+    }
+}
+
+// develop's Variant2 graph: the convolution's result and the add's result are float tensors, the
+// add computes in the output's type through its compute type, and the relu computes in float.
+// The add converts the convolution's result (sigma = 2) to the type and rounds its own result
+// (sqrt(sigma^2 + 1/3), the bias uniform on [-1, 1]): two points, which the CI failures of the
+// bfloat16 cases at four rounding steps from the reference needed.
+TEST_F(TestConvFwdToleranceGradingFixture, AddComputingInTheOutputTypeOverFloatTensorsHasTwoPoints)
+{
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT2;
+        spec.pointwiseCompute = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.pointwiseCompute);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        auto scale = defaultFillScale();
+        scale.roundingPoints = {{eps, 2.0, 1.0}, {eps, std::sqrt(4.0 + 1.0 / 3.0), 1.0}};
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
 }
