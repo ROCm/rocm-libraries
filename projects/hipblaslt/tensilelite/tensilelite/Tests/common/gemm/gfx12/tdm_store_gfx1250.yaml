@@ -1339,3 +1339,49 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [64, 64, 1, 128]
           - Exact: [128, 128, 1, 256]
+  ########################################
+  # int32 D from int32 accumulators, which the TDM block stages as 4-byte elements like fp32 D, at every
+  # TDMStoreInst level on the setup of i8ii_gfx1250.yaml: i8 inputs, ScaleAlphaVec and the activations.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i
+      ComputeDataType: i
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      Activation: True
+      UseScaleAlphaVec: 1
+      BiasDataTypeList: ['i']
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - LDSTrInst: [True]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StaggerU: [0]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 127]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [129, 129, 1, 129]
+        - BiasTypeArgs: ['i']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
