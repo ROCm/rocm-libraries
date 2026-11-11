@@ -844,6 +844,20 @@ namespace hipblaslt_ext
         return m_gemm_count;
     }
 
+    void GemmInstance::setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode)
+    {
+        switch(mode)
+        {
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_ON:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO:
+            m_streamk_tile_scheduling_mode = mode;
+            break;
+        default:
+            throw std::invalid_argument("StreamK tile scheduling mode must be OFF, ON, or AUTO");
+        }
+    }
+
     hipblasStatus_t GemmInstance::algoGetHeuristic(
         const int                                      requestedAlgoCount,
         const GemmPreference&                          pref,
@@ -952,6 +966,7 @@ namespace hipblaslt_ext
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto                    rocalgo  = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
         auto                    status
             = RocBlasLtStatusToHIPStatus(rocblaslt_makeArgument_cpp((rocblaslt_handle)m_handle,
                                                                     gemmType,
@@ -986,6 +1001,7 @@ namespace hipblaslt_ext
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto rocalgo   = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<const rocblaslt::RocTuningV2*>(tuning.pimpl.get());
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
         auto status
             = RocBlasLtStatusToHIPStatus(rocblaslt_makeArgument_cpp((rocblaslt_handle)m_handle,
                                                                     gemmType,

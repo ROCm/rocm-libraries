@@ -3984,17 +3984,38 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
-// Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
-// contraction problem currently carried by gemmData. Called from
-// rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
-// arg-pack and the heuristic-selection paths see the same mode value.
-// Defined here because gemmData's concrete type (TensileDataGemm /
-// TensileDataGroupedGemm) only exists in this translation unit.
+// Test support, outside the supported API: read the effective contraction settings.
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_gemm_scheduling_for_test(
+    std::shared_ptr<void> gemmData, bool grouped, size_t index, int32_t* smCount, int32_t* mode)
+{
+    if(!gemmData || !smCount || !mode)
+        return false;
+    const TensileLite::ContractionProblemGemm* problem = nullptr;
+    if(grouped)
+    {
+        const auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+        if(index >= data->problem.gemms.size())
+            return false;
+        problem = &data->problem.gemms[index];
+    }
+    else
+    {
+        if(index != 0)
+            return false;
+        problem = ExtractProblemGemm(gemmData);
+    }
+    *smCount = problem->getParams().smCountTarget();
+    *mode    = problem->getParams().streamKTileSchedulingMode();
+    return true;
+}
+
+// The concrete GEMM data types only exist here. A negative mode inherits the
+// setting resolved when the problem was created from its descriptor or defaults.
 void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode)
 {
-    if(!gemmData)
+    if(!gemmData || mode < 0)
         return;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {

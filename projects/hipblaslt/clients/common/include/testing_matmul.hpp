@@ -74,6 +74,15 @@
 #include <stdexcept>
 #include <type_traits>
 
+#ifdef GOOGLE_TEST
+namespace hipblaslt_bench
+{
+    // Inspect the C++ problems after algorithm queries, including rejected candidates.
+    inline thread_local std::function<void(hipblaslt_ext::GemmInstance&)>
+        gemm_selection_observer_for_test;
+}
+#endif
+
 // Convert element count to byte count, accounting for sub-byte packing.
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
 size_t elementsToBytes(size_t numElements, hipDataType dtype)
@@ -2155,6 +2164,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
     hipblaslt_local_handle handle{arg};
+    CHECK_HIPBLASLT_ERROR(
+        hipblasLtSetSmCountTarget(handle, hipblaslt_bench_options::sm_count_target()));
     // The stream must be declared before every device buffer, including placedWorkspace. Locals
     // are destroyed in reverse order, so the buffers go first and ~PlacedRegion's
     // hipDeviceSynchronize() drains this stream before it is destroyed. Before ROCm 7.1,
@@ -2865,15 +2876,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
         {
-            int32_t sm = hipblaslt_bench_options::sm_count_target();
-            if(sm != 0)
-            {
-                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
-                    matmul[0][i],
-                    HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
-                    &sm,
-                    sizeof(sm)));
-            }
             int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
             if(dyn >= 0)
             {
@@ -4470,15 +4472,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
             {
-                int32_t sm = hipblaslt_bench_options::sm_count_target();
-                if(sm != 0)
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
-                        matmul[b][i],
-                        HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
-                        &sm,
-                        sizeof(sm)));
-                }
                 int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
                 if(dyn >= 0)
                 {
@@ -4563,6 +4556,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Cpp API
     hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
+    const int32_t schedulingMode = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+    if(schedulingMode >= 0)
+        gemmPref.setStreamKTileSchedulingMode(
+            static_cast<hipblasLtStreamKTileSchedulingMode_t>(schedulingMode));
     std::vector<hipblaslt_ext::Gemm>                    gemmVec;
     std::vector<hipblaslt_ext::GroupedGemm>             groupedGemmVec;
     std::vector<std::vector<hipblaslt_ext::GemmInputs>> extinputs;
@@ -4600,6 +4597,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     for(int32_t b = 0; b < block_count; b++)
     {
         if(!do_grouped_gemm)
+        {
             gemmVec.push_back(hipblaslt_ext::Gemm(handle,
                                                   transA,
                                                   transB,
@@ -4608,7 +4606,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   arg.c_type,
                                                   arg.d_type,
                                                   arg.compute_type));
+            if(schedulingMode >= 0)
+                gemmVec.back().setStreamKTileSchedulingMode(
+                    static_cast<hipblasLtStreamKTileSchedulingMode_t>(schedulingMode));
+        }
         else
+        {
             groupedGemmVec.push_back(hipblaslt_ext::GroupedGemm(handle,
                                                                 transA,
                                                                 transB,
@@ -4617,7 +4620,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                 arg.c_type,
                                                                 arg.d_type,
                                                                 arg.compute_type));
+            if(schedulingMode >= 0)
+                groupedGemmVec.back().setStreamKTileSchedulingMode(
+                    static_cast<hipblasLtStreamKTileSchedulingMode_t>(schedulingMode));
+        }
     }
+
+#ifdef GOOGLE_TEST
+    auto observeSelectionForTest = [&] {
+        if(hipblaslt_bench::gemm_selection_observer_for_test)
+        {
+            for(auto& gemm : gemmVec)
+                hipblaslt_bench::gemm_selection_observer_for_test(gemm);
+            for(auto& gemm : groupedGemmVec)
+                hipblaslt_bench::gemm_selection_observer_for_test(gemm);
+        }
+    };
+#endif
 
     std::vector<hipblaslt_ext::GemmEpilogue> extepilogue;
     hipblaslt_ext::GemmProblemType           extproblemtype;
@@ -5166,6 +5185,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         searchForSupportedAlgoViaIndexAPI();
 
+#ifdef GOOGLE_TEST
+        observeSelectionForTest();
+#endif
+
         if(!indicesAreDiscovered)
         {
             if(!selectionWasAttempted)
@@ -5618,6 +5641,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             workspace_size = max_workspace_size;
         }
     }
+
+#ifdef GOOGLE_TEST
+    if(arg.algo_method != 2)
+        observeSelectionForTest();
+#endif
 
     returnedAlgoCount = heuristicResult.size();
 

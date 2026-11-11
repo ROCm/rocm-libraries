@@ -323,6 +323,15 @@ the space lives in `matmul_gtest.yaml` and `hipblaslt_common.yaml`. Coverage inc
 datatypes and epilogues, grouped GEMM, matrix transform, auxiliary and descriptor APIs, extension
 operations such as layernorm and amax, ULP-level numerical checks, and Stream-K.
 
+`ClientScheduling` and `BenchScheduling` in `clients/tests/src/matmul_gtest.cpp` check
+the effective SM-count and scheduling requests on single and grouped C++ problems.
+The benchmark tests exercise sizes-and-strides and descriptor setup with heuristic,
+all-algorithm and explicit-index selection, stopping before launch so devices without
+a matching grouped kernel still check forwarding. The API tests cover mode validation,
+descriptor inheritance, preference precedence and
+initialization after replacing a problem. Their `smoke_` names include them in the
+quick shared CI lane.
+
 Each case validates against a CPU reference computation with tolerance checks, so a failure means a
 real numerical disagreement rather than a crash only.
 
