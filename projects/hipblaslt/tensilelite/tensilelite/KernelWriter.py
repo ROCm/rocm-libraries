@@ -7427,8 +7427,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
     #   same B never request the same address at the same time, which defeats
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
+    # - StaggerU 0 that the host cannot override (no SupportCustomStaggerU): the
+    #   code would never run, and its SGPRs are what a Stream-K kernel lacks.
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
+       (kernel["StaggerU"] == 0 and not kernel["InternalSupportParams"]["SupportCustomStaggerU"]) or \
        not kernel["BufferLoad"] or \
        (isPersistent(kernel) and \
         hasMx and isgfx950) or \
