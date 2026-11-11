@@ -334,9 +334,10 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
                                                            : rocsparse_status_success,
         "the analysis stage did not provide the diagonal offsets required by the diagonal solve");
 
-    view->offset_type     = trm->get_offset_indextype();
-    view->diag_ind        = trm->get_diag_ind();
-    view->transposed_perm = trm->get_transposed_perm();
+    view->offset_type = trm->get_offset_indextype();
+    view->diag_ind    = trm->get_diag_ind();
+    // diag_ind already holds positions in the original matrix.
+    view->transposed_perm = nullptr;
     return rocsparse_status_success;
 }
 

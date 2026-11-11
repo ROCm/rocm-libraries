@@ -278,6 +278,76 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle              ha
     return rocsparse_status_success;
 }
 
+namespace rocsparse
+{
+    template <uint32_t BLOCKSIZE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void trm_transposed_diag_ind_to_original_kernel(int64_t m,
+                                                    const I* __restrict__ transposed_diag_ind,
+                                                    const I* __restrict__ transposed_perm,
+                                                    I* __restrict__ diag_ind)
+    {
+        const int64_t row = static_cast<int64_t>(blockIdx.x) * BLOCKSIZE + threadIdx.x;
+        if(row < m)
+        {
+            const I p     = transposed_diag_ind[row];
+            diag_ind[row] = (p < 0) ? p : transposed_perm[p];
+        }
+    }
+
+    static rocsparse_status trm_transposed_diag_ind_to_original(rocsparse_handle    handle,
+                                                                int64_t             m,
+                                                                rocsparse_indextype indextype,
+                                                                const void* transposed_diag_ind,
+                                                                const void* transposed_perm,
+                                                                void*       diag_ind)
+    {
+        static constexpr uint32_t BLOCKSIZE = 256;
+        if(m == 0)
+        {
+            return rocsparse_status_success;
+        }
+        const dim3 blocks((m - 1) / BLOCKSIZE + 1);
+        const dim3 threads(BLOCKSIZE);
+        switch(indextype)
+        {
+        case rocsparse_indextype_i32:
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (trm_transposed_diag_ind_to_original_kernel<BLOCKSIZE, int32_t>),
+                blocks,
+                threads,
+                0,
+                handle->stream,
+                m,
+                reinterpret_cast<const int32_t*>(transposed_diag_ind),
+                reinterpret_cast<const int32_t*>(transposed_perm),
+                reinterpret_cast<int32_t*>(diag_ind));
+            return rocsparse_status_success;
+        }
+        case rocsparse_indextype_i64:
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (trm_transposed_diag_ind_to_original_kernel<BLOCKSIZE, int64_t>),
+                blocks,
+                threads,
+                0,
+                handle->stream,
+                m,
+                reinterpret_cast<const int64_t*>(transposed_diag_ind),
+                reinterpret_cast<const int64_t*>(transposed_perm),
+                reinterpret_cast<int64_t*>(diag_ind));
+            return rocsparse_status_success;
+        }
+        default:
+        {
+            break;
+        }
+        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    }
+}
+
 rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle              handle,
                                           rocsparse_operation           trans,
                                           int64_t                       m,
@@ -382,7 +452,14 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle              handle,
     //  rocsparse_indextype row_map_indextype = csr_col_ind_indextype;
     void*               row_map            = info->get_row_map();
     rocsparse_indextype diag_ind_indextype = csr_row_ptr_indextype;
-    void*               diag_ind           = info->get_diag_ind();
+
+    // diag_ind holds positions in the original matrix; for a transposed analysis the kernel
+    // output is in the transposed one and is mapped back below.
+    void* diag_ind = info->get_diag_ind();
+    if(trans != rocsparse_operation_none)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&diag_ind, sizeof_I * m, stream));
+    }
 
     const rocsparse_indextype local_csr_row_ptr_indextype = (trans == rocsparse_operation_none)
                                                                 ? csr_row_ptr_indextype
@@ -412,6 +489,18 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle              handle,
                                                                       descr->base,
                                                                       descr->diag_type,
                                                                       descr->fill_mode));
+
+    if(trans != rocsparse_operation_none)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::trm_transposed_diag_ind_to_original(handle,
+                                                           m,
+                                                           diag_ind_indextype,
+                                                           diag_ind,
+                                                           info->get_transposed_perm(),
+                                                           info->get_diag_ind()));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(diag_ind, stream));
+    }
 
     {
         // Post processing
