@@ -339,8 +339,6 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
         // Initialize C
         c_thread_buf.Clear();
 
-        block_sync_lds();
-
         // main body
         if constexpr(HasMainLoop)
         {
@@ -349,17 +347,18 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
             do
             {
                 __builtin_amdgcn_sched_barrier(0);
+                block_sync_lds();
+                __builtin_amdgcn_sched_barrier(0);
+
                 // GEMM A0, B0
                 block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
 
+                __builtin_amdgcn_sched_barrier(0);
                 block_sync_lds();
-
                 __builtin_amdgcn_sched_barrier(0);
 
                 // GEMM A1, B1
                 block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
-
-                block_sync_lds();
 
                 __builtin_amdgcn_sched_barrier(0);
                 i += 2;
@@ -367,17 +366,17 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
         }
 
         // tail
-        if constexpr(TailNum == TailNumber::Odd)
-        {
-            // GEMM A0, B0
-            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
-        }
-        else if constexpr(TailNum == TailNumber::Even)
-        {
-            // GEMM A0, B0
-            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
+        __builtin_amdgcn_sched_barrier(0);
+        block_sync_lds();
+        __builtin_amdgcn_sched_barrier(0);
+        // GEMM A0, B0
+        block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
 
+        if constexpr(TailNum == TailNumber::Even)
+        {
+            __builtin_amdgcn_sched_barrier(0);
             block_sync_lds();
+            __builtin_amdgcn_sched_barrier(0);
 
             // GEMM A1, B1
             block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
