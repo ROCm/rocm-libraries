@@ -45,7 +45,8 @@ The inputs are the perf YAMLs under `projects/hipblaslt/tensilelite/tensilelite/
 ```text
 - the target is a directory name there (a machine variant, not just an arch). Ask the developer
   which target the change is for. Do not guess. If it has no directory, ask.
-- run every YAML under that target's maf/, mab/, and medium/ directories, including the finetune,
+- run every YAML under that target's maf/, mab/, and medium/ directories (skip a directory the
+  target does not have), including the finetune,
   k128k, and other variants. Ignore tuning/ subdirectories: perf YAMLs are for perf tests only.
   No sampling: the full set is already the minimum.
 - one tier 1 result per YAML, not one for the whole set

@@ -36,8 +36,8 @@ the StinkyTofu tests locally (build, ctest, FileCheck; see `README.md` and `test
 are fast, so run them locally and do not leave them to CI.
 
 **Tier 1 needs a fresh binding.** TensileLite loads the rocisa binding, not the `invoke build` output.
-After a StinkyTofu edit, rebuild it as described in `projects/hipblaslt/tensilelite/AGENTS.md`, or the
-comparison runs against stale output.
+After every StinkyTofu edit, run `invoke rocisa` in `projects/hipblaslt/tensilelite` (see its
+`AGENTS.md`), in each worktree, or the comparison runs against stale output.
 
 **The pattern check** is a filter, not a score. The patterns to check for come from the
 database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
@@ -56,7 +56,7 @@ asm supports only "no performance change".
    matching overlap check. Neither the PR bot nor this file replaces it.
    - If `git fetch` fails, tell the developer and continue. In a sparse or partial clone it can print
      `bad tree object` or `failed to run repack`. That message comes from background garbage
-     collection, so check whether the fetch completed.
+     collection, so check whether the fetch completed (`git rev-parse FETCH_HEAD`).
    - In such a clone, do not run `git grep` over history or the whole tree. It downloads missing
      objects one at a time and can hang. Search the working tree instead.
 2. **Record the baseline.** Every comparison run records the baseline commit hash.
