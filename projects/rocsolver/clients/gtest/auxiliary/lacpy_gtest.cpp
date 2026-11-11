@@ -64,9 +64,8 @@ const vector<vector<int>> matrix_size_range = {
     {32, 31, 32, 32},
     {33, 33, 33, 50},
     {20, 47, 32, 25},
-    // more rows or columns than the grid covers (the threads loop over them)
-    {40000, 3, 40000, 40001},
-    {1, 2100000, 1, 2}};
+    // more rows than the grid covers (the threads loop over them)
+    {40000, 3, 40000, 40001}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
@@ -86,9 +85,8 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {32, 31, 32, 32},
     {33, 33, 33, 50},
     {20, 47, 32, 25},
-    // more rows or columns than the grid covers (the threads loop over them)
-    {40000, 3, 40000, 40001},
-    {1, 2100000, 1, 2}};
+    // more rows than the grid covers (the threads loop over them)
+    {40000, 3, 40000, 40001}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
@@ -96,6 +94,14 @@ const vector<vector<int>> large_matrix_size_range
 
 const vector<vector<int64_t>> large_matrix_size_range_64
     = {{512, 1000, 512, 600}, {1500, 300, 1600, 1500}, {2048, 2048, 2050, 2049}};
+
+// for weekly_lapack tests with more rows or columns than the grid covers (the threads loop over
+// them)
+const vector<vector<int>> huge_matrix_size_range
+    = {{2100000, 1, 2100000, 2100000}, {1, 2100000, 1, 2}};
+
+const vector<vector<int64_t>> huge_matrix_size_range_64
+    = {{2100000, 1, 2100000, 2100000}, {1, 2100000, 1, 2}};
 
 template <typename I>
 Arguments lacpy_setup_arguments(lacpy_tuple<I> tup)
@@ -200,3 +206,11 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LACPY_64,
                          Combine(ValuesIn(matrix_size_range_64), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LACPY,
+                         Combine(ValuesIn(huge_matrix_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LACPY_64,
+                         Combine(ValuesIn(huge_matrix_size_range_64), ValuesIn(uplo_range)));

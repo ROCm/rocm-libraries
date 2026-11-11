@@ -58,20 +58,24 @@ ROCSOLVER_KERNEL void lacpy_kernel(const rocblas_fill uplo,
                                    const rocblas_stride strideB,
                                    const I batch_count)
 {
+    // first row and column of this thread, and the strides of the loops over the rows and the
+    // columns (the indices are 64-bit, so that the loops cannot overflow I near its end)
+    const int64_t i_start = blockIdx.x * int64_t(blockDim.x) + threadIdx.x;
+    const int64_t j_start = blockIdx.y * int64_t(blockDim.y) + threadIdx.y;
+    const int64_t i_inc = gridDim.x * int64_t(blockDim.x);
+    const int64_t j_inc = gridDim.y * int64_t(blockDim.y);
+
     for(I bid = blockIdx.z; bid < batch_count; bid += gridDim.z)
     {
         const T* const a = load_ptr_batch<T>(A, bid, shiftA, strideA);
         T* const bb = load_ptr_batch<T>(B, bid, shiftB, strideB);
 
-        // (the indices are 64-bit, so that the strided loops cannot overflow I near its end)
-        for(int64_t j = blockIdx.y * int64_t(blockDim.y) + threadIdx.y; j < n;
-            j += int64_t(gridDim.y) * blockDim.y)
+        for(int64_t j = j_start; j < n; j += j_inc)
         {
             // rows of column j in the copied part
             const int64_t lo = (uplo == rocblas_fill_lower) ? j : 0;
             const int64_t hi = (uplo == rocblas_fill_upper) ? std::min<int64_t>(j + 1, m) : m;
-            for(int64_t i = lo + blockIdx.x * int64_t(blockDim.x) + threadIdx.x; i < hi;
-                i += int64_t(gridDim.x) * blockDim.x)
+            for(int64_t i = lo + i_start; i < hi; i += i_inc)
                 bb[idx2D(i, j, ldb)] = a[idx2D(i, j, lda)];
         }
     }
@@ -133,14 +137,17 @@ rocblas_status rocsolver_lacpy_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // (at most LACPY_MAX_BLOCKSX blocks in x, which is enough to fill the device, and at most
-    // 64K - 1 in y and z, the limit of ROCSOLVER_LAUNCH_KERNEL: the kernel loops over the rest of
-    // the rows, of the columns and of the batch)
-    static constexpr int LACPY_MAX_BLOCKSX = 1024;
-    static constexpr int LACPY_MAX_BLOCKSYZ = 64 * 1024 - 1;
-    const I blocksx = std::min(ceildiv(m, BS2), I(LACPY_MAX_BLOCKSX));
-    const I blocksy = std::min(ceildiv(n, BS2), I(LACPY_MAX_BLOCKSYZ));
-    const I blocksz = std::min(batch_count, I(LACPY_MAX_BLOCKSYZ));
+    // (at most LACPY_MAX_BLOCKSX blocks in x, which is enough to fill the device, at most 64K - 1
+    // in y and z, and at most INT32_MAX threads in all, the limits of ROCSOLVER_LAUNCH_KERNEL: the
+    // kernel loops over the rest of the rows, of the columns and of the batch)
+    static constexpr int64_t LACPY_MAX_BLOCKSX = 1024;
+    static constexpr int64_t LACPY_MAX_BLOCKSYZ = 64 * 1024 - 1;
+    static constexpr int64_t LACPY_MAX_BLOCKS = INT32_MAX / (BS2 * BS2);
+    const int64_t blocksx = std::min<int64_t>(ceildiv(m, BS2), LACPY_MAX_BLOCKSX);
+    const int64_t blocksy
+        = std::min<int64_t>({ceildiv(n, BS2), LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / blocksx});
+    const int64_t blocksz = std::min<int64_t>(
+        {batch_count, LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / (blocksx * blocksy)});
     ROCSOLVER_LAUNCH_KERNEL((lacpy_kernel<T>), dim3(blocksx, blocksy, blocksz), dim3(BS2, BS2, 1),
                             0, stream, uplo, m, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB,
                             batch_count);

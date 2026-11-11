@@ -69,6 +69,12 @@ void lacpy_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_success);
     EXPECT_ROCBLAS_STATUS(rocsolver_lacpy(handle, uplo, m, (I)0, (T) nullptr, lda, (T) nullptr, ldb),
                           rocblas_status_success);
+
+    // quick return with valid pointers
+    EXPECT_ROCBLAS_STATUS(rocsolver_lacpy(handle, uplo, (I)0, n, dA, lda, dB, ldb),
+                          rocblas_status_success);
+    EXPECT_ROCBLAS_STATUS(rocsolver_lacpy(handle, uplo, m, (I)0, dA, lda, dB, ldb),
+                          rocblas_status_success);
 }
 
 template <typename T, typename I>
