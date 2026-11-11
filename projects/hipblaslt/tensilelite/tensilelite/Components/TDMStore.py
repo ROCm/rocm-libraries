@@ -96,6 +96,8 @@ def tdmStoreRejectReason(state):
   the block reads for each group.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block only
   when the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store.
+  StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
+  skips the remap.
   """
   if not state["TDMStoreInst"]:
     return None
@@ -117,9 +119,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires GlobalSplitU=1 or -1"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
-  # -1 (auto) is resolved later, where Solution rejects TDMStoreInst if it resolves to a remap width.
-  if state["StoreRemapVectorWidth"] > 0:
-    return "TDMStoreInst does not support StoreRemapVectorWidth"
   if state["CompactLoopStore"]:
     return "TDMStoreInst does not support CompactLoopStore"
   if pt["FusedGemmA2A"]:

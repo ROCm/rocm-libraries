@@ -277,6 +277,8 @@ class GlobalWriteBatchWriter:
     self.tdmStoreLdsBase = tdmStoreLdsBase
     # With beta != 0 the TDM block loads the C tile into the staged tile and reads C from there.
     self.tdmStoreLoadC = bool(beta) and tdmStoreLdsBase is not None
+    # Only a buffer_store block remaps D through LDS; a TDM block stages D itself.
+    self.storeRemap = self.kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -986,7 +988,7 @@ class GlobalWriteBatchWriter:
       module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
     if self.kernel["CompactLoopStore"] and self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]:
       module.add(SMovB32(dst=sgpr("CLSERowInc"), src=0, comment="Init E CLS row offset"))
-    if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
+    if self.storeRemap and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
       self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
       self.parentWriter.compactLoopStoreVgpr = self.CompactLoopStoreVgpr
@@ -1484,7 +1486,7 @@ class GlobalWriteBatchWriter:
           module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -1 -> exec"))
 
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.storeRemap > 0:
           module.addComment1("StoreRemap: shift coord1 address MultipleBufferSingleKernel")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -1597,14 +1599,14 @@ class GlobalWriteBatchWriter:
                                                 overrideAfterPrimerRows=self._lookaheadRowInc(elementIdx), comment="store E"))
 
         sumIdx = self.ss.elementSumIdx[elementIdx]
-        if self.kernel["StoreRemapVectorWidth"]:
+        if self.storeRemap:
           rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
           module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
           # Column Block Shape has been written to LDS
           # Now read back and write out to global memory
       # module.add(storeCodeGSUSK)
 
-    if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
+    if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.storeRemap:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
         tmpInrSgpr = self._epilogScratchSgpr(2)
@@ -1725,7 +1727,7 @@ class GlobalWriteBatchWriter:
 
     self.ss.firstBatch = False
     self.ss.checkInTempVgprC()
-    if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
+    if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel" and self.storeRemap:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
         # this seems buggy? it's possible to issue more than one stores for SR
@@ -2124,7 +2126,7 @@ class GlobalWriteBatchWriter:
       # Already write wave column block into LDS
       # Now read lds data back to registers and write to global memroy
       if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.storeRemap > 0:
           module.addComment1("StoreRemap: shift coord1 address")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -2590,7 +2592,7 @@ class GlobalWriteBatchWriter:
         module.add(convertModule)
         module.add(packModule)
 
-      if not self.kernel["StoreRemapVectorWidth"]:
+      if not self.storeRemap:
         # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
         # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
         # bf16 and fp16 HPA output types.
