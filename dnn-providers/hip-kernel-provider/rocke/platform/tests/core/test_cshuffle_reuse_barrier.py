@@ -16,7 +16,9 @@ before the first C store, in both epilogue emitters:
   * ``helpers.epilogues.CShuffleEpilogue.store`` (used by conv).
 
 These tests assert, at the KernelDef IR level (CPU-only, no compile), that a
-barrier separates the C staging allocation from the first store into it.
+barrier separates the C staging allocation from the first store into it. The
+conv cases (``CShuffleEpilogue.store``, its no-alias LDS budget and the wavelet
+branch barrier balance) are in library/tests/test_conv_platform_regressions.py.
 """
 
 from __future__ import annotations
@@ -97,34 +99,6 @@ def test_gemm_cshuffle_has_reuse_barrier(pipeline):
     _assert_barrier_before_first_c_store(build_universal_gemm(spec))
 
 
-def test_conv_cshuffle_has_reuse_barrier():
-    """The conv implicit-GEMM cshuffle path (double-buffered compv4, via the
-    shared ``CShuffleEpilogue`` helper) emits the reuse barrier before the first
-    C store."""
-    from kernels.common.conv_implicit_gemm import (
-        ConvProblem,
-        ImplicitGemmConvSpec,
-        build_implicit_gemm_conv,
-    )
-
-    spec = ImplicitGemmConvSpec(
-        problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-        name="c",
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        warp_m=2,
-        warp_n=2,
-        warp_tile_m=32,
-        warp_tile_n=32,
-        warp_tile_k=16,
-        wave_size=64,
-        pipeline="compv4",
-        epilogue="cshuffle",
-    )
-    _assert_barrier_before_first_c_store(build_implicit_gemm_conv(spec, arch="gfx950"))
-
-
 def test_gemm_cshuffle_no_alias_elides_barrier_and_marks_exclusive():
     """With ``cshuffle_no_alias=True`` the C tile gets its own exclusive LDS
     bytes, so the step-0 reuse barrier is elided: there is NO barrier between the
@@ -179,105 +153,6 @@ def test_gemm_cshuffle_no_alias_elides_barrier_and_marks_exclusive():
         "cshuffle_no_alias must elide the step-0 reuse barrier (C has its own "
         "LDS bytes, so there is no A/B WAR hazard to guard)"
     )
-
-
-def test_conv_cshuffle_no_alias_lds_budget_is_per_case():
-    """is_valid_spec must size the LDS budget per ``cshuffle_no_alias``: aliased
-    uses max(ab, c); no-alias uses ab + c. A spec whose max(ab, c) fits gfx950's
-    LDS but whose ab + c overflows it must be accepted aliased and rejected
-    no-alias (regression for yraparti's PR #8844 review comment)."""
-    from kernels.common.conv_implicit_gemm import (
-        ConvProblem,
-        ImplicitGemmConvSpec,
-        is_valid_spec,
-    )
-
-    def _mk(no_alias):
-        return ImplicitGemmConvSpec(
-            problem=ConvProblem(N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3),
-            tile_m=256,
-            tile_n=256,
-            tile_k=32,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            pipeline="mem",
-            epilogue="cshuffle",
-            wave_size=64,
-            cshuffle_no_alias=no_alias,
-        )
-
-    ok_alias, _ = is_valid_spec(_mk(False), "gfx950")
-    ok_noalias, why = is_valid_spec(_mk(True), "gfx950")
-    assert ok_alias, "aliased cshuffle (pool = max(ab, c)) should fit gfx950 LDS"
-    assert not ok_noalias, (
-        "no-alias cshuffle (pool = ab + c) should exceed gfx950 LDS and be "
-        "rejected; sizing it as max(ab, c) would silently accept an over-budget "
-        "kernel"
-    )
-    assert "LDS budget" in why
-
-
-@pytest.mark.parametrize("cshuffle_no_alias", [False, True])
-def test_wavelet_cshuffle_both_branches_have_equal_barrier_count(cshuffle_no_alias):
-    """Both branches of the wavelet scf.if_else must emit the same number of
-    barriers, or the workgroup hangs at a barrier one role issues but the other
-    does not.
-
-    The math branch ends with CShuffleEpilogue (N_epi barriers inside it).
-    The load branch ends with a bare stub that emits N_epi raw s_barrier calls.
-    This test builds the conv IR and counts barriers in each region to confirm
-    both sides agree — a regression guard so future edits to either the epilogue
-    or the stub cannot silently diverge.
-    """
-    from kernels.common.conv_implicit_gemm import (
-        ConvProblem,
-        ImplicitGemmConvSpec,
-        build_implicit_gemm_conv,
-    )
-
-    spec = ImplicitGemmConvSpec(
-        problem=ConvProblem(N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1),
-        name="wv_barrier_check",
-        tile_m=32,
-        tile_n=32,
-        tile_k=32,
-        warp_m=1,
-        warp_n=1,
-        warp_tile_m=16,
-        warp_tile_n=16,
-        warp_tile_k=32,
-        wave_size=32,
-        pipeline="wavelet",
-        epilogue="cshuffle",
-        num_load_waves=1,
-        cshuffle_no_alias=cshuffle_no_alias,
-    )
-    kernel = build_implicit_gemm_conv(spec, arch="gfx1250")
-
-    ops = _flatten(kernel.body, [])
-
-    # Locate the scf.if_else that splits math vs load waves.
-    if_else_ops = [o for o in ops if o.name == "scf.if_else"]
-    assert if_else_ops, "expected an scf.if_else in the wavelet kernel"
-    ife = if_else_ops[0]
-
-    def _count_barriers_in_region(region):
-        buf = []
-        _flatten(region, buf)
-        return sum(1 for o in buf if o.name in _BARRIERS)
-
-    then_count = _count_barriers_in_region(ife.regions[0])
-    else_count = _count_barriers_in_region(ife.regions[1])
-
-    assert then_count == else_count, (
-        f"barrier count mismatch (cshuffle_no_alias={cshuffle_no_alias}): "
-        f"math branch has {then_count}, load branch has {else_count}. "
-        "A workgroup hang will occur at the barrier one role skips."
-    )
-    assert then_count > 0, "expected at least one barrier in each wavelet branch"
 
 
 if __name__ == "__main__":  # pragma: no cover

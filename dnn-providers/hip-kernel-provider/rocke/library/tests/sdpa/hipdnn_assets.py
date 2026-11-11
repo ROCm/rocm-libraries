@@ -62,7 +62,8 @@ def sdpa_fwd_golden_graphs() -> list[Path]:
     A sweep root (e.g. ``Default/`` or ``BshdStats/``) carries ``graph.template.json``
     beside its ``support.json`` and ``sweep.json``: a Jinja-style template with
     ``${case...}`` placeholders, not a graph a golden-bundle test can translate.
-    Skip it by name so any new sweep root is excluded regardless of its folder name.
+    Templates are skipped by name, so a sweep in any bundle directory is excluded
+    regardless of its folder name.
     """
     bundles = golden_bundle_root()
     if bundles is None:
@@ -70,6 +71,7 @@ def sdpa_fwd_golden_graphs() -> list[Path]:
     return sorted(
         p
         for p in bundles.glob("*/SdpaFwd*/**/*.json")
-        if not p.name.endswith(("meta.json", "support.json", "sweep.json"))
-        and p.name != "graph.template.json"
+        if not p.name.endswith(
+            ("meta.json", "support.json", "sweep.json", "template.json")
+        )
     )
