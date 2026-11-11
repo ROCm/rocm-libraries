@@ -452,19 +452,78 @@ This gate and §4.4 overlap on purpose and neither subsumes the other:
   often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
   diagnostic the probe recorded.
 
-### 4.6 Does the measured arch-domain artifact reproduce?
+### 4.6 Does the toolchain retain the baseline's support?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. When the host compiler identity matches the
-provenance recorded in the committed column, the
+host's toolchain retains the recorded support. The existing
 `rocke_arch_domain_reproducibility` CTest runs
 `tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
-and compares the result with that column. LLVM development builds with the same
-major can disagree about intrinsic availability and ABI, so a different compiler
-identity is explicitly unvalidated rather than compared as though it asked the
-same question. This is an artifact-reproduction gate backed by the host
-toolchain, not a Python unit test: it owns external compiler processes, a
-dedicated timeout and resource policy, and an explicit CTest skip result.
+for the host's LLVM flavor and checks a **monotonic support floor**, not exact
+snapshot equality. A formerly `ok` cell must still be `ok`; becoming unavailable,
+crashing, timing out, or losing a measurement fails. Previously accepted processor
+names must remain accepted too. Both `ok` and `arch_absent` records require an
+accepted processor; flavor-axis negatives and no-data can precede rejection.
+
+Every retained positive must also use the same **effective probe contract**:
+return/operand types, operand sources, and actual immediate/literal witnesses.
+The generator derives `probe_contracts` from the same operand plan used by single
+probes, positive batches, splits, and retries. A new `immarg` cannot turn the
+baseline's variable operand into constant zero and still claim an unchanged
+question. Canonical names, stripped attributes, and IR formatting are not this
+contract; there is no IR, assembly, or HSACO hash comparison here.
+
+A shared canonical column serializer keeps one named contract per line while
+leaving ordinary measurement sections pretty-printed. Both generation and
+pruning use it; a later tool run must not expand the metadata again. Every new
+positive key requires its own evidence-backed contract before comparison, not
+just keys present when the metadata was first introduced.
+
+Support gains and unknown-to-unavailable transitions pass and are reported.
+Unavailable-to-unknown transitions are reported as degraded measurement, not
+support loss; remaining no-data cells are explicitly not qualified. Diagnostic
+wording, canonical intrinsic names, and compiler identity do not define support.
+Compiler identity is retained and printed as provenance. Invalid probes,
+malformed data, missing coverage, and incompatible scope or probe methodology
+still fail. This is a real-toolchain gate, not a Python unit test: it owns
+external compiler processes, a dedicated timeout and resource policy, and an
+explicit environmental CTest skip result.
+
+`--check` never re-blesses the baseline. Reviewed gains must be recorded separately
+to protect them from future loss and update the runtime availability table. That
+table also controls lowering warnings/refusals, so a baseline update is a product
+policy change, not merely a way to make this test pass.
+
+#### Historical positive-probe contract recovery
+
+Comparison-only contracts extend the v1 envelope without changing runtime `Cell`
+lookup or the generated C++ availability table. Missing historical positive
+contracts fail comparison: recover the original question from the recorded
+compiler or auditable matching-source evidence, never infer it from a newer host
+or silently fill it with default witnesses.
+
+For a metadata-only recovery:
+
+1. Verify the recorded compiler or matching LLVM source identity and executable
+   provenance. Resolve the canonical declaration with that compiler's `opt`.
+2. Recover the historical probe builder from version history. Render the resolved
+   declaration with both the historical and contract-aware builders, using the
+   column's datalayout and original explicit witnesses. Compare complete module
+   bytes and check that the derived contract describes that same question,
+   including default immediates absent from optional `probe_imm`.
+3. Preserve every measurement field, compiler identity and unrelated contract.
+   Independently check the recovered record, positive-cell inventory and generated
+   runtime-table bytes. Support updates require their own review; metadata
+   recovery must not re-bless a loss or invent a measurement.
+4. Record the exact source/generator revisions, executable receipts, counts,
+   validation results and limitations in the PR description. Attribute compiler
+   and CI results to their tested snapshots, not a later untested head.
+
+This establishes a historical probe question, not a replay of the original
+compiler installation, a new support measurement or GPU numerical qualification.
+Newly measured positives must record their effective contracts from the live
+probe plan; they do not authorize guessing missing historical contracts.
+
+#### Execution and test coverage
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -474,13 +533,16 @@ stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
 The result mapping distinguishes applicability from failure: no clang, no
-committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
-identity different from the column's provenance skips with a named reason. A
-partial or internally inconsistent LLVM installation fails. Flavor
-auto-detection errors, including unavailable COMGR evidence, also remain
+committed host-flavor column, or a clang/resolved-flavor mismatch skips with a
+named reason. A partial or internally inconsistent LLVM installation fails.
+Blank or `(unknown)` live clang/opt identities fail before probing, while a
+nonblank vendor-reworded banner is not automatically a flavor mismatch. The
+complete generated column is validated before either writing or comparing it,
+so invalid produced records cannot overwrite an existing reference.
+Flavor auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
-The reproduction scheduler preserves exhaustive coverage while avoiding
+The probe scheduler preserves exhaustive coverage while avoiding
 redundant compiler startup. It batches declaration discovery, preflights each
 target once, and combines expected-positive calls per architecture. The
 committed artifact schedules those batches but cannot make them pass: every call
@@ -492,17 +554,22 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-The fast structure and generator units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
-`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
+Structure and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Host-only support-policy
+controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
+pytest and the installed `rocke_pytest_*` CI parts, using the staged generator in
+installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
+metadata guards, effective-probe contracts, and processor consistency for both
+gfx942 and gfx950 without a real compiler. Source-only CLI controls additionally
+check early live-provenance and final-document admission in write/check modes. Normal pytest
+and the `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
-reproduction coverage: check the CTest result and reason, especially when the
-compiler identity differs from the committed provenance, its major differs from
-rocKE's resolved flavor, or no committed column exists. Keeping one generator
-implementation behind two thin registrations preserves local coverage while
-avoiding duplicated test logic.
+support-validation coverage: check the CTest result and reason, especially when the
+compiler's major differs from rocKE's resolved flavor or no committed column
+exists. Keeping one generator implementation behind two thin registrations
+preserves local coverage while avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured

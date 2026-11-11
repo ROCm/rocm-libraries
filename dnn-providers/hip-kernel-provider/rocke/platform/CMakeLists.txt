@@ -473,9 +473,9 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # and the arch-domain artifact unit tests. The latter remain
-    # source-only units, while the full regeneration sweep is installed below as
-    # its own CTest with an independent timeout and resource policy.
+    # and the arch-domain artifact/probe unit tests. The host-only support-policy
+    # units are installed with the rest of tests/tools; the full regeneration
+    # sweep has its own CTest timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -518,9 +518,9 @@ if(ROCKE_INSTALL_TESTS)
               "rocKE: top-level run_checks.py not found; skipping its test-only install")
     endif()
 
-    # Test-only implementation for the installed arch-domain reproduction gate.
-    # Keep it outside the production package: CTest owns the external compiler
-    # sweep, while package resources provide the committed columns being checked.
+    # Test-only implementation shared by the installed support-policy units and
+    # arch-domain reproduction gate. Keep it outside the production package:
+    # CTest owns the compiler sweep; pytest checks the policy without one.
     # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
     # installed pytest runs compile lowered IR with the same tool.
     install(FILES
