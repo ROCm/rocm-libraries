@@ -200,6 +200,11 @@ each declares `MXScaleFormat: NoSwizzle`. The kernels a logic file registers
 name the bare `amdgcn-amd-amdhsa--gfx950` target, so they load whatever the
 SRAMECC mode.
 
+A name ending in `_LDSSYNC` is the kernel rocRoller builds for its pick when the
+first attempt leaves diverging waitcnt states at the K-loop labels: the retry
+drains the LDS queue there. It serves the same tile, unroll and workgroup
+mapping as the name without the suffix would.
+
 Only a build without rocRoller selects them. A build with rocRoller serves these
 problems through rocRoller itself, and its Tensile paths (the C API with
 `HIPBLASLT_USE_ROCROLLER=0`, the `hipblaslt_ext` APIs, `getAllAlgos`, support
