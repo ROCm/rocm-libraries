@@ -132,10 +132,34 @@ def test_every_row_is_a_permutation(cols):
         assert sorted(_swz(row, c, p) for c in range(cols)) == list(range(cols))
 
 
+def _accepted_params():
+    """Every ``(cols, chunk)`` :func:`lds_col_xor_params` accepts, chunks 1-64."""
+    out = []
+    for chunk in (1 << k for k in range(7)):
+        for c in (2, 4, 8, 16):
+            out.append((c * chunk, chunk))
+    return out
+
+
+@pytest.mark.parametrize("cols, chunk", _accepted_params())
+def test_every_accepted_chunk_permutes_each_row(cols, chunk):
+    """What the API promises for every chunk it accepts: each row's columns are
+    permuted within the row, whole chunks moving together. The bank claim is
+    for 16-byte chunks only (the test below)."""
+    p = lds_col_xor_params(cols, chunk)
+    for row in range(64):
+        phys = [_swz(row, c, p) for c in range(cols)]
+        assert sorted(phys) == list(range(cols))
+        for c in range(cols):
+            assert phys[c] % chunk == c % chunk
+
+
 @pytest.mark.parametrize("cols", [16, 32, 64, 128])
 @pytest.mark.parametrize("lanes", [8, 16])
 def test_read_and_store_phases_are_conflict_free(cols, lanes):
-    """``lanes`` lanes x 16 B per LDS cycle: 32 banks at 8, 64 banks at 16."""
+    """``lanes`` lanes x 16 B per LDS cycle: 32 banks at 8, 64 banks at 16.
+    The default ``chunk = 8`` of 16-bit elements, the only chunk the bank
+    claim of :func:`lds_col_xor_params` covers."""
     p = lds_col_xor_params(cols)
     chunks = cols // 8
     for r0 in range(0, 64, lanes):

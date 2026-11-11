@@ -289,6 +289,10 @@ in `"row"` mode (transpose-on-store) each scattered element takes its own row's
 XOR. The default (`col_xor=None`) emits the historical, unswizzled stores; the
 C++ engine mirrors the option (`rocke_coalesced_tile_loader_set_col_xor`).
 
+`lds_col_xor_params` also takes another power-of-two `chunk`; that still
+permutes each row's columns, but the bank claim above is only made (and tested)
+for 16-byte chunks.
+
 ---
 
 ## Optimization Method 3: Reduce Pipeline Stages

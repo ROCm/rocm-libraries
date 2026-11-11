@@ -137,7 +137,9 @@ typedef struct rocke_coalesced_tile_loader
  * (16-byte) runs. Writes {row_shift, chunk_mask, chunk_log2, flip_shift} to
  * out[4] and returns ROCKE_OK, or ROCKE_ERR_VALUE (out untouched) where Python
  * raises: chunk not a power of two, or tile_cols / chunk not a power of two in
- * [2, 16]. Pass chunk = 8 for the Python default. */
+ * [2, 16]. Pass chunk = 8 for the Python default. As in Python, the bank
+ * claim holds (and is tested) only for 16-byte chunks (chunk = 8); any other
+ * chunk is a valid in-row permutation with no conflict-freedom claim. */
 rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4]);
 
 /* swizzle_lds_col(b, row, col, col_xor):

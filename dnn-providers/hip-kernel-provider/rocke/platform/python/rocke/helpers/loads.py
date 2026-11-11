@@ -80,6 +80,12 @@ def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, i
     the two 8-row halves of a 16-row group. Only row bits 0-3 are read, so a
     16-row-aligned fragment can take the term from its lane's in-atom row.
     Needs ``C`` a power of two, at least 2 and at most 16.
+
+    The bank claim above is made, and tested, only for 16-byte chunks: the
+    default ``chunk = 8`` of 16-bit elements. Any other power-of-two ``chunk``
+    still gives a valid swizzle (each row a permutation of its own columns, so
+    stores and reads stay in the row), but no conflict-freedom is claimed for
+    it; check the banks of such a layout before relying on it.
     """
     if chunk < 1 or chunk & (chunk - 1):
         raise ValueError(f"LDS XOR swizzle chunk must be a power of two, got {chunk}")
