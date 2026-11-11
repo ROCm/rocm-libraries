@@ -834,13 +834,14 @@ class LogicAnalyzer:
 
 
   def _assignCustomKernelSizePredicates(self):
-    """Limit each exact-size winner to the sizes it won.
+    """Keep each exact-size winner off the sizes below the ones it won.
 
     GridBased can return a neighboring exact row when a benchmark asks for
-    more than one solution. A 32x32 kernel that won 64..128 would then be
-    timed at 256 and replace the 16x16 row. The bounds are strict
-    SizeGreaterThan / SizeLessThan predicates, read back when the library
-    is written.
+    more than one solution. A 16x16 kernel that won only 256 would then be
+    timed at 64 and replace the 32x32 row. The bound is a strict
+    SizeGreaterThan predicate per index, read back when the library is
+    written. There is no upper bound: a kernel stays correct at every larger
+    size its own predicates admit, and a cap would hide it from those sizes.
     """
     wins = {}
     for size, winner in self.exactWinners.items():
@@ -858,11 +859,9 @@ class LogicAnalyzer:
 
     def _bound(index, sizes):
       lo = min(sizes)
-      hi = max(sizes)
       preds = []
       if lo > 0:
         preds.append({"tag": "SizeGreaterThan", "index": index, "value": lo - 1})
-      preds.append({"tag": "SizeLessThan", "index": index, "value": hi + 1})
       return preds
 
     for idx, solution in enumerate(self.solutions):
@@ -873,7 +872,8 @@ class LogicAnalyzer:
       preds += _bound(0, [size[0] for size in chosen])
       preds += _bound(1, [size[1] for size in chosen])
       preds += _bound(k_index, [size[2] for size in chosen])
-      solution["CustomKernelSizePredicate"] = preds
+      if preds:
+        solution["CustomKernelSizePredicate"] = preds
 
 
   ##############################################################################
