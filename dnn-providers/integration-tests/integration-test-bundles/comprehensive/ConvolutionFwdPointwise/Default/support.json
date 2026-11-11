@@ -3,42 +3,118 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
-          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_14598d",
-          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_345a23"
+          "l13a_1d_i1024_n4c128k128g128_f3_bf16_cl_relu",
+          "l13b_3d_i32x32x32_n2c32k64g32_f3x3x3_bf16_cf_relu",
+          "l14_1d_i1023_n4c61k67_f3_fp32_cl_relu6",
+          "l14_2d_i55x55_n4c61k67_f3x3_bf16_cl_relu",
+          "l15_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu6",
+          "l16_1d_i1024_n4c128k128_f3_fp16_cf_relu_clamp",
+          "l16_2d_i56x56_n4c128k128_f3x3_fp32_cl_relu6",
+          "l16_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_clamp",
+          "l17_2d_i56x56_n4c1k128_f3x3_fp16_cf_relu_clamp",
+          "l1_1d_i1024_n4c128k128_f1_fp32_cl_relu_clamp",
+          "l1_3d_i32x32x32_n2c32k32_f1x1x1_fp16_cl_relu",
+          "l3_2d_i56x56_n4c128k128_f3x3_bf16_cf_relu",
+          "l3_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_relu6",
+          "l4_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu_clamp",
+          "l5_2d_i56x56_n4c128k128_f3x3_fp32_cf_relu6",
+          "l6_2d_i56x28_n4c128k128_f3x3_fp32_cl_relu_clamp",
+          "m2_2d_i56x56_n8c64k64_f3x3_bf16_cf_relu",
+          "m3_2d_i56x56_n8c256k64_f1x1_fp32_cf_relu6",
+          "m3_2d_i56x56_n8c256k64_f1x1_fp32_cl_relu_clamp",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_bf16_cl_relu",
+          "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp16_cf_relu_clamp",
+          "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu6",
+          "s10_1d_i16_n2c16k32_f5_bf16_cf_relu",
+          "s10_2d_i16x16_n2c16k32_f5x5_bf16_cf_relu6",
+          "s10_2d_i16x16_n2c16k32_f5x5_bf16_cl_relu_clamp",
+          "s10_2d_i16x16_n2c16k32_f5x5_fp16_cf_relu",
+          "s10_3d_i16x16x16_n2c16k32_f5x5x5_bf16_cl_relu6",
+          "s10_3d_i16x16x16_n2c16k32_f5x5x5_fp16_cl_relu",
+          "s11_1d_i16_n2c3k16_f7_fp32_cf_relu6",
+          "s11_1d_i16_n2c3k16_f7_fp32_cl_relu_clamp",
+          "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_relu_clamp",
+          "s12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_relu6",
+          "s12a_2d_i16x16_n2c16k32_f1x3_fp16_cl_relu",
+          "s12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_relu",
+          "s12b_2d_i16x16_n2c16k32_f3x1_fp32_cf_relu_clamp",
+          "s13a_1d_i16_n2c16k16g16_f3_bf16_cl_relu",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cf_relu6",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cl_relu_clamp",
+          "s13b_1d_i16_n2c16k32g16_f3_fp16_cf_relu_clamp",
+          "s13b_1d_i16_n2c16k32g16_f3_fp32_cl_relu6",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf_relu6",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cl_relu_clamp",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cl_relu",
+          "s14_2d_i15x15_n2c13k17_f3x3_bf16_cl_relu",
+          "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp16_cf_relu_clamp",
+          "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl_relu6",
+          "s15_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
+          "s15_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
+          "s16_1d_i32_n2c16k32_f3_fp16_cf_relu6",
+          "s16_1d_i32_n2c16k32_f3_fp16_cl_relu_clamp",
+          "s16_1d_i32_n2c16k32_f3_fp32_cf_relu",
+          "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cf_relu6",
+          "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
+          "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cf_relu",
+          "s17_2d_i16x16_n2c1k16_f3x3_fp16_cf_relu6",
+          "s17_2d_i16x16_n2c1k16_f3x3_fp16_cl_relu_clamp",
+          "s17_2d_i16x16_n2c1k16_f3x3_fp32_cf_relu",
+          "s19_2d_i16x16_n2c16k32_f16x16_bf16_cf_relu_clamp",
+          "s19_2d_i16x16_n2c16k32_f16x16_fp16_cl_relu6",
+          "s19_2d_i16x16_n2c16k32_f16x16_fp32_cl_relu",
+          "s1_1d_i16_n2c16k32_f1_fp16_cf_relu6",
+          "s1_1d_i16_n2c16k32_f1_fp16_cl_relu_clamp",
+          "s1_1d_i16_n2c16k32_f1_fp32_cf_relu",
+          "s1_2d_i16x16_n2c16k32_f1x1_bf16_cf_relu",
+          "s1_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cl_relu",
+          "s20_1d_i16_n2c16k32_f3_bf16_cf_relu6",
+          "s20_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
+          "s20_1d_i16_n2c16k32_f3_fp16_cf_relu",
+          "s20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu6",
+          "s20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu_clamp",
+          "s20_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu",
+          "s21_2d_i16x16_n2c16k32_f2x2_bf16_cf_relu6",
+          "s21_2d_i16x16_n2c16k32_f2x2_bf16_cl_relu_clamp",
+          "s21_2d_i16x16_n2c16k32_f2x2_fp16_cf_relu",
+          "s22_1d_i16_n2c16k32_f3_bf16_cl_relu6",
+          "s22_1d_i16_n2c16k32_f3_fp16_cl_relu",
+          "s22_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
+          "s22_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu6",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_clamp",
+          "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu_clamp",
+          "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu6",
+          "s3_1d_i16_n2c16k32_f3_bf16_cf_relu_clamp",
+          "s3_1d_i16_n2c16k32_f3_fp16_cl_relu6",
+          "s3_1d_i16_n2c16k32_f3_fp32_cl_relu",
+          "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_slope0",
+          "s4_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
+          "s4_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
+          "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu6",
+          "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
+          "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu",
+          "s5_1d_i16_n2c16k32_f3_bf16_cf_relu6",
+          "s5_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
+          "s5_1d_i16_n2c16k32_f3_fp16_cf_relu",
+          "s6_2d_i16x8_n2c16k32_f3x3_fp16_cf_relu6",
+          "s6_2d_i16x8_n2c16k32_f3x3_fp16_cl_relu_clamp",
+          "s6_2d_i16x8_n2c16k32_f3x3_fp32_cf_relu",
+          "s6_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cf_relu_clamp",
+          "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp16_cl_relu6",
+          "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp32_cl_relu",
+          "s8_1d_i16_n2c32k64g4_f3_bf16_cl_relu6",
+          "s8_1d_i16_n2c32k64g4_f3_fp16_cl_relu",
+          "s8_2d_i16x16_n2c32k64g4_f3x3_bf16_cf_relu_clamp",
+          "s8_2d_i16x16_n2c32k64g4_f3x3_fp16_cl_relu6",
+          "s8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_relu",
+          "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cf_relu6",
+          "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cl_relu_clamp",
+          "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp16_cf_relu",
+          "s9_1d_i16_n8c16k32_f1_fp32_cf_relu_clamp"
         ],
         "support": {
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      }
-    ],
-    "MIOPEN_ENGINE_DETERMINISTIC": [
-      {
-        "cases": [
-          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_14598d",
-          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_345a23"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
-          ],
           "gfx942": [
             "linux"
           ]

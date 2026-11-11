@@ -3,53 +3,51 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
-          "8_16_16_16_fp32_nchw_cdtfp32_dil1x1_postpad0x0"
+          "l10_3d_i32x32x32_n1c16k16_f5x5x5_fp32_cf_relu_clamp",
+          "l11_2d_i56x56_n4c3k128_f7x7_fp32_cf_relu6",
+          "l12a_2d_i56x56_n4c128k128_f1x3_fp32_cl_relu_clamp",
+          "l21_1d_i1024_n4c128k128_f2_fp32_cl_relu6",
+          "l21_3d_i32x32x32_n2c32k32_f2x2x2_fp32_cf_relu6",
+          "l22_2d_i56x56_n4c128k128_f3x3_fp32_cl_relu6",
+          "l22_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_clamp",
+          "l7_1d_i1024_n4c128k128g2_f3_fp32_cf_relu6",
+          "l8_1d_i1024_n4c128k128g4_f3_fp32_cl_relu_clamp",
+          "m2_2d_i56x56_n8c64k64_f3x3_fp32_cf_relu_clamp",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cf_relu6",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cl_relu_clamp",
+          "s10_1d_i16_n2c16k32_f5_fp32_cf_relu_clamp",
+          "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cf_relu_clamp",
+          "s13a_1d_i16_n2c16k16g16_f3_fp32_cf_relu6",
+          "s13a_1d_i16_n2c16k16g16_f3_fp32_cl_relu_clamp",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cf_relu_clamp",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf_relu6",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_relu_clamp",
+          "s14_1d_i15_n2c13k17_f3_fp32_cl_relu6",
+          "s14_2d_i15x15_n2c13k17_f3x3_fp32_cf_relu6",
+          "s14_2d_i15x15_n2c13k17_f3x3_fp32_cl_relu_clamp",
+          "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu6",
+          "s16_2d_i32x32_n2c16k32_f3x3_fp32_cl_relu6",
+          "s17_1d_i16_n2c1k16_f3_fp32_cf_relu",
+          "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp32_cf_relu",
+          "s19_1d_i16_n2c16k32_f16_fp32_cl_relu",
+          "s19_3d_i16x16x16_n2c16k32_f16x16x16_fp32_cl_relu",
+          "s1_2d_i16x16_n2c16k32_f1x1_fp32_cf_relu_clamp",
+          "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cf_relu6",
+          "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cl_relu_clamp",
+          "s20_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu",
+          "s2_1d_i16_n2c16k32_f3_fp32_cf_relu",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu6",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_slope0",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_clamp",
+          "s3_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu6",
+          "s4_1d_i16_n2c16k32_f3_fp32_cl_relu",
+          "s5_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
+          "s5_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu",
+          "s7_2d_i16x16_n2c16k32g2_f3x3_fp32_cf_relu",
+          "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp32_cl_relu",
+          "s9_2d_i16x16_n8c16k32_f1x1_fp32_cl_relu"
         ],
         "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "rslope0"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
-          ]
-        }
-      }
-    ],
-    "MIOPEN_ENGINE_DETERMINISTIC": [
-      {
-        "cases": [
-          "8_16_16_16_fp32_nchw_cdtfp32_dil1x1_postpad0x0"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
-          ],
           "gfx942": [
             "linux"
           ]
