@@ -169,6 +169,20 @@ using TestGpuFlydslSdpaBwdSplitNanBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFin
 using TestGpuFlydslSdpaBwdSplitNanBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasD128Bfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasD128Fp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasD128Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasD128Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Bfp16
+    = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Fp16
+    = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
@@ -311,12 +325,36 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
 /// else, with a log-sum-exp and output that come from the clean bias. The NaN must reach P: a
 /// dK/dV exponent clamp that turns a NaN exponent into 0 gives P = 1 there and finite dK and dV
 /// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient);
-/// it selects the 32-row dK/dV object, and TestFlydslSdpaBwdObjectsPerObject.cpp runs the NaN on the
-/// biased dkdv and merged objects that pin `mfma_rows = 16`, which carry their own copy of the clamp.
+/// at head dim 64 it selects the 32-row dK/dV object. The 16-row family carries its own copy of the
+/// clamp: nanBiasHeadDim128Case selects its policy-picked objects (the policy takes 16 rows at head
+/// dim 128), and TestFlydslSdpaBwdObjectsPerObject.cpp runs the NaN on the biased dkdv and merged
+/// objects that pin `mfma_rows = 16` and on the `gqa_pack` objects, which the policy ranks below
+/// their unpacked twins and no graph selects.
 BwdCase nanBiasCase(DataType dtype)
 {
     BwdCase c = biasCase(dtype);
     c.nanBiasAt = NAN_BIAS_AT;
+    return c;
+}
+
+/// `nanBiasCase` at head dim 128, where the policy-picked biased dK/dV object (split's, and the
+/// dK/dV role of merged's) is the 16-row family rather than head dim 64's 32-row one.
+BwdCase nanBiasHeadDim128Case(DataType dtype)
+{
+    BwdCase c = nanBiasCase(dtype);
+    c.headDim = 128;
+    return c;
+}
+
+/// `nanBiasCase` over a dropout graph at @p headDim: the compiled-dropout dK/dV objects have their own
+/// copy of the exponent clamp ahead of the keep mask. The reference holds dK non-finite at the key in
+/// every row the NaN covers and dV only where the NaN element is kept, as the kernel's select on the
+/// keep mask does.
+BwdCase nanBiasDropoutCase(DataType dtype, int64_t headDim)
+{
+    BwdCase c = nanBiasCase(dtype);
+    c.headDim = headDim;
+    c.dropout = 0.2F;
     return c;
 }
 
@@ -713,6 +751,66 @@ TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16, PropagatesToDkAndDv)
 TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16, PropagatesToDkAndDv)
 {
     expectCase(SPLIT_ENGINE, f32NanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasHeadDim128Case(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasHeadDim128Case(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasHeadDim128Case(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasHeadDim128Case(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutBfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutFp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::HALF, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutBfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutFp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::HALF, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::HALF, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::HALF, 128));
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
