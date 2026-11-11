@@ -218,6 +218,11 @@ A:
 | Arrival skew between the waves of a CU (`wave_skew`) | not built: the DMA issue stall is nearly flat over the arrival order, the queue persists across gaps |
 | One M0 per B half with immediate DMA offsets (`dma_m0=bshare`) | done; each wave fills consecutive regions of the half (same bytes per region, so no B layout change), one LDS base and voffset per half with the step in the instruction offset, M0 writes deduplicated by the compiler's `m0_cse`; within noise (the M0 writes were in MFMA shadow), kept as a knob |
 | DMAs kept in their builder slots (`cc_extra=pin_vmem`) | done; the listing obeys the slot rules; within noise, kept as a knob |
+| `even_bfirst` without its two-gap spacing (`dma_place=dense_bfirst`, `pair_bfirst`) | done; slower: the spacing paces DMA issue at the address path's drain rate, so packed DMAs wait at issue and the barrier waits longer; rejected, kept as knobs |
+| C staged through LDS for whole-row stores (`epilogue=lds`, `ct_lds`) | done; correct (bitwise against the direct epilogue), but the default's stores already write whole lines, so the barrier and LDS round trip are a net cost; rejected, kept as knobs |
+| A scale DMAs out of the trip's heaviest half-step (`as_dma_place`) | done; one into step 1 of each of the trip's two light stages (`split_light`) a gain with both formats, confirmed on a second board, in the best; both into one light step, or spaced in their old step, within noise or slower |
+| Second B scale pair load a stage and a half earlier (`aux_place`); next-stage index clamps once per loop body (`clamp_hoist`) | done; within noise or slower, rejected, kept as knobs |
+| Half-wave A scale DMAs (`z_lanes`) | not built: worth it only if a trace of `split_light` still shows a spike after the A scale DMAs |
 | Open: fewer B-scale requests shared by the two waves of a column; induction-variable offsets | not built; below the threshold at the measured realization |
 
 Deeper A fetches need more resident K per A row than three K128 stages of

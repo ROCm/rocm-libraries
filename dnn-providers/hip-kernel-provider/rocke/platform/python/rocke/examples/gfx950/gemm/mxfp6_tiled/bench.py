@@ -34,6 +34,7 @@ from .....instances.gfx950.block_scaled_gemm_tiled import (
     build_tiled_block_scaled_gemm,
     is_valid_spec,
     tiled_block_scaled_gemm_grid,
+    tiled_block_scaled_gemm_signature,
 )
 from ....common.scaled_gemm_reference import decode_fp6, pack_fp6_codes
 
@@ -195,10 +196,23 @@ class Device:
         self.allocs.clear()
 
 
+def kernel_args(spec, ptrs) -> bytes:
+    """The kernel's argument bytes in its signature's order: the pointers
+    `ptrs` (A, B, A_scale, B_scale, C), then any i32 shape argument."""
+    shape = {"M": spec.M, "N": spec.N, "K": spec.K}
+    sig = tiled_block_scaled_gemm_signature(spec)
+    is_ptr = [p["type"].startswith("ptr<") for p in sig]
+    if sum(is_ptr) != len(ptrs):
+        raise ValueError(f"the kernel takes {sum(is_ptr)} pointers, not {len(ptrs)}")
+    it = iter(ptrs)
+    vals = [next(it) if ptr else shape[p["name"]] for p, ptr in zip(sig, is_ptr)]
+    return struct.pack("<" + "".join("Q" if ptr else "i" for ptr in is_ptr), *vals)
+
+
 def _launcher(dev: Device, hsaco: Path, spec, ptrs):
     module = dev.rt.load_module(hsaco.read_bytes())
     fn = module.get_function(spec.kernel_name())
-    packed = struct.pack("<QQQQQiii", *ptrs, spec.M, spec.N, spec.K)
+    packed = kernel_args(spec, ptrs)
     grid, block = tiled_block_scaled_gemm_grid(spec), (spec.threads, 1, 1)
 
     def launch():
@@ -268,6 +282,8 @@ def _round_out(x: np.ndarray, dtype: str) -> np.ndarray:
 def device_inputs(spec, inputs):
     """The arrays the kernel reads: A and B repacked to the spec's layouts."""
     a, b, sa, sb = inputs
+    if spec.atom16:
+        return a, b_c0c1p(b, spec.wave_tile_n), sa, scales16_pairs(sb, spec.wave_tile_n)
 
     def pack(x: np.ndarray, layout: str) -> np.ndarray:
         if layout == "row":
@@ -353,6 +369,36 @@ def split_halves(b: np.ndarray, blocks=ROT_BLOCKS) -> np.ndarray:
     return np.ascontiguousarray(np.stack(halves, axis=1))
 
 
+def b_c0c1p(b: np.ndarray, wave_n: int = 128) -> np.ndarray:
+    """Row-major B ([N][K*3/4]) for `mfma_atom="16x16x128"`: per stage, column
+    half h, group g of `wave_n` columns, column-block pair p (16-column blocks
+    4h + 2p and 4h + 2p + 1 of the group) and plane k, the 64 lanes' bytes
+    [16k, 16k + 16) of the 48 their two operands make side by side, lane
+    l = 16 kg + c taking column 16 (4h + 2p + q) + c's bytes 24 kg .. 24 kg + 24
+    of the stage ([K/128][2][N/wave_n][2][3][64][16 B])."""
+    n, kt = b.shape[0], b.shape[1] // 96
+    x = b.reshape(n // wave_n, 2, 2, 2, 16, kt, 4, 24)  # [g][h][p][q][c][t][kg][24]
+    x = x.transpose(5, 1, 0, 2, 6, 4, 3, 7).reshape(kt, 2, n // wave_n, 2, 64, 3, 16)  # [t][h][g][p][l][k][16]
+    return np.ascontiguousarray(x.transpose(0, 1, 2, 3, 5, 4, 6)).reshape(-1)
+
+
+def b_c0c1p_unpack(x: np.ndarray, n: int, k: int, wave_n: int = 128) -> np.ndarray:
+    """The row-major B that `b_c0c1p` packed into `x`."""
+    kt = k // 128
+    y = x.reshape(kt, 2, n // wave_n, 2, 3, 64, 16).transpose(0, 1, 2, 3, 5, 4, 6).reshape(kt, 2, n // wave_n, 2, 4, 16, 2, 24)
+    return np.ascontiguousarray(y.transpose(2, 1, 3, 6, 5, 0, 4, 7)).reshape(n, kt * 96)
+
+
+def scales16_pairs(sb: np.ndarray, wave_n: int = 128) -> np.ndarray:
+    """B scales ([K/32][N] bytes) for `mfma_atom="16x16x128"`: per pair of
+    stages v, group g of `wave_n` columns and lane l = 16 kg + c, four dwords,
+    dword 2q + h's byte j the scale of column 16 (4h + j) + c of the group in
+    K32 block kg of stage 2v + q ([K/256][N/wave_n][64][2][2][4] bytes)."""
+    kt, n = sb.shape[0] // 4, sb.shape[1]
+    s = sb.reshape(kt // 2, 2, 4, n // wave_n, 2, 4, 16)  # [v][q][kg][g][h][j][c]
+    return np.ascontiguousarray(s.transpose(0, 3, 2, 6, 1, 4, 5)).reshape(-1)
+
+
 def half_lanes(h: np.ndarray) -> np.ndarray:
     """`split_halves` B ([K/128][2][N][48 B]) in the `b_layout="lanes"` order:
     per stage half and 32-column block, lane (h, r) = column 32c + r's 16-byte
@@ -378,7 +424,8 @@ def run_case(dev: Device, hsaco: Path, spec, inputs):
 
 def exact_check(spec, cache: Path) -> dict:
     """Run the same knobs on a small multi-tile shape; demand exact equality."""
-    small = replace(spec, M=2 * spec.block_m, N=2 * spec.block_n, K=1152)
+    # mfma_atom="16x16x128" runs whole trips of eight stages only.
+    small = replace(spec, M=2 * spec.block_m, N=2 * spec.block_n, K=8 * STAGE_K if spec.atom16 else 1152)
     ok, why = is_valid_spec(small)
     override = {}
     if not ok and spec.xcd_remap != "none":
