@@ -43,7 +43,7 @@ Organize the entries into branch groups, written to `groups.tsv` and `plan_assig
 - formatting-only changes form a `style` group at the bottom;
 - for each group set `author`, `trailers`, `scope`, `subject`, and a plain-language `summary` of 1–3 sentences for a reviewer who has not seen the source (no symbol dumps; for generated-file branches add the file count and lines).
 
-**Test plan** (written even if the user later skips tests): for each branch, list what it changes and who consumes it and, from each touched component's `TESTING.md` or `AGENTS.md`, the build target and unit-test commands, plus `pre-commit run --files <the branch's changed files>`. Organize it by branch purpose; the component table is an input, not the structure. The test plan lists commands only; it does not run them and does not predict failures.
+**Test plan** (written even if the user later skips tests): for each branch, from each touched component's `TESTING.md` or `AGENTS.md`, the build target and unit-test commands, plus `pre-commit run --files <the branch's changed files>`. The component table is an input, not the structure. The test plan lists commands only; it does not run them and does not predict failures.
 
 ## Phase 5: Dependency analysis
 
@@ -73,6 +73,18 @@ A Planner whose answer is not acceptable must merge or re-cut the groups and re-
 The attack agent must also **re-derive, from the code, every behavior-change classification that creates or justifies a group boundary** (including any group of type `fix` and any group that exists because of a behavior change). It reads the definitions the claim depends on (predicates, their callers, the constructors of their inputs, `git log -S` for why a guard exists) and does not accept the classification from `plan.md`, `plan_assign.tsv` or the commit notes. For each one it reports `confirmed`, `refuted` or `unverified` with evidence. A refuted classification sends the entry back to the Planner (dead-code removal goes to a `chore` or the surrounding group); an unverified one cannot stand alone as a group (`concepts.md`).
 
 **Inputs the orchestrator gives the Planner.** Besides the run files, pass any earlier review comments, findings or notes about this branch that bear on grouping (for example a reviewer's remark that a hunk is a no-op), marked "claims to check, not facts".
+
+**`plan.md`** is the Planner's only prose file. It describes the current plan only, and every line belongs to a group, an adjacent pair, an entry or a thread, so it grows with the plan, not with the discussion. Sections in this order; leave out an empty one:
+- `## Inputs`; `## Result`: the number of groups, the gate result, and what is unverified.
+- `## Dependencies`: one line per group whose position `depends_on` does not explain, naming the rule (1–6).
+- `## Entangled sequences`: one line per entangled entry or transition: its steps and the state each group gets.
+- `## Grouping critique`: one or two sentences per adjacent pair (question 1) and one line per group (questions 2 and 3).
+- `## Test plan`: one line per group with its commands.
+- `## Threads` (when `pr.md` exists): one line per thread (thread, entry, new branch) and its reply draft.
+- `## Check warnings`: one line per `check_plan.py` warning with its answer.
+- `## Blocked`.
+
+Do not restate `groups.tsv` or `plan_assign.tsv` (purposes, consumers and per-entry evidence belong in the `note` column), paste script output, or keep revision history or attack responses: after a revision the file describes the revised plan. Edit the affected lines with `apply_patch`; never re-send the whole file.
 
 ## Review thread mapping and reply drafts (when `pr.md` exists)
 

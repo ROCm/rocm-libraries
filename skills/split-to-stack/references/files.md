@@ -14,7 +14,7 @@
 | `commits.md` | orchestrator | the commit list given to the readers and the commits dropped (already in B, duplicates) |
 | `ledger.tsv`, `inventory.md` | Inventory | the ledger; sizes and generated-set notes |
 | `groups.tsv`, `plan_assign.tsv`, `transitions.tsv`, `states/` | Planner | the plan |
-| `plan.md` | Planner | dependency reasons, entangled sequences, test plan, thread mapping and reply drafts, gate result |
+| `plan.md` | Planner | the current plan in prose, one line per group, pair, entry or thread (outline in `analyze-and-plan.md`) |
 | `build_date` | `build_stack.py` | fixed commit date so rebuilds give identical SHAs for unchanged branches |
 | `stack.tsv`, `refs.tsv`, `stack.md` | Builder (`stack.tsv` and `refs.tsv` written by `build_stack.py`) | `stack.tsv`: the last successful build (NN, branch, sha, tree). `refs.tsv`: the SHAs this run last set the local branches to; `--refs update` moves a branch only if it still points there. Notes in `stack.md` |
 | `tests.md` | Builder | per branch: commands, results, classification, fixes, transition proposals |
