@@ -142,10 +142,6 @@ namespace rocsparse
                 }
                 done = true;
             }
-            else
-            {
-                __builtin_amdgcn_s_sleep(1);
-            }
         }
     }
 

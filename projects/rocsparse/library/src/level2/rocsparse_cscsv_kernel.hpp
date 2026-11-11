@@ -31,7 +31,7 @@ namespace rocsparse
 {
     static constexpr uint32_t s_cscsv_blocksize = 256;
     // Entries per lane of a task.
-    static constexpr uint32_t s_cscsv_num_items = 4;
+    static constexpr uint32_t s_cscsv_num_items = 8;
 
     typedef rocsparse_status (*cscsv_analysis_launch_t)(rocsparse_handle     handle,
                                                         int64_t              m,
