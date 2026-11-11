@@ -64,6 +64,8 @@ def request_from_case(case: SdpaCase, arch: str) -> SdpaRequest:
         desc, _ = _bias_desc(case)
         dtype = case.dtype if case.bias.dtype == "same" else case.bias.dtype
         kwargs["bias"] = SdpaBias(SdpaTensor(dtype, desc.dims, desc.strides))
+    if case.alibi:
+        kwargs["alibi"] = True
     if case.emit_lse:
         kwargs["stats"] = packed((case.b, case.h_q, case.s_q, 1), "fp32")
     return SdpaRequest(**kwargs)

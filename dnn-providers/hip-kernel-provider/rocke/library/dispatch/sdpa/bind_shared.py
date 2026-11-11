@@ -196,7 +196,6 @@ _SHARED_DECLINE_REASONS = {
     "scale_tensor": "NOT_YET_IMPLEMENTED: the {family} kernels take only a scalar scale",
     "bias": "NOT_YET_IMPLEMENTED: no {family} candidate declares additive-bias support",
     "bias_broadcast": "NOT_YET_IMPLEMENTED: no {family} candidate declares additive-bias support",
-    "alibi": "NOT_YET_IMPLEMENTED: no {family} candidate declares alibi support",
     "sinks": "NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
     "dropout": "NOT_YET_IMPLEMENTED: the {family} kernels have no dropout",
     "paged": "NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
@@ -244,7 +243,8 @@ def nonfinite_scale_reject(req: SdpaRequest, family: str) -> tuple[bool, str] | 
 def value_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
     """Declines for carried features whose value the ``family`` launch cannot
     honor: an MMA mode other than the I/O dtype, a composite implementation
-    hint, a dispatch pin, and a padding mask with no lengths."""
+    hint, a dispatch pin, a padding mask with no lengths, and ALiBi off the
+    top-left causal band (hipDNN defines it only there; SEM-021)."""
     if req.mma_core_mode is not None and req.mma_core_mode != req.dtype:
         return False, (
             f"mma_core_mode: the {family} kernels run MMA in {req.dtype}, "
@@ -267,6 +267,10 @@ def value_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
         )
     if req.padding_mask and req.seq_len_q is None and req.seq_len_kv is None:
         return False, "padded: padding_mask is set but no seq_len tensor is given"
+    if req.alibi and (req.right_bound != 0 or req.diagonal != "top_left"):
+        return False, (
+            "alibi: hipDNN defines ALiBi only with top-left causal masking (SEM-021)"
+        )
     return None
 
 

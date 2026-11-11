@@ -99,6 +99,7 @@ SDPA_UNIFIED_FEATURES = frozenset(
         "padded",
         "ragged",
         "lse",
+        "alibi",  # top-left causal only (value_rejects)
         "mma_core_mode",
         "implementation_hint",
     }
@@ -116,7 +117,6 @@ _DECLINED = declined_table(
         "scale_tensor",
         "bias",
         "bias_broadcast",
-        "alibi",
         "sinks",
         "dropout",
         "paged",

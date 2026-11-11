@@ -38,7 +38,8 @@ ARCH = "gfx950"
 
 
 def fake_kernel(plan, req):
-    """Attention over exactly the tensors the binding prepared."""
+    """Attention over exactly the tensors the binding prepared, with ALiBi iff the
+    problem the binding launches has it."""
     kt = plan.kernel_tensors()
     used = kt["seqused_k"].tolist()
     table = kt["block_table"]
@@ -46,6 +47,11 @@ def fake_kernel(plan, req):
     for b, n in enumerate(used):
         k_pages.append(kt["k"][table[b].long()].reshape(-1, *kt["k"].shape[2:])[:n])
         v_pages.append(kt["v"][table[b].long()].reshape(-1, *kt["v"].shape[2:])[:n])
+    q_offsets = np.asarray(kt["cu_seqlens_q"].tolist())
+    alibi = None
+    if plan.problem.use_alibi:
+        s_q = int(np.diff(q_offsets).max())
+        alibi = H.alibi_oracle_bias(kt["q"].shape[1], s_q, max(used))
     o, lse = sdpa_reference(
         kt["q"].double().numpy(),
         torch.cat(k_pages).double().numpy(),
@@ -54,7 +60,8 @@ def fake_kernel(plan, req):
         left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
-        q_offsets=np.asarray(kt["cu_seqlens_q"].tolist()),
+        bias=alibi,
+        q_offsets=q_offsets,
         kv_offsets=np.concatenate([[0], np.cumsum(used)]),
     )
     kt["out"].copy_(torch.from_numpy(o).to(kt["out"].dtype))

@@ -99,7 +99,6 @@ _DECLINED_CASES = {
     "scale_tensor": replace(_BASE, scale_source="tensor", scale_tensor=packed((1,))),
     "bias": replace(_BASE, bias=SdpaBias(packed((2, 4, S, S)))),
     "bias_broadcast": replace(_BASE, bias=SdpaBias(packed((S, S)))),
-    "alibi": replace(_BASE, alibi=True),
     "sinks": replace(_BASE, sink_token=packed((1, 4, 1, 1))),
     "padded": replace(_BASE, padding_mask=True, seq_len_q=_LENS, seq_len_kv=_LENS),
     "ragged": replace(
@@ -137,13 +136,12 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 # A NOT_YET_IMPLEMENTED decline names an implementation shortcut with its own
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
 # Same set as the unified gate (bind_shared.declined_table shares the
-# wording): nothing about the dense hardware or ABI rules out bias/alibi
+# wording): nothing about the dense hardware or ABI rules out bias
 # either, so they are tagged here too, not called permanent.
 _NOT_YET_IMPLEMENTED_FEATURES = {
     "scale_tensor",
     "bias",
     "bias_broadcast",
-    "alibi",
     "sinks",
     "dropout",
     "paged",
@@ -181,6 +179,37 @@ def test_arch_without_a_dense_candidate_declines():
 
 def test_mma_core_mode_matching_the_dtype_is_admitted():
     _admitted(replace(_BASE, mma_core_mode="fp16"))
+
+
+# --- ALiBi: hipDNN defines it only with top-left causal masking (SEM-021) -----
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("left_bound", [-1, 64], ids=["causal", "window"])
+def test_alibi_with_top_left_causal_is_admitted(arch, left_bound):
+    _admitted(
+        _dense_request(arch=arch, alibi=True, right_bound=0, left_bound=left_bound)
+    )
+
+
+_ALIBI_OFF_TOP_LEFT_CAUSAL = {
+    "no_mask": {},
+    "bottom_right_square": {"right_bound": 0, "diagonal": "bottom_right"},
+    "bottom_right": {"s_q": 128, "right_bound": 0, "diagonal": "bottom_right"},
+    "right_bound": {"left_bound": 64, "right_bound": 1},
+}
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("band", sorted(_ALIBI_OFF_TOP_LEFT_CAUSAL))
+def test_alibi_off_top_left_causal_is_declined(arch, band):
+    req = _dense_request(arch=arch, alibi=True, **_ALIBI_OFF_TOP_LEFT_CAUSAL[band])
+    assert _declined(req).startswith("alibi:")
+
+
+def test_alibi_with_bias_is_declined_as_bias():
+    req = _dense_request(alibi=True, right_bound=0, bias=SdpaBias(packed((2, 4, S, S))))
+    assert _declined(req).startswith("bias:")
 
 
 def test_mma_core_mode_other_than_the_dtype_is_declined():
