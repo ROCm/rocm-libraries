@@ -104,4 +104,4 @@ Example (all branches are under `users/<you>/`):
 
 Offer **approve**, **edit** (regroup, rename, reorder), or **abort**. If the user edits, update the plan files, re-run `check_plan.py`, and present again. Record the approved plan verbatim in `run.md` with `approval: user`, and copy the plan files to `$RUN/approved/`.
 
-**Default run:** stop here and tell the user how to continue (approve, then ask to implement). **`--implement`:** present and record the plan with `approval: auto (--implement)`, then continue to Phase 7 without waiting, subject to the stops in SKILL.md.
+**Default run:** stop here, tell the user how to continue (approve, then ask to implement), and ask the cleanup prompt (`publish-and-cleanup.md` 9.4) for `$WT`, the helper refs and `$RUN`. **`--implement`:** present and record the plan with `approval: auto (--implement)`, then continue to Phase 7 without waiting, subject to the stops in SKILL.md.
