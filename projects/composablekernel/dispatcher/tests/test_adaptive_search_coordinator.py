@@ -1211,6 +1211,8 @@ BASE = {"schema_version": 1, "strategy": "tpe", "trials_per_problem": 4,
     ({"confirm": {"finalists": 0}}, ">= 1"),
     ({"warm_start": {"top_k": 3}}, "pairs_file, ranked_csv and/or cover"),
     ({"warm_start": {"cover": ""}}, "a candidate field name"),
+    ({"warm_start": {"cover": "   "}}, "a candidate field name"),
+    ({"warm_start": {"cover": " pipeline "}}, "a candidate field name"),
     ({"warm_start": {"cover": ["pipeline"]}}, "expected type str"),
     ({"warm_start": {"pairs_file": "missing.json"}}, "no such file"),
     ({"warm_start": {"pairs_file": 7}}, "expected type str"),
@@ -1404,6 +1406,45 @@ def test_warm_start_cover_is_not_truncated_by_top_k(tmp_path):
     assert [w["pipeline"] for w in warm] == ["p0", "p1", "p2"]
     meta = strict(tmp_path / "out" / "run.json")["problems"]["P1"]
     assert meta["warm_start"][0] == "D" and set(meta["warm_cover"]) == {"p1", "p2"}
+
+
+def test_warm_start_cover_handles_partial_fields_and_duplicate_pairs(tmp_path):
+    # A pick missing the covered field does not mask a None group, and
+    # duplicate listed names in pairs_file do not consume extra top_k slots.
+    vals = (None, "x", "y")
+
+    class PartialAdapter(FakeAdapter):
+        def enumerate_eligible(self):
+            cands = [AS.Candidate("A", "A", rec("A"), None)]
+            for i, name in enumerate(KERNELS[1:4]):
+                cands.append(
+                    AS.Candidate(name, name, {**rec(name), "tag": vals[i]}, None)
+                )
+            for name in KERNELS[4:6]:
+                cands.append(AS.Candidate(name, name, rec(name), None))
+            return {"P1": cands}
+
+    picks = tmp_path / "picks.json"
+    picks.write_text(json.dumps({"P1": ["A", "A", "C"]}))  # A lacks tag; C has "x"
+    ad = PartialAdapter({"P1": list(KERNELS[:6])})
+    s = AS.SearchCoordinator(
+        ad,
+        settings(
+            strategy="tpe",
+            trials_per_problem=5,
+            new_builds_per_run=10,
+            batch_per_problem=1,
+            warm_start={"pairs_file": str(picks), "top_k": 2, "cover": "tag"},
+        ),
+        tmp_path / "out",
+        pair_loader=json_pairs,
+        clock=FakeClock(),
+    ).run()
+    assert s.exit_code == 0, s.error
+    meta = strict(tmp_path / "out" / "run.json")["problems"]["P1"]
+    assert meta["warm_start"] == ["A", "C", "B", "D"]
+    assert meta["warm_cover"] == {"None": "B", "y": "D"}
+    assert [r.kernel_name for r in ad.measured[:4]] == ["A", "C", "B", "D"]
 
 
 def test_warm_start_cover_unknown_field_ends_the_run(tmp_path):

@@ -340,7 +340,8 @@ class GemmSearchAdapter:
             self.extra["host_cache"] = self.host_cache
         # The workers' fp8/bf8 host format follows the run's --arch, not the
         # local GPU's detection (rocminfo / amd-smi), which can fail.
-        self.arch = {"arch": self._context["arch"]} if self._context.get("arch") else {}
+        arch = self._context.get("arch") or getattr(args, "arch", None)
+        self.arch = {"arch": arch} if arch else {}
         self.extra.update(self.arch)
         by_name = {}
         for cfg in configs:
@@ -377,6 +378,11 @@ class GemmSearchAdapter:
             notes.append("fixed-vector-width kernels are candidates where a full run "
                          "pairs them; one a full run measures only because its native "
                          "kernel failed to build is not")
+        pipes = self._context.get("pipelines") or getattr(a, "pipelines", None)
+        if pipes:
+            notes.append(
+                f"--pipelines {','.join(pipes)} restricts the expanded configs"
+            )
         if a.pairs:
             notes.append(f"--pairs {a.pairs} restricts the problems to its keys and "
                          "the candidates to its pairs")

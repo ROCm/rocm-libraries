@@ -333,7 +333,15 @@ class SearchSettings:
                 ranked_csv=_get_file(wd, ww, "ranked_csv", base),
                 top_k=_get(wd, ww, "top_k", int, 5, _positive, ">= 1"),
                 use_prior=_get(wd, ww, "use_prior", bool, False),
-                cover=_get(wd, ww, "cover", str, None, bool, "a candidate field name"),
+                cover=_get(
+                    wd,
+                    ww,
+                    "cover",
+                    str,
+                    None,
+                    lambda v: bool(v) and v == v.strip(),
+                    "a candidate field name",
+                ),
             )
             if (warm.pairs_file, warm.ranked_csv, warm.cover) == (None, None, None):
                 raise SettingsError(f"{ww}: expected pairs_file, ranked_csv and/or cover")
@@ -926,7 +934,7 @@ class SearchCoordinator:
         if names == "*":
             names = [c.kernel_name for c in p.cands]
         by_name = {c.kernel_name: c for c in p.cands}
-        picks = [by_name[n] for n in names if n in by_name]
+        picks = [by_name[n] for n in dict.fromkeys(names) if n in by_name]
         if picks:
             picks = picks[: warm.top_k]
         if warm is not None and warm.cover is not None:
@@ -963,15 +971,21 @@ class SearchCoordinator:
         has, values in candidate order; each value's candidate is drawn with
         its own seeded RNG, so unrelated groups cannot change shared picks."""
         groups: Dict[Any, List[Candidate]] = {}
+        values: Dict[Any, Any] = {}
         for c in p.cands:
             if name in c.record:
-                groups.setdefault(c.record[name], []).append(c)
+                v = c.record[name]
+                k = (type(v), v)
+                values.setdefault(k, v)
+                groups.setdefault(k, []).append(c)
         drawn = {
-            v: random.Random(repr(("cover", p.seed, name, v))).choice(cands)
-            for v, cands in groups.items()
+            k: random.Random(repr(("cover", p.seed, name, values[k]))).choice(cands)
+            for k, cands in groups.items()
         }
-        have = {c.record.get(name) for c in picks}
-        out = [c for v, c in drawn.items() if v not in have]
+        have = {
+            (type(c.record[name]), c.record[name]) for c in picks if name in c.record
+        }
+        out = [c for k, c in drawn.items() if k not in have]
         p.cover = {str(c.record[name]): c.kernel_name for c in out}
         return out
 

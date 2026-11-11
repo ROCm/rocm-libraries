@@ -273,6 +273,8 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert summary["counts"]["confirm_calls"] == 2 * 2 * len(KEYS)
     assert (run["sampling_policy"], run["exhaustive"]) == ("adaptive", False)
     assert (run["context"]["arch"], run["context"]["variant"]) == ("gfx950", "standard")
+    assert "pipelines" not in run["context"]
+    assert all("--pipelines" not in n for n in run["context"]["domain_notes"])
     assert "SEARCH COMPLETE: 3/3 problems" in cap.out
     # Progress: a line per round and build, a title per measure call, no banner.
     assert "[search] round 1: building" in cap.out and "Phase 3" not in cap.out
@@ -511,6 +513,11 @@ def _kernels(monkeypatch, capsys, tmp_path, *argv, fixed=None):
     )
     assert rc == 0 and not built
     data = json.loads(path.read_text())
+    if "--pipelines" in argv:
+        want = drv.parse_pipelines(argv[argv.index("--pipelines") + 1])
+        assert data["pipelines"] == list(want)
+    else:
+        assert "pipelines" not in data
     return {k: v["pipeline"] for k, v in data["kernels"].items()}, data["pairs"]
 
 
@@ -575,7 +582,9 @@ def test_pipeline_filter_is_shared_before_limits_and_pairs(
         c["prob"] == PROBLEMS[0] and c["names"] == [expected] for c in calls
     )
     assert _read(out, "winners.json") == {KEYS[0]: [expected]}
-    assert _read(out, "run.json")["context"]["pipelines"] == ["compv4"]
+    ctx = _read(out, "run.json")["context"]
+    assert ctx["pipelines"] == ["compv4"]
+    assert "--pipelines compv4 restricts the expanded configs" in ctx["domain_notes"]
 
 
 @pytest.mark.parametrize("search", [False, True])
@@ -609,7 +618,8 @@ def test_pipeline_filter_no_matching_config_is_an_error(monkeypatch, capsys, tmp
         fixed=GFX1250,
     )
     assert rc == 1 and not built and not calls and not path.exists()
-    assert "--pipelines" in cap.out and "0 configs" in cap.out
+    assert "0 configs left after --pipelines comp_tdm" in cap.out
+    assert "expanded only:" in cap.out
 
 
 @pytest.mark.parametrize(
