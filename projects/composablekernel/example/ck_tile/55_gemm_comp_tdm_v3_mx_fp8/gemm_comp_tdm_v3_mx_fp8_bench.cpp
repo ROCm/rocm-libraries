@@ -633,6 +633,24 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
 {
     const std::string tile    = arg.get_str("tile");
     const std::string cluster = arg.get_str("cluster");
+    // EXPERIMENT (B0 8 PF): 256x256x256 with 4 fat waves (warps 2x2x1, 128x128 per wave).
+    if(arg.get_str("warps") == "2x2")
+    {
+        const std::string wt = arg.get_str("wt");
+        if(tile != "256x256x256" || (cluster != "1x1" && cluster != "2x2") ||
+           (wt != "32" && wt != "16"))
+        {
+            std::printf("-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2, -wt=32|16\n");
+            return 2;
+        }
+        if(wt == "32")
+            return cluster == "2x2"
+                       ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 32, 2>>(arg, name)
+                       : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 32>>(arg, name);
+        return cluster == "2x2"
+                   ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2>>(arg, name)
+                   : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+    }
     if(tile == "256x256x256" && cluster == "2x2")
         return run<Instance<256, 256, 256, 4, 4, TdmEpi, CDataType, 32, 2>>(arg, name);
     if(cluster != "1x1")
@@ -683,9 +701,12 @@ int dispatch(const ck_tile::ArgParser& arg)
 {
     const std::string c    = arg.get_str("c_dtype");
     const std::string tile = arg.get_str("tile");
-    const std::string wt   = tile == "256x256x256" ? "32x32x128" : "16x16x128";
-    const std::string name = "ck_comp_tdm_v3_mxfp8_e8m0x32_rcr_c" + c + "_" + tile + "_wt" + wt +
-                             "_" + arg.get_str("epilogue") +
+    const bool w2x2        = arg.get_str("warps") == "2x2";
+    const std::string wt   = w2x2 ? arg.get_str("wt") + "x" + arg.get_str("wt") + "x128"
+                             : tile == "256x256x256" ? "32x32x128"
+                                                     : "16x16x128";
+    const std::string name = "ck_comp_tdm_v3_mxfp8_e8m0x32_rcr_c" + c + "_" + tile +
+                             (w2x2 ? "_w2x2x1" : "") + "_wt" + wt + "_" + arg.get_str("epilogue") +
                              (arg.get_str("cluster") == "2x2" ? "_cl2x2" : "") +
                              (arg.get_int("k_batch") > 1 ? "_kb" + arg.get_str("k_batch") : "");
     if(c == "fp16")
@@ -712,6 +733,8 @@ int main(int argc, char* argv[])
                 "16x256x256 | 16x128x256 | 16x64x256")
         .insert(
             "cluster", "1x1", "1x1 | 2x2 (256x256x256 only): workgroup cluster with TDM multicast")
+        .insert("warps", "default", "default | 2x2 (EXPERIMENT: 256x256x256 with 4 waves)")
+        .insert("wt", "32", "with -warps=2x2: warp tile 32 (32x32x128) | 16 (16x16x128)")
         .insert("k_batch", "1", "split K into this many atomically added ranges (CShuffle only)")
         .insert("mode", "verify-sparse", "verify-sparse | verify-rand | peak | sustained")
         .insert("data", "rand", "input data for peak/sustained: rand | sparse")
