@@ -87,7 +87,7 @@ Wherever a phase text says "ask the user" or "stop and ask", a subagent writes i
 
 **Order at start:**
 1. Resolve the argument to its head branch and compute `<key>`; check whether `$RUN` already exists: if so, handle **Resume** (below) before creating anything.
-2. Resolve `$BASE_REMOTE` and `$PUSH_REMOTE` (`common.md`, Remotes), then `<you>` (`common.md`, Naming), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO` = `git rev-parse --show-toplevel` of the invoking directory). Settle the stack kind if the user said "stack".
+2. Find `$CO` (`git rev-parse --show-toplevel` of the invoking directory), resolve `$BASE_REMOTE` and `$PUSH_REMOTE` (`common.md`, Remotes), then `<you>` (`common.md`, Naming), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO`). Settle the stack kind if the user said "stack".
 3. With `--implement`: ask the Tests question now.
 4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date. Then make `$CO` clean and run the Setup sync (`survey-and-update.md`, Clean checkout and Setup sync): every branch of the stack equals its remote copy before anything else happens.
 5. Now that S is confirmed, check `$SPLIT` and `$SPLIT/*`: if helper refs exist without a `run.md`, show them with their SHAs and let the user choose another name or delete them (the Restart procedure).
