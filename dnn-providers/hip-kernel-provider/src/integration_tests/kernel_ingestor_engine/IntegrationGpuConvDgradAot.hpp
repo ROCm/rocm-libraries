@@ -16,6 +16,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -260,31 +261,30 @@ inline std::string candidateCount(size_t candidates)
     return std::to_string(candidates) + " candidate(s)";
 }
 
-/// The kernel id following @p marker in the last log that carries it, or empty.
-inline std::string loggedKernel(const LogRecorderBase& recorder, const std::string& marker)
+/// The kernel id following @p marker (one of detail::KERNEL_SELECTION_LOG_MARKERS) in the
+/// last log that carries it, or empty.
+inline std::string loggedKernel(const LogRecorderBase& recorder, std::string_view marker)
 {
     std::string kernel;
     for(const auto& log : recorder.getRecordedLogs())
     {
         const auto at = log.message.find(marker);
-        if(at == std::string::npos)
+        if(at != std::string::npos)
         {
-            continue;
+            kernel = log.message.substr(at + marker.size(), detail::KERNEL_ID_LENGTH);
         }
-        const auto begin = at + marker.size();
-        kernel = log.message.substr(begin, log.message.find(' ', begin) - begin);
     }
     return kernel;
 }
 
 inline std::string selectedKernel(const LogRecorderBase& recorder)
 {
-    return loggedKernel(recorder, "' selected kernel ");
+    return loggedKernel(recorder, detail::SELECTED_KERNEL_LOG);
 }
 
 inline std::string servedKernel(const LogRecorderBase& recorder)
 {
-    return loggedKernel(recorder, "' served kernel ");
+    return loggedKernel(recorder, detail::KERNEL_SELECTION_LOG_MARKERS[1]);
 }
 
 inline std::string canonicalUuid(const std::string& text)
