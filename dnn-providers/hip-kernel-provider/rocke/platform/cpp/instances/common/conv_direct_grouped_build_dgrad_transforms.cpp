@@ -95,7 +95,7 @@ static rocke_kernel_def_t*
     const bool RTC = spec->runtime_channels;
     const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int BLOCK = 64;
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
+    const rocke_type_t* io_type = rocke_dconv_io_type(b, p->dtype);
     dconv_xform_params_t prm;
     if(io_type == NULL)
         return NULL;
@@ -104,7 +104,7 @@ static rocke_kernel_def_t*
     dconv_xform_params(b, io_type, RTC, &prm);
 
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
-    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(p->dtype));
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
 
     rocke_value_t* tid = rocke_b_thread_id_x(b);
@@ -184,8 +184,13 @@ static rocke_kernel_def_t*
         = rocke_b_select(b, valid, rocke_b_mul(b, src_off, c_half_bytes), oob_sentinel);
     rocke_value_t* a_rsrc = rocke_b_buffer_rsrc(b, prm.A, prm.A_bytes);
     rocke_value_t* d_rsrc = rocke_b_buffer_rsrc(b, prm.D, prm.D_bytes);
-    rocke_value_t* val = is_bf16 ? rocke_b_buffer_load_bf16(b, a_rsrc, src_safe, c0)
-                                 : rocke_b_buffer_load_f16(b, a_rsrc, src_safe, c0);
+    rocke_value_t* val;
+    if(rocke_dconv_is_f32_storage(p->dtype))
+        val = rocke_b_buffer_load_vN(b, a_rsrc, src_safe, c0, rocke_f32(), 1);
+    else if(is_bf16)
+        val = rocke_b_buffer_load_bf16(b, a_rsrc, src_safe, c0);
+    else
+        val = rocke_b_buffer_load_f16(b, a_rsrc, src_safe, c0);
 
     static const char* const dst_coords[4] = {"c", "r", "s", "k"};
     rocke_tensor_descriptor_t* dst_desc;
@@ -216,7 +221,9 @@ static rocke_kernel_def_t*
     }
     rocke_value_t* dst_safe
         = rocke_b_select(b, valid, rocke_b_mul(b, dst_off, c_half_bytes), oob_sentinel);
-    if(is_bf16)
+    if(rocke_dconv_is_f32_storage(p->dtype))
+        rocke_b_buffer_store_vN_f32(b, d_rsrc, dst_safe, c0, val, 1);
+    else if(is_bf16)
         rocke_b_buffer_store_bf16(b, d_rsrc, dst_safe, c0, val);
     else
         rocke_b_buffer_store_f16(b, d_rsrc, dst_safe, c0, val);
@@ -229,29 +236,11 @@ static rocke_kernel_def_t*
 /* ===================================================================== *
  *  build_direct_reorganize_weights
  * ===================================================================== */
-static rocke_value_t* dconv_xform_load(rocke_ir_builder_t* b,
-                                       bool is_bf16,
-                                       rocke_value_t* rsrc,
-                                       rocke_value_t* voff,
-                                       rocke_value_t* c0,
-                                       int dwords)
+/* _xform_dtype_tag: the transforms only move elements, so fp32 and tf32
+ * share one binary ("_f32"); fp16 / bf16 keep their untagged names. */
+static const char* dconv_xform_dtype_tag(const char* dtype)
 {
-    return is_bf16 ? rocke_b_buffer_load_vN_bf16(b, rsrc, voff, c0, dwords)
-                   : rocke_b_buffer_load_vN_f16(b, rsrc, voff, c0, dwords);
-}
-
-static void dconv_xform_store(rocke_ir_builder_t* b,
-                              bool is_bf16,
-                              rocke_value_t* rsrc,
-                              rocke_value_t* voff,
-                              rocke_value_t* c0,
-                              rocke_value_t* val,
-                              int dwords)
-{
-    if(is_bf16)
-        rocke_b_buffer_store_vN_bf16(b, rsrc, voff, c0, val, dwords);
-    else
-        rocke_b_buffer_store_vN_f16(b, rsrc, voff, c0, val, dwords);
+    return rocke_dconv_is_f32_storage(dtype) ? "_f32" : "";
 }
 
 /* _reorganize_weights_rtc_body: the W_coa layout's K-atom / M-tile counts
@@ -259,7 +248,6 @@ static void dconv_xform_store(rocke_ir_builder_t* b,
  * zero their redirected load returned. */
 static rocke_kernel_def_t* dconv_reorganize_rtc_body(rocke_ir_builder_t* b,
                                                      const rocke_direct_conv_problem_t* p,
-                                                     bool is_bf16,
                                                      int K_ATOM_SZ,
                                                      int ELEMS_PER_LANE,
                                                      const dconv_xform_params_t* prm,
@@ -342,15 +330,15 @@ static rocke_kernel_def_t* dconv_reorganize_rtc_body(rocke_ir_builder_t* b,
     }
     rocke_value_t* safe_src
         = rocke_b_select(b, src_ok, rocke_b_mul(b, src_off, c_half_bytes), oob_sentinel);
-    rocke_value_t* val = dconv_xform_load(b, is_bf16, a_rsrc, safe_src, c0, ELEMS_PER_LANE / 2);
+    rocke_value_t* val = rocke_dconv_load_elems(b, p->dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE);
     rocke_value_t* dst_off;
     {
         rocke_value_t* m1 = rocke_b_mul(b, bx, rocke_b_const_i32(b, WAVE * ELEMS_PER_LANE));
         rocke_value_t* m2 = rocke_b_mul(b, tid, rocke_b_const_i32(b, ELEMS_PER_LANE));
         dst_off = rocke_b_add(b, m1, m2);
     }
-    dconv_xform_store(
-        b, is_bf16, d_rsrc, rocke_b_mul(b, dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE / 2);
+    rocke_dconv_store_elems(
+        b, p->dtype, d_rsrc, rocke_b_mul(b, dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     return rocke_ir_builder_kernel(b);
@@ -363,13 +351,12 @@ static rocke_kernel_def_t*
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool fold_k32 = spec->fold_k32;
     const bool RTC = spec->runtime_channels;
-    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int K_ATOM_SZ = fold_k32 ? 32 : 16;
     const int ELEMS_PER_LANE = fold_k32 ? 8 : 4;
     const int N_K_ATOMS = (p->kpg + K_ATOM_SZ - 1) / K_ATOM_SZ;
     const int N_M_TILES = (p->cpg + 15) / 16;
     const int WAVE = 64;
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
+    const rocke_type_t* io_type = rocke_dconv_io_type(b, p->dtype);
     dconv_xform_params_t prm;
     if(io_type == NULL)
         return NULL;
@@ -378,23 +365,14 @@ static rocke_kernel_def_t*
     dconv_xform_params(b, io_type, RTC, &prm);
 
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
-    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(p->dtype));
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* bx = rocke_b_block_id_x(b);
 
     if(RTC)
-        return dconv_reorganize_rtc_body(b,
-                                         p,
-                                         is_bf16,
-                                         K_ATOM_SZ,
-                                         ELEMS_PER_LANE,
-                                         &prm,
-                                         c0,
-                                         c_half_bytes,
-                                         oob_sentinel,
-                                         tid,
-                                         bx);
+        return dconv_reorganize_rtc_body(
+            b, p, K_ATOM_SZ, ELEMS_PER_LANE, &prm, c0, c_half_bytes, oob_sentinel, tid, bx);
 
     const int n_per_group = p->KH * p->KW * N_K_ATOMS * N_M_TILES;
     rocke_value_t* grp = rocke_b_div(b, bx, rocke_b_const_i32(b, n_per_group));
@@ -466,7 +444,7 @@ static rocke_kernel_def_t*
     }
     rocke_value_t* safe_src
         = rocke_b_select(b, src_ok, rocke_b_mul(b, src_off, c_half_bytes), oob_sentinel);
-    rocke_value_t* val = dconv_xform_load(b, is_bf16, a_rsrc, safe_src, c0, ELEMS_PER_LANE / 2);
+    rocke_value_t* val = rocke_dconv_load_elems(b, p->dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE);
     rocke_value_t* dst_off;
     {
         rocke_value_t* m1 = rocke_b_mul(b, bx, rocke_b_const_i32(b, WAVE * ELEMS_PER_LANE));
@@ -476,8 +454,8 @@ static rocke_kernel_def_t*
     /* Every lane stores, zeros where the source is out of range: the main
      * kernel masks only the dY operand of a partial K-atom. */
     val = rocke_b_select(b, src_ok, val, rocke_b_zero_vec(b, io_type, ELEMS_PER_LANE));
-    dconv_xform_store(
-        b, is_bf16, d_rsrc, rocke_b_mul(b, dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE / 2);
+    rocke_dconv_store_elems(
+        b, p->dtype, d_rsrc, rocke_b_mul(b, dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     return rocke_ir_builder_kernel(b);
@@ -501,9 +479,10 @@ rocke_kernel_def_t* rocke_build_direct_transpose_weights_dgrad_new(
             return NULL;
         snprintf(name,
                  sizeof name,
-                 "direct_transpose_weights_dgrad_%s%s",
+                 "direct_transpose_weights_dgrad_%s%s%s",
                  short_buf,
-                 spec->runtime_channels ? "_rtc" : "");
+                 spec->runtime_channels ? "_rtc" : "",
+                 dconv_xform_dtype_tag(spec->problem.dtype));
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
             return NULL;
         return dconv_build_transpose(b, spec);
@@ -532,10 +511,11 @@ rocke_kernel_def_t* rocke_build_direct_reorganize_weights_new(
             return NULL;
         snprintf(name,
                  sizeof name,
-                 "direct_reorg_wt%s_%s%s",
+                 "direct_reorg_wt%s_%s%s%s",
                  spec->fold_k32 ? "32" : "",
                  short_buf,
-                 spec->runtime_channels ? "_rtc" : "");
+                 spec->runtime_channels ? "_rtc" : "",
+                 dconv_xform_dtype_tag(spec->problem.dtype));
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
             return NULL;
         return dconv_build_reorganize(b, spec);

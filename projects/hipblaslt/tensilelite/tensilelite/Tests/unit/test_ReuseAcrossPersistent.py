@@ -469,7 +469,7 @@ def test_a_rap_kernel_never_reaches_the_tail_loop_emitter(
     import rocisa
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(_make_params(gfx1250_iim, AssertSummationElementMultiple=32),
@@ -707,12 +707,17 @@ _AUDITED = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
 
 
 def _kernelSource(sol, assembler):
-    """The kernel's assembly source; raises if the kernel fails to generate."""
+    """The kernel's assembly source.
+
+    Raises RuntimeError if the kernel fails to generate, a label defined twice
+    included: the writer refuses that before the CFG builder, which would abort
+    the whole test process instead.
+    """
     import shutil
     import rocisa
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
     with preserve_rocisa_kernel_state():
@@ -762,8 +767,9 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
 # ---------------------------------------------------------------------------
 # Parameters off rap_gfx1250.yaml's audited configuration, which a tuning run
 # reaches. RAP emits the compute section twice, so a label built there from a
-# literal is defined twice unless rapLabel suffixes it, and the CFG builder
-# aborts the whole process on a duplicate rather than failing the kernel.
+# literal is defined twice unless rapLabel suffixes it. The CFG builder would
+# abort the whole process on the duplicate, so the writer fails the kernel
+# first.
 # ---------------------------------------------------------------------------
 def _labels(source):
     return re.findall(r"^(label_\w+):", source, re.M)
@@ -777,6 +783,54 @@ def test_rap_kernel_generates_with_the_gl2_prefetch(_gp_gfx1250, gfx1250_iim, as
     labels = _labels(_kernelSource(sol, assembler))
     assert {"label_Skip_GL2", "label_Skip_GL2_RAPIterN"} <= set(labels)
     assert len(labels) == len(set(labels))
+
+
+def test_duplicate_labels_names_each_label_defined_twice():
+    from tensilelite.KernelWriter import duplicateLabels
+
+    inner = Module("inner")
+    inner.add(Label("Skip_GL2", ""))
+    inner.add(Label("Once", ""))
+    module = Module("kernel")
+    module.add(Label("Skip_GL2", ""))
+    module.add(inner)
+    module.add(Label("Skip_GL2", ""))
+    assert duplicateLabels(module) == ["label_Skip_GL2"]
+    assert duplicateLabels(inner) == []
+
+
+def test_rap_kernel_with_a_duplicate_label_fails_instead_of_aborting(
+    _gp_gfx1250, gfx1250_iim, assembler, monkeypatch
+):
+    # Undo the suffix, as a regression would: both copies define label_Skip_GL2.
+    monkeypatch.setattr(PersistentKernelState, "rapLabel", lambda self, name: name)
+    sol = Solution(_make_params(gfx1250_iim, PrefetchGL2=1, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    with pytest.raises(RuntimeError, match="defines a label more than once: .*label_Skip_GL2"):
+        _kernelSource(sol, assembler)
+
+
+def test_rap_reuse_copy_prefetches_only_b_into_gl2(_gp_gfx1250, gfx1250_iim, assembler):
+    """A and its scales stay resident, so the reuse copy warms L2 for B alone.
+
+    Their prefetch there is pure overhead: on g04-2 dropping it made RAP 1 with
+    PrefetchGL2 1 3-5% faster, about as much with 288 KB of A as with 16 MB.
+    """
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=_MX_PROBLEM_TYPE, PrefetchGL2=1, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    source = _kernelSource(sol, assembler)
+    fill, reuse = source.split("label_RAP_IterN:", 1)
+    reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
+
+    def prefetched(section):
+        return set(re.findall(r"prefetch_b8 v\[vgprGL2PrefetchAddr(A|B|MXSA|MXSB)_", section))
+
+    assert prefetched(fill) == {"A", "B", "MXSA", "MXSB"}
+    assert prefetched(reuse) == {"B", "MXSB"}
+    assert not re.search(r"GL2Prefetch(?:Addr|Inc)(?:A|MXSA)\b|GL2PrefetchAddr(?:A|MXSA)_", reuse), \
+        "the reuse copy still computes A's prefetch addresses"
 
 
 def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
