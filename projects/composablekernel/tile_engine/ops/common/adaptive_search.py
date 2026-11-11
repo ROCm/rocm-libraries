@@ -1001,9 +1001,8 @@ class SearchCoordinator:
     def _cover(self, p: _Problem, cover, picks) -> List[Candidate]:
         """For each field of ``cover`` in turn, one candidate per value of that
         record field that no pick so far has (the earlier fields' included),
-        values in candidate order; each value's candidate is drawn with the
-        problem's seed, so a run is reproducible and seeds differ."""
-        rng = random.Random(f"cover:{p.seed}")
+        values in candidate order; each field/value group has its own seeded
+        RNG, so unrelated groups cannot change shared representatives."""
         out: List[Candidate] = []
         by_field: Dict[str, Dict[str, str]] = {}
         for name in _cover_fields(cover):
@@ -1011,7 +1010,10 @@ class SearchCoordinator:
             for c in p.cands:
                 if name in c.record:
                     groups.setdefault(c.record[name], []).append(c)
-            drawn = {v: rng.choice(cands) for v, cands in groups.items()}
+            drawn = {
+                v: random.Random(repr(("cover", p.seed, name, v))).choice(cands)
+                for v, cands in groups.items()
+            }
             have = {c.record.get(name) for c in [*picks, *out]}
             new = [c for v, c in drawn.items() if v not in have]
             by_field[name] = {str(c.record[name]): c.kernel_name for c in new}

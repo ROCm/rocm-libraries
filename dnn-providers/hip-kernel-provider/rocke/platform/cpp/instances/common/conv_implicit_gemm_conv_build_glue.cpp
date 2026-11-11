@@ -140,6 +140,17 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
+    /* The override hands the MFMA its A operand directly, bypassing the LDS
+     * fragment read where the fp32 -> tf32 reinterpretation happens. */
+    if(rocke_conv_data_is_tf32(spec->mma_dtype) && overrides != NULL
+       && overrides->a_operand_override != NULL)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "mma_dtype='tf32' does not support a_operand_override: the override "
+                        "supplies the A operand in its own type, not as a TF32 fragment");
+        return false;
+    }
     /* The merged A/B addressing lives in the split address form; the
      * descriptor-DAG path a caller-supplied (n, ho, wo) decode forces has no
      * slot for the merged channel decode or the diagonal mask. (3-D, the other
@@ -208,7 +219,16 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         rocke_param_opts_t a_opts;
         rocke_param_opts_t bp_opts;
         rocke_param_opts_t d_opts;
-        const rocke_type_t* f16_global = rocke_ptr_type(b, rocke_f16(), "global");
+        /* ir_dtype_a/b/d = _ir_dtype(spec.data.dtype_a/b/d) */
+        const rocke_type_t* ir_a = rocke_conv_ir_dtype(b, spec->dtype_a);
+        const rocke_type_t* ir_b = rocke_conv_ir_dtype(b, spec->dtype_b);
+        const rocke_type_t* ir_d = rocke_conv_ir_dtype(b, spec->dtype_d);
+        if(ir_a == NULL || ir_b == NULL || ir_d == NULL)
+        {
+            return false; /* rocke_conv_ir_dtype set the builder error */
+        }
+        ctx->ir_dtype_a = ir_a;
+        ctx->ir_dtype_b = ir_b;
 
         memset(&a_opts, 0, sizeof(a_opts));
         a_opts.noalias = true;
@@ -217,7 +237,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         a_opts.readonly_set = true;
         a_opts.align = 16;
         a_opts.align_set = true;
-        ctx->A = rocke_b_param(b, "A", f16_global, &a_opts);
+        ctx->A = rocke_b_param(b, "A", rocke_ptr_type(b, ir_a, "global"), &a_opts);
 
         memset(&bp_opts, 0, sizeof(bp_opts));
         bp_opts.noalias = true;
@@ -226,7 +246,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         bp_opts.readonly_set = true;
         bp_opts.align = 16;
         bp_opts.align_set = true;
-        ctx->Bp = rocke_b_param(b, "B", f16_global, &bp_opts);
+        ctx->Bp = rocke_b_param(b, "B", rocke_ptr_type(b, ir_b, "global"), &bp_opts);
 
         memset(&d_opts, 0, sizeof(d_opts));
         d_opts.noalias = true;
@@ -235,7 +255,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         d_opts.writeonly_set = true;
         d_opts.align = 16;
         d_opts.align_set = true;
-        ctx->D = rocke_b_param(b, "D", f16_global, &d_opts);
+        ctx->D = rocke_b_param(b, "D", rocke_ptr_type(b, ir_d, "global"), &d_opts);
 
         /* extra_context = extra_params(b) if extra_params is not None else None */
         if(overrides != NULL && overrides->extra_params != NULL)
@@ -361,19 +381,44 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* atom = spec.atom if op.family == "mma" else None.
      *
      * Python: ``ImplicitGemmConvSpec.atom`` is
-     *     mfma_atom("f16", warp_tile_m, warp_tile_n, warp_tile_k)
+     *     mfma_atom(spec.data.mma_a, warp_tile_m, warp_tile_n, warp_tile_k)
+     * keyed on the MMA dtype: a TF32 spec stores fp32 but issues an XF32 atom,
+     * whose fragment lengths differ from the fp32 atom's
      * and ``build_implicit_gemm_conv`` keeps it only on the MFMA path
      * (``atom = spec.atom if op.family == "mma" else None``). ``rocke_mfma_atom``
      * returns a pointer into the same immutable static catalog the epilogues
      * use, so the lookup is byte-identical to ``spec.atom``. NULL stays correct
      * on the WMMA family. */
-    ctx->atom
-        = ctx->is_wmma
-              ? NULL
-              : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    ctx->atom = ctx->is_wmma
+                    ? NULL
+                    : rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                                      spec->warp_tile_m,
+                                      spec->warp_tile_n,
+                                      spec->warp_tile_k);
 
     ctx->a_per_lane = ctx->op->srcs[0].frag_len;
     ctx->b_per_lane = ctx->op->srcs[1].frag_len;
+    /* LDS operand element type follows the *storage* dtype the tiles were
+     * written in: bf16 -> BF16, fp32 -> F32; fp16 goes through the default f16
+     * path. Equal to the MMA operand type except under TF32 compute, where the
+     * fp32 fragment is reinterpreted after the read (_load_mma_operand). */
+    ctx->smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
+    ctx->is_tf32 = rocke_conv_data_is_tf32(spec->mma_dtype);
+    /* Instruction-stream shape of one logical MMA step, for the compv3/compv4
+     * scheduling hints. 1/1 for every non-TF32 atom so their hints are
+     * unchanged; under TF32 an 8-wide fp32 fragment is two ds_read_b128 and a
+     * BF16x3-emulated atom issues three physical MFMAs. */
+    if(ctx->is_tf32)
+    {
+        ctx->ds_reads_per_frag
+            = (ctx->a_per_lane + ROCKE_CONV_TF32_LDS_LOAD_MAX - 1) / ROCKE_CONV_TF32_LDS_LOAD_MAX;
+        ctx->mfmas_per_mma = rocke_conv_mfma_issues_per_mma(ctx->op);
+    }
+    else
+    {
+        ctx->ds_reads_per_frag = 1;
+        ctx->mfmas_per_mma = 1;
+    }
     ctx->c_per_lane = ctx->op->dst.frag_len;
 
     /* ---- block tile dims ---- (817) */
@@ -602,8 +647,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         a_shape[1] = ctx->lds_layout.row_stride;
         b_shape[0] = ctx->block_n;
         b_shape[1] = ctx->lds_layout.row_stride;
-        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
-        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
+        ctx->A_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem");
 
         /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
          * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
@@ -614,8 +659,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
-            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
-            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem2");
+            ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem2");
         }
         else
         {
@@ -759,20 +804,22 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         const int cpg = rocke_conv_problem_cpg(&spec->problem);
         const int max_dwords
             = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
-        rocke_status_t sa = rocke_async_tile_loader_from_tile(ctx->block_m,
-                                                              ctx->block_k,
-                                                              ctx->threads,
-                                                              spec->wave_size,
-                                                              max_dwords,
-                                                              cpg,
-                                                              &ctx->a_loader);
-        rocke_status_t sb = rocke_async_tile_loader_from_tile(ctx->block_n,
-                                                              ctx->block_k,
-                                                              ctx->threads,
-                                                              spec->wave_size,
-                                                              max_dwords,
-                                                              cpg,
-                                                              &ctx->b_loader);
+        rocke_status_t sa = rocke_async_tile_loader_from_tile_typed(ctx->block_m,
+                                                                    ctx->block_k,
+                                                                    ctx->threads,
+                                                                    spec->wave_size,
+                                                                    ctx->ir_dtype_a,
+                                                                    max_dwords,
+                                                                    cpg,
+                                                                    &ctx->a_loader);
+        rocke_status_t sb = rocke_async_tile_loader_from_tile_typed(ctx->block_n,
+                                                                    ctx->block_k,
+                                                                    ctx->threads,
+                                                                    spec->wave_size,
+                                                                    ctx->ir_dtype_b,
+                                                                    max_dwords,
+                                                                    cpg,
+                                                                    &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
@@ -796,6 +843,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: wavelet tile loader from_tile failed");
             return false;
         }
+        ctx->a_wavelet_loader.elem_dtype = ctx->ir_dtype_a;
+        ctx->b_wavelet_loader.elem_dtype = ctx->ir_dtype_b;
         ctx->have_wavelet_loaders = true;
 
         /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
@@ -838,6 +887,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: coalesced tile loader from_tile failed");
             return false;
         }
+        /* CoalescedTileLoader(..., elem_dtype=ir_dtype_a / ir_dtype_b) */
+        ctx->a_sync_loader.elem_dtype = ctx->ir_dtype_a;
+        ctx->b_sync_loader.elem_dtype = ctx->ir_dtype_b;
         ctx->have_sync_loaders = true;
     }
 

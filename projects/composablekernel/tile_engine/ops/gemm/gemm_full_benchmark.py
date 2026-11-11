@@ -214,6 +214,25 @@ def resolve_configs(args, arch):
                      cfg_dir / names[-1]))]
 
 
+def parse_pipelines(value):
+    """Parse a restriction to bridged pipeline names, not a config override."""
+    from codegen_common import CommonTypeMappings
+
+    names = tuple(part.strip() for part in value.split(","))
+    if not all(names):
+        raise argparse.ArgumentTypeError(
+            "expected non-empty comma-separated pipeline names"
+        )
+    if len(set(names)) != len(names):
+        raise argparse.ArgumentTypeError("duplicate pipeline names")
+    unknown = sorted(set(names) - CommonTypeMappings.PIPELINE_TO_CK.keys())
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"unknown pipeline name(s): {', '.join(unknown)}"
+        )
+    return names
+
+
 def load_problems(path, variant):
     if path:
         with open(path) as f:
@@ -633,7 +652,7 @@ def repeat_plan(measured, top_k):
     return plan
 
 
-def run_repeats(plan, count, problems, built_kernels, devices, run_args):
+def run_repeats(plan, count, problems, built_kernels, devices, run_args, extra=None):
     """Re-time each planned (problem, kernel) ``count`` times, one subprocess per
     launch, rep-major so repeats of one kernel are spread over the run.
 
@@ -664,7 +683,13 @@ def run_repeats(plan, count, problems, built_kernels, devices, run_args):
                 return
             fails = []
             rows, _, n_fail, n_skip = _run_batch_on_device(
-                device_id, unit, rargs, worker_path, base_env, failures=fails,
+                device_id,
+                unit,
+                rargs,
+                worker_path,
+                base_env,
+                extra,
+                failures=fails,
                 workers=workers,
             )
             if workers.cancelled:
@@ -913,6 +938,15 @@ def main():
         help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
+        "--pipelines",
+        type=parse_pipelines,
+        default=None,
+        metavar="NAME[,NAME...]",
+        help="Keep only these bridged pipelines from the selected configs, before "
+        "--max-kernels and --pairs; applies to plain runs, --list-pairs and search. "
+        "Does not change which config files are selected",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Check each kernel's output against an fp32 numpy reference "
@@ -1009,6 +1043,9 @@ def main():
         "summary.json, rounds/, artifacts/); must not hold an earlier run",
     )
     args = parser.parse_args()
+    pipeline_metadata = (
+        {"pipelines": args.pipelines} if args.pipelines is not None else {}
+    )
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
     if args.build_timeout is not None and args.build_timeout <= 0:
@@ -1156,6 +1193,9 @@ def main():
         )
     vfb.report_rejects()
 
+    if args.pipelines is not None:
+        all_configs = [cfg for cfg in all_configs if cfg.pipeline in args.pipelines]
+        print(f"  Pipeline filter (--pipelines): {', '.join(args.pipelines)}")
     all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
     if budgets:
         # Launch variants, not new kernels: each budget runs its kernel's build.
@@ -1189,6 +1229,7 @@ def main():
             "layout": sweep_layout,
             "variant": codegen_variant,
             "configs": config_paths,
+            **pipeline_metadata,
             "problems": [
                 {"M": int(p["M"]), "N": int(p["N"]), "K": int(p["K"])} for p in problems
             ],
@@ -1222,7 +1263,8 @@ def main():
                     print(
                         f"  ERROR: --pairs lists {len(items)} {what} this run does not "
                         f"have (same configs, problems, dtype, layout and arch"
-                        f"{', and --budget-pct' if budgets else ''}?): "
+                        f"{', and --budget-pct' if budgets else ''}"
+                        f"{' and --pipelines' if args.pipelines is not None else ''}?): "
                         f"{', '.join(items[:3])}{' ...' if len(items) > 3 else ''}"
                     )
             return 1
@@ -1290,6 +1332,7 @@ def main():
             "variant": codegen_variant,
             "configs": config_paths,
             **({"budget_pct": budgets} if budgets else {}),
+            **pipeline_metadata,
         }
         return run_gemm_search(
             args, search_settings, hooks, problems=problems, configs=all_configs,
@@ -1419,6 +1462,7 @@ def main():
         hooks["measured"] = measured
     # The workers' fp8/bf8 host format (OCP or FNUZ) follows the arch the
     # kernels were built for, not the local GPU's detection, which can fail.
+    worker_extra = {"arch": arch}
     stats = benchmark_on_devices(
         problems,
         pairs,
@@ -1428,7 +1472,7 @@ def main():
         worker_path,
         base_env,
         csv_path,
-        {"arch": arch},
+        worker_extra,
         **hooks,
     )
 
@@ -1448,7 +1492,13 @@ def main():
             rwriter.writeheader()
             run_args = (args, worker_path, base_env, rwriter, rfh, threading.Lock())
             repeat_result = run_repeats(
-                plan, args.repeat_count, problems, built_kernels, devices, run_args
+                plan,
+                args.repeat_count,
+                problems,
+                built_kernels,
+                devices,
+                run_args,
+                worker_extra,
             )
         stats["failures"] += repeat_result[1]
     if fail_file:

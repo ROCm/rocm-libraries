@@ -202,6 +202,12 @@ typedef struct rocke_implicit_gemm_conv_spec
     const char* dtype_b; /* default "fp16" */
     const char* dtype_d; /* default "fp16" */
     const char* dtype_acc; /* default "fp32" */
+    /* ConvDataSpec.mma_dtype: the matrix-core input type when it differs from
+     * the storage type. NULL (Python None, the default) = the MMA consumes
+     * dtype_a / dtype_b as stored. "tf32": A and B stay fp32 in memory and LDS
+     * and each LDS fragment is reinterpreted as vec<tf32xN> for the catalog's
+     * TF32 atom (native XF32 on gfx942, BF16x3 emulation on gfx950). */
+    const char* mma_dtype; /* default NULL */
 
     rocke_conv_acc_epilogue_t acc_epilogue; /* default identity */
 
@@ -285,6 +291,17 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
 bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
                                                char* reason,
                                                size_t reason_cap);
+
+/* The forward kernel's TF32 gate, used by both
+ * rocke_implicit_gemm_conv_spec_validate (arch NULL) and
+ * rocke_implicit_gemm_conv_is_valid_spec (with the arch), as dgrad and wgrad
+ * share rocke_conv_tf32_conv_spec_reason. Every non-TF32 spec passes unless it
+ * spells TF32 as a storage dtype. Returns true and writes the reason when the
+ * spec cannot build; false when it can. Mirrors Python _fwd_tf32_reason. */
+bool rocke_conv_fwd_tf32_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                const char* arch,
+                                char* reason,
+                                size_t reason_cap);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). Returns
  * ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

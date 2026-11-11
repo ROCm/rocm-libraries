@@ -50,6 +50,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Python's `//` floors; C's `/` truncates toward zero.  Every use below is on a
  * value already known to be divisible or non-negative, but the kernel's row
@@ -90,6 +91,8 @@ static rocke_value_t*
     {
         return rocke_b_cast_to_f32(b, rocke_b_buffer_load_f16(b, rsrc, byte_off, ctx->c0));
     }
+    if(strcmp(ctx->DT->name, "f32") == 0)
+        return rocke_dconv_scalar_load(b, "fp32", rsrc, byte_off, ctx->c0);
     return rocke_b_cast_to_f32(b, rocke_b_buffer_load_bf16(b, rsrc, byte_off, ctx->c0));
 }
 
@@ -103,6 +106,10 @@ static void dwcol_store_elem(rocke_dconv_dwcol_ctx_t* ctx,
     if(strcmp(ctx->DT->name, "f16") == 0)
     {
         rocke_b_buffer_store_f16(b, rsrc, byte_off, ctx->c0, rocke_b_trunc_f32_to_f16(b, acc));
+    }
+    else if(strcmp(ctx->DT->name, "f32") == 0)
+    {
+        rocke_b_buffer_store_f32(b, rsrc, byte_off, ctx->c0, acc);
     }
     else
     {
@@ -123,18 +130,13 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
      * raise before a single op is emitted. */
     if(rocke_direct_depthwise_col_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
     if(!rocke_direct_depthwise_col_is_valid_spec(spec, ctx->arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseColSpec for %s: %s", ctx->arch, reason);
         return false;
     }
 
@@ -148,7 +150,7 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
     /* Input rows one tile's band can reach: (BLOCK_H - 1) * stride + KH. */
     ctx->n_iters = rocke_direct_depthwise_col_n_iters(spec);
 
-    ctx->DT = rocke_fuse_dtype_to_ir_str(spec->dtype);
+    ctx->DT = rocke_dconv_dw_col_storage(spec->dtype);
     if(ctx->DT == NULL)
     {
         if(b->status == ROCKE_OK)
@@ -157,9 +159,9 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
         }
         return false;
     }
-    /* Python: ELEM_BYTES = 2 -- the validator has already restricted DT to
-     * f16/bf16, both 2 bytes wide. */
-    ctx->ELEM_BYTES = 2;
+    /* The validator has already restricted DT to f16/bf16 (2 bytes) or f32
+     * (4 bytes; tf32 runs the same exact fp32 math). */
+    ctx->ELEM_BYTES = strcmp(ctx->DT->name, "f32") == 0 ? 4 : 2;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 

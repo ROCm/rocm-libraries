@@ -626,6 +626,14 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        emitted through ``const_i32`` (no range check) and the voffset feeding it is
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
+       The UNIT differs per operand and is not cosmetic. K/V always go through a
+       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
+       and in elements otherwise (``global_load_vN`` takes an element index). O is
+       element-addressed in every mode, despite ``_emit_o_store`` naming its
+       address argument ``q_row_byte``. Bounding ragged Q in elements lets a spec
+       between 2**30 and 2**31 elements through to a byte offset that overflows.
+
     Order matters between 2 and 4: a negative extent makes the products in 4
     vacuously true, so the sign check has to run first.
 
@@ -668,7 +676,17 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= INT32_LIMIT:
+    if spec.ragged:
+        # A ragged Q goes through a buffer resource whose num_records AND voffset
+        # are both i32 BYTES, so the ceiling is half the element count the
+        # element-offset paths get. O stays element-addressed even here.
+        qo_bytes = qo_elems * 2
+        if qo_bytes >= INT32_LIMIT:
+            return False, (
+                f"Q/O extent is {qo_bytes} B, at or past the 32-bit "
+                f"buffer-resource limit ({INT32_LIMIT} B)"
+            )
+    elif qo_elems >= INT32_LIMIT:
         return False, (
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"

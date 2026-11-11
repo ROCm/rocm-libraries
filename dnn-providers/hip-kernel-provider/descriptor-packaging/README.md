@@ -49,7 +49,7 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
-Two filters decide what a build packs, and both prune exactly as arch pruning does:
+Three filters decide what a build packs, and all prune exactly as arch pruning does:
 
 - **Family folders.** A descriptor family lives in a top-level child folder of a root
   (`rocKE/` and `FlyDSL/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
@@ -60,6 +60,12 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   name deeper in the tree is not a family. A root that is itself placed inside a family
   folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
   pointing a root there is the user's responsibility.
+- **Incomplete bundles.** `--exclude-folder` also takes a `/`-separated path under the
+  root, which excludes that one folder (case-insensitively, like a family). The provider
+  passes `rocKE/<bundle>` to the production root, and to the probes that read it, for
+  every rocKE bundle whose DVC outputs were not pulled (`HKP_PRODUCT_EXCLUDED_BUNDLES`,
+  set by the provider's DVC check): its git-tracked descriptors may name one that lives
+  in the missing output, which the packer would refuse as a dangling reference.
 - **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
   as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it

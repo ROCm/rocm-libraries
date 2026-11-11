@@ -32,7 +32,7 @@ import yaml
 
 import tensilelite
 import tensilelite.CustomKernels as ck_mod
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+import tensilelite.logic.handle_custom_kernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
@@ -1578,7 +1578,7 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     The BF16 file must also share the placeholder of the shipped plain-GEMM
     Equality file beside it. That is a fact about two corpus files, so
     ``TensileLogic --check-all`` checks it
-    (``ValidCorpusConsistency.find_range_sibling_violations``), not this test."""
+    (``valid_corpus_consistency.find_range_sibling_violations``), not this test."""
     with open(require_logic_file(rel)) as f:
         doc = yaml.safe_load(f)
     assert doc["LibraryType"] == "Range"

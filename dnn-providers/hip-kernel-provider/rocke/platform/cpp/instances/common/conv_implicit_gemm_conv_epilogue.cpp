@@ -209,7 +209,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
      * untouched and dense. */
     rocke_direct_epilogue_t epi;
 
-    epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    /* atom=spec.atom: keyed on the MMA dtype (the TF32 atom under TF32). */
+    epi.atom = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                               spec->warp_tile_m,
+                               spec->warp_tile_n,
+                               spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -491,8 +495,12 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     }
     else
     {
+        /* atom=spec.atom: keyed on the MMA dtype (the TF32 atom under TF32). */
         const rocke_mfma_atom_t* atom
-            = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+            = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                              spec->warp_tile_m,
+                              spec->warp_tile_n,
+                              spec->warp_tile_k);
         epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     }
     /* out_dtype: the stored element type. dtype_d, except the split-K binary,
