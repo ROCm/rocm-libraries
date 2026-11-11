@@ -1293,7 +1293,13 @@ TEST_P(SplitKvSinkSoftCap, DataTypeConfig)
         1, // init_sink
         0, // pack_gqa
         stream_config);
-    CHECK_RESULT(result);
+    // This suite sets no kvcache, so num_splits == 1 is exactly when it
+    // dispatches to the prefill API, whose test-build instance filter keeps
+    // nlogits only: a soft cap there has no instance to match.
+    if(num_splits == 1 && soft_cap != 0.f)
+        CHECK_RESULT(result);
+    else
+        CHECK_SPLITKV_RESULT(result);
 }
 
 // SplitKvSinkSoftCap pins the mode to batch, the page size to 0 and the sink
@@ -1420,7 +1426,7 @@ TEST_P(SplitKvSinkDoubleCount, DataTypeConfig)
         1, // init_sink
         0, // pack_gqa
         stream_config);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 
 // Both split-KV pipelines seed m at an i_split > 0 lookback; the nwarp one had
@@ -1484,7 +1490,7 @@ TEST_P(SplitKvSinkNwarpSeed, DataTypeConfig)
         1, // init_sink
         0, // pack_gqa
         stream_config);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 
 // Query rows past seqlen_k have no ordinary KV work, so every split takes the
@@ -1548,7 +1554,7 @@ TEST_P(SplitKvSinkDroppedSink, DataTypeConfig)
         1, // init_sink
         0, // pack_gqa
         stream_config);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
 
@@ -1984,7 +1990,7 @@ TEST_P(SplitKV, DataTypeConfig)
                                                true,       // is_rotary_interleaved
                                                num_splits, // num_splits
                                                COMMON_ARGS);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 
 // Paged split-kv. Kept apart from the SplitKV matrix above so that adding a
