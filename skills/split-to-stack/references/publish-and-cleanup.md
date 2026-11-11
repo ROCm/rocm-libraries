@@ -26,7 +26,7 @@ Publishing does not use `$WT`. To remove it: `git -C "$WT" status --porcelain`; 
 
 ## 9.4 Cleanup prompt
 
-Only after the orchestrator's `verify_stack.py` run (8.1) has passed and the test results (or "not run") are recorded in `tests.md`, ask **one** prompt listing every helper item that exists, each with its recommended answer, and wait. Skip items that do not exist. Never ask about, or delete, `$BR(NN)`, the source branch `S`, or anything not listed.
+Ask it after the orchestrator's `verify_stack.py` run (8.1) has passed and the test results (or "not run") are recorded in `tests.md`, or at the plan-only stop (Phase 6). Ask **one** prompt listing every helper item that exists, each with its recommended answer, and wait. Skip items that do not exist. Never ask about, or delete, `$BR(NN)`, the source branch `S`, or anything not listed. At the plan-only stop, also list `$WT` (path; removed as in 9.3, recreated when needed), and recommend keeping a, b and c if the user may implement this plan: deleting any of them means implementing later starts over from the Survey.
 
 - **a. `$SPLIT/00-updated` (<SHA>)**: the copy of `<S>` with the hooks applied and brought up to date. Recommended: keep until the PRs are merged, so it can be inspected.
 - **b. `$SPLIT/00-linear` (<SHA>)**: the zero-diff linear chain; `tree($BR(top)) == tree(00-linear)` is verified (tests: <summary>). Needed only to re-split or compare. Recommended: keep until the PRs are merged.
