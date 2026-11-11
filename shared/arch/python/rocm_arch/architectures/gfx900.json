@@ -1,1 +1,6 @@
-{"schema_version": 1, "id": "gfx900", "kind": "processor"}
+{
+  "schema_version": 1,
+  "id": "gfx900",
+  "kind": "processor",
+  "release_year": 2017
+}

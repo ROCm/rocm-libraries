@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
@@ -72,6 +73,121 @@ class CatalogTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "duplicate JSON field"):
             rocm_arch.load_catalog(self.definitions)
+
+    def test_release_metadata_validation(self):
+        for fields in (
+            {"release_year": True},
+            {"release_year": "2020"},
+            {"release_year": 1899},
+            {"release_year": 10000},
+        ):
+            with self.subTest(fields=fields):
+                self.write_record(**fields)
+                with self.assertRaises(ValueError):
+                    rocm_arch.load_definitions(self.definitions)
+
+    def test_release_filter_parity(self):
+        for name, year in (
+            ("gfx900", 2025),
+            ("gfx906", 2020),
+            ("gfx908", 2020),
+            ("gfx942", 2023),
+            ("gfx9999", None),
+        ):
+            fields = {} if year is None else {"release_year": year}
+            self.write_record(name, **fields)
+        output = self.root / "generated"
+        generator.generate(self.definitions, output)
+        cases = [
+            (None, None, ("gfx906", "gfx908", "gfx942", "gfx900", "gfx9999")),
+            (2023, None, ("gfx942", "gfx900")),
+            (None, 2020, ("gfx906", "gfx908")),
+            (2020, 2023, ("gfx906", "gfx908", "gfx942")),
+            (2023, 2023, ("gfx942",)),
+            (2026, None, ()),
+        ]
+        with patch.object(rocm_arch, "_DEFINITIONS", self.definitions):
+            self.assertIsNone(rocm_arch.release_year("gfx9999"))
+            self.assertEqual(rocm_arch.release_year("gfx942"), 2023)
+            for bounds in ((True, None), (1899, None), (None, "2020"), (2025, 2020)):
+                with self.assertRaises(ValueError):
+                    rocm_arch.architectures(*bounds)
+            with self.assertRaises(ValueError):
+                rocm_arch.architectures(order="numeric")
+            for minimum, maximum, expected in cases:
+                with self.subTest(minimum=minimum, maximum=maximum):
+                    self.assertEqual(
+                        rocm_arch.architectures(minimum, maximum, order="release"),
+                        expected,
+                    )
+                    self.assertEqual(
+                        rocm_arch.architectures(minimum, maximum),
+                        tuple(sorted(expected)),
+                    )
+                    options = "".join(
+                        f" {key} {year}"
+                        for key, year in (("MIN_YEAR", minimum), ("MAX_YEAR", maximum))
+                        if year is not None
+                    )
+                    script = self.root / "years.cmake"
+                    result = self.root / "years.txt"
+                    script.write_text(
+                        "cmake_minimum_required(VERSION 3.25.2)\n"
+                        f'include("{output}/rocm-arch-catalog.cmake")\n'
+                        f'include("{ROOT}/cmake/rocm-arch-functions.cmake")\n'
+                        f"rocm_arch_list(names ORDER RELEASE{options})\n"
+                        f'file(WRITE "{result}" "${{names}}")\n'
+                    )
+                    subprocess.run(["cmake", "-P", str(script)], check=True)
+                    self.assertEqual(result.read_text(), ";".join(expected))
+                    source = self.root / "years.cpp"
+                    source.write_text(
+                        "#include <rocm/arch/catalog.hpp>\n#include <iostream>\n"
+                        f"constexpr auto filtered = rocm::arch::architectures_between<{minimum or 0}, {maximum or 0}>();\n"
+                        f'static_assert(filtered.size() == {len(expected)}, "size");\n'
+                        + (
+                            f'static_assert(rocm::arch::equal(filtered[0], "{expected[0]}"), "order");\n'
+                            if expected
+                            else ""
+                        )
+                        + 'int main() { for(auto n: filtered) std::cout << n << "\\n"; }\n'
+                    )
+                    executable = self.root / "years"
+                    subprocess.run(
+                        [
+                            shutil.which("c++") or "c++",
+                            "-std=c++14",
+                            "-I",
+                            str(output / "include"),
+                            str(source),
+                            "-o",
+                            str(executable),
+                        ],
+                        check=True,
+                    )
+                    self.assertEqual(
+                        subprocess.check_output(
+                            [str(executable)], text=True
+                        ).splitlines(),
+                        list(expected),
+                    )
+            for options in (
+                "MIN_YEAR 1899",
+                "MAX_YEAR abc",
+                "MIN_YEAR 2025 MAX_YEAR 2020",
+                "KIND GENERIC MIN_YEAR 2020",
+            ):
+                script.write_text(
+                    f'include("{output}/rocm-arch-catalog.cmake")\n'
+                    f'include("{ROOT}/cmake/rocm-arch-functions.cmake")\n'
+                    f"rocm_arch_list(names {options})\n"
+                )
+                self.assertNotEqual(
+                    subprocess.run(
+                        ["cmake", "-P", str(script)], capture_output=True
+                    ).returncode,
+                    0,
+                )
 
     def test_discovery_removal_and_reproducibility(self):
         self.write_record("gfx942")

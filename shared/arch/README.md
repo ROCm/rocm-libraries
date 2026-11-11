@@ -9,13 +9,24 @@ Python, and C++. Each architecture registers through a JSON definition in
 The filename matches the canonical ID:
 
 ```json
-{"schema_version": 1, "id": "gfx942", "kind": "processor"}
+{
+  "schema_version": 1,
+  "id": "gfx942",
+  "kind": "processor",
+  "release_year": 2023
+}
 ```
 
 `kind` is `processor` or `generic`. Processor identities include distinct
 steppings such as `gfx1250-strict`. Names are exact and case-sensitive. Feature
 suffixes, marketing aliases, compiler acceptance, and hardware resources are
 outside the catalog. Library support and tuning are owned by each consumer.
+
+Processor definitions may include `release_year`, describing the first publicly
+released hardware using that processor target, at year granularity. It does not
+describe compiler introduction or library support. Omit the field when the
+release year is unknown. Generic targets have no hardware year.
+The catalog contains no resource or tuning metadata.
 
 Python reads the packaged definitions directly. CMake generates the native
 catalog and C++ header in the build directory using the same validated loader.
@@ -43,6 +54,7 @@ The Python distribution can also be installed into a virtual environment.
 ```cmake
 include(rocm-arch-dependency)
 rocm_arch_list(processors KIND PROCESSOR)
+rocm_arch_list(recent KIND PROCESSOR MIN_YEAR 2020 MAX_YEAR 2025 ORDER RELEASE)
 rocm_arch_list(generics KIND GENERIC)
 rocm_arch_is_known(known ID gfx942)
 target_link_libraries(my_consumer PRIVATE rocm::arch)
@@ -53,6 +65,8 @@ target_link_libraries(my_consumer PRIVATE rocm::arch)
 using architecture = rocm::arch::architecture_t;
 static_assert(rocm::arch::from_name("gfx942") == architecture::gfx942, "identity");
 static_assert(rocm::arch::is_known("gfx1250-strict"), "distinct stepping");
+constexpr auto recent = rocm::arch::architectures_between<2020, 2025>();
+static_assert(rocm::arch::released_between(architecture::gfx942, 2020, 2025), "release year");
 ```
 
 C++ exposes name arrays `architectures` and `generic_targets`, typed processor
@@ -66,11 +80,21 @@ the native package.
 ```python
 import rocm_arch
 processors = rocm_arch.architectures()
+recent = rocm_arch.architectures(min_year=2020, max_year=2025, order="release")
 generics = rocm_arch.generic_targets()
 assert rocm_arch.is_known("gfx942")
 ```
 
-Python lists are sorted immutable tuples. All language views expose the same
+Year bounds are inclusive and independently optional. With no bounds, all
+registered processors are returned, including undated identities. With either
+bound, undated identities are excluded. Name order is the CMake/Python default;
+release order sorts by year, breaks ties by canonical ID, and places undated
+identities last. C++ `architectures_between<MinYear, MaxYear>()` returns a constexpr
+name array in release order, with `0` for an omitted bound. `release_year()` returns
+`0` in C++ or `None` in Python for an unknown year. Invalid or inverted bounds are
+rejected by CMake/Python and the C++ template; the C++ predicate returns false.
+
+Python lists are immutable tuples. All language views expose the same
 SHA-256 catalog digest. Native arrays use constant initialization; C++17 uses
 inline constants and C++14 uses constants local to each translation unit.
 
@@ -98,5 +122,14 @@ exclusions. rocFFT also derives its Python configuration enum from the catalog.
 Origami uses the shared processor type and enumerates model-supported identities
 by applying explicit exclusions; registration without a model or exclusion fails
 its compile-time model check. Its Python enum uses that same supported set.
+
+rocPRIM's legacy `GPU_TARGETS=all` defaults query the catalog with local exclusions
+and XNACK feature policy.
+The separate ASAN defaults and explicit target selection use their own policy.
+rocRAND's `rmake.py` derives defaults from the catalog with local exclusions;
+`--architecture` selects explicit targets. Its tool requires the checkout or
+installed `rocm_arch` Python package.
+rocSPARSE uses shared canonical names in its private C++ dispatch headers and
+links the native catalog as a build dependency.
 
 See [TESTING.md](TESTING.md) for validation commands.

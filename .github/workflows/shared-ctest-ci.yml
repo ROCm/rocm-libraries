@@ -12,6 +12,9 @@ on:
       - 'projects/rocfft/CMakeLists.txt'
       - 'projects/rocfft/library/src/device/kernels/configs/config_arch.py'
       - 'projects/hipfft/CMakeLists.txt'
+      - 'projects/rocprim/CMakeLists.txt'
+      - 'projects/rocrand/rmake.py'
+      - 'projects/rocsparse/library/src/include/rocsparse_arch.hpp'
       - 'CMakeLists.txt'
       - '.github/workflows/shared-ctest-ci.yml'
 
@@ -36,6 +39,9 @@ jobs:
             projects/rocfft/cmake
             projects/rocfft/library/src/device/kernels/configs
             projects/hipfft/cmake
+            projects/rocprim/cmake
+            projects/rocrand/cmake
+            projects/rocsparse/library/src/include
           sparse-checkout-cone-mode: true
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -47,7 +53,7 @@ jobs:
             -DROCM_ARCH_BUILD_INTEGRATION_TESTING=ON
       - name: Build catalog tests
         run: cmake --build build/arch --parallel 2
-      - name: Test catalog and FFT consumers
+      - name: Test catalog and library consumers
         run: ctest --test-dir build/arch --output-on-failure
 
   optional-args-regression:

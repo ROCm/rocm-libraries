@@ -16,10 +16,13 @@ when testing the standalone source distribution.
 The tests cover:
 
 - Schema validation, exact names, processor/generic separation, and invalid inputs.
-- C++ constexpr identity round trips and enumeration.
+- C++ constexpr identity round trips, enumeration, and release-year filters.
+- Inclusive independent year bounds, release ordering, unknown years, and invalid ranges.
 - Identical lists and digests across CMake, Python, and C++.
 - Reproducible generation and discovery of added or removed definitions.
 - FFT inline default policies, exclusions, Python enum names, and serialization.
+- rocPRIM default target and feature policy, rocRAND Python defaults and explicit targets,
+  and rocSPARSE private canonical C++ names, including added definitions.
 - Shared dependency resolution from source and installed packages, including
   repeated inclusion of the dependency module and separate consumer directories.
 
@@ -46,11 +49,11 @@ every non-excluded processor has architecture constants at compile time.
 Build a wheel and source distribution with `python3 -m build shared/arch`. Install
 each into an isolated environment and check enumeration and exact lookup outside
 the checkout. Install the native package into a separate prefix, then configure
-and build an external consumer using `find_package(rocm-arch 0.4 CONFIG REQUIRED)`.
+and build an external consumer using `find_package(rocm-arch 0.5 CONFIG REQUIRED)`.
 For Origami, also build an external consumer of its installed public headers to
 verify the exported dependency.
 
 The `Architecture Catalog Consumers` job in
 [Shared CTest CI](../../.github/workflows/shared-ctest-ci.yml) runs the catalog and
-FFT consumer tests. Catalog tests establish identity and build integration;
+library consumer tests. Catalog tests establish identity and build integration;
 architecture-specific kernel support requires the consumer's device tests.

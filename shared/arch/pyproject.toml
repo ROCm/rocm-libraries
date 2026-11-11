@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocm-arch"
-version = "0.4.0"
+version = "0.5.0"
 description = "Prototype device-independent AMD GPU architecture catalog"
 readme = "README.md"
 requires-python = ">=3.9"

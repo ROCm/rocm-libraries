@@ -26,6 +26,7 @@
 
 #include "rocsparse-auxiliary.h"
 
+#include "rocsparse_arch.hpp"
 #include "rocsparse_adaptive_info.hpp"
 #include "rocsparse_blas.hpp"
 #include "rocsparse_bsrmv_info.hpp"
@@ -126,11 +127,6 @@ namespace rocsparse
     // Get architecture name.
     //
     std::string handle_get_arch_name(rocsparse_handle handle);
-
-    struct rocsparse_arch_names
-    {
-        static constexpr const char* gfx908 = "gfx908";
-    };
 
     //
     // Get xnack mode.

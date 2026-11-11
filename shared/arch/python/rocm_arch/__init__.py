@@ -20,8 +20,8 @@ def _unique_object(pairs):
     return result
 
 
-def load_catalog(directory=None):
-    """Load validated (id, kind) records, sorted by ID, from individual JSON files.
+def load_definitions(directory=None):
+    """Load validated definitions sorted by ID from individual JSON files.
 
     An alternate directory supports generation and catalog-authoring checks.
     There is deliberately no implicit device or compiler filtering.
@@ -35,12 +35,22 @@ def load_catalog(directory=None):
         record = json.loads(
             path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object
         )
-        if not isinstance(record, dict) or set(record) != {
-            "schema_version",
-            "id",
-            "kind",
-        }:
-            raise ValueError(f"{path}: expected schema_version, id, and kind")
+        required = {"schema_version", "id", "kind"}
+        optional = {"release_year"}
+        if (
+            not isinstance(record, dict)
+            or not required <= set(record)
+            or set(record) - required - optional
+        ):
+            raise ValueError(
+                f"{path}: expected identity fields and optional release metadata"
+            )
+        if "release_year" in record:
+            validate_year(record["release_year"])
+            if record["kind"] != "processor":
+                raise ValueError(
+                    f"{path}: hardware release years apply only to processors"
+                )
         if type(record["schema_version"]) is not int or record["schema_version"] != 1:
             raise ValueError(f"{path}: unsupported schema version")
         name, kind = record["id"], record["kind"]
@@ -52,13 +62,61 @@ def load_catalog(directory=None):
             raise ValueError(f"{path}: invalid architecture kind")
         if (kind == "generic") != name.endswith("-generic"):
             raise ValueError(f"{path}: generic ID and kind must agree")
-        records.append((name, kind))
-    return tuple(sorted(records))
+        records.append(record)
+    return tuple(sorted(records, key=lambda record: record["id"]))
 
 
-def architectures():
-    """Return the immutable list of registered processor names, including steppings."""
-    return tuple(name for name, kind in load_catalog() if kind == "processor")
+def validate_year(year):
+    if type(year) is not int or not 1900 <= year <= 9999:
+        raise ValueError("release year must be an integer from 1900 to 9999")
+
+
+def load_catalog(directory=None):
+    """Return identity pairs without discarding the validation of release metadata."""
+    return tuple(
+        (record["id"], record["kind"]) for record in load_definitions(directory)
+    )
+
+
+def architectures(min_year=None, max_year=None, order="name"):
+    """Enumerate processors with optional inclusive hardware release-year bounds.
+
+    Unknown years are excluded when either bound is set. Release ordering places
+    unknown years last and uses canonical names to break ties.
+    """
+    for year in (min_year, max_year):
+        if year is not None:
+            validate_year(year)
+    if min_year is not None and max_year is not None and min_year > max_year:
+        raise ValueError("minimum release year exceeds maximum")
+    if order not in ("name", "release"):
+        raise ValueError("order must be name or release")
+    records = [record for record in load_definitions() if record["kind"] == "processor"]
+    if min_year is not None or max_year is not None:
+        records = [
+            record
+            for record in records
+            if "release_year" in record
+            and (min_year is None or record["release_year"] >= min_year)
+            and (max_year is None or record["release_year"] <= max_year)
+        ]
+    if order == "release":
+        records.sort(
+            key=lambda record: (record.get("release_year", 10000), record["id"])
+        )
+    return tuple(record["id"] for record in records)
+
+
+def release_year(name):
+    """Return a processor's hardware release year, or None when unknown."""
+    return next(
+        (
+            record.get("release_year")
+            for record in load_definitions()
+            if record["id"] == name
+        ),
+        None,
+    )
 
 
 def generic_targets():
@@ -73,6 +131,8 @@ def is_known(name):
 
 def catalog_digest(records=None):
     """Fingerprint shared by generated C++/CMake views and the Python package."""
-    records = load_catalog() if records is None else records
-    canonical = json.dumps(records, separators=(",", ":"), ensure_ascii=True)
+    records = load_definitions() if records is None else records
+    canonical = json.dumps(
+        records, separators=(",", ":"), ensure_ascii=True, sort_keys=True
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

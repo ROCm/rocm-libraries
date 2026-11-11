@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.25.2)
-project(rocm-arch VERSION 0.4.0 LANGUAGES NONE)
+project(rocm-arch VERSION 0.5.0 LANGUAGES NONE)
 
 include(CMakePackageConfigHelpers)
 # A header-only package needs no target compiler to configure/install.

@@ -128,7 +128,9 @@ target_include_directories(rocsparse
 )
 
 # Target link libraries
-target_link_libraries(rocsparse PRIVATE roc::rocprim hip::device)
+include(rocm-arch-dependency)
+target_link_libraries(rocsparse PRIVATE roc::rocprim hip::device
+                                      $<BUILD_INTERFACE:rocm::arch>)
 set(static_depends PACKAGE rocprim)
 
 if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)

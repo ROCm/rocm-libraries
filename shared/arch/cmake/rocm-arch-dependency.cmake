@@ -7,7 +7,7 @@ if(NOT TARGET rocm::arch)
         # Installed module: use the package beside it, independent of prefix lookup.
         include("${CMAKE_CURRENT_LIST_DIR}/rocm-arch-config.cmake")
     else()
-        find_package(rocm-arch 0.4 QUIET CONFIG)
+        find_package(rocm-arch 0.5 QUIET CONFIG)
         if(NOT rocm-arch_FOUND)
             get_filename_component(_rocm_arch_source_directory
                                    "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
