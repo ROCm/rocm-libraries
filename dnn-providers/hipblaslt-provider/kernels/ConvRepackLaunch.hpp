@@ -159,6 +159,32 @@ inline RepackLaunch stridedCopyLaunch(StridedCopyArgs& args, int bytes)
                           ? (args.dims[axis] + 31) / 32
                           : args.dims[axis];
         }
+        // Every offset in 32 bits: the narrow transpose (64 x 64 tiles of 16-bit pairs).
+        long long srcSpan = 1;
+        long long dstSpan = 1;
+        for(int axis = 0; axis < rank; ++axis)
+        {
+            srcSpan += (args.dims[axis] - 1) * args.srcStrides[axis];
+            dstSpan += (args.dims[axis] - 1) * args.dstStrides[axis];
+        }
+        args.narrow = srcSpan <= INT_LIMIT && dstSpan <= INT_LIMIT ? 1 : 0;
+        if(args.narrow != 0)
+        {
+            const long long tile = bytes == 2 ? 64 : 32;
+            long long narrowBlocks = 1;
+            for(int axis = 0; axis < rank; ++axis)
+            {
+                narrowBlocks *= axis == args.srcUnitAxis || axis == args.dstUnitAxis
+                                    ? (args.dims[axis] + tile - 1) / tile
+                                    : args.dims[axis];
+            }
+            if(narrowBlocks <= INT_LIMIT)
+            {
+                launch.entry = "StridedTransposeNarrow" + width;
+                launch.grid = static_cast<unsigned int>(narrowBlocks);
+                return launch;
+            }
+        }
         if(blocks <= INT_LIMIT)
         {
             launch.entry = "StridedTranspose" + width;

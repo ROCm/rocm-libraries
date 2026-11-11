@@ -378,13 +378,27 @@ TEST(TestConvRepackLaunch, ChannelsFirstToLastCopyIsATiledTranspose)
         args.dstStrides[axis] = dst[axis];
     }
     args.total = 2 * 8 * 49;
-    const auto launch = stridedCopyLaunch(args, 2);
-    EXPECT_EQ(launch.entry, "StridedTranspose2");
-    EXPECT_EQ(args.rank, 3);
-    EXPECT_EQ(args.dims[2], 49);
-    EXPECT_EQ(args.srcUnitAxis, 2);
-    EXPECT_EQ(args.dstUnitAxis, 1);
-    EXPECT_EQ(launch.grid, 2u * 1 * 2); // n x ceil(8 / 32) x ceil(49 / 32)
+    auto copy = args;
+    const auto launch = stridedCopyLaunch(copy, 2);
+    // Offsets in 32 bits: the narrow transpose, 64 x 64 tiles of 16-bit pairs.
+    EXPECT_EQ(launch.entry, "StridedTransposeNarrow2");
+    EXPECT_EQ(copy.narrow, 1);
+    EXPECT_EQ(copy.rank, 3);
+    EXPECT_EQ(copy.dims[2], 49);
+    EXPECT_EQ(copy.srcUnitAxis, 2);
+    EXPECT_EQ(copy.dstUnitAxis, 1);
+    EXPECT_EQ(launch.grid, 2u * 1 * 1); // n x ceil(8 / 64) x ceil(49 / 64)
+    // 4-byte elements: 32 x 32 tiles.
+    auto wide = args;
+    EXPECT_EQ(stridedCopyLaunch(wide, 4).entry, "StridedTransposeNarrow4");
+
+    // Offsets past 32 bits: the 64-bit transpose, 32 x 32 tiles.
+    auto huge = args;
+    huge.dims[0] = int64_t{1} << 23; // 2^23 images of 392
+    auto hugeLaunch = stridedCopyLaunch(huge, 2);
+    EXPECT_EQ(hugeLaunch.entry, "StridedTranspose2");
+    EXPECT_EQ(huge.narrow, 0);
+    EXPECT_EQ(hugeLaunch.grid, (1u << 23) * 1 * 2);
 }
 
 TEST(TestConvRepackLaunch, ContiguousCopyCollapsesToOneAxis)
