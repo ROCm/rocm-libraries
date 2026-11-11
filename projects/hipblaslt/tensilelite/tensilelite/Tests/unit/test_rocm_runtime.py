@@ -690,8 +690,25 @@ def test_client_writer_path_request_accepts_valid_explicit_client(tmp_path, monk
     root = _root(tmp_path)
     client = (tmp_path / "configured-client").absolute()
     client.parent.mkdir(parents=True, exist_ok=True)
-    client.write_text("#!/bin/sh\nprintf '5.0.0+rocm7.2.4\\n'\n", encoding="utf-8")
+    client.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        f"  --source-revision) echo {_SHA} ;;\n"
+        "  --build-rocm) echo '7.2.4 base' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
     client.chmod(0o755)
+    package_dir = tmp_path / "package" / "tensilelite"
+    package_dir.mkdir(parents=True)
+    (package_dir / "_source_revision.py").write_text(
+        Path(_rocm.__file__).with_name("_source_revision.py").read_text(encoding="utf-8")
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "current_installation",
+        lambda: client_binding.Installation(package_dir, "id", "5.0.0+rocm7.2.4", _SHA, False),
+    )
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: client)
     _initialize_runtime_with_root(root, monkeypatch)

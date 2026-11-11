@@ -194,7 +194,6 @@ def build_tensilelite_client(
             "--editable",
             tensilelite_path,
         ],
-        env=_tensilelite_build_environment(),
     )
     run_silent_command(
         [
@@ -207,28 +206,6 @@ def build_tensilelite_client(
     )
     return client_path
 
-def _tensilelite_build_environment() -> dict[str, str]:
-    """Return the active interpreter environment with an explicit ROCm identity."""
-    environment = os.environ.copy()
-    if environment.get("TENSILELITE_ROCM_VERSION"):
-        return environment
-    if "ROCM_PATH" in environment and not environment["ROCM_PATH"]:
-        raise RuntimeError(
-            "GEKO cannot build TensileLite with ROCM_PATH set but empty; "
-            "set ROCM_PATH to a ROCm installation or unset it."
-        )
-    rocm_root = Path(environment.get("ROCM_PATH", "/opt/rocm"))
-    version_file = rocm_root / ".info" / "version"
-    try:
-        environment["TENSILELITE_ROCM_VERSION"] = version_file.read_text(
-            encoding="utf-8"
-        ).strip()
-    except OSError as exc:
-        raise RuntimeError(
-            "GEKO could not determine the ROCm identity for its TensileLite editable install; "
-            f"set TENSILELITE_ROCM_VERSION or provide {version_file}."
-        ) from exc
-    return environment
 def parse_devices(devices: str | list[int]) -> List[int]:
     """Parse device specification into a list of device IDs.
 

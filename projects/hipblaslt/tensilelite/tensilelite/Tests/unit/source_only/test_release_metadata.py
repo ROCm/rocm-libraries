@@ -13,7 +13,6 @@ import sys
 import pytest
 
 from tensilelite import GENERATOR_VERSION
-import os
 
 pytestmark = pytest.mark.unit
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]

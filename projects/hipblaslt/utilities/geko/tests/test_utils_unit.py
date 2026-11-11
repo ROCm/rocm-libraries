@@ -147,7 +147,6 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
         client.write_text("bin\n")
 
     monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"})
 
     out1 = utils.build_tensilelite_client(hip, build_dir=build_dir)
     assert out1 == client
@@ -168,7 +167,9 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
         "--editable",
         tensile,
     ]
-    assert calls[1][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
+    # The editable install is a development build (+g<commit>); it needs no
+    # ROCm identity, so it runs in the caller's environment.
+    assert calls[1][2] is None
     assert calls[2] == (
         [
             utils.sys.executable,
@@ -181,52 +182,8 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
         None,
     )
     assert calls[3][0] == calls[1][0]
-    assert calls[3][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
+    assert calls[3][2] is None
     assert calls[4][0] == calls[2][0]
-
-
-def test_tensilelite_build_environment_reads_the_selected_rocm_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    root = tmp_path / "rocm"
-    (root / ".info").mkdir(parents=True)
-    (root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
-    monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
-    monkeypatch.setenv("ROCM_PATH", str(root))
-
-    assert utils._tensilelite_build_environment()["TENSILELITE_ROCM_VERSION"] == "7.2.4"
-
-
-def test_tensilelite_build_environment_prefers_an_explicit_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ROCM_PATH", "")
-    monkeypatch.setenv("TENSILELITE_ROCM_VERSION", "10.1.0a20260813")
-
-    assert (
-        utils._tensilelite_build_environment()["TENSILELITE_ROCM_VERSION"]
-        == "10.1.0a20260813"
-    )
-
-
-def test_tensilelite_build_environment_reports_missing_metadata(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
-    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "rocm"))
-
-    with pytest.raises(RuntimeError, match="could not determine the ROCm identity"):
-        utils._tensilelite_build_environment()
-
-
-def test_tensilelite_build_environment_rejects_empty_rocm_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
-    monkeypatch.setenv("ROCM_PATH", "")
-
-    with pytest.raises(RuntimeError, match="ROCM_PATH set but empty"):
-        utils._tensilelite_build_environment()
 
 
 def test_build_tensilelite_client_passes_gpu_targets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -248,9 +205,6 @@ def test_build_tensilelite_client_passes_gpu_targets(monkeypatch: pytest.MonkeyP
         client.write_text("bin\n")
 
     monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(
-        utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"}
-    )
 
     utils.build_tensilelite_client(hip, build_dir=build_dir, gpu_targets="gfx950")
 
@@ -279,9 +233,6 @@ def test_build_tensilelite_client_omits_gpu_targets_when_not_given(
         client.write_text("bin\n")
 
     monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(
-        utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"}
-    )
 
     utils.build_tensilelite_client(hip, build_dir=build_dir)
 
