@@ -485,6 +485,41 @@ contracts fail comparison. Recover the original question with matching compiler
 or auditable source evidence; never infer it from a newer host or silently fill
 it with default witnesses.
 
+**Recorded atomic-fadd reconstruction.** The 247-key metadata snapshot includes
+`raw.ptr.buffer.atomic.fadd.f32` contracts in all four columns. Each contract was
+reconstructed with `opt` built from that column's recorded LLVM source revision,
+not inferred from a newer compiler. A read-only replay verified the clean source
+revision and the executable's SHA-256 against the reconstruction receipt before
+checking the resolved canonical declaration, original explicit witnesses, and
+byte-identical old/new probe rendering.
+
+| Column | Recorded LLVM source revision | Other positive cells | Atomic-fadd positive cells | Total recorded positive cells |
+| --- | --- | ---: | ---: | ---: |
+| llvm20 | `27682a16360e33e37c4f3cc6adf9a620733f8fe1` | 1,593 | 15 | 1,608 |
+| llvm22 | `f58b06dce1f9c15707c5f808fd002e18c2accf7e` | 1,971 | 16 | 1,987 |
+| llvm23 | `8f497e0992fb7513f7f78a6f6b6f1056c375e961` | 2,123 | 16 | 2,139 |
+| llvm24 | `2792f8ceeb5aa6e188c1ce2b735923b2406a8e59` | 2,231 | 17 | 2,248 |
+
+All four revisions resolve the canonical name
+`llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32`. Its effective contract returns
+`float` and takes a variable `float`, a `ptr addrspace(8)` poison witness, two
+variable `i32` operands, and an immediate `i32 0`. The default zero is present in
+`probe_contracts` even though these cells do not carry an explicit `probe_imm`.
+The replay reproduced the committed contracts without writing a column; every
+prior measurement, compiler identity, and other contract remained unchanged,
+and the generated C++ runtime availability table remained byte-identical.
+
+To audit this reconstruction, resolve the declaration with each matching-source
+`opt`, render it with both the pre-contract and contract-aware probe builders at
+the column's datalayout and original witnesses, and compare the complete module
+bytes. Compare the derived contract to the committed record, then independently
+check the positive-cell counts and preservation of all other fields. This
+establishes the historical probe question, not a replay of the original compiler
+installations, a new support measurement, or GPU numerical qualification. The
+247 keys and 18 targets describe 4,446 recorded cells per column, not a new
+compiler sweep. CI results must be attributed separately to their tested source
+or merge snapshot; a newer passing run does not erase an earlier failure.
+
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
 test-only copy of the same implementation against the column in the relocated
