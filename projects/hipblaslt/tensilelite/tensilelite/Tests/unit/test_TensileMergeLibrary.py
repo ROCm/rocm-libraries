@@ -1012,9 +1012,9 @@ class TestAvoidRegressions:
             companion = inc_path + ".csv.xz"
             Path(companion).write_bytes(b"fake csv.xz content")
 
-            with patch("tensilelite.TensileMergeLibrary.compareProblemType"), patch(
-                "tensilelite.TensileMergeLibrary.compareDestFolderToYaml"
-            ), patch("tensilelite.TensileMergeLibrary.reNameSolutions"):
+            with patch("tensilelite.merge_library.compareProblemType"), patch(
+                "tensilelite.merge_library.compareDestFolderToYaml"
+            ), patch("tensilelite.merge_library.reNameSolutions"):
                 avoidRegressions(orig_dir, inc_dir, out_dir, forceMerge=True)
 
             assert os.path.isfile(os.path.join(out_dir, inc_name))
