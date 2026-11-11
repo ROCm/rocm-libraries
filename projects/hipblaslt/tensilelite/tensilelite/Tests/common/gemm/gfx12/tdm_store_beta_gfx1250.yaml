@@ -510,3 +510,120 @@ BenchmarkProblems:
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: relu]
+  ########################################
+  # fp32 D from bf16 inputs with fp32 accumulators: the TDM block stages D at 4 bytes per element, and at
+  # store vector width 8 each 32-byte vector goes as two 16-byte DS ops; store vector width 1 has the one
+  # masked block. NonEdge, M-edge, N-edge and corner workgroups and a leading dimension larger than M.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DestDataType: s
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [1, 8]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # fp32 D with non-atomic StreamK 3: the final stores of the tiles go through the TDM block, the partial
+  # tiles keep buffer_store.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DestDataType: s
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - TDMStoreInst: [0, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+  ########################################
+  # fp32 D with GlobalSplitU=-1 and bias and ScaleAlphaVec: the GSU == 1 branch stores through the TDM block,
+  # the GSU > 1 partials keep buffer_store, and the staged tile follows the vectors.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DestDataType: s
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [-1]
+        - TDMStoreInst: [0, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+  ########################################
+  # fp32 D from fp32 inputs without HighPrecisionAccumulate.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DataType: s
+      DestDataType: s
+      HighPrecisionAccumulate: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [0, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
