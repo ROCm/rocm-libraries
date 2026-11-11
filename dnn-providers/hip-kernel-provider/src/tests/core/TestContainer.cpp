@@ -3,11 +3,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <iostream>
+#include <map>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "core/Container.hpp"
+#include "core/GraphSchema.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -15,12 +22,21 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <atomic>
+#include <set>
+#include <thread>
+
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#ifdef HIPDNN_ENGINE_FLYDSL
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
+#endif
 #endif
 
 using namespace hip_kernel_provider;
@@ -33,44 +49,80 @@ using namespace hip_kernel_provider::core;
 static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
               "Container::getEngineName must match the signature the plugin SDK calls");
 
-/// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set, read from the inventory rather than hardcoded so a
-/// newly shipped pack is never silently uncounted.
-static uint32_t expectedEngines()
+/// Engines this build configuration exposes: every compiled-in native engine, plus every
+/// shipped descriptor set. Spelled out here rather than read from the provider inventory,
+/// so an engine that disappears from that inventory fails these tests.
+///
+/// Containment, not equality: the catalog is descriptor-driven, so a build that stages
+/// additional descriptor sets legitimately exposes more engines. These names are a floor.
+///
+/// The ingestor names are literals where the others are shared constants, and must stay
+/// that way. The others are declared in C++ and read here from the same constant as
+/// production, so a rename moves both sides together and goes undetected. These two are
+/// declared in descriptor JSON, so restating them here is an independent check.
+static std::vector<std::string> expectedEngineNames()
 {
-    uint32_t expected = 0;
+    std::vector<std::string> names;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    expected += static_cast<uint32_t>(
-        hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
+    names.emplace_back("hipkernel:ConvFwd");
+    names.emplace_back("hipkernel:Pointwise");
 #endif
-    return expected;
+    return names;
 }
 
-/// Upper bound for the fixed-size buffers below; only needs to be at least
-/// expectedEngines().
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+/// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
+/// more engines than this. FlyDSL alone adds one engine per kernel family.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
     const Container container;
 }
 
-TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
+TEST(TestContainer, CopyEngineIdsAdvertisesEveryExpectedEngine)
 {
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines = Container::copyEngineIds(nullptr, 0, numEngines);
+    auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
+    EXPECT_EQ(numEngines, totalEngines);
+
+    const auto expectedNames = expectedEngineNames();
+    EXPECT_GE(totalEngines, static_cast<uint32_t>(expectedNames.size()));
+
+    const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(engineIds.begin(), last, engineId), last)
+            << "engine '" << name << "' is not advertised";
+    }
+}
+
+TEST(TestContainer, CopyEngineIdsReportsTheSameCountWithAndWithoutABuffer)
+{
+    uint32_t countedEngines = 0;
+    const auto totalFromCount = Container::copyEngineIds(nullptr, 0, countedEngines);
+
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t copiedEngines = 0;
+    const auto totalFromCopy
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, copiedEngines);
+
+    EXPECT_EQ(countedEngines, totalFromCount);
+    EXPECT_EQ(totalFromCopy, totalFromCount);
+    EXPECT_EQ(copiedEngines, std::min(totalFromCount, MAX_EXPECTED_ENGINES));
 }
 
 TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
@@ -83,8 +135,7 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     auto totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    EXPECT_EQ(numEngines, totalEngines);
 
     bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
@@ -117,6 +168,8 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         names.push_back(set.engine.name);
     }
     std::sort(names.begin(), names.end());
+    // Literals for the reason expectedEngineNames() records: a constant shared with
+    // the production table would make a rename propagate here and this never fail.
     for(const auto* expected : {"hipkernel:ConvFwd", "hipkernel:Pointwise"})
     {
         EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end())
@@ -131,6 +184,176 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
         EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
             << "no engine for descriptor set '" << set.engine.name << "'";
+    }
+}
+
+TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngine)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    const auto expectEveryIngestorEngine = [&sets](Container& container, const char* which) {
+        const auto engineIds = container.getEngineManager().getAllEngineIds();
+        for(const auto& set : sets)
+        {
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+                << which << " Container has no engine for descriptor set '" << set.engine.name
+                << "'";
+        }
+    };
+
+    // `earlier` takes whatever state managers are still in their slots, discovery's or a
+    // rediscovery's, so these two are on the rebuild path whatever ran before.
+    {
+        const Container earlier;
+    }
+    Container afterDestroyed;
+    expectEveryIngestorEngine(afterDestroyed, "the after-destroyed");
+    Container whileAlive;
+    expectEveryIngestorEngine(whileAlive, "the while-alive");
+}
+
+TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    // The schema id is what a state exposes of the set it was built from, so a slot
+    // serving another set's state shows up only between sets whose schemas differ.
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    for(const auto& set : sets)
+    {
+        schemaIds.insert(set.schema.id);
+    }
+    ASSERT_GE(schemaIds.size(), 2U)
+        << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
+
+    for(const auto& set : sets)
+    {
+        const auto state = discoveredSharedState(set.engine.id);
+        ASSERT_NE(state.get(), nullptr)
+            << "no shared state for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
+            << "the id of '" << set.engine.name << "' serves the state of another set";
+        // Shared, not rebuilt or handed out once: a second lookup is the same object.
+        EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
+            << "'" << set.engine.name << "' built a second state";
+    }
+
+    EXPECT_EQ(discoveredSharedState(hipdnn_plugin_sdk::ingestor::DescriptorId{}).get(), nullptr)
+        << "an id no discovered set has must have no state";
+}
+
+TEST(TestContainer, ConcurrentLookupsOfOneDiscoveredSharedStateAllSeeTheSameState)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    const auto expected = discoveredSharedState(engineId);
+    ASSERT_NE(expected.get(), nullptr);
+
+    constexpr size_t THREAD_COUNT = 8;
+    std::atomic<bool> start{false};
+    std::atomic<size_t> matching{0};
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        threads.emplace_back([&start, &matching, &engineId, &expected] {
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+            if(discoveredSharedState(engineId) == expected)
+            {
+                ++matching;
+            }
+        });
+    }
+    start.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(matching.load(), THREAD_COUNT);
+}
+
+TEST(TestContainer, EveryContainerSharesTheDiscoveredStateAndReleasesItOnDestruction)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    // use_count, read through a held copy, counts the engines serving each state: one
+    // more per live Container proves each Container shares it rather than building its
+    // own, and the count falling back proves a destroyed Container lets go.
+    std::vector<
+        std::shared_ptr<const hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>>>
+        states;
+    std::vector<long> baseline;
+    for(const auto& set : sets)
+    {
+        states.push_back(discoveredSharedState(set.engine.id));
+        ASSERT_NE(states.back().get(), nullptr);
+        baseline.push_back(states.back().use_count());
+    }
+
+    {
+        const Container first;
+        const Container second;
+        for(size_t index = 0; index < sets.size(); ++index)
+        {
+            EXPECT_EQ(states[index].use_count(), baseline[index] + 2)
+                << "two Containers do not both serve the shared state of '"
+                << sets[index].engine.name << "'";
+        }
+    }
+
+    for(size_t index = 0; index < sets.size(); ++index)
+    {
+        EXPECT_EQ(states[index].use_count(), baseline[index])
+            << "a destroyed Container still holds the shared state of '" << sets[index].engine.name
+            << "'";
+    }
+}
+
+TEST(TestContainer, RediscoveryReplacesTheSharedStateWithoutInvalidatingALiveContainer)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    const auto engineIdValue = hipdnn_data_sdk::utilities::engineNameToId(sets.front().engine.name);
+
+    const auto before = discoveredSharedState(engineId);
+    ASSERT_NE(before.get(), nullptr);
+
+    Container alive;
+    ASSERT_NO_THROW(rediscoverSharedStatesForTesting());
+
+    const auto after = discoveredSharedState(engineId);
+    ASSERT_NE(after.get(), nullptr);
+    EXPECT_NE(after.get(), before.get()) << "the reset hook did not rebuild the shared state";
+    EXPECT_EQ(after->slots().front().schema.id, before->slots().front().schema.id);
+
+    // The live Container's engine still holds what it was built over; the next Container
+    // serves the rebuilt state.
+    const auto engineIds = alive.getEngineManager().getAllEngineIds();
+    EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineIdValue), engineIds.end());
+    const long afterBaseline = after.use_count();
+    {
+        const Container next;
+        EXPECT_EQ(after.use_count(), afterBaseline + 1);
     }
 }
 
@@ -196,6 +419,50 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
+// schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
+// and the six FlyDSL SDPA engines claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
+// their matchers reviewed against every field up to it). The gfx950 rocKE conv dgrad engine
+// claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
+// tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
+// multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with that
+// engine's matchers.
+TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
+{
+    const std::map<std::string, std::string> optedIn{
+        {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
+        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},
+        {"hipkernel:flydsl_sdpa_rdna", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_rdna_decode", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_aiw", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"}};
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto baseline = providerBaselineGraphSchema();
+    for(const auto engineId : manager.getAllEngineIds())
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        const auto declared = manager.maxGraphSchema(engineId);
+        std::cout << "[ schema   ] " << name << " " << declared.str() << "\n";
+        const auto opted = optedIn.find(name);
+        if(opted != optedIn.end())
+        {
+            EXPECT_EQ(declared.str(), opted->second) << name;
+        }
+        else
+        {
+            EXPECT_FALSE(baseline < declared)
+                << name << " claims graph schema " << declared.str()
+                << " past the provider baseline without being on the opt-in list";
+        }
+    }
+}
+
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
     Container container;
@@ -211,7 +478,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     Handle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
+    if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -236,13 +503,42 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+    // Unused when neither the ASM nor the FlyDSL engines are built.
+    [[maybe_unused]] const auto applies = [&applicableEngines](auto engineId) {
+        return std::find(applicableEngines.begin(), applicableEngines.end(), engineId)
+               != applicableEngines.end();
+    };
 
+    // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
-#else
-    EXPECT_TRUE(applicableEngines.empty());
+    // The assembly kernels are built for gfx942 and gfx950 only.
+    if(deviceString != "gfx90a")
+    {
+        EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+        ++expected;
+    }
 #endif
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+    // FlyDSL's CDNA SDPA engines, one per kernel family: each family that ships objects for
+    // this device has a bf16 head-dim-128 non-causal one, so it must serve this graph, and a
+    // family that ships none must not (the dual-wave kernel ships for gfx950 only).
+    for(const auto& [op, engine] : std::array<std::pair<std::string_view, std::string_view>, 3>{{
+            {"sdpa_cdna", "hipkernel:flydsl_sdpa_cdna"},
+            {"sdpa_cdna_dualwave", "hipkernel:flydsl_sdpa_cdna_dualwave"},
+            {"sdpa_cdna_decode", "hipkernel:flydsl_sdpa_cdna_decode"},
+        }})
+    {
+        const bool ships = kernel_ingestor_engine::testing::flydslShipsForThisDevice(op);
+        EXPECT_EQ(applies(hipdnn_data_sdk::utilities::engineNameToId(std::string(engine))), ships)
+            << engine;
+        if(ships)
+        {
+            ++expected;
+        }
+    }
+#endif
+    EXPECT_EQ(applicableEngines.size(), expected);
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -278,5 +574,87 @@ TEST(TestContainer, GetAllEngineIds)
 
     auto allEngines = engineManager.getAllEngineIds();
 
-    ASSERT_EQ(allEngines.size(), expectedEngines());
+    const auto expectedNames = expectedEngineNames();
+    ASSERT_GE(allEngines.size(), expectedNames.size());
+
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(allEngines.begin(), allEngines.end(), engineId), allEngines.end())
+            << "engine '" << name << "' is missing from the engine manager";
+    }
 }
+
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+// The provider at engine plugin API 1.4.0 with its schema guard (core/GraphSchema.hpp): a packed
+// (THD) SDPA graph, schema 1.4.0 through its ragged offset multipliers, reaches the FlyDSL SDPA
+// engines, which opted in, and no other engine claims it.
+TEST(TestContainer, RoutesAPackedSdpaGraphOnlyToTheFlydslEngines)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+    SdpaGraphSpec spec;
+    setPacked(spec, {128, 37}, {100, 128});
+    const auto buffer = buildFlydslSdpaRdnaGraph(spec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    ASSERT_EQ(graphSchemaFloor(graph).str(), "1.4.0");
+    Handle handle;
+    Container container;
+    const auto applicable = container.getEngineManager().getApplicableEngineIds(handle, graph);
+    bool rdna = false;
+    for(const auto engineId : applicable)
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        EXPECT_EQ(std::string_view(name).rfind("hipkernel:flydsl_sdpa", 0), 0U)
+            << name << " claims a graph past its schema";
+        rdna = rdna || std::string_view(name) == FLYDSL_SDPA_RDNA.engineName;
+    }
+    // The RDNA prefill objects serve packed sequences on every gfx11 device this build ships.
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) == 0
+       && findLoadedSet(FLYDSL_SDPA_RDNA.engineName) != nullptr)
+    {
+        EXPECT_TRUE(rdna) << "the RDNA prefill engine declined a packed graph it serves";
+    }
+}
+#endif
+
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+// The schema guard passes the ASM engine the ragged graphs it serves (AITER group mode):
+// ragged Q/K/V/O raise the graph's floor to 1.4.0, the schema the engine declares.
+TEST(TestContainer, RoutesARaggedSdpaGraphToTheAsmEngine)
+{
+    SKIP_IF_NO_DEVICES();
+    Handle handle;
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP() << "the ASM group-mode kernels ship for gfx942 and gfx950 only";
+    }
+    const std::vector<int64_t> dims{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
+    auto ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
+        {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper raggedGraph(
+        ragged.GetBufferPointer(), ragged.GetSize());
+    ASSERT_EQ(graphSchemaFloor(raggedGraph).str(), "1.4.0");
+
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto ids = manager.getApplicableEngineIds(handle, raggedGraph);
+    EXPECT_NE(std::find(ids.begin(), ids.end(), asm_sdpa_engine::AsmSdpaEngine::staticId()),
+              ids.end());
+}
+#endif

@@ -30,9 +30,9 @@ gfx1250 WMMA 16x16x32 atom instead of the CDNA MFMA atom:
   same logical ``(m, inter)`` element of a row-major LDS tile).
 
 The WMMA wave32 deltas vs the MFMA wave64 mega (same 16x16x32 atom shape):
-``a_frag_len``/``b_frag_len`` = 16 (not 8), ``c_frag_len`` = 8 (not 4),
+``a_frag_len``/``b_frag_len`` = 16 (not 8), ``dst.frag_len`` = 8 (not 4),
 ``block_size`` = warp_m*warp_n*32 = 128 (not 256), and the accumulator scatter
-is driven by ``op.c_layout()`` (column-distributed) instead of the MFMA
+is driven by ``op.dst_layout()`` (column-distributed) instead of the MFMA
 ``_CWarpDecode``. The k-loop / cshuffle / atomic-reduce *structure* is a 1:1
 mirror of ``moe_gemm_fused.py`` / ``moe_fused_mega.py``; only the per-lane
 fragment math and the matmul intrinsic change.
@@ -68,6 +68,11 @@ from ...helpers.tensor_view import (
     TensorView,
     make_global_view,
     make_tile_window,
+)
+from ..common._moe_fused_mega_lds import (
+    LdsAlloc,
+    lds_elem_bytes,
+    validate_mega_lds_budget,
 )
 from ..common.gemm_universal import (
     DataSpec,
@@ -295,7 +300,7 @@ class _WmmaMoePlan:
 
     Same static-geometry carrier the loader / store / WMMA phases share, but
     the per-lane fragment widths come from the resolved WMMA op contract
-    (``op.a_frag_len`` / ``b_frag_len`` / ``c_frag_len`` = 16 / 16 / 8 for the
+    (``op.a_frag_len`` / ``b_frag_len`` / ``dst.frag_len`` = 16 / 16 / 8 for the
     gfx1250 16x16x32 atom) instead of the wave64 ``shape // waves`` MFMA
     formula. The coalesced global-load / LDS-store decode (``a_vecs_per_thread``
     / ``b_vecs_per_thread`` / ``_rowcol``) is byte-identical to the MFMA plan,
@@ -312,7 +317,7 @@ class _WmmaMoePlan:
         self.storage_dtype = _storage_dtype(u)
         self.a_per_lane = op.a_frag_len
         self.b_per_lane = op.b_frag_len
-        self.c_per_lane = op.c_frag_len
+        self.c_per_lane = op.dst.frag_len
         self.block_m = t.tile_m
         self.block_n = t.tile_n
         self.block_k = t.tile_k
@@ -698,7 +703,7 @@ def _emit_wmma_silu_to_hidden(
 
     WMMA analog of ``moe_gemm_fused._emit_cshuffle_stage`` -- but the WMMA
     accumulator is column-distributed, so we scatter each per-lane slot through
-    ``op.c_layout()`` (one ``(row, col)`` per slot) instead of the MFMA C-warp
+    ``op.dst_layout()`` (one ``(row, col)`` per slot) instead of the MFMA C-warp
     distribution. ``Hidden_smem`` is written in logical ``(row=m, col=inter)``
     packed layout; the down GEMM reads A from the SAME logical element, so the
     pyisa ``G_reshape`` is implicit (no explicit LDS transpose). Both A and B
@@ -709,7 +714,7 @@ def _emit_wmma_silu_to_hidden(
     t = plan.t
     op = plan.op
     sd = plan.storage_dtype
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     warp_m_off = b.mul(warp_m_idx, b.const_i32(plan.mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(plan.mfmas_n * t.warp_tile_n))
 
@@ -1049,7 +1054,7 @@ def _emit_wmma_down_reduce_atomic(
     mfmas_n = t.mfmas_per_warp_n
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
 
     # col is i-independent for the column-distributed WMMA accumulator.
     _, col0 = c_map.coord(b, lane, 0)
@@ -1095,6 +1100,33 @@ def _emit_wmma_down_reduce_atomic(
 
 
 # ---------------------------------------------------------------------------
+# LDS budget
+# ---------------------------------------------------------------------------
+
+
+def _lds_allocs(spec: FusedMegaWmmaSpec) -> Tuple[LdsAlloc, ...]:
+    """Every LDS buffer :func:`build_moe_fused_mega_wmma` allocates, in order.
+
+    Keep in lock-step with the ``b.smem_alloc`` calls in the builder: this is
+    what the whole-kernel budget in
+    :mod:`..common._moe_fused_mega_lds` is computed from. ``double_buffer``
+    doubles the three operand tiles (the ping-pong halves live in one
+    allocation), which is the config most likely to overrun the budget.
+    """
+    t = spec.gate_up_tile()
+    td = spec.down_tile()
+    eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+    nbuf = 2 if spec.double_buffer else 1
+    return (
+        LdsAlloc("A_smem", eb, nbuf * t.tile_m * t.tile_k),
+        LdsAlloc("Bg_smem", eb, nbuf * t.tile_n * t.tile_k),
+        LdsAlloc("Bu_smem", eb, nbuf * t.tile_n * t.tile_k),
+        LdsAlloc("Hidden_smem", eb, t.tile_m * t.tile_n),
+        LdsAlloc("Bd_smem", eb, nbuf * td.tile_n * td.tile_k),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
 
@@ -1111,7 +1143,10 @@ def build_moe_fused_mega_wmma(
     exposes only inputs + ``Y``).
 
     Requires a WMMA (wave32) target with the 16x16x32 atom (gfx1250); an MFMA /
-    wave64 spec is rejected by the GEMM-spec validator.
+    wave64 spec is rejected by the GEMM-spec validator. A tiling whose two GEMMs
+    each fit the per-WG LDS budget but whose fused total does not is rejected
+    too -- the two sub-specs are validated independently and neither sees
+    ``Hidden_smem``.
     """
     u_gu = spec.gate_up_universal_spec()
     ok, why = is_valid_gemm_spec(u_gu, arch=arch)
@@ -1121,6 +1156,9 @@ def build_moe_fused_mega_wmma(
     ok, why = is_valid_gemm_spec(u_down, arch=arch)
     if not ok:
         raise ValueError(f"invalid fused-mega-wmma down GEMM spec: {why}")
+    ok, why = validate_mega_lds_budget(_lds_allocs(spec), arch)
+    if not ok:
+        raise ValueError(f"invalid fused-mega-wmma spec: {why}")
 
     op_gu = _resolve_mma_op(u_gu, arch)
     if op_gu is None:
@@ -1171,7 +1209,7 @@ def build_moe_fused_mega_wmma(
     tokens = b.param("tokens", I32)
 
     t = spec.gate_up_tile()
-    c_per_lane = op_gu.c_frag_len  # noqa: F841
+    c_per_lane = op_gu.dst.frag_len  # noqa: F841
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1213,6 +1251,8 @@ def build_moe_fused_mega_wmma(
     gu_n_off = b.mul(b.block_id_x(), c_block_n)
 
     # ---- LDS allocations -----------------------------------------------
+    # Mirrored by :func:`_lds_allocs` for the whole-kernel budget above; the two
+    # must stay in lock-step.
     # Double-buffer doubles the A/B operand LDS so the next K-tile can be
     # written into the opposite half while the current half is being read.
     db = bool(spec.double_buffer)
@@ -1429,7 +1469,7 @@ def build_moe_fused_mega_wmma(
                 SortedTokenIds,
                 SortedWeights,
                 Y,
-                op_down.c_frag_len,
+                op_down.dst.frag_len,
                 batch_bucket_off=c0,
                 tokens=tokens,
                 pad_m=down_pad_m,

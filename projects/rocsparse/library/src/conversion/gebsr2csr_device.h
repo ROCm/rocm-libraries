@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int ROW_BLOCK_DIM,
               rocsparse_int COL_BLOCK_DIM,
+              bool          GRID_STRIDE,
               typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void gebsr2csr_block_per_row_1_32_kernel(rocsparse_direction  dir,
@@ -48,52 +49,69 @@ namespace rocsparse
                                              rocsparse_int* __restrict__ csr_col_ind)
     {
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
-        rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
-        rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
-
-        if(bid == 0 && tid == 0)
+        // GRID_STRIDE is set when get_grid_size_x clamped grid.x below mb: every
+        // block then starts on a valid block row and strides over the rest.
+        // Otherwise each block converts the block row it is launched for.
+        int64_t bid64 = hipBlockIdx_x;
+        do
         {
-            csr_row_ptr[0] = csr_base;
-        }
+            const rocsparse_int bid = static_cast<rocsparse_int>(bid64);
 
-        rocsparse_int lid = tid & (ROW_BLOCK_DIM * COL_BLOCK_DIM - 1);
-        rocsparse_int wid = tid / (ROW_BLOCK_DIM * COL_BLOCK_DIM);
+            rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
+            rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
 
-        rocsparse_int c = lid & (COL_BLOCK_DIM - 1);
-        rocsparse_int r = lid / COL_BLOCK_DIM;
-
-        if(r >= row_block_dim || c >= col_block_dim)
-        {
-            return;
-        }
-
-        rocsparse_int prev
-            = row_block_dim * col_block_dim * start + col_block_dim * (end - start) * r;
-        rocsparse_int current = col_block_dim * (end - start);
-
-        csr_row_ptr[row_block_dim * bid + r + 1] = prev + current + csr_base;
-
-        for(rocsparse_int i = start + wid; i < end;
-            i += (BLOCK_SIZE / (ROW_BLOCK_DIM * COL_BLOCK_DIM)))
-        {
-            rocsparse_int col    = bsr_col_ind[i] - bsr_base;
-            rocsparse_int offset = prev + col_block_dim * (i - start) + c;
-
-            csr_col_ind[offset] = col_block_dim * col + c + csr_base;
-
-            if(dir == rocsparse_direction_row)
+            if(bid == 0 && tid == 0)
             {
-                csr_val[offset]
-                    = bsr_val[row_block_dim * col_block_dim * i + col_block_dim * r + c];
+                csr_row_ptr[0] = csr_base;
             }
-            else
+
+            rocsparse_int lid = tid & (ROW_BLOCK_DIM * COL_BLOCK_DIM - 1);
+            rocsparse_int wid = tid / (ROW_BLOCK_DIM * COL_BLOCK_DIM);
+
+            rocsparse_int c = lid & (COL_BLOCK_DIM - 1);
+            rocsparse_int r = lid / COL_BLOCK_DIM;
+
+            // r and c do not depend on the block row and the kernel has no barrier, so
+            // this leaves the block-row loop as well.
+            if(r >= row_block_dim || c >= col_block_dim)
             {
-                csr_val[offset]
-                    = bsr_val[row_block_dim * col_block_dim * i + row_block_dim * c + r];
+                return;
             }
-        }
+
+            rocsparse_int prev
+                = row_block_dim * col_block_dim * start + col_block_dim * (end - start) * r;
+            rocsparse_int current = col_block_dim * (end - start);
+
+            csr_row_ptr[row_block_dim * bid + r + 1] = prev + current + csr_base;
+
+            for(rocsparse_int i = start + wid; i < end;
+                i += (BLOCK_SIZE / (ROW_BLOCK_DIM * COL_BLOCK_DIM)))
+            {
+                rocsparse_int col    = bsr_col_ind[i] - bsr_base;
+                rocsparse_int offset = prev + col_block_dim * (i - start) + c;
+
+                csr_col_ind[offset] = col_block_dim * col + c + csr_base;
+
+                if(dir == rocsparse_direction_row)
+                {
+                    csr_val[offset]
+                        = bsr_val[row_block_dim * col_block_dim * i + col_block_dim * r + c];
+                }
+                else
+                {
+                    csr_val[offset]
+                        = bsr_val[row_block_dim * col_block_dim * i + row_block_dim * c + r];
+                }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+
+            bid64 += hipGridDim_x;
+        } while(bid64 < mb);
     }
 
     template <rocsparse_int BLOCK_SIZE,
@@ -101,6 +119,7 @@ namespace rocsparse
               rocsparse_int COL_BLOCK_DIM,
               rocsparse_int SUB_ROW_BLOCK_DIM,
               rocsparse_int SUB_COL_BLOCK_DIM,
+              bool          GRID_STRIDE,
               typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void gebsr2csr_block_per_row_33_128_kernel(rocsparse_direction  dir,
@@ -118,64 +137,79 @@ namespace rocsparse
                                                rocsparse_int* __restrict__ csr_col_ind)
     {
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
-        rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
-        rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
-
-        if(bid == 0 && tid == 0)
+        // GRID_STRIDE is set when get_grid_size_x clamped grid.x below mb: every
+        // block then starts on a valid block row and strides over the rest.
+        // Otherwise each block converts the block row it is launched for.
+        int64_t bid64 = hipBlockIdx_x;
+        do
         {
-            csr_row_ptr[0] = csr_base;
-        }
+            const rocsparse_int bid = static_cast<rocsparse_int>(bid64);
 
-        for(rocsparse_int y = 0; y < (ROW_BLOCK_DIM / SUB_ROW_BLOCK_DIM); y++)
-        {
-            rocsparse_int r = (tid / SUB_COL_BLOCK_DIM) + SUB_ROW_BLOCK_DIM * y;
+            rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
+            rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
 
-            if(r < row_block_dim)
+            if(bid == 0 && tid == 0)
             {
-                rocsparse_int prev
-                    = row_block_dim * col_block_dim * start + col_block_dim * (end - start) * r;
-                rocsparse_int current = col_block_dim * (end - start);
-
-                csr_row_ptr[row_block_dim * bid + r + 1] = prev + current + csr_base;
+                csr_row_ptr[0] = csr_base;
             }
-        }
-
-        for(rocsparse_int i = start; i < end; i++)
-        {
-            rocsparse_int col = bsr_col_ind[i] - bsr_base;
 
             for(rocsparse_int y = 0; y < (ROW_BLOCK_DIM / SUB_ROW_BLOCK_DIM); y++)
             {
-                for(rocsparse_int x = 0; x < (COL_BLOCK_DIM / SUB_COL_BLOCK_DIM); x++)
+                rocsparse_int r = (tid / SUB_COL_BLOCK_DIM) + SUB_ROW_BLOCK_DIM * y;
+
+                if(r < row_block_dim)
                 {
-                    rocsparse_int c = (tid & (SUB_COL_BLOCK_DIM - 1)) + SUB_COL_BLOCK_DIM * x;
-                    rocsparse_int r = (tid / SUB_COL_BLOCK_DIM) + SUB_ROW_BLOCK_DIM * y;
+                    rocsparse_int prev
+                        = row_block_dim * col_block_dim * start + col_block_dim * (end - start) * r;
+                    rocsparse_int current = col_block_dim * (end - start);
 
-                    if(r < row_block_dim && c < col_block_dim)
+                    csr_row_ptr[row_block_dim * bid + r + 1] = prev + current + csr_base;
+                }
+            }
+
+            for(rocsparse_int i = start; i < end; i++)
+            {
+                rocsparse_int col = bsr_col_ind[i] - bsr_base;
+
+                for(rocsparse_int y = 0; y < (ROW_BLOCK_DIM / SUB_ROW_BLOCK_DIM); y++)
+                {
+                    for(rocsparse_int x = 0; x < (COL_BLOCK_DIM / SUB_COL_BLOCK_DIM); x++)
                     {
-                        rocsparse_int prev = row_block_dim * col_block_dim * start
-                                             + col_block_dim * (end - start) * r;
+                        rocsparse_int c = (tid & (SUB_COL_BLOCK_DIM - 1)) + SUB_COL_BLOCK_DIM * x;
+                        rocsparse_int r = (tid / SUB_COL_BLOCK_DIM) + SUB_ROW_BLOCK_DIM * y;
 
-                        rocsparse_int offset = prev + col_block_dim * (i - start) + c;
-
-                        csr_col_ind[offset] = col_block_dim * col + c + csr_base;
-
-                        if(dir == rocsparse_direction_row)
+                        if(r < row_block_dim && c < col_block_dim)
                         {
-                            csr_val[offset] = bsr_val[row_block_dim * col_block_dim * i
-                                                      + col_block_dim * r + c];
-                        }
-                        else
-                        {
-                            csr_val[offset] = bsr_val[row_block_dim * col_block_dim * i
-                                                      + row_block_dim * c + r];
+                            rocsparse_int prev = row_block_dim * col_block_dim * start
+                                                 + col_block_dim * (end - start) * r;
+
+                            rocsparse_int offset = prev + col_block_dim * (i - start) + c;
+
+                            csr_col_ind[offset] = col_block_dim * col + c + csr_base;
+
+                            if(dir == rocsparse_direction_row)
+                            {
+                                csr_val[offset] = bsr_val[row_block_dim * col_block_dim * i
+                                                          + col_block_dim * r + c];
+                            }
+                            else
+                            {
+                                csr_val[offset] = bsr_val[row_block_dim * col_block_dim * i
+                                                          + row_block_dim * c + r];
+                            }
                         }
                     }
                 }
             }
-        }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+
+            bid64 += hipGridDim_x;
+        } while(bid64 < mb);
     }
 
     template <rocsparse_int BLOCK_SIZE, rocsparse_int WF_SIZE>
@@ -191,44 +225,67 @@ namespace rocsparse
                               rocsparse_int* __restrict__ csr_row_ptr,
                               rocsparse_int* __restrict__ csr_col_ind)
     {
-        rocsparse_int entries_in_block = row_block_dim * col_block_dim;
+        const rocsparse_int entries_in_block = row_block_dim * col_block_dim;
 
-        rocsparse_int thread_id = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
-        rocsparse_int warp_id   = thread_id / WF_SIZE;
-        rocsparse_int lane_id   = thread_id % WF_SIZE;
+        // AISPARSE-684. One wavefront per row of the CSR matrix. The bound used to be
+        // the rocsparse_int expression `mb * row_block_dim`, formed exactly as the
+        // host formed it when it sized the grid, so the launch was undersized and the
+        // guard it was checked against was corrupted by the same signed overflow --
+        // undefined behaviour, and in practice a partially written csr_row_ptr /
+        // csr_col_ind with no error reported. Both sides are 64-bit now.
+        const int64_t       num_rows          = static_cast<int64_t>(mb) * row_block_dim;
+        const int64_t       rows_per_block    = BLOCK_SIZE / WF_SIZE;
+        const int64_t       row_in_block_grid = hipThreadIdx_x / WF_SIZE;
+        const rocsparse_int lane_id           = hipThreadIdx_x % WF_SIZE;
 
-        if(warp_id >= mb * row_block_dim)
-        { // one warp per row in matrix
-            return;
-        }
-
-        rocsparse_int block_row    = warp_id / row_block_dim; // block row in bsr matrix
-        rocsparse_int row_in_block = warp_id % row_block_dim; // local row in bsr row block
-
-        rocsparse_int bsr_row_start = bsr_row_ptr[block_row] - bsr_base;
-        rocsparse_int bsr_row_end   = bsr_row_ptr[block_row + 1] - bsr_base;
-
-        rocsparse_int entries_in_row = (bsr_row_end - bsr_row_start) * col_block_dim;
-        rocsparse_int number_of_entries_in_prev_rows
-            = bsr_row_start * entries_in_block + row_in_block * entries_in_row;
-
-        if(warp_id == 0)
+        // Block-uniform stride bound: row_base is built from hipBlockIdx_x,
+        // hipGridDim_x, a kernel argument (mb, row_block_dim) and compile-time
+        // constants only -- no hipThreadIdx_x -- so every thread of a block runs the
+        // same number of iterations. This kernel contains no __syncthreads() and the
+        // per-row guard is a `continue` rather than a `return`, so a wavefront that
+        // falls past the end of the last partial block still reaches the next
+        // iteration of the stride loop.
+        for(int64_t row_base = rows_per_block * hipBlockIdx_x; row_base < num_rows;
+            row_base += rows_per_block * hipGridDim_x)
         {
-            csr_row_ptr[0] = csr_base;
-        }
+            const int64_t warp_id = row_base + row_in_block_grid;
 
-        csr_row_ptr[warp_id + 1] = number_of_entries_in_prev_rows + entries_in_row + csr_base;
+            if(warp_id >= num_rows)
+            { // one warp per row in matrix
+                continue;
+            }
 
-        for(rocsparse_int i = bsr_row_start + lane_id; i < bsr_row_end; i += WF_SIZE)
-        {
+            // block row in bsr matrix, and local row in bsr row block. Both are
+            // bounded by mb and row_block_dim respectively, so they fit rocsparse_int
+            // whenever the caller's own arrays do.
+            const rocsparse_int block_row    = static_cast<rocsparse_int>(warp_id / row_block_dim);
+            const rocsparse_int row_in_block = static_cast<rocsparse_int>(warp_id % row_block_dim);
 
-            rocsparse_int col = bsr_col_ind[i] - bsr_base;
-            rocsparse_int offset
-                = number_of_entries_in_prev_rows + col_block_dim * (i - bsr_row_start);
+            const rocsparse_int bsr_row_start = bsr_row_ptr[block_row] - bsr_base;
+            const rocsparse_int bsr_row_end   = bsr_row_ptr[block_row + 1] - bsr_base;
 
-            for(rocsparse_int j = 0; j < col_block_dim; j++)
+            const rocsparse_int entries_in_row = (bsr_row_end - bsr_row_start) * col_block_dim;
+            const rocsparse_int number_of_entries_in_prev_rows
+                = bsr_row_start * entries_in_block + row_in_block * entries_in_row;
+
+            if(warp_id == 0)
             {
-                csr_col_ind[offset + j] = col_block_dim * col + j + csr_base;
+                csr_row_ptr[0] = csr_base;
+            }
+
+            csr_row_ptr[warp_id + 1] = number_of_entries_in_prev_rows + entries_in_row + csr_base;
+
+            for(rocsparse_int i = bsr_row_start + lane_id; i < bsr_row_end; i += WF_SIZE)
+            {
+
+                const rocsparse_int col = bsr_col_ind[i] - bsr_base;
+                const rocsparse_int offset
+                    = number_of_entries_in_prev_rows + col_block_dim * (i - bsr_row_start);
+
+                for(rocsparse_int j = 0; j < col_block_dim; j++)
+                {
+                    csr_col_ind[offset + j] = col_block_dim * col + j + csr_base;
+                }
             }
         }
     }

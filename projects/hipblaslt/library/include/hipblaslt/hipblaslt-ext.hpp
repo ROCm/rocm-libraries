@@ -74,7 +74,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Set the maximum workspace size in bytes.
+         *  workspaceBytes  Set the maximum workspace size in bytes. algoGetHeuristic clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -108,11 +109,15 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
-         *  \brief Enable uniform summation order for this Gemm.
+         *  \brief Set uniform summation order mode for this Gemm. Defaults to ``-1``.
+         *
+         *  \details
+         *  The mode is tri-state: a caller can use the uniform summation order (``1``),
+         *  disable the uniform summation order (``0``), or inherit the handle request (``-1``).
          *
          *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
          */
-        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
+        HIPBLASLT_EXPORT void setUniformSummationOrder(int32_t value);
 
         /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
@@ -130,9 +135,11 @@ namespace hipblaslt_ext
 
         /*! \ingroup library_module
          *  \brief Return the uniform-summation-order request set via
-         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         *  ``setUniformSummationOrder``. Defaults to ``-1``.
+         *
+         *  \retval int32_t Returns the set uniform summation order mode.
          */
-        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
+        HIPBLASLT_EXPORT int32_t getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -183,8 +190,15 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setTypeD(hipDataType type); //!< Set the D matrix data type.
         HIPBLASLT_EXPORT void
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
-        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
-        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set the A matrix data order. setProblem returns HIPBLAS_STATUS_NOT_SUPPORTED for
+        //! HIPBLASLT_ORDER_ROW.
+        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order);
+        //! Set the B matrix data order. setProblem returns HIPBLAS_STATUS_NOT_SUPPORTED for
+        //! HIPBLASLT_ORDER_ROW.
+        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order);
+        //! Set the int4 encoding of A (C API: HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT).
+        //! Throws std::invalid_argument for values outside hipblasLtInt4Encoding_t.
+        HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -195,6 +209,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute data type.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
+        HIPBLASLT_EXPORT hipblasLtInt4Encoding_t
+            getInt4EncodingA() const; //!< How the int4 weights in A are encoded.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
@@ -276,9 +292,12 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT             GemmTuning(GemmTuning&& tuning);
         HIPBLASLT_EXPORT GemmTuning& operator=(GemmTuning&& tuning);
 
-        HIPBLASLT_EXPORT void setSplitK(
-            uint16_t
-                splitK); //!< Set the value of splitK, 0 is off (use the splitK inside the solution).
+        /**
+         * Set splitK; 0 uses the solution default.
+         * Device-scalar-alpha-capable kernels support at most 2047,
+         * including in host/vector alpha mode.
+         */
+        HIPBLASLT_EXPORT void setSplitK(uint16_t splitK);
         HIPBLASLT_EXPORT void setWgm(
             int16_t
                 wgm); //!< Set the value of workgroup mapping, 0 is off (use the workgroup mapping inside the solution).
@@ -323,9 +342,19 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleC(const void* scaleC); //!< Set the scale C input pointer.
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
-            setScaleAux(const void* scaleAux); //!< Set the scale aux input pointer.
-        HIPBLASLT_EXPORT void setScaleAlphaVec(
-            const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
+            setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
+        /// Select device vector alpha, replacing any device scalar alpha setting.
+        /// Pass nullptr to use the host alpha supplied to setAlpha().
+        HIPBLASLT_EXPORT void setScaleAlphaVec(const void* scaleAlphaVec);
+        /// Select a single device-resident FP32 alpha for all output elements and batches.
+        /// The value replaces setAlpha(); a host alpha pointer is not required or read.
+        /// Requires a compatible device-scalar-alpha kernel. In GroupedGemm, all
+        /// problems must select scalar alpha; pointers and values may differ per GEMM.
+        /// Device-user-args execution supports GSU=1, without a separate conversion kernel.
+        /// The pointer must be non-null and remain valid until execution completes.
+        /// This replaces any setScaleAlphaVec() setting. Use setScaleAlphaVec(nullptr)
+        /// to return to host alpha. Beta remains host-resident.
+        HIPBLASLT_EXPORT void setScaleAlphaScalar(const void* scaleAlphaScalar);
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
         HIPBLASLT_EXPORT void setAmaxD(const void* amaxD); //!< Set the AmaxD input pointer.
 
@@ -342,7 +371,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT const void* getScaleD() const; //!< The scale D input pointer.
         HIPBLASLT_EXPORT const void* getScaleAux() const; //!< The scale aux input pointer.
         HIPBLASLT_EXPORT const void*
-            getScaleAlphaVec() const; //!< The scaleAlpha vector input pointer.
+            getScaleAlphaVec() const; //!< The vector alpha pointer, or nullptr in scalar mode.
+        HIPBLASLT_EXPORT const void*
+            getScaleAlphaScalar() const; //!< The device scalar alpha pointer, or nullptr otherwise.
         HIPBLASLT_EXPORT const void* getAux() const; //!< The aux input pointer.
         HIPBLASLT_EXPORT const void* getAmaxD() const; //!< The AmaxD input pointer.
 
@@ -430,11 +461,12 @@ namespace hipblaslt_ext
         *  @param[out]
         *  heuristicResults    The algorithm heuristic vector.
         *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies whether
-        * heuristicResults.size > 0 but could have heuristicResults.size < requestedAlgoCount
-        * as a valid state for the status. \retval HIPBLAS_STATUS_NOT_SUPPORTED
+        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+        * heuristicResults can hold fewer than requestedAlgoCount results, and is empty when
+        * no solution is found. \retval HIPBLAS_STATUS_NOT_SUPPORTED
         * If no heuristic function is available for the current configuration.
-        * \retval HIPBLAS_STATUS_INVALID_VALUE If no solution is found.
+        * \retval HIPBLAS_STATUS_INVALID_VALUE If no problem has been set on this object,
+        * requestedAlgoCount is less than 1, or the solution library could not be loaded.
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t
@@ -488,7 +520,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Sets the maximum workspace size in bytes.
+         *  workspaceBytes  Sets the maximum workspace size in bytes. initialize clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -609,7 +642,7 @@ namespace hipblaslt_ext
 
         size_t  m_workspace_bytes        = 0;
         int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
-        bool    m_uniform_summation_order = false;
+        int32_t m_uniform_summation_order = -1;
     };
 
     /*! \ingroup types_module
@@ -1094,11 +1127,11 @@ namespace hipblaslt_ext
      *  @param[out]
      *  heuristicResults The algorithm heuristic vector.
      *
-     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies that
-     * returnedAlgoCount > 0 to determine the status of the
-     * results. \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
+     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+     * heuristicResults is empty when no solution is found.
+     * \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
      * available for the current configuration. \retval HIPBLAS_STATUS_INVALID_VALUE If
-     * no solution is found.
+     * the solution library could not be loaded.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t getAllAlgos(hipblasLtHandle_t                              handle,
@@ -1215,6 +1248,7 @@ namespace hipblaslt_ext
      *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. The problem is
      * supported by the algorithm.
      * results. \retval HIPBLAS_STATUS_INVALID_VALUE     The problem is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t matmulIsAlgoSupported(hipblasLtHandle_t       handle,
@@ -1243,6 +1277,13 @@ namespace hipblaslt_ext
     HIPBLASLT_EXPORT
     hipblasStatus_t copyMatmul(hipblasLtMatmulDesc_t src, hipblasLtMatmulDesc_t dst);
 
+    /*! \ingroup library_module
+     *  \brief Check whether the problem has a tuned solution in the loaded library.
+     *
+     *  \retval 1  The best solution for the problem matches a tuned size exactly.
+     *  \retval 0  The problem is valid, but no tuned size matches it exactly.
+     *  \retval -1 An argument is null, or A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
+     */
     HIPBLASLT_EXPORT
     int matmulIsTuned(hipblasLtHandle_t       handle,
                       hipblasLtMatmulDesc_t   matmulDesc,
@@ -1279,6 +1320,7 @@ namespace hipblaslt_ext
      *
      *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
      *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,

@@ -17,7 +17,9 @@
  */
 
 #include <stddef.h>
+#include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
@@ -49,10 +51,11 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  *   lds_row = b.add(atom_mn_base, mn_in_atom)
  *   lds_col = b.add(k_tile_base, k_in_atom)
  *   if frag_len <= 8:
- *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len)
+ *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype)
  *   frag = None
  *   for off in range(0, frag_len, 8):
- *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8)
+ *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8,
+ *                               smem_dtype=smem_dtype)
  *       frag = chunk if frag is None else b.vec_concat(frag, chunk)
  *   return frag
  * ====================================================================== */
@@ -71,6 +74,24 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
  * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
  * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
+/* Element type for the K-outer transpose read, from the operand dtype string.
+ * Mirrors Python's
+ *   _smem_dtype = BF16 if a_dtype == "bf16" else F32 if a_dtype == "fp32" else None
+ *   tr_dtype    = _smem_dtype if _smem_dtype is not None else F16
+ * Never returns NULL: rocke_b_ds_read_tr16_b128 defaults a NULL dtype to f16,
+ * and the gfx1250 opcode is element-typed, so a bf16 kernel would silently
+ * select .v8f16 and feed half fragments to a bf16 WMMA. The wave64
+ * ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity never caught
+ * a NULL here. */
+const rocke_type_t* rocke_conv_tr_elem_dtype(const char* a_dtype)
+{
+    if(a_dtype != NULL && strcmp(a_dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(a_dtype != NULL && strcmp(a_dtype, "fp32") == 0)
+        return rocke_f32();
+    return rocke_f16();
+}
+
 rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
                                   rocke_value_t* lane,
                                   rocke_value_t* tr_lane_mod4,
@@ -80,8 +101,38 @@ rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
                                   rocke_value_t* k_base,
                                   int mn_atom,
                                   int n,
+                                  int wave_size,
                                   const rocke_type_t* dtype)
 {
+    /* wave32 (gfx1250 WMMA 16x16x32): the RESULT layout is lane l owning column
+     * l % 16 and K-half l // 16 -- but that is what the lane must end up
+     * holding, not the address it supplies. ds_load_tr16_b128 transposes an 8x8
+     * element block within each group of 8 lanes: the 8 lanes of a group each
+     * read 8 contiguous elements, and lane j of the group receives element j
+     * from all 8 of those runs. So the group addresses the 8-column block
+     * containing l % 16, and lane l supplies the (l % 8)-th K row of the run:
+     *     col  = mn_base + ((l % 16) / 8) * 8
+     *     row0 = k_base  + (l / 16) * n + (l % 8)
+     * Verified on silicon. Mirrors the wave32 branch of
+     * _BoundConvKOuterFragmentReader.fragment() in Python; the lane map itself
+     * is the shared rocke_conv_tr_lane_offsets32. */
+    if(wave_size == 32)
+    {
+        rocke_value_t* col32;
+        rocke_value_t* row032;
+        rocke_conv_tr_lane_offsets32(b, lane, n, mn_base, k_base, &col32, &row032);
+        rocke_value_t* out32 = NULL;
+        for(int r = 0; r < n / 8; ++r)
+        {
+            rocke_value_t* row = rocke_b_add(b, row032, rocke_b_const_i32(b, 8 * r));
+            rocke_value_t* idx32[2];
+            idx32[0] = row;
+            idx32[1] = col32;
+            rocke_value_t* part = rocke_b_ds_read_tr16_b128(b, smem, idx32, 2, dtype);
+            out32 = (out32 == NULL) ? part : rocke_b_vec_concat(b, out32, part);
+        }
+        return out32;
+    }
     /* Every operand is sequenced into a temporary: Python evaluates these
      * builder calls strictly left-to-right (innermost first) and C argument
      * evaluation order is unspecified, so nesting them would drift the SSA ids. */
@@ -122,18 +173,19 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len)
+                                              int frag_len,
+                                              const rocke_type_t* smem_dtype)
 {
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
     if(frag_len <= 8)
-        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len);
+        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype);
 
     rocke_value_t* frag = NULL;
     for(int off = 0; off < frag_len; off += 8)
     {
         rocke_value_t* col = rocke_b_add(b, lds_col, rocke_b_const_i32(b, off));
-        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8);
+        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8, smem_dtype);
         frag = (frag == NULL) ? chunk : rocke_b_vec_concat(b, frag, chunk);
     }
     return frag;
@@ -190,16 +242,59 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
-            a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
+            if(ctx->lds_k_outer)
+            {
+                /* Python skips the frag load entirely on this path. */
+                a_rows[mi] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                A_src,
+                                                atom_row,
+                                                k_tile_base,
+                                                spec->warp_tile_m,
+                                                ctx->a_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
+            a_rows[mi] = rocke_conv_emit_frag_smem_load(b,
+                                                        A_src,
+                                                        a_row_in_atom,
+                                                        a_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->a_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
-            b_cols[ni] = rocke_conv_emit_frag_smem_load(
-                b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
+            if(ctx->lds_k_outer)
+            {
+                b_cols[ni] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                B_src,
+                                                atom_row,
+                                                k_tile_base,
+                                                spec->warp_tile_n,
+                                                ctx->b_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
+            b_cols[ni] = rocke_conv_emit_frag_smem_load(b,
+                                                        B_src,
+                                                        b_col_in_atom,
+                                                        b_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->b_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         int flat = 0;
@@ -294,7 +389,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                                                 k_c,
                                                 spec->warp_tile_m,
                                                 ctx->a_per_lane,
-                                                NULL);
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
                 continue;
             }
             /* a_row = warp_m_off + (mi*warp_tile_m + m_in_atom) */
@@ -316,7 +412,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
             else
             {
-                a_rows[mi] = rocke_conv_emit_smem_load(b, A_src, a_row, col_base, ctx->a_per_lane);
+                a_rows[mi] = rocke_conv_load_mma_operand(
+                    b, A_src, a_row, col_base, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
             }
         }
 
@@ -336,7 +433,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                                                 k_c,
                                                 spec->warp_tile_n,
                                                 ctx->b_per_lane,
-                                                NULL);
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
                 continue;
             }
             /* b_row = warp_n_off + (ni*warp_tile_n + n_in_atom) */
@@ -344,7 +442,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 b,
                 warp_n_off,
                 rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-            b_cols[ni] = rocke_conv_emit_smem_load(b, B_src, b_row, col_base, ctx->b_per_lane);
+            b_cols[ni] = rocke_conv_load_mma_operand(
+                b, B_src, b_row, col_base, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
 
         int flat = 0;
@@ -358,9 +457,13 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
         }
 
-        /* schedule.emit_after_mfma_step(b, ds_read_count=mfmas_m + mfmas_n,
-         *                               mfma_count=mfmas_m * mfmas_n) */
+        /* schedule.emit_after_mfma_step(
+         *     b, ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+         *     mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma) */
         rocke_schedule_policy_emit_after_mfma_step(
-            &ctx->schedule, b, ctx->mfmas_m + ctx->mfmas_n, ctx->mfmas_m * ctx->mfmas_n);
+            &ctx->schedule,
+            b,
+            (ctx->mfmas_m + ctx->mfmas_n) * ctx->ds_reads_per_frag,
+            ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma);
     }
 }

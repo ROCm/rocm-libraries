@@ -134,6 +134,7 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForTwoNodeGraph)
 {
     const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+    EXPECT_CALL(mockGraph, getGraph()).Times(::testing::AnyNumber());
     // nodeWrappers is only used in an all_of check which will pass when it's empty
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
@@ -245,16 +246,24 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsR
 {
     SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
-        {150528, 50176, 224, 1},
-        {2, 3, 224, 224},
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{2, 3, 224, 224};
+    auto builderWithStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        strides, dims, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    auto builderWithoutStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        strides, dims, false, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWithStats(
+        builderWithStats.GetBufferPointer(), builderWithStats.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWithoutStats(
+        builderWithoutStats.GetBufferPointer(), builderWithoutStats.GetSize());
     const Settings settings;
 
-    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 16u);
+    // Both graphs describe the same shape, so they share whatever parallel reduction buffer this
+    // device's multiprocessor count calls for. Their difference is the fallback mean/rstd
+    // workspace on its own: `sizeof(float) * 2 * outerSize * stride` = `4 * 2 * 2 * 1` = `16`
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graphWithoutStats, settings)
+                  - _planBuilder.getMaxWorkspaceSize(_dummyHandle, graphWithStats, settings),
+              16u);
 }
 
 // ============================================================================

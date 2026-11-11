@@ -54,11 +54,12 @@ rocWMMA is supported on the following GPUs.
       ``F8`` and ``BF8`` data type support requires the gfx942 or gfx950.
 
 *  AMD RDNA class GPUs featuring AI acceleration support, including the
-   gfx1100, gfx1101, and gfx1102 (collectively known as gfx11), and the gfx1200 and gfx1201 (collectively known as gfx12).
+   gfx1100, gfx1101, gfx1102, gfx1170, and gfx1171 (gfx11), and
+   gfx1200 and gfx1201 (gfx12).
 
    .. note::
 
-      ``F8`` and ``BF8`` data type support requires the gfx1200 or gfx1201.
+      ``F8`` and ``BF8`` data type support is available on gfx1170, gfx1171, gfx1200, and gfx1201.
 
 Dependencies
 -------------------------------------------
@@ -152,7 +153,7 @@ Here are the available options to build the rocWMMA library, with or without cli
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1170``; ``gfx1171``; ``gfx1200``; ``gfx1201``
     *   -   ``ROCWMMA_BUILD_TESTS``
         -   Build the tests
         -   ``ON``

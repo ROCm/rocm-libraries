@@ -21,7 +21,9 @@
 // the CI regression test share one definition without depending on the
 // library's hidden-visibility symbols.
 
+#include <cctype>
 #include <cstdlib>
+#include <string>
 
 #if defined(_WIN32)
 // No POSIX credential headers on Windows.
@@ -105,3 +107,20 @@ inline bool rocblaslt_env_suppressed_for_security(const char* name)
 {
     return rocblaslt_env_suppressed_for_security_impl(name, rocblaslt_process_is_privileged());
 }
+
+namespace rocblaslt
+{
+    // Environment value with surrounding blanks trimmed, lowercased.
+    inline std::string normalizeEnv(const char* raw)
+    {
+        std::string  s(raw);
+        const size_t first = s.find_first_not_of(" \t");
+        if(first == std::string::npos)
+            return {};
+        s.erase(0, first);
+        s.erase(s.find_last_not_of(" \t") + 1);
+        for(auto& c : s)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    }
+} // namespace rocblaslt

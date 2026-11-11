@@ -1,0 +1,882 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * tests/parity/conv_implicit_gemm_wgrad_emit.c -- C-side emitter for the
+ * implicit-GEMM backward-weight convolution parity harness.  Selects one of N
+ * sampled spec configs by argv[1] (the config index), builds the
+ * rocke_implicit_gemm_conv_wgrad_spec_t identically to the Python emitter
+ * conv_implicit_gemm_wgrad_emit.py, builds the kernel via
+ * rocke_build_implicit_gemm_conv_wgrad_new and lowers via
+ * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO), printing the .ll
+ * to stdout so the two outputs can be byte-compared.
+ *
+ * Config index table (must stay in sync with the Python emitter):
+ *   0  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950
+ *   1  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950
+ *   2  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 fp16
+ *   3  N8H56W56C64_K64Y1X1, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950
+ *   4  N8H56W56C64_K64Y3X3, t128x128x64, w2x2, a32x32x16, compv4/default, gfx950
+ *   5  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx1151 (WMMA w32)
+ *   6  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx1201 (WMMA w32)
+ *   7  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 fp32
+ *   8  3-D conv N4Di14H14W14C32_K32Z3Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950
+ *   9  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 bf16
+ *  10  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, chiplet_swizzle
+ *  11  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950, lds_k_outer
+ *  12  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, lds_k_outer + async_dma, split_k=4 fp32
+ *  13  N8H56W56C64_K64Y3X3, t64x64x16, w2x2, a16x16x16, mem/cshuffle,     gfx950, lds_k_outer (4 operand elems/lane)
+ *  14  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, basic/default,    gfx950, split_k=4 fp32
+ *  15  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 two_stage fp16
+ *  16  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
+ *  17  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250 (WMMA w32), lds_k_outer fp32 out
+ *  18  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, unroll_k, split_k=4 fp32
+ *  19  N8H56W56C3_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=2 two_stage fp16
+ *  20  N10H8W8C64_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950, lds_k_outer + async_dma, split_k=2
+ *  21  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk linear fp16
+ *  22  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk tree fp16
+ *  23  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk atomic fp32
+ *  24  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk workspace fp16
+ *  25  N8H56W56C64_K64Y3X3, a16x16x16, gfx942, streamk persistent linear fp16
+ *  26  N4H28W28C96_K120Y3X3G3 pad1, a32x32x16, gfx950, streamk dp_sk linear fp16
+ *  27  N4H28W28C64_K128Y3X3G2 pad1, a32x32x16, gfx950, streamk persistent tree bf16 dW
+ *  28  N4H28W28C64_K128Y3X3G2 pad1, a32x32x16, gfx950, streamk persistent atomic fp32
+ *  29  N8H56W56C64_K64Y3X3, a16x16x16, gfx942, streamk persistent workspace fp16
+ *  30  N4H14W14C64_K96Y3X3G2 pad1, a32x32x16, gfx950, streamk dp_sk linear fp16, lds_k_outer
+ *  (21-30 carry a CTA pool, but it is a launch parameter and leaves the IR as is.)
+ *  31-48  prefetch_addr=true on a base config (pfa_base below); 45-47 pair it
+ *         with async_dma / unroll_k / WMMA and must be rejected by both engines
+ *  49  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 bf16 out
+ *  50  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 fp32 out, lds_k_outer
+ *  51  N4H12W12C24_K32Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=2 fp16 out
+ *  52-54  WMMA split-K: gfx1201 bf16 out and gfx1151 fp32 out, which both
+ *         engines must reject, and gfx1250 bf16 out with the cshuffle
+ *         epilogue, which both admit. Must match the Python emitter's 52-54.
+ *  55-57,67-70  gfx1250 WMMA async K loop (global_load_async_to_lds
+ *         ping-pong): split-K fp32 out small/big (55/56), C=3 rejected by
+ *         both engines (57), bf16 operands (67), explicit vector_size_a
+ *         rejected by both engines (68), and the synchronous K loop with
+ *         explicit A/B load-width caps, K-outer/M-outer (69-70). Must match
+ *         the Python emitter's 55-57,67-70.
+ *  58-61  WMMA cshuffle epilogue: direct fp16 out, split-K bf16 out,
+ *         async_dma split-K, and gfx1201 (WMMA split-K enabled only on
+ *         gfx1250, rejected). Must match the Python emitter's 58-61.
+ *  62  both engines must reject: WMMA cshuffle split-K fp16 out with an odd
+ *      store vector. Must match the Python emitter's 62.
+ *  63-66  two-stage (f32 workspace) split-K on WMMA: fp16/bf16 out variants,
+ *         and gfx1151 rejected (no validated float global atomics). Must
+ *         match the Python emitter's 63-66.
+ *  73-88  TF32 compute (mma_dtype "tf32"), fp32 storage, on both TF32 atoms
+ *         of gfx950 and gfx942. Must match the Python emitter's _tf32_spec.
+ *  71-72  prefetch_addr + compv3 + register_prefetch=true: split-K packed
+ *         fp16 atomic on base 11, and two-stage on base 15. Config 43 above
+ *         is compv3 + prefetch_addr with register_prefetch left at its
+ *         default false, so it is NOT this loop. Must match the Python
+ *         emitter's _PFA_BASES.
+ *  89-100 prefetch_global_regs=true on a base config: mem/cshuffle M-outer and
+ *         K-outer, compv3 packed fp16 atomic, compv4 two-stage fp16 dW,
+ *         two-stage bf16 dW, packed bf16 atomic, the 16x16x32 atom on a
+ *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
+ *         WMMA / stream-K, which both engines must reject. Must match the
+ *         Python emitter's _PGR_BASES.
+ *  101-105 prefetch_global_regs=true, continued: bf16 A/B operands on the K-outer
+ *         cshuffle base (101), compv4 two-stage into bf16 dW (102) and scalar
+ *         loads (103); fp16 scalar loads with tile_k=256, 64 loads per thread
+ *         per operand, which both engines must reject (104), and tile_k=128,
+ *         exactly the 32 allowed (105). Must match the Python _PGR_BASES.
+ *  106-107 the packed 16-bit split-K atomic at dW width 2 on the K-outer
+ *         cshuffle base, fp16 (106) and bf16 (107) dW. Must match the Python
+ *         _ATOMIC_VEC_C_BASES.
+ *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
+ *         store epilogue honours the explicit dW width (C = 64 alone would
+ *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "rocke/instance_conv_implicit_gemm_wgrad.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
+
+/* prefetch_addr configs 31-48: the base config each one flips the flag on.
+ * Must match _PFA_BASES in the Python emitter. -1 = not a prefetch_addr index. */
+static int pfa_base(int idx)
+{
+    static const int bases[] = {1, 11, 4, 13, 7, 11, 15, 19, 14, 3, 8, 16, 0, 10, 12, 18, 5, 4};
+    if(idx < 31 || idx >= 31 + (int)(sizeof(bases) / sizeof(bases[0])))
+        return -1;
+    return bases[idx - 31];
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch);
+
+/* Stream-K fields of configs 21-29 (Python _STREAMK_CFGS). */
+static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    /* idx: dtype a/b, dtype d, atom edge, streamk, reduction, ctas, arch */
+    static const struct
+    {
+        const char *dt_ab, *dt_d;
+        int edge;
+        const char *mode, *reduction;
+        int ctas;
+        const char* arch;
+    } cfgs[9] = {
+        {"fp16", "fp16", 32, "dp_sk", "linear", 16, "gfx950"},
+        {"fp16", "fp16", 32, "dp_sk", "tree", 16, "gfx950"},
+        {"fp16", "fp32", 32, "dp_sk", "atomic", 4, "gfx950"},
+        {"fp16", "fp16", 32, "dp_sk", "workspace", 4, "gfx950"},
+        {"fp16", "fp16", 16, "persistent", "linear", 4, "gfx942"},
+        {"fp16", "fp16", 32, "dp_sk", "linear", 6, "gfx950"},
+        {"fp16", "bf16", 32, "persistent", "tree", 5, "gfx950"},
+        {"fp16", "fp32", 32, "persistent", "atomic", 3, "gfx950"},
+        {"fp16", "fp16", 16, "persistent", "workspace", 6, "gfx942"},
+    };
+    const int i = idx - 21;
+    spec->dtype_a = cfgs[i].dt_ab;
+    spec->dtype_b = cfgs[i].dt_ab;
+    spec->dtype_d = cfgs[i].dt_d;
+    spec->warp_tile_m = cfgs[i].edge;
+    spec->warp_tile_n = cfgs[i].edge;
+    spec->streamk = cfgs[i].mode;
+    spec->streamk_reduction = cfgs[i].reduction;
+    spec->streamk_ctas = cfgs[i].ctas;
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
+/* prefetch_global_regs configs 89-105 (Python _PGR_BASES). */
+static int make_pgr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21, 11, 15, 11, 11, 11};
+    if(make_base_cfg(bases[idx - 89], spec, arch) != 0)
+        return -1;
+    spec->prefetch_global_regs = true;
+    switch(idx)
+    {
+    case 91:
+        spec->split_k = 2; /* packed fp16 atomic */
+        spec->pipeline = "compv3";
+        break;
+    case 92:
+        /* two-stage, fp16 dW */
+        spec->pipeline = "compv4";
+        break;
+    case 93:
+        /* two-stage, bf16 dW */
+        spec->dtype_d = "bf16";
+        break;
+    case 94:
+        spec->split_k = 2; /* packed bf16 atomic */
+        spec->dtype_d = "bf16";
+        break;
+    case 95:
+        /* The 16x16x32 atom on a 128x128 tile, compv3. */
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->pipeline = "compv3";
+        break;
+    case 98:
+        /* + prefetch_addr: rejected */
+        spec->prefetch_addr = true;
+        break;
+    case 101:
+        /* bf16 A/B operands, bf16 dW. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        break;
+    case 102:
+        /* bf16 A/B, compv4 two-stage into bf16 dW, K-outer. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->pipeline = "compv4";
+        spec->lds_k_outer = true;
+        break;
+    case 103:
+        /* bf16 A/B, scalar loads. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 104:
+    case 105:
+        /* Scalar loads: 64 per thread per operand (rejected), then 32. */
+        spec->tile_k = idx == 104 ? 256 : 128;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
+/* TF32 compute: fp32 dY / X / dW, each LDS fragment bitcast to vec<tf32xN>
+ * for the arch's TF32 atom -- BF16x3 emulation on gfx950 (32x32x16,
+ * 16x16x32), native XF32 on gfx942 (32x32x4, 16x16x8). 64x64x32 tile, 2x2
+ * warps. Keep in lockstep with _tf32_spec() in conv_implicit_gemm_wgrad_emit.py
+ * (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    /* problem: 2 = 2-D, 3 = 3-D, 1 = grouped (groups=3) */
+    static const struct
+    {
+        const char* arch;
+        int edge;
+        int k;
+        int problem;
+        const char* pipeline;
+        const char* epilogue;
+        int split_k;
+    } cfgs[] = {
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 73 */
+        {"gfx950", 16, 32, 2, "compv4", "cshuffle", 1}, /* 74 */
+        {"gfx942", 32, 4, 2, "compv4", "default", 1}, /* 75 */
+        {"gfx942", 16, 8, 2, "mem", "cshuffle", 1}, /* 76 */
+        {"gfx950", 32, 16, 3, "mem", "default", 1}, /* 77 */
+        {"gfx942", 16, 8, 3, "compv4", "default", 1}, /* 78 */
+        {"gfx950", 16, 32, 2, "mem", "default", 4}, /* 79 */
+        {"gfx942", 32, 4, 2, "mem", "cshuffle", 4}, /* 80 */
+        {"gfx950", 32, 16, 2, "mem", "default", 4}, /* 81: two_stage */
+        {"gfx942", 16, 8, 2, "mem", "default", 4}, /* 82: two_stage */
+        {"gfx950", 16, 32, 1, "mem", "default", 1}, /* 83: stream-K dp_sk */
+        {"gfx942", 32, 4, 2, "mem", "default", 1}, /* 84: stream-K persistent atomic */
+        {"gfx950", 32, 16, 2, "basic", "default", 1}, /* 85: lds_k_pad=4 */
+        {"gfx942", 16, 8, 2, "compv4", "default", 1}, /* 86: unroll_k */
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 87: lds_k_outer, rejected */
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 88: async_dma, rejected */
+    };
+    const int i = idx - 73;
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    if(cfgs[i].problem == 3)
+        spec->problem
+            = rocke_conv_problem_make_3d(1, 5, 6, 6, 16, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    else if(cfgs[i].problem == 1)
+    {
+        spec->problem = rocke_conv_problem_make(2, 10, 10, 48, 120, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 3;
+    }
+    else
+        spec->problem = rocke_conv_problem_make(2, 12, 12, 32, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = cfgs[i].edge;
+    spec->warp_tile_n = cfgs[i].edge;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->split_k = cfgs[i].split_k;
+    spec->two_stage = (idx == 81 || idx == 82);
+    if(idx == 83)
+    {
+        spec->streamk = "dp_sk";
+        spec->streamk_ctas = 6;
+    }
+    if(idx == 84)
+    {
+        spec->streamk = "persistent";
+        spec->streamk_ctas = 6;
+        spec->streamk_reduction = "atomic";
+    }
+    if(idx == 85)
+    {
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 4;
+    }
+    spec->unroll_k = (idx == 86);
+    spec->lds_k_outer = (idx == 87);
+    spec->async_dma = (idx == 88);
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
+/* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
+ * On success sets *spec and *arch. */
+static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    if(idx >= 73 && idx <= 88)
+        return make_cfg_tf32(idx, spec, arch);
+    if(idx >= 89 && idx <= 105)
+        return make_pgr_cfg(idx, spec, arch);
+    if(idx == 108)
+    {
+        /* split_k = 1 cshuffle store at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES). */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        return 0;
+    }
+    if(idx == 106 || idx == 107)
+    {
+        /* Packed 16-bit split-K atomic at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES): fp16 (106) and bf16 (107) dW. */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        if(idx == 107)
+            spec->dtype_d = "bf16";
+        return 0;
+    }
+    int base = pfa_base(idx);
+    if(idx == 71 || idx == 72)
+        base = idx == 71 ? 11 : 15;
+    if(base < 0)
+        return make_base_cfg(idx, spec, arch);
+    if(make_base_cfg(base, spec, arch) != 0)
+        return -1;
+    spec->prefetch_addr = true;
+    if(idx == 36)
+        spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
+    if(idx == 43 || idx == 71 || idx == 72)
+        spec->pipeline = "compv3";
+    /* 71-72 opt into the register-prefetch compv3 K loop explicitly: config
+     * 43 above leaves register_prefetch at its default false, so it stays on
+     * the plain prefetch_addr loop every other pipeline shares. */
+    if(idx == 71 || idx == 72)
+        spec->register_prefetch = true;
+    if(idx == 71)
+        spec->split_k = 2; /* packed fp16 atomic on the K-outer cshuffle base */
+    if(idx == 48)
+    {
+        /* C = K = 3 on the 128x128x64 base: both operands load scalar, so
+         * more carried offsets than accumulators */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 3, 3, 3);
+    }
+    return 0;
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 32;
+    spec->warp_tile_n = 32;
+    spec->warp_tile_k = 16;
+    spec->pipeline = "mem";
+    spec->epilogue = "default";
+
+    switch(idx)
+    {
+    case 0:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        *arch = "gfx950";
+        return 0;
+    case 1:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 2:
+        /* split_k=4, dtype_d="fp16" (default). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 3:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        *arch = "gfx950";
+        return 0;
+    case 4:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->pipeline = "compv4";
+        *arch = "gfx950";
+        return 0;
+    case 5:
+        /* WMMA wave32, gfx1151. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        *arch = "gfx1151";
+        return 0;
+    case 6:
+        /* WMMA wave32, gfx1201. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        *arch = "gfx1201";
+        return 0;
+    case 7:
+        /* split_k=4, dtype_d="fp32". */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 8:
+        /* 3-D convolution: N4 Di14 Hi14 Wi14 C32 K32 Z3 Y3 X3, s=1, p=1, d=1. */
+        spec->problem
+            = rocke_conv_problem_make_3d(4, 14, 14, 14, 32, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        *arch = "gfx950";
+        return 0;
+    case 9:
+        /* split_k=4, dtype_d="bf16" (packed bf16 atomic path). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "bf16";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 10:
+        /* chiplet_swizzle enabled. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->chiplet_swizzle = true;
+        *arch = "gfx950";
+        return 0;
+    case 11:
+        /* K-outer LDS tile + gfx950 ds_read_b64_tr_b16 transpose reads. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* K-outer + direct load (async_dma). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* K-outer with the 16x16x16 atom: 4 MFMA operand elements per lane
+         * rather than 8, so the transpose-read k-stride between lane groups
+         * is 4. Cases 11 and 12 both use 32x32x16 (8 per lane). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_k = 16;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* pipeline="basic": unrolled global-read/compute overlap loop. Needs a
+         * compile-time trip count, hence the fixed split_k. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->dtype_d = "fp32";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 15:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx950. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx942
+         * (16x16x16 MFMA only). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx942";
+        return 0;
+    case 17:
+        /* gfx1250 wave32 WMMA 16x16x32 K-outer. The transpose read lowers to
+         * ds_load_tr16_b128 (8 per lane), so a 16-element fragment is two
+         * reads. dtype_d=fp32 because WMMA wgrad supports only the 'default'
+         * epilogue, which rejects 16-bit dW. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = "fp32";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->lds_k_outer = true;
+        *arch = "gfx1250";
+        return 0;
+    case 18:
+        /* unroll_k under split-K: the double-buffered loop's odd-tail prefetch
+         * is redirected to wg_K so it cannot read the next slice's tile. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->unroll_k = true;
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* Split-K (degree chosen at launch) + two-stage scratch; odd wg_N = 27,
+         * which the packed 16-bit atomic cannot address. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 64, 3, 3);
+        spec->split_k = 2;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 20:
+        /* K-outer + async_dma + split-K=2, fp16 cshuffle atomic epilogue; 3 K
+         * tiles per slice, so phase B's prefetch takes the zero-fill redirect. */
+        spec->problem = rocke_conv_problem_default(10, 8, 8, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+    case 29:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        return streamk_cfg(idx, spec, arch);
+    case 26:
+        spec->problem = rocke_conv_problem_default(4, 28, 28, 96, 120, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 3;
+        return streamk_cfg(idx, spec, arch);
+    case 27:
+    case 28:
+        spec->problem = rocke_conv_problem_default(4, 28, 28, 64, 128, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 2;
+        return streamk_cfg(idx, spec, arch);
+    case 30:
+        spec->problem = rocke_conv_problem_default(4, 14, 14, 64, 96, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 2;
+        streamk_cfg(26, spec, arch);
+        spec->streamk_ctas = 7;
+        spec->lds_k_outer = true;
+        return 0;
+    case 49:
+    case 50:
+    case 51:
+        /* gfx1250 wave32 WMMA split-K through the WMMA atomic epilogue: a
+         * packed 16-bit atomic per element (zero partner) or a scalar fp32
+         * atomic. Must match the Python emitter's 49-51. */
+        if(idx == 51)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 49 ? "bf16" : idx == 50 ? "fp32" : "fp16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = idx == 51 ? 2 : 4;
+        spec->lds_k_outer = idx == 50;
+        *arch = "gfx1250";
+        return 0;
+    case 52:
+    case 53:
+    case 54:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 54 ? "fp32" : "bf16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = idx == 53 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = idx == 53 ? "cshuffle" : "default";
+        spec->split_k = 4;
+        *arch = idx == 52 ? "gfx1201" : idx == 53 ? "gfx1250" : "gfx1151";
+        return 0;
+    case 55:
+    case 56:
+    case 57:
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    {
+        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57,
+         * 67 (55 with bf16 operands), 68 (55 with an explicit vector_size_a,
+         * which both engines must reject) and 69-70 (55 on the synchronous
+         * K loop with A/B load-width caps 4/2, K-outer and M-outer). */
+        const bool big = idx == 56;
+        if(idx == 57)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
+        else if(idx == 55 || idx >= 67)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = idx == 67 ? "bf16" : "fp16";
+        spec->dtype_b = idx == 67 ? "bf16" : "fp16";
+        spec->dtype_d = "fp32";
+        spec->tile_m = big ? 64 : 32;
+        spec->tile_n = big ? 64 : 32;
+        spec->tile_k = big ? 64 : 32;
+        spec->warp_m = big ? 2 : 1;
+        spec->warp_n = big ? 2 : 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = big ? 4 : 2;
+        spec->lds_k_outer = idx != 70;
+        spec->async_dma = idx < 69;
+        if(idx >= 68)
+        {
+            spec->has_vector_size_a = true;
+            spec->vector_size_a = 4;
+        }
+        if(idx >= 69)
+        {
+            spec->has_vector_size_b = true;
+            spec->vector_size_b = 2;
+        }
+        *arch = "gfx1250";
+        return 0;
+    }
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    {
+        /* WMMA cshuffle epilogue. Must match the Python emitter's 58-61. */
+        const bool gfx1250 = idx != 61;
+        if(idx == 60)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 59 ? "bf16" : "fp16";
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = gfx1250 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "cshuffle";
+        spec->split_k = idx == 58 ? 1 : (idx == 60 ? 2 : 4);
+        spec->lds_k_outer = gfx1250;
+        spec->async_dma = idx == 60;
+        *arch = gfx1250 ? "gfx1250" : "gfx1201";
+        return 0;
+    }
+    case 62:
+        /* WMMA cshuffle split-K with an odd store vector. Must match the
+         * Python emitter's 62 (both engines reject). */
+        spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 2, 2);
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = "fp16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "cshuffle";
+        spec->split_k = 4;
+        *arch = "gfx1250";
+        return 0;
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    {
+        /* Two-stage (f32 workspace) split-K on WMMA. Must match the Python
+         * emitter's 63-66. */
+        const bool gfx1250 = idx != 66;
+        const bool big = idx == 64;
+        if(idx == 63)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
+        else if(idx == 65)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 64 ? "bf16" : "fp16";
+        spec->tile_m = big ? 64 : 32;
+        spec->tile_n = big ? 64 : 32;
+        spec->tile_k = big ? 64 : 32;
+        spec->warp_m = big ? 2 : 1;
+        spec->warp_n = big ? 2 : 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = gfx1250 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = 4;
+        spec->two_stage = true;
+        spec->lds_k_outer = idx == 64 || idx == 65;
+        spec->async_dma = idx == 65;
+        if(idx == 65)
+            spec->ws_replicas = 1;
+        *arch = gfx1250 ? "gfx1250" : "gfx1151";
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
+        fprintf(stderr, "usage: %s <config_index> [ll|ir|verify]\n", argv[0]);
+        return 2;
+    }
+    int idx = atoi(argv[1]);
+    const char* mode = (argc > 2) ? argv[2] : "ll";
+
+    rocke_implicit_gemm_conv_wgrad_spec_t spec;
+    const char* arch = "gfx950";
+    if(make_cfg(idx, &spec, &arch) != 0)
+    {
+        fprintf(stderr, "unknown config index %d\n", idx);
+        return 2;
+    }
+
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_implicit_gemm_conv_wgrad_new(&b, &spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
+        rocke_ir_builder_free(&b);
+        return 1;
+    }
+
+    int ret = 0;
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
+        {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
+        {
+            fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        rocke_diag_t* d = NULL;
+        size_t n = 0;
+        rocke_verify(kernel, &d, &n);
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = rocke_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
+        }
+        rocke_diags_free(d, n);
+    }
+    else
+    {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        rocke_ir_builder_free(&b);
+        return 2;
+    }
+    rocke_ir_builder_free(&b);
+    return ret;
+}

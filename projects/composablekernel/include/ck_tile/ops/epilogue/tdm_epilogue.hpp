@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -52,6 +52,16 @@ struct TdmEpilogue
 
     static constexpr index_t NumDTensor = Problem::NumDTensor;
 
+    /**
+     * @brief The TDM store always overwrites its output and ignores the atomic_add memory
+     * operation, so this epilogue cannot accumulate split-K partial tiles, whatever the output
+     * type. Kernels with a split-K arm read this through epilogue_can_accumulate_v to reject
+     * k_batch > 1 on the host and to compile that arm out; an epilogue that does not declare it
+     * is assumed able to accumulate. Kernels that do not read it are caught by the trap in
+     * operator().
+     */
+    static constexpr bool SupportsSplitK = false;
+
     // no use of vector store in TDM epilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC() { return 1; }
     template <index_t I>
@@ -87,10 +97,19 @@ struct TdmEpilogue
         return kMPerBlock * kNPerBlock * sizeof(ODataType);
     }
 
+    /// Number of workgroup barriers operator() issues. Must stay in sync with operator().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount() { return 2; }
+
+    /// Issues the barriers of operator() for wavelet load waves, which hold no C tile.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        static_for<0, GetBarrierCount(), 1>{}([&](auto) { block_sync_lds(); });
+    }
+
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
-        const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile);
+        const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
 
         store_tile(in_lds_window, c_warptile_in_tensor_casted);
     }
@@ -119,43 +138,160 @@ struct TdmEpilogue
         static_assert(std::is_same_v<ScaleM, EmptyScale> && std::is_same_v<ScaleN, EmptyScale>,
                       "ScaleM and ScaleN now is EmptyScale when TDM");
         static_assert(kBlockSize % get_warp_size() == 0, "BlockSize must be multiple of WarpSize");
-        constexpr index_t waveNum      = kBlockSize / get_warp_size();
-        constexpr auto outLdsTileDistr = make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<waveNum, kMPerBlock / waveNum>, sequence<kNPerBlock>>,
-                tuple<sequence<1>>,
-                tuple<sequence<0>>,
-                sequence<1, 2>,
-                sequence<1, 0>>{},
-            bool_constant<true>{});
 
-        TDMConfig tdm_config;
+        constexpr auto kOutMemOp =
+            remove_cvref_t<decltype(out_dram_window.get_bottom_tensor_view())>::DstInMemOp;
+        if constexpr(kOutMemOp != memory_operation_enum::set)
+        {
+            // The TDM store cannot accumulate (see SupportsSplitK): reaching here means a
+            // split-K launch the host should have rejected. Abort rather than overwrite C with
+            // one split's partial sum -- a trap, not a static_assert, because kernels that
+            // dispatch on k_batch at run time still instantiate their atomic_add arm.
+            ignore = out_dram_window;
+            ignore = o_acc_tile;
+            ignore = p_smem;
+            __builtin_trap();
+        }
+        else
+        {
+            constexpr index_t waveNum      = kBlockSize / get_warp_size();
+            constexpr auto outLdsTileDistr = make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<waveNum, kMPerBlock / waveNum>, sequence<kNPerBlock>>,
+                    tuple<sequence<1>>,
+                    tuple<sequence<0>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{},
+                bool_constant<true>{});
 
-        constexpr auto lds_block_desc = MakeLdsBlockDescriptor();
+            TDMConfig tdm_config;
 
-        auto o_lds_block = make_tensor_view<address_space_enum::lds>(
-            static_cast<ODataType*>(p_smem), lds_block_desc);
+            constexpr auto lds_block_desc = MakeLdsBlockDescriptor();
 
-        auto in_lds_window =
-            make_tile_window(o_lds_block,
-                             make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
-                             {0, 0},
-                             o_acc_tile.get_tile_distribution());
+            auto o_lds_block = make_tensor_view<address_space_enum::lds>(
+                static_cast<ODataType*>(p_smem), lds_block_desc);
 
-        auto out_lds_window =
-            make_tile_window(o_lds_block,
-                             make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
-                             {0, 0},
-                             outLdsTileDistr);
+            auto in_lds_window =
+                make_tile_window(o_lds_block,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                 {0, 0},
+                                 o_acc_tile.get_tile_distribution());
 
-        s_wait_tensorcnt_barrier<0 /*tensor_cnt*/, 0 /*lgkmcnt*/>();
+            auto out_lds_window =
+                make_tile_window(o_lds_block,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                 {0, 0},
+                                 outLdsTileDistr);
 
-        cast_lds_tile(o_acc_tile, in_lds_window);
-        block_sync_lds();
+            // Barriers here must match GetBarrierCount(): RunBarrierStub() mirrors them.
+            s_wait_tensorcnt_barrier<0 /*tensor_cnt*/, 0 /*lgkmcnt*/>();
 
-        store_tile_tdm(tdm_config, out_dram_window, out_lds_window);
-    };
+            cast_lds_tile(o_acc_tile, in_lds_window);
+            block_sync_lds();
+
+            store_tile_tdm(tdm_config, out_dram_window, out_lds_window);
+            // The store reads p_smem asynchronously; retire it before the caller reuses LDS.
+            s_wait_tensorcnt();
+        }
+    }
 };
+
+namespace impl {
+
+template <index_t kBlockSize, index_t kMPerBlock, index_t kNPerBlock>
+CK_TILE_DEVICE constexpr auto tdm_wave_linear_distr()
+{
+    static_assert(kBlockSize % get_warp_size() == 0,
+                  "kBlockSize must be a multiple of the wave size");
+    constexpr index_t waveNum = kBlockSize / get_warp_size();
+    static_assert(kMPerBlock % waveNum == 0, "kMPerBlock must split evenly across waves");
+
+    return make_static_tile_distribution(
+        tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<waveNum, kMPerBlock / waveNum>, sequence<kNPerBlock>>,
+            tuple<sequence<1>>,
+            tuple<sequence<0>>,
+            sequence<1, 2>,
+            sequence<1, 0>>{},
+        bool_constant<true>{});
+}
+
+template <typename ODataType, index_t kMPerBlock, index_t kNPerBlock>
+CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
+{
+    constexpr auto desc =
+        make_naive_tensor_descriptor(make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                     make_tuple(number<kNPerBlock>{}, number<1>{}));
+    return make_tensor_view<address_space_enum::lds>(static_cast<ODataType*>(p), desc);
+}
+
+template <typename Problem>
+constexpr bool is_tdm_epilogue(const TdmEpilogue<Problem>*)
+{
+    return true;
+}
+constexpr bool is_tdm_epilogue(const void*) { return false; }
+
+} // namespace impl
+
+/// True for TdmEpilogue and for epilogues derived from it (e.g. TdmMultiDEpilogue).
+template <typename Epilogue>
+inline constexpr bool is_tdm_epilogue_v =
+    impl::is_tdm_epilogue(static_cast<const remove_cvref_t<Epilogue>*>(nullptr));
+
+template <typename ODataType,
+          index_t kBlockSize,
+          index_t kMPerBlock,
+          index_t kNPerBlockA,
+          index_t kNPerBlockB,
+          typename ADramWindow,
+          typename BDramWindow,
+          typename AAccTile,
+          typename BAccTile>
+CK_TILE_DEVICE void tdm_store_2d_pair(ADramWindow& a_dram_window,
+                                      const AAccTile& a_acc_tile,
+                                      BDramWindow& b_dram_window,
+                                      const BAccTile& b_acc_tile,
+                                      void* p_smem)
+{
+    auto* p_a = static_cast<char*>(p_smem);
+    auto* p_b = p_a + kMPerBlock * kNPerBlockA * sizeof(ODataType);
+
+    auto a_lds = impl::tdm_row_major_lds_view<ODataType, kMPerBlock, kNPerBlockA>(p_a);
+    auto b_lds = impl::tdm_row_major_lds_view<ODataType, kMPerBlock, kNPerBlockB>(p_b);
+
+    auto a_in = make_tile_window(a_lds,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
+                                 {0, 0},
+                                 a_acc_tile.get_tile_distribution());
+    auto b_in = make_tile_window(b_lds,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
+                                 {0, 0},
+                                 b_acc_tile.get_tile_distribution());
+
+    auto a_out =
+        make_tile_window(a_lds,
+                         make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
+                         {0, 0},
+                         impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockA>());
+    auto b_out =
+        make_tile_window(b_lds,
+                         make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
+                         {0, 0},
+                         impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockB>());
+
+    TDMConfig tdm_config;
+
+    s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+
+    store_tile(a_in, cast_tile_pk<ODataType>(a_acc_tile));
+    store_tile(b_in, cast_tile_pk<ODataType>(b_acc_tile));
+    block_sync_lds();
+
+    store_tile_tdm(tdm_config, a_dram_window, a_out);
+    store_tile_tdm(tdm_config, b_dram_window, b_out);
+}
 
 } // namespace ck_tile

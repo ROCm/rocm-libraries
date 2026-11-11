@@ -103,6 +103,25 @@ bool hasCodeObjectMagic(const void* data, size_t size)
 
 } // namespace
 
+bool isCredibleCodeObjectSize(std::uintmax_t reportedBytes, std::uintmax_t archiveBytes)
+{
+    // This size comes from the same untrusted TOC as the magic above, handed back unchecked.
+    // Two independent ceilings, because either can be the only one available: the absolute
+    // cap holds when the file size could not be read, the ratio when a small archive declares
+    // a large entry. The ratio sits far above what zstd achieves -- real entries land near 4x.
+    //
+    // Written as reported / RATIO > archive rather than reported > archive * RATIO: the
+    // multiplication overflows on a large archive and would silently admit everything.
+    static constexpr std::uintmax_t MAX_CODE_OBJECT_BYTES = 2ULL * 1024 * 1024 * 1024;
+    static constexpr std::uintmax_t MAX_EXPANSION_RATIO = 4096;
+
+    if(reportedBytes > MAX_CODE_OBJECT_BYTES)
+    {
+        return false;
+    }
+    return archiveBytes == 0 || reportedBytes / MAX_EXPANSION_RATIO <= archiveBytes;
+}
+
 KpackCodeObject::KpackCodeObject(void* data, size_t size)
     : _data(data)
     , _size(size)
@@ -144,6 +163,7 @@ KpackArchive::~KpackArchive()
 
 KpackArchive::KpackArchive(KpackArchive&& other) noexcept
     : _archive(std::exchange(other._archive, nullptr))
+    , _archiveBytes(std::exchange(other._archiveBytes, 0))
 {
 }
 
@@ -153,6 +173,7 @@ KpackArchive& KpackArchive::operator=(KpackArchive&& other) noexcept
     {
         close();
         _archive = std::exchange(other._archive, nullptr);
+        _archiveBytes = std::exchange(other._archiveBytes, 0);
     }
     return *this;
 }
@@ -164,6 +185,7 @@ void KpackArchive::close()
         kpack_close(asArchive(_archive));
         _archive = nullptr;
     }
+    _archiveBytes = 0;
 }
 
 bool KpackArchive::open(const std::filesystem::path& path, KpackError& error)
@@ -197,6 +219,13 @@ bool KpackArchive::open(const std::filesystem::path& path, KpackError& error)
     }
 
     _archive = archive;
+
+    // Read here, not in codeObject: this is the one place the path is in hand, and taking it
+    // once keeps a per-entry check from becoming a per-entry stat of an already-open file.
+    std::error_code sizeError;
+    const std::uintmax_t bytes = std::filesystem::file_size(path, sizeError);
+    _archiveBytes = sizeError ? 0 : bytes;
+
     return true;
 }
 
@@ -267,6 +296,15 @@ bool KpackArchive::codeObject(const std::string& tocKey,
         // A success return with nothing in it would otherwise reach hipModuleLoadData
         // as a null pointer and fail there, one stage too late to name.
         error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_DECOMPRESSION_FAILED);
+        return false;
+    }
+
+    // Checked after the call rather than before it, because kpack_get_kernel is what
+    // allocates and the C API exposes no way to ask an entry's size first; what this stops
+    // is a bogus length reaching hipModuleLoadData.
+    if(!isCredibleCodeObjectSize(codeObject.size(), _archiveBytes))
+    {
+        error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_INVALID_METADATA);
         return false;
     }
 

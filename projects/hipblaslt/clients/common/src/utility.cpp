@@ -30,6 +30,7 @@
 #include <libloaderapi.h>
 #endif
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
 #include "d_vector.hpp"
 #include "utility.hpp"
 #include <atomic>
@@ -45,15 +46,8 @@
 
 #include <Tensile/hip/HipHardware.hpp>
 
-#if __has_include(<filesystem>)
 #include <filesystem>
 namespace fs = std::filesystem;
-#elif __has_include(<experimental/filesystem>)
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#else
-#error no filesystem found
-#endif
 
 /* ============================================================================================ */
 // Return path of this executable
@@ -484,3 +478,12 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                    << std::endl;
 }
 
+bool hipblaslt_timing_allowed_with_adaptive_sm_count()
+{
+    using namespace rocblaslt::adaptive_sm;
+    if(!Config::fromEnv().hintVaries())
+        return true;
+    hipblaslt_cerr << "error: " << kEnvEnable << " changes the timed solution during timing; set "
+                   << kEnvForce << "=<cus> to time a fixed hint" << std::endl;
+    return false;
+}

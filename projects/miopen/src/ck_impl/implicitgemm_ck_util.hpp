@@ -4,9 +4,11 @@
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/zero_tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
 #include <limits>
+#include <unordered_map>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -169,24 +171,42 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     });
 }
 
-// Non-large-tensor CK instances silently narrow CK's int64 MakeArgumentPointer overload
-// back to int32 and form byte offsets in 32-bit arithmetic, so any tensor whose byte span
-// exceeds INT_MAX overflows and returns silently wrong results -- even when every individual
-// dim/stride and the raw element count fit in int32. Must use GetNumBytes() (stride-aware
-// byte span), not GetElementSpace()/GetElementSize() (element counts): a tensor can have a
-// large element count but a sub-2GiB byte span (no risk), or the reverse -- a sub-INT_MAX
-// element count with a >2GiB byte span, which does overflow. Applies to every direction:
-// forward and backward-data hit the same 32-bit byte-offset overflow as backward-weights.
+// Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
+// backward-weights tensor's addressable element extent exceeds INT_MAX, so the problem
+// must be dispatched to a CK instance whose argument types are int64 end-to-end.
+//
+// CK exposes both index_t (int32) and long_index_t (int64) MakeArgumentPointer
+// overloads, but most non-large-tensor impls override the int64 overload by
+// silently narrowing back to int32 (e.g.
+// device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp:2090-2117). Without
+// this filter the loader would happily pick a narrowing instance for an
+// out-of-range stride and corrupt the kernel arguments.
 template <typename ProblemDescriptionType>
 inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 {
     if(!problem.AllTensorsDimsFitIntoInt())
         return true;
 
-    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-    return problem.GetIn().GetNumBytes() > max_int32 ||
-           problem.GetOut().GetNumBytes() > max_int32 ||
-           problem.GetWeights().GetNumBytes() > max_int32;
+    // AllTensorsDimsFitIntoInt() only checks that each individual length/stride fits in
+    // int32; it does NOT bound the maximum flat element offset the kernel indexes. A grouped
+    // backward-weights tensor whose element extent exceeds INT_MAX overflows a non-large CK
+    // instance's 32-bit element indexing and returns silently wrong results, so require a
+    // large-tensor (int64) instance for those too. Use GetElementSpace() (the stride-aware
+    // max addressable offset, as GetNumBytes() does), not GetElementSize() (the packed
+    // element count): for a non-packed tensor the element space is larger and is the true
+    // bound on the int32 offset that overflows. Scoped to the backward-weights direction:
+    // forward and backward-data verify correctly on the int32 instances and must keep them
+    // (the large-tensor instances are measurably slower). This gate is rank-agnostic, so it
+    // covers both 2D (ConvHipImplicitGemmGroupWrwXdlops) and 3D
+    // (ConvHipImplicitGemm3DGroupWrwXdlops) grouped backward-weights.
+    if(problem.IsDirectionBackwardWrW())
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        return problem.GetIn().GetElementSpace() > max_int32 ||
+               problem.GetOut().GetElementSpace() > max_int32 ||
+               problem.GetWeights().GetElementSpace() > max_int32;
+    }
+    return false;
 }
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see
@@ -443,6 +463,52 @@ inline constexpr bool IsSplitKNeeded()
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
 
+// Candidate selection calls IsCKArgsSupported once per (kernel, split_k), and
+// GetInstances() rebuilds every instance on each call, so keep one list and a
+// type-string index per DeviceOpType; IsCKSplitKSupported shares the same cache.
+// emplace keeps the first index, the same instance FindConvPtrByID would return.
+// Sharing one list is safe because the grouped-conv device ops have no data
+// members of their own: per-call state lives in the Argument, not the instance.
+// IsSupportedArgument and MakeArgumentPointer are non-const (they bind through a
+// const unique_ptr& only because constness is not propagated), but they write the
+// Argument, not the shared instance. GetInstances() is now called once per process
+// and must return a fixed list; some CK factories gate on ck::get_device_name()
+// (the calling thread's current device), so the first call fixes the list, which
+// is deterministic in practice because the plugin is per-arch. FillValidKernels,
+// IsCKApplicable and InitAnyInvokerFactory still call GetInstances() fresh.
+template <typename DeviceOpType>
+const auto& CachedCKInstances()
+{
+    static const auto instances = DeviceOpType::GetInstances();
+    return instances;
+}
+
+template <typename DeviceOpType>
+const std::unordered_map<std::string, std::size_t>& CachedCKInstanceIndex()
+{
+    // An explicit return type: with a deduced one clang does not elide the copy (-Wnrvo).
+    static const auto index = []() -> std::unordered_map<std::string, std::size_t> {
+        const auto& instances = CachedCKInstances<DeviceOpType>();
+        std::unordered_map<std::string, std::size_t> by_type;
+        by_type.reserve(instances.size());
+        for(std::size_t i = 0; i < instances.size(); ++i)
+            by_type.emplace(instances[i]->GetTypeString(), i);
+        return by_type;
+    }();
+    return index;
+}
+
+template <typename DeviceOpType>
+auto FindCachedConvPtr(const std::string& kernel_id)
+{
+    const auto& instances = CachedCKInstances<DeviceOpType>();
+    const auto& index     = CachedCKInstanceIndex<DeviceOpType>();
+    const auto found      = index.find(kernel_id);
+    if(found == index.end())
+        return instances.end();
+    return instances.begin() + static_cast<std::ptrdiff_t>(found->second);
+}
+
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 template <typename DeviceOpType,
@@ -454,7 +520,7 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        auto conv_ptrs                  = DeviceOpType::GetInstances();
+        const auto& conv_ptrs           = CachedCKInstances<DeviceOpType>();
         const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
@@ -477,14 +543,14 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
                 return false;
             }
 
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id.substr(0, pos));
+            auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id.substr(0, pos));
             return (ptr_iter != conv_ptrs.end()) &&
                    (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
         }
         else
         {
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id);
+            auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id);
             return (ptr_iter != conv_ptrs.end()) &&
                    (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBy(*ptr_iter);
@@ -543,8 +609,8 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
                          int split_k)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    auto conv_ptrs = DeviceOpType::GetInstances();
-    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+    const auto& conv_ptrs = CachedCKInstances<DeviceOpType>();
+    auto ptr_iter         = FindCachedConvPtr<DeviceOpType>(kernel_id);
 
     if(ptr_iter == conv_ptrs.end())
     {
@@ -1185,7 +1251,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 {
                     if constexpr(ZeroOutputs)
                     {
-                        ZeroOutTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
+                        ZeroTensor(handle, data_ctx.tensors.dwDesc, data_ctx.tensors.dw);
 
                         if(handle.IsProfilingEnabled())
                         {
@@ -1257,7 +1323,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> &&
                              ZeroOutputs)
                 {
-                    ZeroOutTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
+                    ZeroTensor(handle, data_ctx.tensors.outDesc, data_ctx.tensors.out);
 
                     if(handle.IsProfilingEnabled())
                     {

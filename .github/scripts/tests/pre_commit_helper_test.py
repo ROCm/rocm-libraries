@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import sys
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import call, patch, MagicMock
 
@@ -33,6 +34,8 @@ class PreCommitHelperTest(unittest.TestCase):
 
     def test_main_normalizes_new_branch_before_pipeline(self):
         null_ref = "0" * 40
+        temp_dir = self.enterContext(tempfile.TemporaryDirectory())
+        changed_files_file = Path(temp_dir, "changed-files.txt")
 
         with patch.object(
             sys,
@@ -45,6 +48,8 @@ class PreCommitHelperTest(unittest.TestCase):
                 "origin/develop",
                 "--pushed-branch-name",
                 "feature/from-elsewhere",
+                "--changed-files-file",
+                os.fspath(changed_files_file),
             ],
         ), patch("pre_commit_helper.fetch_diff_base") as mock_fetch, patch(
             "pre_commit_helper.sparse_checkout_changed_projects",
@@ -58,16 +63,22 @@ class PreCommitHelperTest(unittest.TestCase):
         mock_sparse_checkout.assert_called_once_with("origin/develop")
         mock_set_github_output.assert_any_call({"diff_ref": "origin/develop"})
         mock_set_github_output.assert_any_call(
-            {"changed_files": "projects/hipdnn/src/foo.cpp"}
+            {"changed_files_file": os.fspath(changed_files_file)}
+        )
+        self.assertEqual(
+            changed_files_file.read_text(encoding="utf-8"),
+            "projects/hipdnn/src/foo.cpp\n",
         )
 
     def test_main_runs_pre_commit_checkout_pipeline(self):
         changed_files = [
-            "projects/hipdnn/src/foo.cpp",
-            "projects/hipdnn/include/foo.hpp",
-            "shared/hipdnn/common.py",
-            "README.md",
+            "projects/hipdnn/"
+            f"namespace_move/{index:04d}/{'long_path_component_' * 3}.py"
+            for index in range(1484)
         ]
+        self.assertGreater(len("\n".join(changed_files).encode()), 128 * 1024)
+        temp_dir = self.enterContext(tempfile.TemporaryDirectory())
+        changed_files_file = Path(temp_dir, "changed-files.txt")
 
         with patch.object(
             sys,
@@ -80,6 +91,8 @@ class PreCommitHelperTest(unittest.TestCase):
                 "origin/develop",
                 "--pushed-branch-name",
                 "feature/pre-commit-helper",
+                "--changed-files-file",
+                os.fspath(changed_files_file),
             ],
         ), patch("pre_commit_helper.is_shallow_repo", return_value=False), patch(
             "pre_commit_helper.get_modified_paths", return_value=changed_files
@@ -113,7 +126,6 @@ class PreCommitHelperTest(unittest.TestCase):
                         "set",
                         "--cone",
                         "projects/hipdnn",
-                        "shared/hipdnn",
                     ],
                     check=True,
                 ),
@@ -121,7 +133,11 @@ class PreCommitHelperTest(unittest.TestCase):
         )
         mock_set_github_output.assert_any_call({"diff_ref": "origin/develop"})
         mock_set_github_output.assert_any_call(
-            {"changed_files": "\n".join(sorted(changed_files))}
+            {"changed_files_file": os.fspath(changed_files_file)}
+        )
+        self.assertEqual(
+            changed_files_file.read_text(encoding="utf-8"),
+            "".join(f"{path}\n" for path in sorted(changed_files)),
         )
 
     @patch("pre_commit_helper.is_shallow_repo", return_value=True)

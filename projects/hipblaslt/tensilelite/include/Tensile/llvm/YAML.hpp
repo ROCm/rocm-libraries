@@ -134,6 +134,14 @@ namespace TensileLite
         {
             using IO = llvm::yaml::IO;
 
+            static bool hasKey(IO& io, const char* key)
+            {
+                for(auto const& present : io.keys())
+                    if(present == key)
+                        return true;
+                return false;
+            }
+
             template <typename T>
             static void mapRequired(IO& io, const char* key, T& obj)
             {
@@ -156,6 +164,34 @@ namespace TensileLite
             static void mapOptional(IO& io, const char* key, T& obj, Context& ctx)
             {
                 io.mapOptional(key, obj, ctx);
+            }
+
+            /// Omits the key on output when the value is the one an absent key
+            /// would produce. llvm::yaml::IO already behaves this way; this only
+            /// routes the shared traits' call to it.
+            template <typename T>
+            static void mapOptional(IO& io, const char* key, T& obj, T const& defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
+            }
+
+            // YAML has no binary scalar, and the indexed library format is only
+            // ever written as msgpack, so there is nothing to read here. Always
+            // failing keeps the shared MappingTraits compiling for this backend
+            // while forcing the indexed branch to report a format error.
+            static bool mapRawBytes(IO& io, const char* key, const uint8_t*& ptr, size_t& size)
+            {
+                return false;
+            }
+
+            // Never reached: mapRawBytes above fails first, so the indexed
+            // branch reports a format error before it needs a deserializer.
+            // Present so the shared MappingTraits instantiates for this backend.
+            template <typename MySolution>
+            static std::function<std::shared_ptr<MySolution>(const uint8_t*, size_t)>
+                solutionDeserializer(IO& io)
+            {
+                return {};
             }
 
             static bool outputting(IO& io)
@@ -314,4 +350,3 @@ namespace llvm
             "fdsa");
     } // namespace yaml
 } // namespace llvm
-

@@ -22,6 +22,7 @@
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include <algorithm>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <memory>
 #include <random>
@@ -430,4 +431,136 @@ TEST(rocfft_UnitTest, buffer_hashing_double)
     {
         GTEST_SKIP() << e.what();
     }
+}
+
+// Hash a host buffer laid out exactly as given (strides/dist describe memory).
+template <typename Telem>
+static hash_output<size_t> hash_host_buffer(rocfft_precision           precision,
+                                            rocfft_array_type          type,
+                                            const std::vector<Telem>&  mem,
+                                            const std::vector<size_t>& length,
+                                            const std::vector<size_t>& stride,
+                                            size_t                     dist,
+                                            size_t                     nbatch)
+{
+    std::vector<hostbuf> buf(1);
+    buf[0].alloc(mem.size() * sizeof(Telem));
+    std::copy(mem.begin(), mem.end(), static_cast<Telem*>(buf[0].data()));
+    auto hash_in  = hash_input(precision, length, stride, dist, type, nbatch);
+    auto hash_out = hash_output<size_t>();
+    compute_hash(buf, hash_in, hash_out);
+    return hash_out;
+}
+
+template <typename Tfloat>
+static hash_output<size_t> hash_real_1234(rocfft_precision precision)
+{
+    std::vector<Tfloat> mem;
+    for(size_t i = 0; i < 4; ++i)
+        mem.push_back(static_cast<Tfloat>(i + 1)); // {1, 2, 3, 4}
+    return hash_host_buffer(precision, rocfft_array_type_real, mem, {4}, {1}, 4, 1);
+}
+
+// The buffer hash must be a fixed function of the data (no std::hash), so a
+// known buffer always produces the same fingerprint on every toolchain.
+TEST(rocfft_UnitTest, buffer_hash_golden_values)
+{
+    PROB_SKIP_UNITTEST();
+    auto h_half = hash_real_1234<rocfft_fp16>(rocfft_precision_half);
+    EXPECT_EQ(h_half.buffer_real, 6010172260665940913ULL);
+    EXPECT_EQ(h_half.buffer_imag, 0u);
+
+    auto h_single = hash_real_1234<float>(rocfft_precision_single);
+    EXPECT_EQ(h_single.buffer_real, 13029437891923012638ULL);
+    EXPECT_EQ(h_single.buffer_imag, 0u);
+
+    auto h_double = hash_real_1234<double>(rocfft_precision_double);
+    EXPECT_EQ(h_double.buffer_real, 4918654574207189942ULL);
+    EXPECT_EQ(h_double.buffer_imag, 0u);
+}
+
+template <typename Tfloat>
+static void expect_real_transpose_detected(rocfft_precision precision)
+{
+    std::vector<Tfloat> a(16), t(16);
+    for(size_t r = 0; r < 4; ++r)
+        for(size_t c = 0; c < 4; ++c)
+            a[r * 4 + c] = static_cast<Tfloat>(r * 4 + c + 1);
+    for(size_t r = 0; r < 4; ++r)
+        for(size_t c = 0; c < 4; ++c)
+            t[r * 4 + c] = a[c * 4 + r];
+    auto ha = hash_host_buffer(precision, rocfft_array_type_real, a, {4, 4}, {4, 1}, 16, 1);
+    auto ht = hash_host_buffer(precision, rocfft_array_type_real, t, {4, 4}, {4, 1}, 16, 1);
+    EXPECT_NE(ha.buffer_real, ht.buffer_real);
+}
+
+// Elements on an anti-diagonal must not share a position, so a transposed
+// square output hashes differently.
+TEST(rocfft_UnitTest, buffer_hash_detects_transpose)
+{
+    PROB_SKIP_UNITTEST();
+    expect_real_transpose_detected<float>(rocfft_precision_single);
+    expect_real_transpose_detected<double>(rocfft_precision_double);
+
+    std::vector<rocfft_complex<float>> a(16), t(16);
+    for(size_t r = 0; r < 4; ++r)
+        for(size_t c = 0; c < 4; ++c)
+        {
+            const float v = static_cast<float>(r * 4 + c + 1);
+            a[r * 4 + c]  = rocfft_complex<float>(v, -v);
+        }
+    for(size_t r = 0; r < 4; ++r)
+        for(size_t c = 0; c < 4; ++c)
+            t[r * 4 + c] = a[c * 4 + r];
+    const auto type = rocfft_array_type_complex_interleaved;
+    auto       ha   = hash_host_buffer(rocfft_precision_single, type, a, {4, 4}, {4, 1}, 16, 1);
+    auto       ht   = hash_host_buffer(rocfft_precision_single, type, t, {4, 4}, {4, 1}, 16, 1);
+    EXPECT_NE(ha.buffer_real, ht.buffer_real);
+    EXPECT_NE(ha.buffer_imag, ht.buffer_imag);
+}
+
+// A 1-ULP change in any element must change the hash.
+TEST(rocfft_UnitTest, buffer_hash_detects_one_ulp)
+{
+    PROB_SKIP_UNITTEST();
+    std::vector<float> a = {1.0f, 2.0f, 1.7f, 4.0f};
+    std::vector<float> b = a;
+    b[2]                 = std::nextafter(1.7f, 2.0f);
+    auto ha = hash_host_buffer(rocfft_precision_single, rocfft_array_type_real, a, {4}, {1}, 4, 1);
+    auto hb = hash_host_buffer(rocfft_precision_single, rocfft_array_type_real, b, {4}, {1}, 4, 1);
+    EXPECT_NE(ha.buffer_real, hb.buffer_real);
+}
+
+// Swapping two batches must change the hash.
+TEST(rocfft_UnitTest, buffer_hash_detects_batch_swap)
+{
+    PROB_SKIP_UNITTEST();
+    std::vector<float> a = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<float> b = {5, 6, 7, 8, 1, 2, 3, 4};
+    auto ha = hash_host_buffer(rocfft_precision_single, rocfft_array_type_real, a, {4}, {1}, 4, 2);
+    auto hb = hash_host_buffer(rocfft_precision_single, rocfft_array_type_real, b, {4}, {1}, 4, 2);
+    EXPECT_NE(ha.buffer_real, hb.buffer_real);
+}
+
+// The hash depends on logical data only: strides, dist and padding contents
+// must not change it.
+TEST(rocfft_UnitTest, buffer_hash_ignores_padding)
+{
+    PROB_SKIP_UNITTEST();
+    const size_t       nbatch = 2, rows = 3, cols = 4;
+    std::vector<float> contig(nbatch * rows * cols);
+    std::vector<float> padded(nbatch * 17, -999.0f);
+    for(size_t b = 0; b < nbatch; ++b)
+        for(size_t r = 0; r < rows; ++r)
+            for(size_t c = 0; c < cols; ++c)
+            {
+                const float v              = static_cast<float>(b * 100 + r * 10 + c);
+                contig[b * 12 + r * 4 + c] = v;
+                padded[b * 17 + r * 5 + c] = v;
+            }
+    const auto prec = rocfft_precision_single;
+    const auto type = rocfft_array_type_real;
+    auto       hc   = hash_host_buffer(prec, type, contig, {rows, cols}, {4, 1}, 12, nbatch);
+    auto       hp   = hash_host_buffer(prec, type, padded, {rows, cols}, {5, 1}, 17, nbatch);
+    EXPECT_EQ(hc.buffer_real, hp.buffer_real);
 }

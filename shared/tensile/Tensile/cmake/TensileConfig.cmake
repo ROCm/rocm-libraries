@@ -82,6 +82,40 @@ else()
     set(TENSILE_STATIC_ONLY OFF CACHE BOOL "Disable exporting symbols from shared library.")
 endif()
 
+# Discover HIP_VERSION before add_subdirectory so it is available in this
+# scope (add_subdirectory creates a child scope whose variables do not
+# propagate back).  The call is wrapped in a function that saves and
+# restores the GPU_TARGETS cache entry because hip-config-amd.cmake
+# unconditionally writes GPU_TARGETS (via amdgpu-arch auto-detection),
+# which would interfere with Tensile's own GPU_TARGETS initialisation in
+# Source/CMakeLists.txt.
+function(_tensile_discover_hip_version out_var)
+  # Remember whether GPU_TARGETS was already in the cache.
+  get_property(_had_gpu_targets CACHE GPU_TARGETS PROPERTY TYPE)
+  if(_had_gpu_targets)
+    get_property(_saved_gpu_targets CACHE GPU_TARGETS PROPERTY VALUE)
+  endif()
+
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" _rocm_path)
+  find_package(HIP REQUIRED CONFIG PATHS ${_rocm_path} /opt/rocm)
+  if(NOT HIP_VERSION)
+    message(FATAL_ERROR "The HIP package did not provide HIP_VERSION")
+  endif()
+  set(${out_var} "${HIP_VERSION}" PARENT_SCOPE)
+
+  # Restore GPU_TARGETS to its prior state so Tensile initialises it fresh.
+  if(_had_gpu_targets)
+    set(GPU_TARGETS "${_saved_gpu_targets}" CACHE STRING
+        "AMD GPU targets to compile for" FORCE)
+  else()
+    unset(GPU_TARGETS CACHE)
+  endif()
+endfunction()
+
+if(TENSILE_USE_HIP)
+  _tensile_discover_hip_version(Tensile_HIP_VERSION)
+endif()
+
 add_subdirectory("${Tensile_ROOT}/Source" "Tensile")
 
 # Output target: ${Tensile_VAR_PREFIX}_LIBRARY_TARGET. Ensures that the libs get built in Tensile_OUTPUT_PATH/library.
@@ -128,6 +162,65 @@ function(TensileCreateLibraryFiles
   endif()
   if(Tensile_KEYWORDS_MISSING_VALUES)
     message(WARNING "Malformed arguments: ${Tensile_KEYWORDS_MISSING_VALUES}")
+  endif()
+
+  # Each generator process owns one variant of an ISA-keyed capability map.
+  # "all" implies gfx1250-strict too, but strict cannot share an invocation with
+  # gfx1250/all (see configureCompilerTarget), so it always needs its own child.
+  set(_strict_target "")
+  set(_strict_embed_source "")
+  if(("gfx1250-strict" IN_LIST Tensile_ARCHITECTURE OR "all" IN_LIST Tensile_ARCHITECTURE)
+     AND NOT _tensile_strict_child)
+    set(_strict_args)
+    foreach(_option IN LISTS options)
+      if(Tensile_${_option})
+        list(APPEND _strict_args ${_option})
+      endif()
+    endforeach()
+    # EMBED_LIBRARY/EMBED_KEY are forwarded so the child emits its own embed
+    # source under ${OUTPUT_PATH}-strict/library/. The child suppresses its own
+    # add_library() (guarded by _tensile_strict_child below); the parent compiles
+    # both embed sources into the single requested target. Same EMBED_KEY lets the
+    # regular and strict catalogs aggregate into one keyed registry at runtime.
+    foreach(_option IN LISTS oneValueArgs)
+      if(DEFINED Tensile_${_option} AND NOT _option STREQUAL "VAR_PREFIX")
+        list(APPEND _strict_args ${_option} "${Tensile_${_option}}")
+      endif()
+    endforeach()
+    if(Tensile_EMBED_LIBRARY)
+      set(_strict_embed_source
+        "${Tensile_OUTPUT_PATH}-strict/library/${Tensile_EMBED_LIBRARY}.cpp")
+    endif()
+    if(NOT Tensile_VAR_PREFIX)
+      set(Tensile_VAR_PREFIX TENSILE)
+    endif()
+    set(_strict_prefix "${Tensile_VAR_PREFIX}_STRICT")
+    set(_strict_target "${_strict_prefix}_LIBRARY_TARGET")
+    # The child flag prevents recursion; compiler selection remains the target
+    # name, not a workflow option or a second logical GPU family.
+    set(_tensile_strict_child ON)
+    list(REMOVE_ITEM Tensile_ARCHITECTURE gfx1250-strict)
+    TensileCreateLibraryFiles(
+      "${Tensile_LOGIC_PATH}" "${Tensile_OUTPUT_PATH}-strict"
+      ${_strict_args} ARCHITECTURE gfx1250-strict VAR_PREFIX "${_strict_prefix}")
+    unset(_tensile_strict_child)
+    add_custom_command(TARGET ${_strict_target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${Tensile_OUTPUT_PATH}-strict/library/gfx1250-strict"
+        "${Tensile_OUTPUT_PATH}/library/gfx1250-strict"
+      VERBATIM)
+    if(NOT Tensile_ARCHITECTURE)
+      # strict-only: no regular generator invocation follows, so build the
+      # requested embed target here from the strict source alone.
+      add_custom_target(${Tensile_VAR_PREFIX}_LIBRARY_TARGET DEPENDS ${_strict_target})
+      if(Tensile_EMBED_LIBRARY)
+        set_source_files_properties(${_strict_embed_source} PROPERTIES GENERATED TRUE)
+        add_library(${Tensile_EMBED_LIBRARY} ${_strict_embed_source})
+        target_link_libraries(${Tensile_EMBED_LIBRARY} PUBLIC TensileHost)
+        add_dependencies(${Tensile_EMBED_LIBRARY} ${Tensile_VAR_PREFIX}_LIBRARY_TARGET)
+      endif()
+      return()
+    endif()
   endif()
 
   # Parse incoming options
@@ -232,7 +325,7 @@ function(TensileCreateLibraryFiles
   endif()
   set(ENV_PATH_ARG "PATH=${ESC_PATH}")
   set(CommandLine
-    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" --
+    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" "ROCM_VERSION=${Tensile_HIP_VERSION}" --
     ${CommandLine})
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
@@ -309,10 +402,23 @@ function(TensileCreateLibraryFiles
          VERBATIM)
   endif()
 
-  if(Tensile_EMBED_LIBRARY)
+  if(_strict_target)
+    add_dependencies(${Tensile_VAR_PREFIX}_LIBRARY_TARGET ${_strict_target})
+  endif()
+
+  # The strict child emits its embed source but must not create the shared embed
+  # target — the parent owns add_library() and compiles both sources into it.
+  if(Tensile_EMBED_LIBRARY AND NOT _tensile_strict_child)
 
       set_source_files_properties(${Tensile_EMBED_LIBRARY_SOURCE} PROPERTIES GENERATED TRUE)
-      add_library(${Tensile_EMBED_LIBRARY} ${Tensile_EMBED_LIBRARY_SOURCE})
+      # Aggregate the strict embed source (if any) into the same target. Both use
+      # the same EMBED_KEY, so their catalogs register together at runtime; each
+      # source wraps its symbol in an anonymous namespace, so there is no ODR clash.
+      if(_strict_embed_source)
+        set_source_files_properties(${_strict_embed_source} PROPERTIES GENERATED TRUE)
+      endif()
+      add_library(${Tensile_EMBED_LIBRARY}
+        ${Tensile_EMBED_LIBRARY_SOURCE} ${_strict_embed_source})
       target_link_libraries(${Tensile_EMBED_LIBRARY} PUBLIC TensileHost)
 
       add_dependencies(${Tensile_EMBED_LIBRARY} ${Tensile_VAR_PREFIX}_LIBRARY_TARGET)

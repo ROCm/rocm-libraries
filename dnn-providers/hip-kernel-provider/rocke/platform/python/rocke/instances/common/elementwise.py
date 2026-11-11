@@ -10,9 +10,11 @@ operation per element.
 
 What we cover today:
 
-* Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``
+* Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``,
+  ``tanh``
 * Binary ops: ``add``, ``sub``, ``mul``, ``max``, ``min``
-* Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally)
+* Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally), and
+  ``f64`` (native f64 ops only, ``vec=2``)
 
 The kernel processes the buffer as a single contiguous run of ``numel``
 elements; multi-dimensional torch tensors must be ``contiguous()``. This
@@ -38,9 +40,9 @@ CK Tile parity shape:
   kernel falls through to a per-element scalar loop guarded by
   ``cmp_lt(idx, N)``.
 
-The per-element math uses the canonical ``exp2``-based sigmoid /
-``tanh`` pattern (no ``llvm.tanh``, which the AMDGPU backend can't
-lower); negation goes through :meth:`IRBuilder.fneg` rather than
+The per-element math uses the canonical AMDGPU-lowerable sigmoid /
+``tanh`` paths (no ``llvm.tanh``, which the AMDGPU backend can't lower);
+negation goes through :meth:`IRBuilder.fneg` rather than
 ``fsub(0.0, x)`` so the LLVM lowering emits a single ``v_neg``-form
 sign-flip instead of a one-op ``v_sub``.
 """
@@ -50,14 +52,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import (
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+    Value,
+    dtype_to_ir_type,
+)
 from ...helpers.activations import _sigmoid_via_exp2, _tanh_via_exp2
 from ...helpers.distribution import (
     TileDistributionEncoding,
     make_static_distributed_tensor,
     make_static_tile_distribution,
 )
-from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 from ...helpers.tensor_view import make_global_view, make_tile_window
 
@@ -76,7 +85,11 @@ UnaryOp = Literal[
     "exp2",
 ]
 BinaryOp = Literal["add", "sub", "mul", "max", "min", "swiglu", "geglu"]
-DType = Literal["f16", "bf16"]
+DType = Literal["f16", "bf16", "f64"]
+
+# Ops with a native f64 lowering; the exp2-based activations are f32-only,
+# so f64 is limited to this set.
+_F64_OPS = ("copy", "neg", "abs", "relu", "add", "sub", "mul", "max", "min")
 
 
 @dataclass(frozen=True)
@@ -132,11 +145,16 @@ class ElementwiseSpec:
 def is_valid_spec(spec: ElementwiseSpec) -> Tuple[bool, str]:
     if not (spec.is_unary() or spec.is_binary()):
         return False, f"unknown op {spec.op!r}"
-    if spec.dtype not in ("f16", "bf16"):
+    if spec.dtype not in ("f16", "bf16", "f64"):
         return False, f"unsupported dtype {spec.dtype!r}"
+    if spec.dtype == "f64" and spec.op not in _F64_OPS:
+        return False, f"op {spec.op!r} not supported for f64"
     if spec.block_size not in (64, 128, 256, 512, 1024):
         return False, f"block_size {spec.block_size} not in {{64, 128, 256, 512, 1024}}"
-    if spec.vec not in (2, 4, 8):
+    if spec.dtype == "f64":
+        if spec.vec != 2:
+            return False, f"vec {spec.vec} not in {{2}} for f64"
+    elif spec.vec not in (2, 4, 8):
         return False, f"vec {spec.vec} not in {{2, 4, 8}}"
     return True, "ok"
 
@@ -178,12 +196,17 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         # ``v_sub`` pair pre-canonicalisation.
         return b.fneg(x)
     if op == "abs":
+        if x.type.name == "f64":
+            # ``llvm.fabs.f64`` clears the sign bit in one instruction;
+            # ``max(x, -x)`` would cost three ``v_max_f64`` under IEEE mode.
+            return b.fabs(x)
         # ``|x| = max(x, -x)`` is the AMDGPU-friendly form; the
         # ``v_max3_f32`` family selects the max directly without the
         # ``fsub(0.0, x)`` constant load.
         return b.fmax(x, b.fneg(x))
     if op == "relu":
-        return b.fmax(x, b.const_f32(0.0))
+        zero = b.const_f64(0.0) if x.type.name == "f64" else b.const_f32(0.0)
+        return b.fmax(x, zero)
     if op == "exp2":
         return b.exp2(x)
     if op == "tanh":
@@ -234,6 +257,16 @@ def _apply_binary(b: IRBuilder, a: Value, c: Value, op: str) -> Value:
     raise ValueError(f"unsupported binary op {op!r}")
 
 
+def _to_compute(b: IRBuilder, x: Value) -> Value:
+    """Promote an I/O scalar to the compute type (f64 stays native)."""
+    return x if x.type.name == "f64" else b.cast_to_f32(x)
+
+
+def _from_compute(b: IRBuilder, x: Value, io_ty: Type) -> Value:
+    """Demote a compute scalar back to the I/O type (f64 stays native)."""
+    return x if io_ty.name == "f64" else b.cast_f32_to(x, io_ty)
+
+
 # ---------------------------------------------------------------------
 # Codegen
 # ---------------------------------------------------------------------
@@ -250,7 +283,7 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
     if not ok:
         raise ValueError(f"invalid elementwise spec: {why}")
 
-    io_ty = io_ir_type(spec.dtype)
+    io_ty = dtype_to_ir_type(spec.dtype)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
@@ -350,13 +383,13 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
             idx = b.add(thread_base, b.const_i32(i))
             in_bounds = b.cmp_lt(idx, N)
             with b.scf_if(in_bounds):
-                a = b.cast_to_f32(a_view.load_scalar(b, [idx]))
+                a = _to_compute(b, a_view.load_scalar(b, [idx]))
                 if spec.is_binary():
-                    bv = b.cast_to_f32(b_view.load_scalar(b, [idx]))
+                    bv = _to_compute(b, b_view.load_scalar(b, [idx]))
                     r = _apply_binary(b, a, bv, spec.op)
                 else:
                     r = _apply_unary(b, a, spec.op)
-                c_view.store_scalar(b, [idx], b.cast_f32_to(r, io_ty))
+                c_view.store_scalar(b, [idx], _from_compute(b, r, io_ty))
 
     with b.scf_if(in_fast):
         emit_vec_path()

@@ -96,6 +96,10 @@ Tests:
   function: sptrsv_ell_bad_arg
   precision: *single_double_precisions_complex_real
 
+- name: sptrsv_ell_extra
+  category: quick
+  function: sptrsv_ell_extra
+
 - name: sptrsv_ell
   category: pre_checkin
   function: sptrsv_ell

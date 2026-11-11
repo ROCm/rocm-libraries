@@ -44,31 +44,57 @@ namespace TensileLite
 
             static void mapping(IO& io, Entry& entry)
             {
-                int32_t index = -1;
-                iot::mapRequired(io, "index", index);
-
                 using SSLibrary
                     = SingleSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
 
+                int32_t index = -1;
+                if(iot::outputting(io))
+                {
+                    auto single = std::dynamic_pointer_cast<SSLibrary>(entry.value);
+                    if(single == nullptr)
+                        iot::setError(io, "FreeSizeLibrary entries must be single solutions.");
+                    else
+                        index = single->solutionIndex();
+                }
+
+                iot::mapRequired(io, "index", index);
+
+                if(iot::outputting(io))
+                    return;
+
                 auto ctx = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
-                if(ctx == nullptr || ctx->solutions == nullptr)
+                if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
                 {
                     iot::setError(io,
                                   "SingleSolutionLibrary requires that context be set to "
                                   "a SolutionMap.");
                 }
-
-                auto iter = ctx->solutions->find(index);
-                if(iter == ctx->solutions->end())
+                else if(ctx->blobCache)
                 {
-                    std::ostringstream msg;
-                    msg << "[FreeSizeLibrary] Invalid solution index: " << index;
-                    iot::setError(io, msg.str());
+                    if(!ctx->blobCache->contains(index))
+                    {
+                        iot::setError(
+                            io, concatenate("[FreeSizeLibrary] Invalid solution index: ", index));
+                    }
+                    else
+                    {
+                        entry.value = std::make_shared<SSLibrary>(index, ctx->blobCache);
+                    }
                 }
                 else
                 {
-                    std::shared_ptr<ContractionSolution> solution = iter->second;
-                    entry.value = std::make_shared<SSLibrary>(solution);
+                    auto iter = ctx->solutions->find(index);
+                    if(iter == ctx->solutions->end())
+                    {
+                        std::ostringstream msg;
+                        msg << "[FreeSizeLibrary] Invalid solution index: " << index;
+                        iot::setError(io, msg.str());
+                    }
+                    else
+                    {
+                        std::shared_ptr<ContractionSolution> solution = iter->second;
+                        entry.value = std::make_shared<SSLibrary>(solution);
+                    }
                 }
             }
 
@@ -95,6 +121,9 @@ namespace TensileLite
                         std::ostringstream msg;
                         msg << "[FreeSizeLibrary] Empty table";
                         iot::setError(io, msg.str());
+                        // setError records the message; it does not unwind.
+                        // Returning keeps *table below from dereferencing null.
+                        return;
                     }
                 }
                 else

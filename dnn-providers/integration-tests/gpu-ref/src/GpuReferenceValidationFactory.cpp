@@ -37,4 +37,24 @@ std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> createGpuAllCl
     }
 }
 
+std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
+    createGpuRmsValidator(hipdnn_frontend::DataType dataType, float relativeTolerance)
+{
+    switch(dataType)
+    {
+    case hipdnn_frontend::DataType::FLOAT:
+        return std::make_unique<GpuFpReferenceRmsValidation<float>>(relativeTolerance);
+    case hipdnn_frontend::DataType::HALF:
+        return std::make_unique<GpuFpReferenceRmsValidation<hipdnn_data_sdk::types::half>>(
+            relativeTolerance);
+    case hipdnn_frontend::DataType::BFLOAT16:
+        return std::make_unique<GpuFpReferenceRmsValidation<hipdnn_data_sdk::types::bfloat16>>(
+            relativeTolerance);
+    case hipdnn_frontend::DataType::DOUBLE:
+        return std::make_unique<GpuFpReferenceRmsValidation<double>>(relativeTolerance);
+    default:
+        throw std::runtime_error("Unsupported data type for GPU RMS validator");
+    }
+}
+
 } // namespace hipdnn_gpu_ref

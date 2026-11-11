@@ -1,0 +1,1 @@
+../../../rocprim/scripts/copyright-date/check-copyright.sh

@@ -32,9 +32,22 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h> /* strcmp */
 
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+/* The split A/B address forms (defined after the descriptors that call them). */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid);
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid);
 
 /* ===================================================================== *
  *  _choose_load_vec -- pick the widest fp16 load vector width.
@@ -49,8 +62,11 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     int out_vec = 0;
     /* spec.block_size = warp_m * warp_n * wave_size (the @property). */
     int block_size = rocke_implicit_gemm_conv_spec_block_size(spec);
+    /* elem_bytes 2: the Python conv path leaves choose_load_vec's default in
+     * place, so this stays on the old f16 ladder and its emission is
+     * unchanged by the GEMM-side widening. */
     rocke_status_t st
-        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
+        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, 2, &out_vec);
     /* On the Python ValueError path choose_load_vec raises; here the status is
      * ROCKE_ERR_VALUE and out_vec is left untouched (0). The prologue is the
      * gate that surfaces the spec validity error before this is reached. */
@@ -60,27 +76,179 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
 }
 
 /* ===================================================================== *
- *  _emit_smem_load -- one fp16 LDS read (v4 fast path else vN).
+ *  The default sync load width (Python _sync_load_vecs without an explicit
+ *  vector_size_*): the tile-geometry width clamped by the largest power of two
+ *  dividing the per-group channel count (A and B both stride over cpg). For
+ *  groups==1 cpg==C. For C=3 this yields 1; without the clamp the tile picker
+ *  returns a wider width Python never uses (e.g. the ImageNet-stem C3 conv).
+ *  Returns 0 when the tile admits no width at all.
+ * ===================================================================== */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    int load_vec = rocke_conv_choose_load_vec(spec);
+    bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+    int max_elem = is_fp32 ? 4 : 8;
+    /* The merged problem: on depthwise its cpg is Gm rather than 1, because the
+     * merged A tile really does address Gm consecutive NHWC channels. A plain
+     * copy of spec->problem at group_merge 1. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
+    int c_dim = rocke_conv_problem_cpg(&merged);
+    int max_ab = (c_dim % max_elem == 0) ? max_elem
+                 : (c_dim % 4 == 0)      ? 4
+                 : (c_dim % 2 == 0)      ? 2
+                                         : 1;
+    if(load_vec > max_ab)
+        load_vec = max_ab;
+    return load_vec;
+}
+
+int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    /* B does NOT widen under merge: consecutive k_gemm differ in the merged
+     * group g_k and all but the diagonal one are masked off, a per-element
+     * predicate one vector load cannot carry. */
+    if(spec->group_merge > 1)
+        return 1;
+    return rocke_conv_default_load_vec(spec);
+}
+
+/* ===================================================================== *
+ *  _ir_dtype / _smem_dtype_for -- storage dtype -> IR element type.
  *
- *  Python span: conv_implicit_gemm.py lines 641-644:
- *      def _emit_smem_load(b, smem, row, col, n):
+ *  Python (_conv_implicit_gemm_common.py):
+ *      _DTYPE_TO_IR = {"fp16": F16, "bf16": BF16, "fp32": F32}
+ *      def _ir_dtype(dtype):
+ *          t = _DTYPE_TO_IR.get(dtype)
+ *          if t is None:
+ *              if _is_tf32_spelling(dtype): raise ValueError("... compute mode ...")
+ *              raise ValueError(f"unsupported conv dtype {dtype!r}; ...")
+ *          return t
+ *      def _smem_dtype_for(dtype):
+ *          return BF16 if dtype == "bf16" else F32 if dtype == "fp32" else None
+ * ===================================================================== */
+const rocke_type_t* rocke_conv_ir_dtype_lookup(const char* dtype)
+{
+    const char* d = dtype ? dtype : "fp16";
+    if(strcmp(d, "fp16") == 0)
+        return rocke_f16();
+    if(strcmp(d, "bf16") == 0)
+        return rocke_bf16();
+    if(strcmp(d, "fp32") == 0)
+        return rocke_f32();
+    return NULL;
+}
+
+const rocke_type_t* rocke_conv_ir_dtype(rocke_ir_builder_t* b, const char* dtype)
+{
+    const char* d = dtype ? dtype : "fp16";
+    const rocke_type_t* t = rocke_conv_ir_dtype_lookup(d);
+    if(t != NULL)
+        return t;
+    if(rocke_conv_is_tf32_spelling(d))
+        return (const rocke_type_t*)rocke_i_set_err(b,
+                                                    ROCKE_ERR_VALUE,
+                                                    "'%s' is a compute mode, not a storage dtype: "
+                                                    "use dtype_a='fp32', dtype_b='fp32' with "
+                                                    "mma_dtype='tf32'",
+                                                    d);
+    return (const rocke_type_t*)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "unsupported conv dtype '%s'; choose fp16, bf16, or fp32", d);
+}
+
+const rocke_type_t* rocke_conv_smem_dtype_for(const char* dtype)
+{
+    if(dtype != NULL && strcmp(dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(dtype != NULL && strcmp(dtype, "fp32") == 0)
+        return rocke_f32();
+    return NULL;
+}
+
+/* ===================================================================== *
+ *  _emit_smem_load -- one LDS operand read.
+ *
+ *  Python (_conv_implicit_gemm_common.py):
+ *      def _emit_smem_load(b, smem, row, col, n, *, smem_dtype=None):
+ *          if smem_dtype is not None and smem_dtype is not F16:
+ *              vec = b.smem_load_vN(smem, row, col, dtype=smem_dtype, n=n)
+ *              return b.vec_extract(vec, 0) if (smem_dtype is F32 and n == 1) else vec
  *          if n == 4:
  *              return b.smem_load_v4_f16(smem, row, col)
  *          return b.smem_load_vN_f16(smem, row, col, n=n)
  *
- *  The C smem_load_vN_f16 takes an explicit (row, col) index pair as an indices
+ *  The C smem_load_vN takes an explicit (row, col) index pair as an indices
  *  array of length 2, matching the Python (smem, row, col) call.
  * ===================================================================== */
-rocke_value_t* rocke_conv_emit_smem_load(
-    rocke_ir_builder_t* b, rocke_value_t* smem, rocke_value_t* row, rocke_value_t* col, int n)
+rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         int n,
+                                         const rocke_type_t* smem_dtype)
 {
+    rocke_value_t* idx[2];
+    idx[0] = row;
+    idx[1] = col;
+    if(smem_dtype != NULL && smem_dtype != rocke_f16())
+    {
+        rocke_value_t* vec = rocke_b_smem_load_vN(b, smem, idx, 2, smem_dtype, n);
+        return (smem_dtype == rocke_f32() && n == 1) ? rocke_b_vec_extract(b, vec, 0) : vec;
+    }
     if(n == 4)
         return rocke_b_smem_load_v4_f16(b, smem, row, col);
+    return rocke_b_smem_load_vN_f16(b, smem, idx, 2, n);
+}
+
+/* ===================================================================== *
+ *  _to_mma_operand / _load_mma_operand / _mfma_issues_per_mma -- the TF32
+ *  operand fetch (_conv_implicit_gemm_common.py).
+ *
+ *      def _to_mma_operand(b, frag, data):
+ *          if not data.is_tf32: return frag
+ *          return b.bitcast(frag, VectorType(TF32, frag.type.count))
+ *
+ *      def _load_mma_operand(b, smem, row, col, n, *, smem_dtype, data):
+ *          if not data.is_tf32:
+ *              return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
+ *          frag = smem_load_fragment(b, smem, row, col, dtype=F32, n=n,
+ *                                    max_elems=_TF32_LDS_LOAD_MAX)
+ *          return _to_mma_operand(b, frag, data)
+ * ===================================================================== */
+rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32)
+{
+    if(!is_tf32 || frag == NULL)
+        return frag;
+    return rocke_b_bitcast(b, frag, rocke_vector_type(b, rocke_tf32(), frag->type->count));
+}
+
+rocke_value_t* rocke_conv_load_mma_operand(rocke_ir_builder_t* b,
+                                           rocke_value_t* smem,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col,
+                                           int n,
+                                           const rocke_type_t* smem_dtype,
+                                           bool is_tf32)
+{
+    if(!is_tf32)
+        return rocke_conv_emit_smem_load(b, smem, row, col, n, smem_dtype);
+    rocke_value_t* frag = rocke_b_smem_load_fragment(
+        b, smem, row, col, rocke_f32(), n, ROCKE_CONV_TF32_LDS_LOAD_MAX, 0);
+    return rocke_conv_to_mma_operand(b, frag, true);
+}
+
+int rocke_conv_mfma_issues_per_mma(const rocke_mmaop_t* op)
+{
+    /* _EMULATION_MFMAS = {"bf16x3": 3}
+     * return _EMULATION_MFMAS[op.emulation.recipe.value] if op.emulation else 1 */
+    if(op == NULL || rocke_arch_mma_op_is_native(op))
+        return 1;
+    switch(op->emulation_recipe)
     {
-        rocke_value_t* idx[2];
-        idx[0] = row;
-        idx[1] = col;
-        return rocke_b_smem_load_vN_f16(b, smem, idx, 2, n);
+    case ROCKE_MMA_EMULATION_BF16X3:
+        return 3;
+    default:
+        return 1;
     }
 }
 
@@ -119,7 +287,18 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     if(ctx->is_pointwise)
     {
         rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
-        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        rocke_value_t* off;
+        if(ctx->ir_pw_a_chan_base != NULL)
+        {
+            /* Grouped: offset = m * C + g*cpg + c; c stays bounded by cpg below.
+             * Python adds the channel base before the row multiply. */
+            rocke_value_t* chan = rocke_b_add(b, ctx->ir_pw_a_chan_base, k_val);
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->p_C), chan);
+        }
+        else
+        {
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        }
         rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->ir_c_M_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, k_val, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, m_ok, c_ok);
@@ -164,6 +343,9 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     else
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
+    if(ctx->split_ab)
+        return conv_a_offset_split(ctx, m_val, k_val, out_valid);
+
     if(ctx->group_idx != NULL)
     {
         /* A_desc.offset(b_, m=m_val, k=k_val, group=group_idx) */
@@ -189,12 +371,143 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
 }
 
 /* ===================================================================== *
+ *  mul_u24 / magic_divmod -- Python _conv_implicit_gemm_common helpers.
+ *
+ *  Every operand is bound to a temporary in Python's left-to-right order: C
+ *  leaves argument evaluation order unspecified and the SSA ids follow it.
+ * ===================================================================== */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    rocke_value_t* c24 = rocke_b_const_i32(b, 0xFFFFFF);
+    rocke_value_t* xm = rocke_b_land(b, x, c24);
+    rocke_value_t* ym = rocke_b_land(b, y, c24);
+    return rocke_b_mul(b, xm, ym);
+}
+
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem)
+{
+    /* do_magic_division_dynamic: umul_hi, no-unsigned-wrap add, lshr */
+    rocke_value_t* tmp = rocke_b_umul_hi_i32(b, val, mult);
+    rocke_value_t* summed = rocke_b_add_nuw(b, tmp, val);
+    rocke_value_t* q = rocke_b_lshr(b, summed, shift);
+    rocke_value_t* prod = u24 ? rocke_conv_mul_u24(b, q, dim) : rocke_b_mul(b, q, dim);
+    *quot = q;
+    *rem = rocke_b_sub(b, val, prod);
+}
+
+/* Python k_decode (fwd): k -> (y, x, c) through the runtime magic pairs for
+ * cpg and X, with 24-bit remainder products.
+ *
+ * Under group_merge the innermost field of k is the merged group (the merged
+ * per-group channel run is Gm wide), split off with a shift and a mask; c is
+ * then the in-merge group index -- A's channel within the merged slab and B's
+ * diagonal coordinate. */
+static void conv_k_decode(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_val,
+                          rocke_value_t** y,
+                          rocke_value_t** x,
+                          rocke_value_t** c)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* q_c = NULL;
+    if(ctx->merged)
+    {
+        q_c = rocke_b_lshr(b, k_val, ctx->c_gm_shift);
+        *c = rocke_b_land(b, k_val, ctx->c_gm_mask);
+        rocke_conv_magic_divmod(
+            b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, y, x);
+        return;
+    }
+    rocke_conv_magic_divmod(
+        b, k_val, ctx->p_magic_k_cpg_mult, ctx->p_magic_k_cpg_shift, ctx->p_cpg, true, &q_c, c);
+    rocke_conv_magic_divmod(
+        b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, y, x);
+}
+
+/* Python a_offset_split: the row part (m -> (n, ho, wo), the (hi, wi) origin,
+ * the base offset) and the k part (y, x, c), with the strides distributed so
+ * the row part is loop-invariant. */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *n, *ho;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &n, &ho);
+    rocke_value_t* ho_s = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hi0 = rocke_b_add(b, ho_s, ctx->split_neg_pH);
+    rocke_value_t* wo_s = rocke_b_mul(b, wo, ctx->p_sW);
+    rocke_value_t* wi0 = rocke_b_add(b, wo_s, ctx->split_neg_pW);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* hi_off = rocke_b_mul(b, hi0, ctx->p_A_stride_hi);
+    rocke_value_t* base = rocke_b_add(b, n_off, hi_off);
+    rocke_value_t* wi_off = rocke_b_mul(b, wi0, ctx->p_A_stride_wi);
+    base = rocke_b_add(b, base, wi_off);
+    if(ctx->split_group_base != NULL)
+        base = rocke_b_add(b, base, ctx->split_group_base);
+
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, k_val, &y, &x, &c);
+    rocke_value_t* y_dh = rocke_b_mul(b, y, ctx->p_dH);
+    rocke_value_t* hi = rocke_b_add(b, hi0, y_dh);
+    rocke_value_t* x_dw = rocke_b_mul(b, x, ctx->p_dW);
+    rocke_value_t* wi = rocke_b_add(b, wi0, x_dw);
+    rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, ctx->c0);
+    rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, ctx->p_Hi);
+    rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+    rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, ctx->c0);
+    rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, ctx->p_Wi);
+    rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
+    rocke_value_t* ok = rocke_b_land(b, hi_ok, wi_ok);
+    rocke_value_t* y_ok = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    ok = rocke_b_land(b, ok, y_ok);
+    rocke_value_t* y_off = rocke_b_mul(b, y, ctx->split_ystep);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_b_mul(b, x, ctx->split_xstep);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = ok;
+    return off;
+}
+
+/* Python b_offset_split: k_out*stride_k + y*stride_y + x*stride_x + c, the
+ * filter strides through 24-bit multiplies. */
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, kg, &y, &x, &c);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    return off;
+}
+
+/* ===================================================================== *
  *  b_descriptor -- the B global-address closure.
  *
  *  Python span: conv_implicit_gemm.py lines 976-982:
  *      def b_descriptor(b_, row, col):
- *          k_out = b_.add(block_n_off_v, row)
- *          if grouped: k_out = b_.add(k_out_group_base, k_out)
+ *          n_val = b_.add(block_n_off_v, row)
+ *          k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
  *          kg = b_.add(k_off_capture[0], col)
  *          return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
  * ===================================================================== */
@@ -206,21 +519,26 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
 {
     rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
 
-    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* n_val = rocke_b_add(b, ctx->block_n_off_v, row);
     /* Grouped conv: fold in the absolute output-filter group base. */
-    if(ctx->k_out_group_base != NULL)
-        k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+    rocke_value_t* k_out
+        = (ctx->k_out_group_base != NULL) ? rocke_b_add(b, ctx->k_out_group_base, n_val) : n_val;
     rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
 
-    /* Pointwise fast path: flat offset = k_out * C + c, valid = (k_out < K) & (c < C) */
+    /* Pointwise fast path: flat offset = k_out * cpg + c, valid = (n < kpg) & (c < cpg).
+     * The bound is on the within-group filter n, not the absolute k_out: every
+     * group past the first would otherwise load zeros. */
     if(ctx->is_pointwise)
     {
         rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->ir_c_C_pw), kg);
-        rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_out, ctx->ir_c_K_pw);
+        rocke_value_t* k_ok = rocke_b_cmp_lt(b, n_val, ctx->ir_c_K_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, kg, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, k_ok, c_ok);
         return off;
     }
+
+    if(ctx->split_ab)
+        return conv_b_offset_split(ctx, k_out, kg, out_valid);
 
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};
@@ -228,6 +546,65 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
     rocke_value_t* valid = NULL;
     rocke_transforms_descriptor_offset(b, ctx->B_desc, names, vals, 2, &off, &valid);
     *out_valid = valid;
+    return off;
+}
+
+/* ===================================================================== *
+ *  b_descriptor_merged -- the B load for group_merge > 1.
+ *
+ *  Python span: conv_implicit_gemm.py b_descriptor_merged:
+ *      g_n = b_.add(block_n_off_v, row)
+ *      kg = b_.add(k_off_capture[0], col)
+ *      y, x, g_k = k_decode(b_, kg)
+ *      k_out = b_.add(k_out_group_base, g_n)
+ *      off = b_.add(b_.add(b_.mul(k_out, p_B_stride_k),
+ *                          mul_u24(b_, y, p_B_stride_y)),
+ *                   mul_u24(b_, x, p_B_stride_x))
+ *      diag = b_.cmp_eq(g_k, g_n)
+ *      return off, b_.land(b_.cmp_lt(y, p_Y), diag)
+ *
+ *  The merged GEMM indexes n by the merged group g_n and k by (y, x, g_k) with
+ *  g_k innermost. Only g_k == g_n is real work; every other (n, k) pair is a
+ *  redundant MAC that must contribute zero. The mask therefore rides on the
+ *  *weight* load, not the store: an invalid element is handed to the loader as
+ *  valid = False, takes the buffer descriptor's OOB sentinel, and reads back as
+ *  a hardware zero with no memory traffic -- so the redundant MAC is a no-op and
+ *  the output store stays a dense contiguous run of Gm real outputs.
+ *
+ *  The weight tensor is physical and does not merge: on depthwise it really is
+ *  W[K][Y][X][1], so the channel term is always 0. Merge is gated to the split
+ *  address form, so this never goes through B_desc. Every operand is bound to a
+ *  temporary in Python's left-to-right order (C leaves argument evaluation
+ *  order unspecified and the SSA ids follow it).
+ * ===================================================================== */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
+
+    /* g_n: which merged group this tile column owns. Self-bounding -- for
+     * row >= Gm the diagonal is false for every k, so no N-axis clamp is needed
+     * here (the epilogue still bounds the store). */
+    rocke_value_t* g_n = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
+    rocke_value_t *y, *x, *g_k;
+    conv_k_decode(ctx, kg, &y, &x, &g_k);
+
+    /* k_out is the ABSOLUTE output filter index into the physical weight
+     * tensor: merged_group * Gm + g_n. Merge always engages the grouped path. */
+    rocke_value_t* k_out = rocke_b_add(b, ctx->k_out_group_base, g_n);
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+
+    rocke_value_t* diag = rocke_b_cmp_eq(b, g_k, g_n);
+    rocke_value_t* y_ok = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    *out_valid = rocke_b_land(b, y_ok, diag);
     return off;
 }
 
@@ -254,6 +631,32 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
 
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
+
+    if(ctx->async_global_lds)
+    {
+        /* gfx1250: Python a_sync_loader / b_sync_loader.load_async_to_lds with
+         * the default coherency (the X tile is re-read across N tiles and
+         * filter taps, so it is not streamed past the cache). */
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->a_sync_loader,
+                                                      ctx->tid,
+                                                      A_dst,
+                                                      ctx->a_descriptor_fn,
+                                                      ctx,
+                                                      ctx->a_ptr,
+                                                      ctx->a_buf_rsrc.num_bytes,
+                                                      0);
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->b_sync_loader,
+                                                      ctx->tid,
+                                                      B_dst,
+                                                      ctx->b_descriptor_fn,
+                                                      ctx,
+                                                      ctx->b_ptr,
+                                                      ctx->b_buf_rsrc.num_bytes,
+                                                      0);
+        return;
+    }
 
     if(spec->async_dma)
     {
@@ -312,58 +715,4 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
         rocke_coalesced_tile_loader_load(
             b, &ctx->b_sync_loader, ctx->tid, B_dst, b_fn, ctx, ctx->b_rsrc, NULL);
     }
-}
-
-/* ===================================================================== *
- *  rocke_conv_emit_global_read -- split load, phase 1 of 2.
- *
- *  Mirrors Python emit_global_read(k_off) -> (k_off, a_staged, b_staged).
- *  Sets ctx->k_off_capture = k_off (so the descriptor closures see the
- *  correct tile offset during load_global), then issues only the
- *  buffer_load_vN ops for A and B into VGPR SSA values stored in
- *  *a_staged / *b_staged. The smem_store_vN ops are deferred to
- *  rocke_conv_emit_lds_write. Only valid on the sync (non-async-DMA) path.
- * ===================================================================== */
-void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
-                                 rocke_value_t* k_off,
-                                 rocke_ctl_staged_t* a_staged,
-                                 rocke_ctl_staged_t* b_staged)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    /* Honour the per-family descriptor overrides, as rocke_conv_emit_load_phase
-     * already does.  wgrad installs its own (including the lds_k_outer
-     * coordinate-swap variants); without the fallback a wgrad basic kernel
-     * would emit forward-conv addressing.  Both are NULL on the forward path,
-     * so its emission is unchanged. */
-    rocke_loads_descriptor_fn a_fn
-        = (ctx->a_descriptor_fn != NULL) ? ctx->a_descriptor_fn : rocke_conv_a_descriptor;
-    rocke_loads_descriptor_fn b_fn
-        = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
-    /* k_off_capture[0] = k_off */
-    ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_staged);
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_staged);
-}
-
-/* ===================================================================== *
- *  rocke_conv_emit_lds_write -- split load, phase 2 of 2.
- *
- *  Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst).
- *  Restores ctx->k_off_capture = k_off (from the staged tuple's recorded
- *  offset), then emits smem_store_vN for the VGPRs staged by a prior
- *  rocke_conv_emit_global_read call.
- * ===================================================================== */
-void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
-                               rocke_value_t* k_off,
-                               const rocke_ctl_staged_t* a_staged,
-                               const rocke_ctl_staged_t* b_staged,
-                               rocke_value_t* A_dst,
-                               rocke_value_t* B_dst)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, A_dst, a_staged);
-    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, B_dst, b_staged);
 }

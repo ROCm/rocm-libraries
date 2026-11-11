@@ -24,6 +24,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
+#include <tuple>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
@@ -35,13 +38,18 @@ using namespace stinkytofu::test;
 // =============================================================================
 // Read-Write Operand Tests
 //
-// For instructions where the destination register also acts as a source,
-// the HwInstDesc marks the operand field with isReadWrite (RW).  The verifier
-// checks that every RW register appears in both destRegs and srcRegs.
+// A destination that also acts as a source must appear in both destRegs and
+// srcRegs, and the verifier checks that. Two things make a destination one of
+// those, and readsDestination answers for both:
+//   - HwInstDesc marks the operand field isReadWrite (RW), a property of the
+//     opcode: s_cmov_b32, v_swap_b32, v_cvt_sr_*, the buffer atomics;
+//   - the write is narrower than the register and op_sel names the half it
+//     lands in, so the other half survives. A property of the instance, which
+//     is why these cases carry an op_sel.
 //
 // Each instruction has:
-//   - a "valid" test  : RW register present in both lists  → verifier passes
-//   - an "invalid" test: RW register missing from srcRegs  → verifier catches it
+//   - a "valid" test  : register present in both lists  → verifier passes
+//   - an "invalid" test: register missing from srcRegs   → verifier catches it
 // =============================================================================
 
 class ReadWriteOperandTest : public ::testing::Test {
@@ -60,8 +68,13 @@ class ReadWriteOperandTest : public ::testing::Test {
 
     /// Build a single-instruction function and run the read-write verifier.
     /// Returns the verifier error string (empty = pass).
+    ///
+    /// \p opSel, when given, is attached as the instruction's op_sel. A narrow
+    /// destination is read-write only where op_sel names the half it writes, so
+    /// a case about one of those has to say which half.
     std::string verifyRW(const std::string& mnemonic, const std::vector<StinkyRegister>& destRegs,
-                         const std::vector<StinkyRegister>& srcRegs) {
+                         const std::vector<StinkyRegister>& srcRegs,
+                         const std::vector<int>& opSel = {}) {
         Function func("test");
         setFunctionArch(func, arch);
         BasicBlock* bb = func.createBasicBlock("entry");
@@ -73,13 +86,49 @@ class ReadWriteOperandTest : public ::testing::Test {
         StinkyInstruction* inst = builder.create(desc);
         for (const auto& r : destRegs) inst->addDestReg(r);
         for (const auto& r : srcRegs) inst->addSrcReg(r);
+        if (!opSel.empty()) inst->addModifier<VOP3PModifiers>(VOP3PModifiers(opSel));
 
         AsmVerifierConfig config;
         config.checkRegisterWidths = false;
         config.checkReadWriteOperands = true;
         return validateStinkyIR(func, config);
     }
+
+    /// Same, with every category enabled, over a whole list of instructions.
+    std::string verifyAll(const std::vector<std::tuple<std::string, std::vector<StinkyRegister>,
+                                                       std::vector<StinkyRegister>>>& insts) {
+        Function func("test");
+        setFunctionArch(func, arch);
+        BasicBlock* bb = func.createBasicBlock("entry");
+
+        AsmIRBuilder builder(*bb, arch);
+        for (const auto& [mnemonic, destRegs, srcRegs] : insts) {
+            const HwInstDesc* desc = getDescByMnemonic(mnemonic);
+            if (!desc) return "Unknown mnemonic: " + mnemonic;
+            StinkyInstruction* inst = builder.create(desc);
+            for (const auto& r : destRegs) inst->addDestReg(r);
+            for (const auto& r : srcRegs) inst->addSrcReg(r);
+        }
+
+        AsmVerifierConfig config;
+        config.checkRegisterWidths = true;
+        config.checkReadWriteOperands = true;
+        return validateStinkyIR(func, config);
+    }
 };
+
+// ---------------------------------------------------------------------------
+// m0 is encoded in the scalar operand space, so an sdst field accepts it.
+// ---------------------------------------------------------------------------
+TEST_F(ReadWriteOperandTest, SMovB32_M0DestIsAcceptedAsScalar) {
+    std::string error = verifyAll({{"s_mov_b32", {StinkyRegister("m", 0, 1)}, {sgpr(2)}}});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, SMovB32_VgprDestIsStillRejected) {
+    std::string error = verifyAll({{"s_mov_b32", {vgpr(1)}, {sgpr(2)}}});
+    EXPECT_NE(error.find("Register width validation failed"), std::string::npos) << error;
+}
 
 // ---------------------------------------------------------------------------
 // s_cmov_b32  —  D0 is RW: if (SCC) s0 = s1; else s0 = s0
@@ -139,6 +188,79 @@ TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_Valid) {
 TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_MissingDstInSrc) {
     std::string error = verifyRW("v_cvt_sr_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+// ---------------------------------------------------------------------------
+// v_cvt_pk_fp8_f32  —  read-write by instance, not by opcode. The table gives a
+// 16-bit D0 and op_sel gives the half it writes, so the other half keeps what
+// was already there and a four-value pack is two of these writing one register.
+// HW fields: {D0, vdst, vgpr, 16}, {S0, src0, src, 32}, {S1, src1, src, 32}
+// op_sel for a two-source VOP3 is [src0, src1, dst].
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_HighHalfValid) {
+    std::string error =
+        verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)}, {0, 0, 1});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_HighHalfMissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)}, {0, 0, 1});
+    EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_LowHalfMissingDstInSrc) {
+    // The low half keeps the high one, so it is read-write as well.
+    std::string error = verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)}, {0, 0, 0});
+    EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_NoOpSelNeedsNoDstInSrc) {
+    // Naming no half is the producer saying it writes the whole register, and
+    // the table's flag is off, so nothing here reads the destination.
+    std::string error = verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+// ---------------------------------------------------------------------------
+// v_cvt_pk_bf8_f32  —  same pattern as the FP8 variant
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, VCvtPkBf8F32_HighHalfValid) {
+    std::string error =
+        verifyRW("v_cvt_pk_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)}, {0, 0, 1});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkBf8F32_HighHalfMissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_pk_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)}, {0, 0, 1});
+    EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+// ---------------------------------------------------------------------------
+// The pack converts stay out of the table's read-write set: which half survives
+// is chosen per instance, and the table describes the encoding.
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, PackConvertsAreNotTableReadWrite) {
+    for (const char* mnemonic : {"v_cvt_pk_fp8_f32", "v_cvt_pk_bf8_f32"}) {
+        const HwInstDesc* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        ASSERT_FALSE(desc->operandFields.empty()) << mnemonic;
+        EXPECT_TRUE(desc->operandFields[0].isDest) << mnemonic;
+        EXPECT_EQ(desc->operandFields[0].fieldSizeBits, 16) << mnemonic;
+        EXPECT_FALSE(desc->operandFields[0].isReadWrite) << mnemonic;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v_add_f16 also declares a 16-bit destination, and no producer names a half for
+// it, so it is a whole-register write and reads nothing back.
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, VAddF16_NeedsNoDstInSrc) {
+    std::string error = verifyRW("v_add_f16", {vgpr(0)}, {vgpr(1), vgpr(2)});
+    EXPECT_TRUE(error.empty()) << error;
 }
 
 // ---------------------------------------------------------------------------

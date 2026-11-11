@@ -1,4 +1,6 @@
 #include "conv_kernel_table.h"
+#include "direction_field.h"
+#include "kv_descriptor.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -91,11 +93,11 @@ struct GroupedDataTraits<DataType::tf32>
     static constexpr bool needs_lds_pack = false;
     static __device__ __forceinline__ mfma_operand_t to_mfma_operand(operand_t raw)
     {
-        return fp32x4_to_bf16_pair(raw);
+        return fp32xN_to_bf16_pair(raw);
     }
     static __device__ __forceinline__ mfma_operand_t zero_operand()
     {
-        return fp32x4_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
+        return fp32xN_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
     }
 };
 
@@ -875,7 +877,7 @@ __global__ void conv2d_grouped_4c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -926,7 +928,7 @@ public:
     {
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -958,7 +960,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         // Compute the grid size.
         // For Dgrad the output is the input gradient (width = par.w, not par.q).
@@ -973,6 +975,21 @@ public:
         launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", GROUP_SIZE);
+        d.int_field("waves_c64", cfg_.waves_c64);
+        d.int_field("waves_q4", cfg_.waves_q4);
+        d.int_field("stride", cfg_.stride, /*default=*/1);
+        d.int_field("dilation", cfg_.dilation, /*default=*/1);
+        direction_field(d, cfg_.direction);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        d.int_field("n_fold", cfg_.n_fold, /*default=*/8);
+        return d;
     }
 
 protected:

@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -51,8 +52,7 @@ void testing_csric02_bad_arg(const Arguments& argus)
     int                    safe_size = 100;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -166,8 +166,7 @@ void testing_csric02(Arguments argus)
     hipsparseSolvePolicy_t policy   = argus.solve_policy;
     std::string            filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -336,6 +335,10 @@ void testing_csric02(Arguments argus)
         int number_hot_calls  = argus.iters;
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXcsric02_analysis(
+            handle, m, nnz, descr, dval_1, dptr, dcol, info, policy, dbuffer));
 
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)

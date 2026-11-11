@@ -17,4 +17,11 @@ namespace hipdnn_integration_tests::bundle
 /// place production actually assembles one.
 HarnessPolicy productionPolicy(TensorPlacement placement);
 
+/// The CLI flag, as the one value the harness reads.
+///
+/// Exposed rather than kept private to productionPolicy() because main.cpp needs the
+/// same answer for the summary header, and a header that disagreed with the mode the
+/// run actually used would be worse than no header.
+ClaimMode claimMode();
+
 } // namespace hipdnn_integration_tests::bundle

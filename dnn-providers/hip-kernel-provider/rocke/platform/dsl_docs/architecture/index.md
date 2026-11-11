@@ -21,6 +21,12 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   other phases remain proposed.
 - [`ir_serialization_format.md`](ir_serialization_format.md) — serialized IR
   format consumed across that seam.
+- [`portable_ir_schema.md`](portable_ir_schema.md) — the JSON/CBOR artifact
+  schemas the C++ engine replays at runtime, and the byte-identity and device
+  gates on that path.
+- [`portable_ir_production_readiness.md`](portable_ir_production_readiness.md) —
+  assessment of that path against production requirements: measured evidence,
+  gap analysis, and the acceptance plan for the implementation story.
 
 ## Addressing and layout
 
@@ -30,6 +36,8 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 - [`multi_arch_data_layout.md`](multi_arch_data_layout.md) — current architecture
   facts plus forward design for matrix catalogs, layout maps, ISA backends, and
   family policy.
+- [`adding_an_arch.md`](adding_an_arch.md) — route map for enabling a new gfx
+  target: which files it touches, in what order, and which gates prove it.
 
 ## Code-generation controls
 
@@ -38,6 +46,11 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 ## Kernel optimization design
 
+- [`ck_tile_merged_groups.md`](ck_tile_merged_groups.md) — how CK Tile's
+  `NumGroupsToMerge` works in grouped convolution, read as the basis for porting
+  the same capability to ROCKE. Records where ROCKE's forward arrangement
+  deliberately departs from CK's and why. Line numbers are pinned to the commit
+  named in its header and will drift.
 - [`kernel_opt_design.md`](kernel_opt_design.md) — proposal for combining current
   gfx950 tiled-2D attention optimization controls.
 - [`wavescope_integration.md`](wavescope_integration.md) — how source locations

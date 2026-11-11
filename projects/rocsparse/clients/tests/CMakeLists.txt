@@ -28,8 +28,6 @@ if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/T
   set(ROCSPARSE_HAS_CTEST_CATEGORIES ON)
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
 # MEMSTAT ?
 if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
@@ -44,46 +42,26 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-if(BUILD_WITH_CSC_TRSV)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
-endif()
-
-if(BUILD_WITH_CSC_TRSM)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
-endif()
-
 #
-# Client matrices.
+# Client matrices; ClientMatrices.cmake converts only the .csr files that are missing.
 #
-if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
-  #
-  # Download.
-  #
-  set(CMAKE_MATRICES_DIR ${PROJECT_BINARY_DIR}/matrices CACHE STRING "Matrices directory.")
-  file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
+set(CMAKE_MATRICES_DIR ${PROJECT_BINARY_DIR}/matrices CACHE STRING "Matrices directory.")
 
-  if(NOT TARGET rocsparse AND NOT BUILD_CLIENTS_ONLY)
-    set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/../deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
-    include(${CMAKE_SOURCE_DIR}/../cmake/ClientMatrices.cmake)
-  else()
-   set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
-    include(${CMAKE_SOURCE_DIR}/cmake/ClientMatrices.cmake)
-  endif()
-
+if(NOT TARGET rocsparse AND NOT BUILD_CLIENTS_ONLY)
+  set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/../deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
+  include(${CMAKE_SOURCE_DIR}/../cmake/ClientMatrices.cmake)
 else()
-  #
-  # Copy.
-  #
-  if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
-    message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
+  set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
+  include(${CMAKE_SOURCE_DIR}/cmake/ClientMatrices.cmake)
+endif()
 
-    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+#
+# Copy.
+#
+if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
+  message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
 
-    if(STATUS AND NOT STATUS EQUAL 0)
-      message(FATAL_ERROR "Failed to copy matrix .csr files, aborting.")
-    endif()
-  endif()
-
+  file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
 endif()
 
 set(ROCSPARSE_TEST_SOURCES
@@ -239,6 +217,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_check_matrix_hyb.cpp
   test_check_spmat.cpp
   test_bsrpad_value.cpp
+  test_spildlt0.cpp
 )
 
 if(BUILD_ROCSPARSE_DEBUGGING)
@@ -247,28 +226,31 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_spsv_ell.cpp
+  test_sptrsv_ell.cpp)
+
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_sptrsm.cpp)
 endif()
 
-if(BUILD_WITH_ELL_TRSV)
+list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
+
+if(BUILD_WITH_SPSORT)
   list(APPEND ROCSPARSE_TEST_SOURCES
-    test_spsv_ell.cpp
-    test_sptrsv_ell.cpp)
+    test_spsort_coo.cpp
+    test_spsort_csr.cpp
+    test_spsort_csc.cpp)
 endif()
 
-if(ROCSPARSE_ENABLE_SPMAT_SCALE)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
-endif()
-
-if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
-  list(APPEND ROCSPARSE_TEST_SOURCES
-    test_sddmm_batched_ell.cpp
-    test_sddmm_batched_coo.cpp
-    test_sddmm_batched_coo_aos.cpp
-    test_sddmm_batched_csr.cpp
-    test_sddmm_batched_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_sddmm_batched_ell.cpp
+  test_sddmm_batched_coo.cpp
+  test_sddmm_batched_coo_aos.cpp
+  test_sddmm_batched_csr.cpp
+  test_sddmm_batched_csc.cpp)
 
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
@@ -423,31 +405,35 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+../testings/testing_spildlt0.cpp
 rocsparse_test_listeners.cpp
   )
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_sptrsm.cpp)
 endif()
 
-if(BUILD_WITH_ELL_TRSV)
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_spsv_ell.cpp
+  ../testings/testing_sptrsv_ell.cpp)
+
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+
+if(BUILD_WITH_SPSORT)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS
-    ../testings/testing_spsv_ell.cpp
-    ../testings/testing_sptrsv_ell.cpp)
+    ../testings/testing_spsort_coo.cpp
+    ../testings/testing_spsort_csr.cpp
+    ../testings/testing_spsort_csc.cpp)
 endif()
 
-if(ROCSPARSE_ENABLE_SPMAT_SCALE)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
-endif()
-
-if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
-    ../testings/testing_sddmm_batched_ell.cpp
-    ../testings/testing_sddmm_batched_coo.cpp
-    ../testings/testing_sddmm_batched_coo_aos.cpp
-    ../testings/testing_sddmm_batched_csr.cpp
-    ../testings/testing_sddmm_batched_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_sddmm_batched_ell.cpp
+  ../testings/testing_sddmm_batched_coo.cpp
+  ../testings/testing_sddmm_batched_coo_aos.cpp
+  ../testings/testing_sddmm_batched_csr.cpp
+  ../testings/testing_sddmm_batched_csc.cpp)
 
 
 
@@ -498,6 +484,7 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
+  ../common/rocsparse_clients_dnmat_descr.cpp
   ../common/rocsparseio.cpp
   )
 
@@ -604,6 +591,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
 else()
   message(STATUS "rocSPARSE: No test_categories.yaml (CTest categories not used)")
 endif()
+
+# clients/unittests appends the unit-test binaries to this file later in configure.
+# install(FILES) reads it at install time, so those entries are included.
+set(ROCSPARSE_CTEST_INSTALL_FILE "${ROCSPARSE_CTEST_INSTALL_FILE}" PARENT_SCOPE)
 
 # Install CTestTestfile.cmake to bin/rocsparse/ for TheRock (relocatable tests; run ctest from that dir)
 if(ROCSPARSE_CTEST_INSTALL_FILE)

@@ -33,17 +33,33 @@
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
+#include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 namespace hip_kernel_provider::core
 {
 
 using namespace hipdnn_data_sdk::utilities;
+
+namespace
+{
+
+/// The graph schema the built-in engines' matchers were reviewed against: 1.4.0, the version
+/// whose fields each of them gates: ragged tensors (1.3.0), declared alignments (1.3.0) and
+/// ragged offset multipliers (1.4.0).
+[[maybe_unused]] Version builtInEnginesGraphSchema()
+{
+    return Version{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+}
+
+} // namespace
 
 const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
 {
@@ -73,7 +89,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(std::make_unique<resample::ResampleBwdPlanBuilder>(
                      kernelCompiler, devicePropertyProvider));
                  return engine;
-             }},
+             },
+             // Reviewed against graph schema 1.4.0: isApplicable declines ragged tensors and
+             // any alignment that is not a multiple of 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
             // HIP_FLASH2_ENGINE: FP16 Flash-Attention 2 V7 (rocWMMA MFMA + causal tile skip)
@@ -87,7 +106,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(
                      std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
                  return engine;
-             }},
+             },
+             // Reviewed against graph schema 1.4.0: isApplicable declines ragged tensors and
+             // any alignment that is not a multiple of 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
 #ifdef HIPDNN_ENGINE_ASM_SDPA
             // ASM_SDPA_ENGINE
@@ -99,7 +121,12 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
                  engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
                  return engine;
-             }},
+             },
+             // Reviewed against graph schema 1.4.0: the forward serves ragged Q/K/V/O whose
+             // offset multiplier equals the sequence stride (AITER group mode), the backward
+             // declines ragged tensors, and both decline alignments that are not a multiple of
+             // 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif
         };
 
@@ -125,14 +152,28 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      try
                      {
                          // Device facts are resolved per call from the handle, not from
-                         // the construction-time provider.
+                         // the construction-time provider. Every engine for this set shares
+                         // the immutable state discovery built, so a Container -- one per
+                         // handle -- copies no kernel and rebuilds no index.
+                         if(auto state
+                            = kernel_ingestor_engine::discoveredSharedState(set.engine.id))
+                         {
+                             return hipdnn_plugin_sdk::ingestor::
+                                 makeEngine<Handle, Settings, Context>(
+                                     kernel_ingestor_engine::withComputedBehaviorNotes(set),
+                                     std::move(state),
+                                     kernel_ingestor_engine::deviceResolver());
+                         }
+                         // Unreachable while every discovered set keeps its slot; kept so a
+                         // set without one still serves rather than vanishing.
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
-                             set, kernel_ingestor_engine::deviceResolver());
+                             kernel_ingestor_engine::withComputedBehaviorNotes(set),
+                             kernel_ingestor_engine::deviceResolver());
                      }
                      catch(const std::exception& error)
                      {
-                         // The loader validates each set, but its probe and this construction
-                         // are different objects, so that's convention, not a guarantee.
+                         // The loader validates each set, but the engine wrapping its state
+                         // can still throw, so that's convention, not a guarantee.
                          // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name
@@ -140,7 +181,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                                                  << error.what());
                          return nullptr;
                      }
-                 }});
+                 },
+                 // The schema its matchers claim; the plan builder enforces it too.
+                 set.engine.sdkVersion});
         }
 #endif
 
@@ -199,14 +242,15 @@ Container::Container()
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    _kpackArchiveLease = compilation::SharedKpackArchives::lease();
+
     // Must run before any descriptor-backed engine below can resolve its UMD/UHD/UDD
     // symbols. Safe on every Container construction: registers exactly once per process
     // (see SharedContainerManager).
     kernel_ingestor_engine::registerNativeIngestorSymbols();
 #endif
 
-    _engineManager
-        = std::make_unique<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>>();
+    _engineManager = std::make_unique<ApplicabilityManager>(_applicabilityPool);
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -215,7 +259,8 @@ Container::Container()
         // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
-            _engineManager->addEngine(std::move(engine), engineDefinition.name);
+            _engineManager->addEngine(
+                std::move(engine), engineDefinition.name, engineDefinition.maxGraphSchema);
         }
     }
 }
@@ -225,7 +270,7 @@ Container::~Container()
     HIPDNN_PLUGIN_LOG_INFO("Destroying Container");
 }
 
-hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Container::getEngineManager()
+ApplicabilityManager& Container::getEngineManager()
 {
     return *_engineManager;
 }

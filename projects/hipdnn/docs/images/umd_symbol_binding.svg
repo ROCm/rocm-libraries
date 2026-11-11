@@ -1,0 +1,68 @@
+<svg viewBox="0 0 920 420" width="920" height="420" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowSB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
+  <text x="470" y="40" text-anchor="middle" font-weight="600">UED pattern, then UMD criteria</text>
+  <text x="800" y="40" text-anchor="middle" font-weight="600">Declared / bound / used</text>
+
+  <!-- STAGE 1: live graph -->
+  <rect x="20" y="55" width="230" height="290" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <rect x="45" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="70" y="100" text-anchor="middle">Q</text>
+  <rect x="110" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="100" text-anchor="middle">K</text>
+  <rect x="175" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="200" y="100" text-anchor="middle">V</text>
+  <rect x="80" y="185" width="110" height="40" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="11">sdpa_fwd</text>
+  <rect x="110" y="295" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="315" text-anchor="middle">O</text>
+  <line x1="70" y1="110" x2="112" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+  <line x1="135" y1="110" x2="135" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+  <line x1="200" y1="110" x2="158" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+  <line x1="135" y1="225" x2="135" y2="294" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+
+  <line x1="255" y1="200" x2="325" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+  <text x="290" y="192" text-anchor="middle" font-weight="600">match</text>
+
+  <!-- STAGE 2: the engine's pattern, then the pack's criteria -->
+  <rect x="330" y="55" width="315" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="345" y="76" font-size="10" fill="#4a72c4" font-weight="600">UED nodes &#183; the engine's pattern</text>
+  <rect x="340" y="82" width="295" height="64" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.2"/>
+  <text x="352" y="101" font-family="Consolas, monospace" font-size="11">op: sdpa_fwd</text>
+  <text x="352" y="119" font-family="Consolas, monospace" font-size="11">operands {q:$q, k:$k, v:$v}</text>
+  <text x="352" y="137" font-family="Consolas, monospace" font-size="11">results  {o:$o}</text>
+  <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; over the symbols it bound</text>
+  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
+  <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
+  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"==": ["$q.rank", 4]}</text>
+  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.dims[3]", "$kernel.head_size"]}</text>
+  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"divisible": ["$q.dims[1]", "$k.dims[1]"]}</text>
+  <text x="345" y="288" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
+  <text x="345" y="308" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>
+
+  <line x1="650" y1="200" x2="700" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
+  <text x="675" y="192" text-anchor="middle" font-weight="600">bind</text>
+
+  <!-- STAGE 3: bound -->
+  <rect x="705" y="55" width="195" height="290" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="720" y="86" font-family="Consolas, monospace" font-size="11">$q $k $v $o</text>
+  <text x="720" y="112" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
+  <text x="720" y="132" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
+  <text x="720" y="158" font-family="Consolas, monospace" font-size="11">$q.uid, $q.rank, $q.dtype</text>
+  <text x="720" y="178" font-family="Consolas, monospace" font-size="11">$q.stride_order, $q.packed</text>
+  <text x="720" y="198" font-family="Consolas, monospace" font-size="11">$q.virtual, $q.value_f32</text>
+  <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$q.is_runtime_pass_by_value</text>
+  <text x="720" y="252" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
+  <text x="720" y="272" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_..</text>
+  <text x="720" y="308" font-family="Consolas, monospace" font-size="10" fill="#666">read by the criteria and</text>
+  <text x="720" y="326" font-family="Consolas, monospace" font-size="10" fill="#666">the UDD's grid / arg formulas</text>
+
+  <text x="460" y="388" text-anchor="middle" font-style="italic" fill="#444">The engine's pattern auto-binds every tensor, dim, stride, and attribute; dims are read positionally per tensor, so a cross-tensor relation is an explicit criterion.</text>
+  <text x="460" y="406" text-anchor="middle" font-style="italic" fill="#444">A native matcher, when a pack lists one, is named beside these criteria, not inside them.</text>
+</svg>

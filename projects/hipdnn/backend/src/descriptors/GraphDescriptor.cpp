@@ -162,7 +162,8 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
                                                                   anyRuntimePassByValue,
                                                                   hasRaggedTensors(),
-                                                                  hasNonDefaultTensorAlignment());
+                                                                  hasNonDefaultTensorAlignment(),
+                                                                  hasRaggedOffsetMultiplier());
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -684,9 +685,32 @@ bool GraphDescriptor::hasNonDefaultTensorAlignment() const
     return false;
 }
 
+bool GraphDescriptor::hasRaggedOffsetMultiplier() const
+{
+    // Source of truth: tensor_attributes.fbs -> `ragged_offset_multiplier: long = 1`.
+    static constexpr int64_t K_DEFAULT_RAGGED_OFFSET_MULTIPLIER = 1;
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().ragged_offset_multiplier != K_DEFAULT_RAGGED_OFFSET_MULTIPLIER)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool GraphDescriptor::isRuntimePassByValueEnabled() const
 {
     return _isRuntimePassByValueEnabled;
+}
+
+std::optional<std::array<uint8_t, 16>> GraphDescriptor::getGraphId() const
+{
+    return _graphId;
 }
 
 std::string GraphDescriptor::toString() const

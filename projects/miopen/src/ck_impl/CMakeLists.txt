@@ -31,7 +31,7 @@ set(_CK_SUPPORTED_ARCHS
     gfx908 gfx90a gfx942 gfx950
     gfx1100 gfx1101 gfx1102
     gfx1150 gfx1151 gfx1152 gfx1153
-    gfx1200 gfx1201 gfx1250
+    gfx1200 gfx1201 gfx1250 gfx1250-strict
 )
 
 # Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
@@ -109,10 +109,12 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # top-level CMakeLists.txt). These CK-impl plugins device-compile the same way the main
     # MIOpen library does, so without this their device objects fail to link with undefined
     # __ubsan_handle_*_abort symbols. -Xarch_device scopes -fno-sanitize=undefined to the device
-    # sub-compile only, so host code keeps UBSan.
+    # sub-compile only, so host code keeps UBSan. The link option keeps clang from linking the
+    # host-side ubsan_offload runtime into the plugin (see src/CMakeLists.txt).
     if(MIOPEN_DISABLE_DEVICE_UBSAN)
         target_compile_options(${lib_name} PRIVATE
             "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+        target_link_options(${lib_name} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
     endif()
 
     # Mark as building the DLL for dllexport on Windows
@@ -167,6 +169,10 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # MIOpen_private when MIOPEN_ENABLE_HIPDNN_WRAPPER=ON splits the internals out
     # behind a public wrapper that exports only the C API.
     target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
+
+    # Embed a Windows VERSIONINFO resource; see miopen_embed_version_resource() in
+    # src/CMakeLists.txt, defined before this subdirectory is added and so visible here.
+    miopen_embed_version_resource(${lib_name} "MIOpen CK Grouped-Conv Plugin (${arch_base})" ${lib_name})
 
     # Install alongside MIOpen
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")

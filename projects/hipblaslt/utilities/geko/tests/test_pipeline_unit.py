@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+import geko.optim.optim as optim_mod
 from geko import pipeline
 from geko.schemas import RunState
 
@@ -60,8 +61,10 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     rc = pipeline.run_bench(str(hip), str(workload), out_dir, devices=[0], benchmark_duration=0.1)
     assert rc == 0
     assert dumped["path"].is_file()
+    assert (out_dir / "wkld.csv").is_file()
     assert called["kwargs"]["devices"] == [0]
     assert called["kwargs"]["duration"] == 0.1
+    assert called["kwargs"]["custom_lib_dir"] is None
 
 
 def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -84,6 +87,93 @@ def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatc
     rc = pipeline.run_bench(str(hip), str(workload), tmp_path / "out", devices=[0, 1], device=2)
     assert rc == 0
     assert called["devices"] == [2]
+
+
+def test_run_bench_uses_custom_lib_dir_over_custom_lib_src(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    custom_src = tmp_path / "src_libs"
+    custom_src.mkdir()
+    custom_dir = tmp_path / "custom_build"
+    custom_dir.mkdir()
+
+    monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
+
+    create_called = {"n": 0}
+    monkeypatch.setattr(
+        pipeline.library.operations,
+        "create",
+        lambda *_a, **_k: create_called.__setitem__("n", create_called["n"] + 1),
+    )
+
+    called = {}
+
+    def _fake_standard(*_args, **kwargs):
+        called["custom_lib_dir"] = kwargs["custom_lib_dir"]
+        return pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench, "standard_benchmark", _fake_standard)
+
+    rc = pipeline.run_bench(
+        str(hip),
+        str(workload),
+        out_dir,
+        devices=[0],
+        custom_lib_src=str(custom_src),
+        custom_lib_dir=str(custom_dir),
+    )
+    assert rc == 0
+    assert create_called["n"] == 0
+    assert called["custom_lib_dir"] == custom_dir
+
+
+def test_run_bench_builds_custom_lib_from_src(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    custom_src = tmp_path / "src_libs"
+    custom_src.mkdir()
+
+    monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
+
+    created = {}
+
+    def _fake_create(_hip, src, out):
+        created["src"] = Path(src)
+        created["out"] = Path(out)
+
+    monkeypatch.setattr(pipeline.library.operations, "create", _fake_create)
+
+    called = {}
+
+    def _fake_standard(*_args, **kwargs):
+        called["custom_lib_dir"] = kwargs["custom_lib_dir"]
+        return pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench, "standard_benchmark", _fake_standard)
+
+    rc = pipeline.run_bench(
+        str(hip),
+        str(workload),
+        out_dir,
+        devices=[0],
+        custom_lib_src=str(custom_src),
+    )
+    assert rc == 0
+    assert created["src"] == custom_src
+    assert created["out"] == out_dir / "ref_build"
+    assert called["custom_lib_dir"] == out_dir / "ref_build"
 
 
 def test_run_configure_rejects_invalid_device(tmp_path: Path) -> None:
@@ -129,6 +219,26 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
     assert called["devices"] == [2]
 
 
+def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    monkeypatch.setattr(
+        pipeline.bench.log,
+        "summarize",
+        lambda *_args, **kwargs: (pd.DataFrame(), pd.DataFrame([{"M": 16}])),
+    )
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    monkeypatch.setattr(pipeline, "gemm_configs_from_gemm_dataframe", lambda _df: [gc])
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        pipeline.run_configure(str(hip), str(workload), devices=[0], arch="gfx942", workdir=str(tmp_path / "w"))
+
+
 def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
@@ -141,6 +251,26 @@ def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch,
     )
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(tmp_path / "w"))
+
+
+def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    called = {}
+
+    def _fake_summarize(*_args, **kwargs):
+        called["force_benchmark"] = kwargs.get("force_benchmark")
+        called["keep_thr"] = kwargs.get("keep_thr")
+        return pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
+
+    pipeline.run_search(str(hip), str(workload), devices=[0], keep_thr=0.0, workdir=str(tmp_path / "w"))
+
+    assert called["force_benchmark"] is True
+    assert called["keep_thr"] == 0.0
 
 
 def test_run_search_raises_when_no_winners(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -211,8 +341,21 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
             p.mkdir(parents=True, exist_ok=True)
             (p / "lib.yaml").write_text("x\n")
 
-    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    extracted = {}
+
+    def _fake_extract(_winners, match_table, **_kwargs):
+        extracted["match_table"] = Path(match_table)
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", _fake_extract)
+
+    analyze_called = {}
+
+    def _fake_analyze(*_a, **kwargs):
+        analyze_called["ref_custom_lib_dir"] = kwargs.get("ref_custom_lib_dir")
+        return pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
+
+    monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
     monkeypatch.setattr(
         pipeline.library,
         "from_dataframe",
@@ -226,6 +369,98 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert (workdir / "final_libs" / "lib.yaml").is_file()
+    assert extracted["match_table"] == hip / "build/release/device-library/MatchTable.yaml"
+    assert analyze_called["ref_custom_lib_dir"] is None
+
+
+def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    (hip / "build/release/device-library").mkdir(parents=True)
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    workdir = tmp_path / "w"
+    src_lib = tmp_path / "src_lib"
+    src_lib.mkdir()
+
+    summary = pd.DataFrame(
+        [
+            {
+                "transA": "N",
+                "transB": "N",
+                "batch_count": 1,
+                "m": 16,
+                "n": 16,
+                "k": 16,
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "c_f32_r",
+            }
+        ]
+    )
+    winners = summary.copy()
+    winners["solutionIdx"] = 0
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", lambda *_a, **_k: (summary, summary))
+    monkeypatch.setattr(pipeline.search, "configure", lambda *_a, **_k: [{"M": 16}])
+    monkeypatch.setattr(pipeline.search, "run", lambda *_a, **_k: winners)
+
+    class _FakeLibs(list):
+        def dump(self, out_dir):
+            p = Path(out_dir)
+            p.mkdir(parents=True, exist_ok=True)
+            (p / "lib.yaml").write_text("x\n")
+
+    cwd_match = tmp_path / "MatchTable.yaml"
+    cwd_match.write_text("{}\n")
+
+    created = {}
+
+    def _fake_create(_hip, src, out):
+        created["src"] = Path(src)
+        created["out"] = Path(out)
+
+    monkeypatch.setattr(pipeline.library.operations, "create", _fake_create)
+
+    extracted = {}
+
+    def _fake_extract(_winners, match_table, **_kwargs):
+        extracted["match_table"] = Path(match_table)
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", _fake_extract)
+
+    analyze_called = {}
+
+    def _fake_analyze(*_a, **kwargs):
+        analyze_called["ref_custom_lib_dir"] = kwargs.get("ref_custom_lib_dir")
+        return None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
+
+    monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
+
+    prev_cwd = Path.cwd()
+    try:
+        import os
+        os.chdir(tmp_path)
+        pipeline.run_search(
+            str(hip),
+            str(workload),
+            devices=[0],
+            workdir=str(workdir),
+            custom_lib_src=str(src_lib),
+        )
+    finally:
+        import os
+        os.chdir(prev_cwd)
+
+    assert created["src"] == src_lib
+    assert created["out"] == workdir / "ref_build"
+    assert (workdir / "ref_matchtable.yaml").is_file()
+    assert extracted["match_table"] == workdir / "ref_matchtable.yaml"
+    assert analyze_called["ref_custom_lib_dir"] == workdir / "ref_build"
 
 
 def test_run_search_success_without_analysis_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -333,6 +568,86 @@ def test_run_search_keeps_existing_artifacts_when_winners_unchanged(monkeypatch:
     assert (lib_dir / "keep.txt").is_file()
     assert (build_dir / "keep.txt").is_file()
     assert (bench_dir / "keep.txt").is_file()
+
+
+def _logic_payload(sizes: list) -> dict:
+    return {
+        "ArchitectureName": "gfx950",
+        "ScheduleName": "gfx950",
+        "ProblemType": {
+            "DataType": 7,
+            "DestDataType": 7,
+            "ComputeDataType": 0,
+            "TransposeA": True,
+            "TransposeB": False,
+            "HighPrecisionAccumulate": True,
+        },
+        "DefaultSolution": 0,
+        "Solutions": [{"SolutionIndex": 0, "SolutionNameMin": "kernel"}],
+        "ExactLogic": sizes,
+        "LibraryType": "Equality",
+    }
+
+
+def _write_completed_config(optim_dir: Path, name: str, sizes: list, library_name: str | None = None) -> Path:
+    (optim_dir / f"{name}.yaml").write_text("MatrixInstruction: [16, 16, 16, 1]\n")
+    logic = optim_dir / f"build_{name}" / "3_LibraryLogic"
+    logic.mkdir(parents=True)
+    filename = library_name or f"{name}.yaml"
+    path = logic / filename
+    from geko.library import Library
+
+    Library(_logic_payload(sizes), filename).dump(logic, name=filename)
+    return path
+
+
+def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    optim_dir = tmp_path / "optimizations"
+    optim_dir.mkdir()
+    shared = [1024, 1024, 1, 1024]
+    unique = [8, 8, 1, 8]
+    bbs = "gfx950_Cijk_Alik_Bljk_BBS_BH.yaml"
+    hhs = "gfx950_Cijk_Alik_Bljk_HHS_BH.yaml"
+    path_a = _write_completed_config(
+        optim_dir,
+        "BBS_TN_0",
+        [[shared, [3, 100.0]], [unique, [3, 10.0]]],
+        bbs,
+    )
+    path_b = _write_completed_config(optim_dir, "BBS_TN_1", [[shared, [5, 200.0]]], bbs)
+    path_c = _write_completed_config(optim_dir, "HHS_TN_0", [[shared, [1, 50.0]]], hhs)
+
+    created = []
+
+    def _create(_hip, logic_dir, output_dir):
+        created.append((Path(logic_dir), Path(output_dir)))
+
+    def _bench(_hip, bench_file, _output, custom_lib_dir=None, devices=None, cache=False):
+        text = Path(bench_file).read_text()
+        rows = []
+        if "M: 1024" in text:
+            rows.append({"m": 1024, "n": 1024, "batch_count": 1, "k": 1024, "hipblaslt-Gflops": 999.0})
+        if "M: 8" in text:
+            rows.append({"m": 8, "n": 8, "batch_count": 1, "k": 8, "hipblaslt-Gflops": 1.0})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(optim_mod.library, "create", _create)
+    monkeypatch.setattr(optim_mod.bench, "run", _bench)
+
+    optim_mod.process_duplicates(str(tmp_path / "hip"), optim_dir, devices=[0])
+
+    built = {logic.parent.name for logic, _out in created}
+    assert built == {"build_BBS_TN_0", "build_BBS_TN_1"}
+
+    from geko.library import load_library
+
+    lib_a = load_library(path_a)
+    lib_b = load_library(path_b)
+    lib_c = load_library(path_c)
+    assert lib_a.sizes[0] == [shared, [3, 999.0]]
+    assert lib_a.sizes[1] == [unique, [3, 10.0]]
+    assert lib_b.sizes[0] == [shared, [5, 999.0]]
+    assert lib_c.sizes[0] == [shared, [1, 50.0]]
 
 
 def test_run_optimize_requires_existing_workdir(tmp_path: Path) -> None:
@@ -490,3 +805,25 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()
     assert (workdir / "benchmarks" / "keep.txt").is_file()
+
+
+def test_mx_detected_from_scale_columns_in_workload(tmp_path: Path) -> None:
+    """MX should be detected per-GEMM from scaleA/scaleB in workload log."""
+    from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+    import pandas as pd
+
+    df = pd.DataFrame([
+        {"transA": "T", "transB": "N", "a_type": "f8_r", "b_type": "f8_r",
+         "c_type": "f32_r", "compute_type": "f32_r", "m": 256, "n": 256,
+         "batch_count": 1, "k": 256, "d_type": "f32_r", "scaleA": 3, "scaleB": 3},
+        {"transA": "N", "transB": "N", "a_type": "bf16_r", "b_type": "bf16_r",
+         "c_type": "bf16_r", "compute_type": "f32_r", "m": 512, "n": 512,
+         "batch_count": 1, "k": 256, "d_type": "bf16_r", "scaleA": 1, "scaleB": 1},
+    ])
+    gcs = gemm_configs_from_gemm_dataframe(df)
+    assert len(gcs) == 2
+    mx_gcs = [gc for gc in gcs if gc.mx]
+    non_mx_gcs = [gc for gc in gcs if not gc.mx]
+    assert len(mx_gcs) == 1
+    assert mx_gcs[0].gemm_type.data_type == "F8"
+    assert len(non_mx_gcs) == 1

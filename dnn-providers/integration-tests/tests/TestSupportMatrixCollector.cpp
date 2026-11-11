@@ -9,11 +9,12 @@
 #include <fstream>
 #include <string>
 
-#include "ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/SupportMatrixCollector.hpp"
 
 using hipdnn_integration_tests::SupportMatrixCollector;
-using hipdnn_integration_tests::scratch::currentProcessId;
+using hipdnn_test_sdk::utilities::currentProcessId;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 

@@ -524,11 +524,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Make sure that the parameters make sense:
     ASSERT_TRUE(params.valid(verbose));
 
-    // TODO: temporary workaround awaiting robust support for
-    // 64-bit indexing in rocfft kernels.
-    if(params.may_need_64bit_indexing())
-        throw ROCFFT_SKIP{"This test may require kernel support for 64-bit integer arithmetic"};
-
     // Create reference results as early as possible so that system memory is reserved for (an
     // estimation of) the possible FFTW plan's workspace (if needed), providing some guard against
     // OOM kills thereafter.
@@ -552,6 +547,10 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     }
     // Make sure FFT buffers fit in device memory
     check_problem_fits_device_memory(params, verbose);
+
+    // checks rocFFT's choice of execution device, independently of the results below
+    if constexpr(requires { params.validate_work_memory_devices(); })
+        params.validate_work_memory_devices();
 
     auto ibuffer_sizes = params.ibuffer_sizes();
     auto obuffer_sizes = params.obuffer_sizes();

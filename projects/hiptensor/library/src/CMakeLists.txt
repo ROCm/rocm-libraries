@@ -27,6 +27,13 @@
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# The 'amdgpu-waves-per-eu' diagnostic that -Wno-pass-failed hides is re-emitted by lld, where
+# that flag does not reach, so the device linker is silenced as well. This lives here rather than
+# at the top level because the option is only meaningful while compiling device code: on a host
+# only translation unit clang never runs the offload linker and warns that the argument is unused.
+# The CK kernels that provoke the diagnostic are all built from this directory.
+add_compile_options("SHELL: -Xoffload-linker -w")
+
 # Create test executables and deploy
 function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
@@ -42,6 +49,17 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
     target_compile_options(${COMPONENT_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${COMPONENT_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     set_target_properties(${COMPONENT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # Hidden-visibility baseline. The translation units are compiled in these OBJECT libraries,
+    # not in the final shared target, so the visibility flags must be set here to take effect.
+    # With this baseline the HIPTENSOR_EXPORT (visibility("default")) tags on the public C API
+    # act as the real allowlist; everything else stays local to libhiptensor.so. On Windows these
+    # presets are inert (export is __declspec-driven), so the behavior there is unchanged.
+    set_target_properties(${COMPONENT_NAME} PROPERTIES
+        CXX_VISIBILITY_PRESET     hidden
+        C_VISIBILITY_PRESET       hidden
+        VISIBILITY_INLINES_HIDDEN ON)
+
     target_link_libraries(${COMPONENT_NAME} PRIVATE hip::device)
 
     # Don't link to consume ck instances, however will customize and create our own.
@@ -74,6 +92,18 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
 endfunction()
 
+# Compile sources that define no GPU kernels for the host only. Their per-GPU-target device
+# pass emits no kernels but still parses the CK/HIP headers once per target, which only costs
+# build time. Source properties are directory-scoped, so call this from the directory that
+# creates the target compiling the sources. Target-wide offload flags (e.g. --offload-compress)
+# are unused without a device pass, hence the warning suppression.
+# A listed source that does define a kernel fails the build: its host object references an
+# undefined __hip_fatbin_<hash>, which the -Wl,--no-undefined link of libhiptensor rejects.
+function(hiptensor_set_host_only_sources)
+    set_source_files_properties(${ARGN} PROPERTIES
+        COMPILE_OPTIONS "--offload-host-only;-Wno-unused-command-line-argument")
+endfunction()
+
 # Create shared library target
 function(create_hiptensor_shared_library)
     add_library(hiptensor SHARED
@@ -99,6 +129,27 @@ function(create_hiptensor_shared_library)
     # Add driver mode to both cxx and link flags
     target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
     target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
+
+    # Linker version script: belt-and-suspenders ELF allowlist on top of the hidden-visibility
+    # baseline. ELF-only (GNU ld / lld); on Windows the DLL export set is driven entirely by
+    # __declspec, so this is skipped there. Keep the script's global set in lockstep with
+    # scripts/check_exported_symbols.py.
+    if(NOT WIN32)
+        target_link_options(hiptensor PRIVATE
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Relink when the script changes (not tracked as a link input otherwise).
+        set_target_properties(hiptensor PROPERTIES
+            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Reject undefined symbols. Besides catching missing dependencies, this guards the
+        # host-only sources (hiptensor_set_host_only_sources): a source that defines a kernel but
+        # is compiled --offload-host-only references an undefined __hip_fatbin_<hash>, which
+        # would otherwise link silently and fail at run time. (Executables and the Windows DLL
+        # already reject undefined symbols.) Skipped with ASan, whose runtime symbols are left
+        # undefined in shared libraries.
+        if(NOT ADDRESS_SANITIZER_ENABLED)
+            target_link_options(hiptensor PRIVATE "-Wl,--no-undefined")
+        endif()
+    endif()
 
     # Add export definitions
     target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
@@ -158,10 +209,76 @@ set(HIPTENSOR_CORE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
 )
 
+hiptensor_set_host_only_sources(${HIPTENSOR_CORE_SOURCES})
 add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
 
 # Create shared library for production use
 create_hiptensor_shared_library()
+
+# Host-side CPU reference + stateless data-type helpers, built as a static library for the
+# test suite only.
+# With the hidden-visibility baseline the symbols are local to the .so, so the tests get their
+# own copy here instead.
+# The shared singletons (HiptensorOptions, Logger) are NOT here: they are exported from the
+# .so so the harness and the library share one instance.
+#
+# The CPU references are compiled only here: nothing in libhiptensor.so calls them. The other
+# sources are deliberately compiled twice: into libhiptensor.so (hidden) and here (for the
+# tests). Keeping them in the .so would re-export the symbols and defeat the baseline.
+#
+# None of these sources define GPU kernels, so the whole library is compiled host-only (see
+# hiptensor_set_host_only_sources() for the warning suppression).
+if(HIPTENSOR_BUILD_TESTS)
+    set(HIPTENSOR_HOST_REFERENCE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank2_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank3_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank4_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank5_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank6_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_instance_selection.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/device/instance_params.cpp
+    )
+
+    add_library(hiptensor_host_reference STATIC ${HIPTENSOR_HOST_REFERENCE_SOURCES})
+    add_library(hiptensor::host_reference ALIAS hiptensor_host_reference)
+
+    target_compile_options(hiptensor_host_reference PRIVATE
+        ${CLANG_DRIVER_MODE} --offload-host-only -Wno-unused-command-line-argument)
+    target_link_options(hiptensor_host_reference PRIVATE ${CLANG_DRIVER_MODE})
+    set_target_properties(hiptensor_host_reference PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(hiptensor_host_reference PRIVATE hip::device)
+
+    get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(hiptensor_host_reference PRIVATE
+        ${PROJECT_BINARY_DIR}/include/hiptensor
+        ${PROJECT_BINARY_DIR}/include
+        ${composable_kernel_INCLUDES}
+    )
+
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(hiptensor_host_reference PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
+    endif()
+
+    if(HIPTENSOR_BUILD_COMPRESSED_DBG)
+        target_compile_options(hiptensor_host_reference PRIVATE
+            "$<$<CONFIG:Debug>:-gz>"
+            "$<$<CONFIG:RelWithDebInfo>:-gz>"
+            )
+    endif()
+endif()
 
 # Set visibility for function names exported from shared library
 include(GenerateExportHeader)

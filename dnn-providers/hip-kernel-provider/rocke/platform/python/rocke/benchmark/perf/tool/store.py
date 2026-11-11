@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Local record store - append-only JSON Lines in a user cache dir.
 
-The one place records are persisted. Deliberately NOT a database: an append-only
+The history persistence layer. Deliberately NOT a database: an append-only
 `history.jsonl` under `~/.cache/rocke-perf` (one record per line), so a developer can
 keep a run history and compare across runs without any server. The
 data lives in a user cache dir *outside the repo* - only this code is committed,

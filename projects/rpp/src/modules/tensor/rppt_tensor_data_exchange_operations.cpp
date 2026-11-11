@@ -49,63 +49,63 @@ RppStatus rppt_copy(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            copy_u8_u8_host_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                   srcDescPtr,
-                                   static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                   dstDescPtr, layoutParams, handle);
+            return copy_u8_u8_host_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
+                                          srcDescPtr,
+                                          static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
+                                          dstDescPtr, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            copy_f16_f16_host_tensor(
+            return copy_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            copy_f32_f32_host_tensor(
+            return copy_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            copy_i8_i8_host_tensor(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                   srcDescPtr,
-                                   static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                   dstDescPtr, layoutParams, handle);
+            return copy_i8_i8_host_tensor(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
+                                          srcDescPtr,
+                                          static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
+                                          dstDescPtr, layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_copy_tensor(
+            return hip_exec_copy_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            hip_exec_copy_tensor(
+            return hip_exec_copy_tensor(
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_copy_tensor(
+            return hip_exec_copy_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            hip_exec_copy_tensor(
+            return hip_exec_copy_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -124,65 +124,65 @@ RppStatus rppt_channel_permute(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            channel_permute_u8_u8_host_tensor(
+            return channel_permute_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                 permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            channel_permute_f16_f16_host_tensor(
+            return channel_permute_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            channel_permute_f32_f32_host_tensor(
+            return channel_permute_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            channel_permute_i8_i8_host_tensor(
+            return channel_permute_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                 permutationTensor, layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_channel_permute_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                            srcDescPtr,
-                                            static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                            dstDescPtr, permutationTensor, handle);
+            return hip_exec_channel_permute_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                permutationTensor, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            hip_exec_channel_permute_tensor(
+            return hip_exec_channel_permute_tensor(
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, permutationTensor, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_channel_permute_tensor(
+            return hip_exec_channel_permute_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, permutationTensor, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            hip_exec_channel_permute_tensor(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                            srcDescPtr,
-                                            static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                            dstDescPtr, permutationTensor, handle);
+            return hip_exec_channel_permute_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                permutationTensor, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -216,65 +216,65 @@ RppStatus rppt_color_to_greyscale(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            color_to_greyscale_u8_u8_host_tensor(
+            return color_to_greyscale_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            color_to_greyscale_f16_f16_host_tensor(
+            return color_to_greyscale_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 channelWeights, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            color_to_greyscale_f32_f32_host_tensor(
+            return color_to_greyscale_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, channelWeights, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            color_to_greyscale_i8_i8_host_tensor(
+            return color_to_greyscale_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_color_to_greyscale_tensor(
+            return hip_exec_color_to_greyscale_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            hip_exec_color_to_greyscale_tensor(
+            return hip_exec_color_to_greyscale_tensor(
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, channelWeights, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_color_to_greyscale_tensor(
+            return hip_exec_color_to_greyscale_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, channelWeights, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            hip_exec_color_to_greyscale_tensor(
+            return hip_exec_color_to_greyscale_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -360,6 +360,76 @@ RppStatus rppt_yuv_to_rgb_linear_v(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDesc
                                                    static_cast<Rpp8u*>(srcUVPtr), src_uv_pitch,
                                                    static_cast<Rpp8u*>(dstPtr), dst_pitch, width,
                                                    height, col_standard, color_range, handle);
+    }
+#endif
+
+    return RPP_ERROR_INCOMPATIBLE_BACKEND;
+}
+
+/******************** bayer_to_rgb ********************/
+
+RppStatus rppt_bayer_to_rgb(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                            RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
+                            RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
+                            RpptRoiType roiType, rppHandle_t rppHandle,
+                            RppBackend executionBackend) {
+    if ((bayerPattern < RpptBayerPattern_RGGB) || (bayerPattern > RpptBayerPattern_GBRG))
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    if (borderType != RpptImageBorderType::REFLECT_NO_EDGE) return RPP_ERROR_NOT_IMPLEMENTED;
+    if (srcDescPtr->c != 1) return RPP_ERROR_INVALID_SRC_CHANNELS;
+    if (dstDescPtr->c != 3) return RPP_ERROR_INVALID_DST_CHANNELS;
+    if (srcDescPtr->layout != RpptLayout::NCHW) return RPP_ERROR_INVALID_SRC_LAYOUT;
+    if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
+        return RPP_ERROR_INVALID_DST_LAYOUT;
+    if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
+
+    rpp::Handle& handle = rpp::deref(rppHandle);
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
+
+    if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
+        RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+        for (Rpp32u i = 0; i < srcDescPtr->n; i++) {
+            RpptROI roi = roiDefault;
+            if (roiTensorPtrSrc != nullptr)
+                compute_roi_validation_host(&roiTensorPtrSrc[i], &roi, &roiDefault, roiType);
+            if ((roi.xywhROI.roiWidth < 2) || (roi.xywhROI.roiHeight < 2))
+                return RPP_ERROR_INVALID_ARGUMENTS;
+        }
+
+        if ((srcDescPtr->dataType == RpptDataType::U8) &&
+            (dstDescPtr->dataType == RpptDataType::U8)) {
+            return bayer_to_rgb_host_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
+                roiTensorPtrSrc, roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
+                   (dstDescPtr->dataType == RpptDataType::F16)) {
+            return bayer_to_rgb_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
+                   (dstDescPtr->dataType == RpptDataType::F32)) {
+            return bayer_to_rgb_host_tensor(
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
+                   (dstDescPtr->dataType == RpptDataType::I8)) {
+            return bayer_to_rgb_host_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
+                roiTensorPtrSrc, roiType, handle);
+        } else
+            return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+#ifdef GPU_SUPPORT
+    else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
+             (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+        return RPP_ERROR_NOT_IMPLEMENTED;  // HIP kernel not yet available
     }
 #endif
 

@@ -1,0 +1,74 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S10 UseF32XEmulation index-transpose cluster (gfx1250 WMMA_V3).
+#
+# Target: Tensile/Components/LocalRead.py F32X pack / index-transpose paths.
+#   Probe-confirmed missing lines exercised by emit:
+#     861,862,863,1125,1126,1128,1173,1174,1248,1639,1660,1764,1787,1789,1790,1859
+#
+# Reachability gates (KernelWriter.assignDerivedParameters + LocalReadMFMA):
+#   - UseF32XEmulation=True (DataType=S + F32XdlMathOp=X + HPA on gfx1250 WMMA_V3)
+#     => needPack True, enters the F32X pack loop; also multiGroupXF32 candidate.
+#   - is_wmma_v3 True (gfx1250 HasWMMA_V3)
+#   - lrvwTile>1 (VectorWidthA/B=2) => indexTranpose candidate.
+#   - numVgpr*numReadsPerUnroll>8 => multiGroupXF32 True (line 1248).
+#
+# gfx1250 base cloned from a proven UseF32XEmulation emit, stripped of
+# bias/activation/scale epilogue extras, with VectorWidth and tile widened to
+# engage the index-transpose + multiGroup pack paths.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType: float32 NT with XF32 math emulation
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 1, 1]
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+        - TDMInst: [3]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

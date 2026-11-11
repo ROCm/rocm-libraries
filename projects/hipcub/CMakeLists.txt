@@ -35,7 +35,7 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "4.7.1")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
 set(HIPCUB_CCCL_VERSION_MINOR 8)
@@ -165,7 +165,7 @@ elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" S
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -261,6 +261,11 @@ if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
 else()
   add_subdirectory(hipcub)
+endif()
+
+if(BUILD_CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Xarch_host -fprofile-instr-generate")
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))

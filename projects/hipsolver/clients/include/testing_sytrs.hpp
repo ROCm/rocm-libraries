@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API,
           typename I,
@@ -470,14 +471,14 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         sytrs_initData<false, true, T>(
             handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_sytrs(API,
                         handle,
                         uplo,
@@ -494,9 +495,9 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
                         hlwork,
                         dInfo.data(),
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
@@ -672,7 +673,7 @@ void testing_sytrs(Arguments& argus)
                                    &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytrs_getPerfData<API, T>(handle,
                                       uplo,
                                       n,

@@ -148,9 +148,8 @@ TEST(TestGraphWrapper, GetNodeWrapper)
     EXPECT_THROW(wrapper.getNodeWrapper(1), std::out_of_range);
 }
 
-/// `bytes()` is the cache-key seam: `GraphContentKey` reads the buffer back through it
-/// and calls `GetRoot` without re-verifying, so a buffer is retained only once the
-/// verifier has accepted it.
+/// `bytes()` is the cache-key seam: `GraphContentKey` verifies the retained buffer before
+/// calling `GetRoot`, so a buffer is retained only once the verifier has accepted it.
 TEST(TestGraphWrapper, BytesReturnsTheVerifiedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder

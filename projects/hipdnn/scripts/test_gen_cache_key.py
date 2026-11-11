@@ -196,11 +196,29 @@ class TestUidCanonicalization(unittest.TestCase):
         with self.assertRaises(SystemExit):
             Emitter(broken, f"{NS}.Root")
 
-    def test_more_than_one_domain_is_rejected(self):
-        # Ordinals are positions in one vector; two candidates have no defined answer.
+    def test_more_than_one_domain_annotation_is_rejected(self):
+        # The second annotation is on a non-domain-shaped vector, so this reaches
+        # the duplicate-annotation check rather than the candidate ambiguity check.
         broken = uid_schema([field("x_tensor_uid", "Long", 0, uid=True)])
+        broken["objects"].append(table(f"{NS}.Decoy", [field("value", "Int", 0)]))
         broken["objects"][2]["fields"].append(
-            field("more_tensors", "Vector", 2, index=0, element="Obj", uid_domain=True)
+            field("more_domains", "Vector", 2, index=3, element="Obj", uid_domain=True)
+        )
+        with self.assertRaisesRegex(SystemExit, "declared on 2 fields"):
+            Emitter(broken, f"{NS}.Root")
+
+    def test_a_second_domain_shaped_candidate_is_rejected(self):
+        # The annotation alone cannot disambiguate: a second root vector of tables with
+        # one integer key is equally domain-shaped, so the annotated one may be the
+        # wrong one and every ordinal would fold against it silently.
+        broken = uid_schema(
+            [field("x_tensor_uid", "Long", 0, uid=True)], domain_ignored=True
+        )
+        broken["objects"].append(
+            table(f"{NS}.Decoy", [field("uid", "Long", 0, uid_key=True)])
+        )
+        broken["objects"][2]["fields"].append(
+            field("decoys", "Vector", 2, index=3, element="Obj", uid_domain=True)
         )
         with self.assertRaises(SystemExit):
             Emitter(broken, f"{NS}.Root")
@@ -269,6 +287,75 @@ class TestHasherConstants(unittest.TestCase):
         self.assertIn(
             "static constexpr uint64_t PRIME        = 0x100000001b3ULL;", header
         )
+
+
+class TestPortableByteOperations(unittest.TestCase):
+    """The emitted header compiles under MSVC and compares floats by their bytes.
+
+    `__builtin_memcpy` is a GCC/Clang extension, and IEEE `!=` makes a NaN payload
+    unequal to itself, which would turn its cache entry into a permanent miss.
+    """
+
+    def test_the_hasher_uses_standard_memcpy(self):
+        root = table(f"{NS}.Root", [field("alpha", "Int", 0)])
+        header = Emitter(schema([root]), f"{NS}.Root").emit()
+        self.assertIn("#include <cstring>", header)
+        self.assertIn("std::memcpy(", header)
+        self.assertNotIn("__builtin_memcpy", header)
+
+    def test_a_float_field_compares_its_object_representation(self):
+        root = table(f"{NS}.Root", [field("alpha", "Float", 0)])
+        bodies = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())
+        self.assertIn(
+            "std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0",
+            bodies[("equal", "Root")],
+        )
+
+    def test_an_optional_double_keeps_its_presence_tag(self):
+        root = table(f"{NS}.Root", [field("beta", "Double", 0, optional=True)])
+        body = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())[
+            ("equal", "Root")
+        ]
+        self.assertIn("aValue.has_value() != bValue.has_value()", body)
+        self.assertIn("std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0", body)
+
+    def test_a_float_vector_compares_elements_by_object_representation(self):
+        root = table(
+            f"{NS}.Root",
+            [field("values", "Vector", 0, element="Float")],
+        )
+        body = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())[
+            ("equal", "Root")
+        ]
+        self.assertIn("std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0", body)
+        self.assertNotIn(
+            "aItems->Get(index) != bItems->Get(index)",
+            body,
+        )
+
+
+class TestEmittedBodiesAreWellFormed(unittest.TestCase):
+    """Every vector element kind must emit balanced braces.
+
+    A branch that drops its closing brace still passes an `assertIn` on the body
+    text, but the header it emits does not compile. Brace balance is the property
+    worth asserting, over every element kind the emitter has a branch for.
+    """
+
+    ELEMENT_KINDS = ["String", "Float", "Double", "Int", "Long", "UByte", "Bool"]
+
+    def test_a_vector_of_each_element_kind_emits_balanced_braces(self):
+        for element in self.ELEMENT_KINDS:
+            with self.subTest(element=element):
+                root = table(
+                    f"{NS}.Root", [field("values", "Vector", 0, element=element)]
+                )
+                header = Emitter(schema([root]), f"{NS}.Root").emit()
+                self.assertEqual(
+                    header.count("{"),
+                    header.count("}"),
+                    f"a [{element}] vector emits unbalanced braces; the header will not compile",
+                )
 
 
 class TestUnhandledBaseType(unittest.TestCase):

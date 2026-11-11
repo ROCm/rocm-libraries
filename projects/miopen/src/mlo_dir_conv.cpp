@@ -62,6 +62,7 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvDepthwiseFwd2D,
                                            miopen::solver::conv::ConvDepthwiseBwdData2D,
                                            miopen::solver::conv::ConvDepthwiseFwd3D,
+                                           miopen::solver::conv::ConvDirectDepthwiseFwd2D,
                                            miopen::solver::conv::ConvHipConv>{};
 }
 
@@ -120,6 +121,7 @@ static auto GetWindogradSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
+        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<3, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<4, 3>,
@@ -179,6 +181,7 @@ static auto GetWindogradWrWSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
+        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 2>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 4>,

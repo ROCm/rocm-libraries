@@ -9,6 +9,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+
+#include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
@@ -75,7 +79,7 @@ public:
     IGraphEngineRunner& operator=(IGraphEngineRunner&&) = delete;
 
     /// from_binary, plus the single get_ranked_engine_ids() query this test makes.
-    /// A build failure comes back as GraphSession::buildError, not as a throw.
+    /// A build failure comes back as GraphSession::buildFailed, not as a throw.
     virtual GraphSession openGraph(const IntegrationTestBundle& bundle,
                                    const std::optional<LoadedEngine>& engineUnderTest)
         = 0;
@@ -91,6 +95,24 @@ public:
     virtual EngineOpResult execute(GraphSession& session,
                                    const std::optional<LoadedEngine>& engineUnderTest,
                                    VariantPack& variantPack)
+        = 0;
+
+    /// Times the engine of the plan execute() built, on `variantPack`, with
+    /// Graph::autotune(). Called only after the outputs of execute() were verified.
+    virtual hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
+                                                      VariantPack& variantPack,
+                                                      const BenchmarkSettings& settings)
+        = 0;
+
+    /// Captures the plan execute() built into a HIP graph on the handle's stream and
+    /// replays it, running `hooks` around every replay. Called only after the
+    /// outputs of execute() were verified. A decline means the engine does not
+    /// report SUPPORTS_GRAPH_CAPTURE; a failure names the step that broke. Neither
+    /// leaves the stream capturing.
+    virtual CaptureResult captureReplay(GraphSession& session,
+                                        VariantPack& variantPack,
+                                        const CaptureSettings& settings,
+                                        const ReplayHooks& hooks)
         = 0;
 };
 

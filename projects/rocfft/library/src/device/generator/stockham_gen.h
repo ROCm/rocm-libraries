@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../../include/rtc_kernel.h"
 #include "../kernels/device_enum.h"
 #include "rocfft/rocfft.h"
 #include <optional>
@@ -31,14 +32,16 @@
 
 struct StockhamGeneratorSpecs
 {
-    StockhamGeneratorSpecs(const std::vector<unsigned int>&   factors,
+    StockhamGeneratorSpecs(const KIntType&                    itype,
+                           const std::vector<unsigned int>&   factors,
                            const std::vector<unsigned int>&   factors2d,
                            unsigned int                       precision,
                            const std::string&                 gcn_arch_name,
                            unsigned int                       workgroup_size,
                            const std::string&                 scheme,
                            const std::optional<unsigned int>& transform_type = std::nullopt)
-        : factors(factors)
+        : itype(itype)
+        , factors(factors)
         , factors2d(factors2d)
         , precision(precision)
         , gcn_arch_name(gcn_arch_name)
@@ -50,6 +53,7 @@ struct StockhamGeneratorSpecs
     {
     }
 
+    KIntType                  itype;
     std::vector<unsigned int> factors;
     std::vector<unsigned int> factors2d;
     std::vector<unsigned int> factors_pp;
@@ -105,6 +109,7 @@ struct StockhamPartialPassParams
                               const std::vector<unsigned int>& pp_factors_curr,
                               const std::vector<unsigned int>& pp_factors_other)
         : parent_length(parent_length)
+        , node_length(parent_length)
         , pp_threads_per_transform(pp_threads_per_transform)
         , current_dim(current_dim)
         , off_dim(off_dim)
@@ -113,7 +118,13 @@ struct StockhamPartialPassParams
     {
     }
 
+    // Parent length in plan order.  The launcher path emits this as the
+    // function-pool key, so it has to stay in plan order there.
     std::vector<unsigned int> parent_length;
+    // The same lengths as the kernel's own node sees them: the SBRR's node is
+    // in plan order, the SBCC's is rotated so its transform dimension comes
+    // first.  Code generation indexes this one, never parent_length.
+    std::vector<unsigned int> node_length;
     unsigned int              pp_threads_per_transform;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;

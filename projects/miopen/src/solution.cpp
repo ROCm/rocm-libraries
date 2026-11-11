@@ -784,6 +784,17 @@ inline constexpr const char* GlobalWorkDims = "global_work_dims";
 } // namespace kernels
 } // namespace fields
 
+void ValidateSerializedWorkDims(const std::vector<size_t>& work_dims, const char* name)
+{
+    constexpr std::size_t max_work_dims = 3;
+    if(work_dims.empty() || work_dims.size() > max_work_dims)
+        MIOPEN_THROW(miopenStatusInvalidValue,
+                     std::string{"Invalid "} + name +
+                         " work dimensions in serialized solution: size " +
+                         std::to_string(work_dims.size()) + " (expected 1.." +
+                         std::to_string(max_work_dims) + ").");
+}
+
 void to_json(nlohmann::json& json, const Solution::SerializationMetadata& metadata)
 {
     json = nlohmann::json{
@@ -827,6 +838,11 @@ struct SerializedSolutionKernelInfo
         kernel_info.program_name = json.at(fields::kernels::File).get<std::string>();
         json.at(fields::kernels::LocalWorkDims).get_to(kernel_info.local_work_dims);
         json.at(fields::kernels::GlobalWorkDims).get_to(kernel_info.global_work_dims);
+
+        // Reject a malicious or corrupt blob at load time, before any kernel
+        // object is constructed with these attacker-controlled dimensions.
+        ValidateSerializedWorkDims(kernel_info.local_work_dims, "local");
+        ValidateSerializedWorkDims(kernel_info.global_work_dims, "global");
 
         MIOPEN_LOG_I2("Deserialized solution kernel info <"
                       << kernel_info.program_name << ":" << kernel_info.kernel_name << ", binary "

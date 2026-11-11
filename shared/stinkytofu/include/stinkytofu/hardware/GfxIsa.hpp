@@ -187,6 +187,8 @@ enum class FieldType : uint8_t {
     // Register types
     vgpr,
     sreg,
+    /// SGPR, M0 or null, with no inline constant (e.g. the buffer soffset). The emitter
+    /// writes a zero here as null, so type a field that can encode constants differently.
     sreg_m0,
     // Scalar ALU types
     sdst,
@@ -197,7 +199,7 @@ enum class FieldType : uint8_t {
     sleep,
     // Scalar memory types
     smem_offset,
-    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL).
+    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL). Zero is written null.
     smem_offset_nok,
     // Immediate / control-flow types
     label,
@@ -263,6 +265,20 @@ struct HwInstDesc {
 
     // execution unit (e.g., VALU, SALU, MatrixUnit)
     ExecUnit unit = ExecUnit::NONE;
+
+    /// Experimental upper bound on modeled LDS-burst drain latency for this DS
+    /// load opcode (cycles). 0 = use HWModel::lds.dsLoadDefaultMaxDrain via
+    /// makeDsLoadDrainEntry (not "uncapped").
+    uint16_t dsMaxDrain = 0;
+
+    /// Overflow issue throughput for this DS load opcode (per WGP). Higher
+    /// shortens the overflow term of the dynamic drain model. 0 = fall back to
+    /// HWModel::lds.dsLoadDefaultThroughput.
+    uint16_t dsThroughput = 0;
+
+    /// WMMA issue-queue depth for this opcode. Populated from the architecture's
+    /// instruction-format .def; 0 means the opcode does not use the WMMA queue.
+    uint16_t wmmaQueueDepth = 0;
 
     /// Per-operand encoding field description (dest/src, encoding field,
     /// register type, and size in bits).

@@ -2,31 +2,235 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/DeviceCallCheck.hpp"
+#include "harness/input-init/ResampleBackwardInputs.hpp"
+#include "harness/input-init/SdpaBackwardInputs.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
+
+#if defined(USE_ROCRAND)
+#include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
+#endif
 
 namespace hipdnn_integration_tests
 {
 namespace
 {
 
+using TensorDataTypes = std::unordered_map<int64_t, hipdnn_flatbuffers_sdk::data_objects::DataType>;
+
+TensorDataTypes collectDataTypes(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+{
+    TensorDataTypes dataTypes;
+    if(graph.tensors() == nullptr)
+    {
+        return dataTypes;
+    }
+    for(const auto* tensor : *graph.tensors())
+    {
+        dataTypes.emplace(tensor->uid(), tensor->data_type());
+    }
+    return dataTypes;
+}
+
+// Symmetric range over every finite value of T, so a uniform draw rounds onto
+// each representable magnitude, including the extremes.
+template <typename T>
+FillRecipe symmetricFullRange()
+{
+    const auto max = static_cast<float>(std::numeric_limits<T>::max());
+    return FillRecipe::free(-max, max);
+}
+
+// ── VALUES fill ─────────────────────────────────────────────────────────────
+
+bool holdsSubByteElements(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return dataType == DataType::FP4_E2M1 || dataType == DataType::FP6_E2M3
+           || dataType == DataType::FP6_E3M2 || dataType == DataType::INT4;
+}
+
+// Integer element types take only exact integers in their range; BOOLEAN takes 0 or 1.
+// Floating-point element types take any number, rounded to the element type.
+template <typename T, typename V>
+std::optional<std::string> toElement([[maybe_unused]] V number, [[maybe_unused]] T& element)
+{
+    if constexpr(std::is_integral_v<T> && std::is_floating_point_v<V>)
+    {
+        return std::string("the list holds a non-integer number, so it cannot fill an "
+                           "integer tensor");
+    }
+    else if constexpr(std::is_integral_v<T>)
+    {
+        bool inRange = false;
+        if constexpr(std::is_same_v<T, bool>)
+        {
+            inRange = number == 0 || number == 1;
+        }
+        else if constexpr(std::is_same_v<T, int64_t>)
+        {
+            inRange = true;
+        }
+        else
+        {
+            inRange = number >= static_cast<int64_t>(std::numeric_limits<T>::min())
+                      && number <= static_cast<int64_t>(std::numeric_limits<T>::max());
+        }
+        if(!inRange)
+        {
+            return std::to_string(number) + " is out of range for the tensor's data type";
+        }
+        element = static_cast<T>(number);
+        return std::nullopt;
+    }
+    else
+    {
+        element = static_cast<T>(number);
+        return std::nullopt;
+    }
+}
+
+template <typename T, typename V>
+std::optional<std::string> writeValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
+                                       const std::vector<V>& numbers,
+                                       bool repeat)
+{
+    const std::size_t count = tensor.elementCount();
+    if(!repeat && numbers.size() != count)
+    {
+        return "repeat false needs one value per element: " + std::to_string(numbers.size())
+               + " values for " + std::to_string(count) + " elements";
+    }
+    if(numbers.size() > count)
+    {
+        return "the list is longer than the tensor: " + std::to_string(numbers.size())
+               + " values for " + std::to_string(count) + " elements";
+    }
+
+    std::vector<T> elements(numbers.size());
+    for(std::size_t i = 0; i < numbers.size(); ++i)
+    {
+        T element{};
+        if(auto why = toElement(numbers[i], element))
+        {
+            return "values[" + std::to_string(i) + "]: " + *why;
+        }
+        elements[i] = element;
+    }
+
+    std::size_t i = 0;
+    for(auto it = tensor.begin(); it != tensor.end(); ++it, ++i)
+    {
+        *static_cast<T*>(*it) = elements[i % elements.size()];
+    }
+    tensor.markHostModified();
+    return std::nullopt;
+}
+
+// Fills `tensor` when its element type is T; nullopt when it is not.
+template <typename T>
+std::optional<FillResult> fillValuesAs(hipdnn_data_sdk::utilities::ITensor& tensor,
+                                       const FillRecipe& recipe)
+{
+    auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+    if(typed == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto why = std::visit(
+        [&](const auto& numbers) { return writeValues(*typed, numbers, recipe.repeat); },
+        *recipe.list);
+    return why.has_value() ? FillResult::invalid(*why) : FillResult::ok();
+}
+
+template <typename... Ts>
+FillResult fillValuesAsAnyOf(hipdnn_data_sdk::utilities::ITensor& tensor, const FillRecipe& recipe)
+{
+    std::optional<FillResult> result;
+    static_cast<void>((... || (result = fillValuesAs<Ts>(tensor, recipe)).has_value()));
+    return result.has_value() ? *result
+                              : FillResult::invalid("kind values cannot fill this element type");
+}
+
+FillResult fillValues(hipdnn_data_sdk::utilities::ITensor& tensor,
+                      const FillRecipe& recipe,
+                      std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType)
+{
+    if(recipe.list == nullptr)
+    {
+        return FillResult::invalid("kind values has no list");
+    }
+    // INT4 tensors hold uint8_t elements, so only the data type tells them apart.
+    if(!dataType.has_value())
+    {
+        return FillResult::invalid("kind values needs the tensor's data type");
+    }
+    if(holdsSubByteElements(*dataType))
+    {
+        return FillResult::invalid(std::string("kind values cannot fill a ")
+                                   + EnumNameDataType(*dataType) + " tensor");
+    }
+
+    namespace types = hipdnn_data_sdk::types;
+    return fillValuesAsAnyOf<float,
+                             double,
+                             types::half,
+                             types::bfloat16,
+                             types::fp8_e4m3,
+                             types::fp8_e5m2,
+                             types::fp8_e4m3_fnuz,
+                             types::fp8_e5m2_fnuz,
+                             types::fp8_e8m0,
+                             int8_t,
+                             uint8_t,
+                             int32_t,
+                             int64_t,
+                             bool>(tensor, recipe);
+}
+
 // ── Fill dispatch ───────────────────────────────────────────────────────────
 
-FillResult
-    fill(hipdnn_data_sdk::utilities::ITensor& tensor, const FillRecipe& recipe, unsigned int seed)
+FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
+                const FillRecipe& recipe,
+                unsigned int seed,
+                DeviceInputFiller* device,
+                std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType)
 {
     switch(recipe.kind)
     {
     case FillRecipe::Kind::FREE:
+        if(device != nullptr && device->tryFill(tensor, recipe, seed))
+        {
+            return FillResult::ok(/*deviceFilled=*/1);
+        }
         tensor.fillTensorWithRandomValues(recipe.lo, recipe.hi, seed);
         return FillResult::ok();
     case FillRecipe::Kind::FIXED:
         tensor.fillTensorWithValue(recipe.value);
         return FillResult::ok();
+    case FillRecipe::Kind::VALUES:
+        return fillValues(tensor, recipe, dataType);
     default:
         return FillResult::unsupported("unknown FillRecipe kind");
     }
@@ -142,6 +346,29 @@ void setRmsnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::
 
 // ── Block-scale quantization ─────────────────────────────────────────────────
 
+// Largest magnitude a recipe can produce.
+float recipeMagnitude(const FillRecipe& recipe)
+{
+    if(recipe.kind == FillRecipe::Kind::FIXED)
+    {
+        return std::fabs(recipe.value);
+    }
+    if(recipe.kind == FillRecipe::Kind::VALUES && recipe.list != nullptr)
+    {
+        return std::visit(
+            [](const auto& numbers) {
+                float magnitude = 0.0f;
+                for(const auto number : numbers)
+                {
+                    magnitude = std::max(magnitude, std::fabs(static_cast<float>(number)));
+                }
+                return magnitude;
+            },
+            *recipe.list);
+    }
+    return std::max(std::fabs(recipe.lo), std::fabs(recipe.hi));
+}
+
 void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                                          InputFillRecipes& recipes)
 {
@@ -150,10 +377,18 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     {
         return;
     }
-    // [0.5, 2.0]: UE8M0 scales have zero mantissa bits, so any value stored
-    // discretizes to a power of two ({0.5, 1.0, 2.0}), keeping dequantized
-    // products within FP16 range.
-    recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.5f, 2.0f));
+
+    // Scale is normalized against the operand range in effect (its data-type
+    // default or a test override), as OCP MX does: scale ~ 2^-floor(log2(amax)) for
+    // amax >= 1. The dequantized block then peaks between 2 and 4 (FP4/FP6:
+    // 3 to 3.75), so products stay within FP16 range; an operand with
+    // amax < 1 keeps e = 0 and peaks at 2 * amax. UE8M0 has no mantissa bits,
+    // so the [0.5, 2] * 2^-e draw discretizes to three powers of two. An
+    // operand in [-1, 1] gives e = 0, i.e. [0.5, 2].
+    const float amax = recipeMagnitude(recipes.fill(a->x_tensor_uid()));
+    const int e = amax >= 1.0f ? std::ilogb(amax) : 0;
+    recipes.setDefault(a->scale_tensor_uid(),
+                       FillRecipe::free(std::ldexp(0.5f, -e), std::ldexp(2.0f, -e)));
 }
 
 // ── SDPA ─────────────────────────────────────────────────────────────────────
@@ -183,8 +418,18 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
+    // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
+    // where the CPU forward rejects the shapes, and the backward reference fails those.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
+}
+
+// The SDPA backward attributes of a node whose O and stats inputs fillInputs() derives
+// from its Q, K and V after the fill; null for every other node.
+const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes*
+    derivesInputsAfterFill(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
+{
+    return node.attributes_as_SdpaBackwardAttributes();
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -229,7 +474,7 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
     case NA::SdpaBackwardAttributes:
         setSdpaBackwardInitDefaults(node, recipes);
         return true;
-    // All-FREE ops: valid ops whose inputs need no special init (all default to FREE [-1,1]).
+    // Ops whose inputs need no special init; they get defaultFillFor(dtype).
     case NA::PointwiseAttributes:
     case NA::ConvolutionFwdAttributes:
     case NA::ConvolutionBwdAttributes:
@@ -251,11 +496,277 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
 
 } // anonymous namespace
 
+#if defined(USE_ROCRAND)
+using RocRandGenerator = hipdnn_gpu_ref::common::RocRandGenerator;
+#endif
+
+struct DeviceInputFiller::Impl
+{
+#if defined(USE_ROCRAND)
+    std::unique_ptr<RocRandGenerator> generator;
+    bool fillPending = false;
+
+    // Starts the fill when `tensor` is a T tensor; creates the generator on first use,
+    // so a tensor of a type rocRAND does not fill never costs one.
+    template <class T>
+    bool fillOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor,
+                      const FillRecipe& recipe,
+                      unsigned int seed)
+    {
+        auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+        if(typed == nullptr)
+        {
+            return false;
+        }
+
+        if(generator == nullptr)
+        {
+            generator = std::make_unique<RocRandGenerator>(ROCRAND_RNG_PSEUDO_DEFAULT);
+        }
+
+        // Set before the launch: a fill that throws partway may already have queued work.
+        fillPending = true;
+        hipdnn_gpu_ref::common::gpu_fp_reference_tensor::gpuFillWithRandomValues<T>(
+            *typed,
+            static_cast<T>(recipe.lo),
+            static_cast<T>(recipe.hi),
+            seed,
+            *generator,
+            /*synchronize=*/false);
+        return true;
+    }
+#endif
+};
+
+DeviceInputFiller::DeviceInputFiller()
+    : _impl(std::make_unique<Impl>())
+{
+}
+
+DeviceInputFiller::~DeviceInputFiller()
+{
+    // The generator is about to be destroyed; a fill must not still be using it.
+    try
+    {
+        waitForFills();
+    }
+    catch(...) // NOLINT(bugprone-empty-catch): nothing useful to do about it here
+    {
+    }
+}
+
+bool DeviceInputFiller::isSupported()
+{
+#if defined(USE_ROCRAND)
+    return true;
+#else
+    return false;
+#endif
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): uses _impl with rocRAND
+bool DeviceInputFiller::tryFill([[maybe_unused]] hipdnn_data_sdk::utilities::ITensor& tensor,
+                                [[maybe_unused]] const FillRecipe& recipe,
+                                [[maybe_unused]] unsigned int seed)
+{
+#if defined(USE_ROCRAND)
+    if(tensor.elementSpace() < minElements())
+    {
+        return false;
+    }
+
+    try
+    {
+        auto& impl = *_impl;
+        return impl.fillOnDevice<float>(tensor, recipe, seed)
+               || impl.fillOnDevice<hipdnn_data_sdk::types::half>(tensor, recipe, seed)
+               || impl.fillOnDevice<hipdnn_data_sdk::types::bfloat16>(tensor, recipe, seed)
+               || impl.fillOnDevice<double>(tensor, recipe, seed);
+    }
+    catch(const std::exception& e)
+    {
+        // Generator creation, the scaling kernel's compile, scratch allocation and the
+        // launches are all device work; none of it is a fault in the graph under test.
+        throw DeviceInputError(std::string("device input fill failed: ") + e.what());
+    }
+#else
+    return false;
+#endif
+}
+
+void DeviceInputFiller::waitForFills()
+{
+#if defined(USE_ROCRAND)
+    if(!_impl->fillPending)
+    {
+        return;
+    }
+    _impl->fillPending = false;
+
+    checkDeviceCall<DeviceInputError>(hipDeviceSynchronize(), "device input fill");
+#endif
+}
+
+namespace
+{
+
+// Waits for the device fills on every way out of fillInputs(), including an exception
+// from a fill that threw partway: the tensors are about to be dropped, and fills
+// already queued must not still be writing into memory being freed. Errors are
+// swallowed here, since the one already propagating is the one worth reporting; the
+// normal path waits explicitly and sees them.
+class WaitForFillsOnExit
+{
+public:
+    explicit WaitForFillsOnExit(DeviceInputFiller* device)
+        : _device(device)
+    {
+    }
+
+    ~WaitForFillsOnExit()
+    {
+        if(_device == nullptr)
+        {
+            return;
+        }
+        try
+        {
+            _device->waitForFills();
+        }
+        catch(...) // NOLINT(bugprone-empty-catch): see above
+        {
+        }
+    }
+
+    WaitForFillsOnExit(const WaitForFillsOnExit&) = delete;
+    WaitForFillsOnExit& operator=(const WaitForFillsOnExit&) = delete;
+    WaitForFillsOnExit(WaitForFillsOnExit&&) = delete;
+    WaitForFillsOnExit& operator=(WaitForFillsOnExit&&) = delete;
+
+private:
+    DeviceInputFiller* _device;
+};
+
+} // anonymous namespace
+
+FillRecipe defaultFillFor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    namespace types = hipdnn_data_sdk::types;
+
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+    case DataType::DOUBLE:
+        return FillRecipe{};
+    // Few enough codes that a uniform draw over the full range reaches all of them;
+    // [-1, 1] would only reach 3 of the 8 FP4 magnitudes.
+    case DataType::FP4_E2M1:
+        return symmetricFullRange<types::fp4_e2m1>();
+    case DataType::FP6_E2M3:
+        return symmetricFullRange<types::fp6_e2m3>();
+    case DataType::FP6_E3M2:
+        return symmetricFullRange<types::fp6_e3m2>();
+    // FP8 codes are spread logarithmically, so no uniform range reaches most of
+    // them: a wide range leaves the small exponents empty. Full coverage needs a
+    // log-uniform or code-uniform distribution, which ITensor cannot draw yet.
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
+        return FillRecipe{};
+    // Power-of-two scale; [0.5, 2] discretizes to {0.5, 1, 2}.
+    case DataType::FP8_E8M0:
+        return FillRecipe::free(0.5f, 2.0f);
+    // Integer draws from [-1, 1] collapse to a few values. A meaningful range is
+    // op-specific (indices, offsets, masks), so it belongs in per-op defaults.
+    case DataType::UINT8:
+    case DataType::INT32:
+    case DataType::INT8:
+    case DataType::INT4:
+    case DataType::INT64:
+    case DataType::BOOLEAN:
+        return FillRecipe{};
+    case DataType::UNSET:
+    default:
+        throw std::invalid_argument("defaultFillFor: no fill default for data type "
+                                    + std::string(EnumNameDataType(dataType)));
+    }
+}
+
+bool fillDerivesInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+{
+    if(graph.nodes() == nullptr)
+    {
+        return false;
+    }
+    for(const auto* node : *graph.nodes())
+    {
+        if(derivesInputsAfterFill(*node) != nullptr)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
-                      InputFillRecipes& recipes)
+                      InputFillRecipes& recipes,
+                      DeviceInputFiller* device,
+                      const std::vector<TensorAlias>& aliases)
 {
+    std::unordered_set<int64_t> viewUids;
+    std::unordered_set<int64_t> ownerUids;
+    if(!aliases.empty())
+    {
+        if(fillDerivesInputs(graph))
+        {
+            throw std::invalid_argument("fillInputs: aliases need every input of a graph whose "
+                                        "fill derives inputs from other inputs");
+        }
+        const std::unordered_set<int64_t> owned(ownedUids.begin(), ownedUids.end());
+        for(const auto& alias : aliases)
+        {
+            if(owned.count(alias.ofUid) == 0 || inputs.count(alias.ofUid) == 0)
+            {
+                throw std::invalid_argument("fillInputs: " + tensor_alias_detail::describe(alias)
+                                            + ": the owner has no input tensor to fill");
+            }
+            if(recipes.isSet(alias.uid))
+            {
+                return FillResult::invalid(
+                    "uid " + std::to_string(alias.uid) + ": a fill recipe is set on a view of uid "
+                    + std::to_string(alias.ofUid) + ", and a view is never filled");
+            }
+            viewUids.insert(alias.uid);
+            ownerUids.insert(alias.ofUid);
+        }
+    }
+
+    // Dtype defaults sit below test and per-op recipes. Only those that differ
+    // from the generic FREE[-1, 1] are recorded, so meta.inputs stays unchanged
+    // for float graphs and names the range for narrow formats. Registered
+    // before the per-op pass so a default derived from another input's range
+    // (block-scale dequantize's scale) sees that input's final range.
+    const auto dataTypes = collectDataTypes(graph);
+    for(const int64_t uid : ownedUids)
+    {
+        const auto dataType = dataTypes.find(uid);
+        if(dataType == dataTypes.end())
+        {
+            continue;
+        }
+        const auto recipe = defaultFillFor(dataType->second);
+        if(recipe != FillRecipe{})
+        {
+            recipes.setTypeDefault(uid, recipe);
+        }
+    }
+
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
@@ -273,18 +784,103 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     std::sort(sortedUids.begin(), sortedUids.end());
 
     std::mt19937 rng(recipes.globalSeed());
+
+    const WaitForFillsOnExit waitOnExit(device);
+
+    std::size_t deviceFilled = 0;
+    std::unordered_map<int64_t, unsigned int> seeds;
     for(const int64_t uid : sortedUids)
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
-        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed);
+        seeds.emplace(uid, seed);
+        if(viewUids.count(uid) != 0)
+        {
+            continue;
+        }
+
+        // Views can read the gaps between an owner's elements, so the gaps hold zeros.
+        // The owner is filled on the host, where the zeros are written.
+        auto& tensor = *inputs.at(uid);
+        const bool isOwner = ownerUids.count(uid) != 0;
+        if(isOwner)
+        {
+            std::memset(tensor.rawHostData(), 0, tensor.elementSpace() * tensor.elementSize());
+        }
+        const auto dataType = dataTypes.find(uid);
+        auto fillResult
+            = fill(tensor,
+                   recipes.fill(uid),
+                   seed,
+                   isOwner ? nullptr : device,
+                   dataType != dataTypes.end() ? std::optional(dataType->second) : std::nullopt);
+        if(isOwner)
+        {
+            tensor.markHostModified();
+        }
         if(!fillResult.filled)
         {
-            return FillResult::unsupported("uid " + std::to_string(uid) + ": " + fillResult.reason);
+            auto reason = "uid " + std::to_string(uid) + ": " + fillResult.reason;
+            return fillResult.status == FillResult::Status::INVALID
+                       ? FillResult::invalid(std::move(reason))
+                       : FillResult::unsupported(std::move(reason));
+        }
+        deviceFilled += fillResult.deviceFilled;
+    }
+
+    // One wait for every device fill, instead of one per tensor.
+    if(device != nullptr)
+    {
+        device->waitForFills();
+    }
+
+    // O and the LSE of an SDPA backward node are outputs of a forward, not free inputs:
+    // once Q, K and V hold their values, recompute them. Done after the waits, since
+    // the forward reads Q, K and V on the host.
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        const auto* sdpaBackward = derivesInputsAfterFill(node);
+        if(sdpaBackward == nullptr)
+        {
+            continue;
+        }
+        if(auto why = deriveSdpaBackwardForwardOutputs(graph, *sdpaBackward, inputs, ownedUids))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "cannot derive O and stats of SDPA backward node "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)")
+                + " from its Q, K and V: " + *why);
         }
     }
 
-    return FillResult::ok();
+    // The index of a max-pooling resample backward node is the argmax output of a
+    // forward, not a free input: recompute it from a scratch x seeded like the index.
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        const auto* resampleBackward = node.attributes_as_ResampleBwdAttributes();
+        if(resampleBackward == nullptr || !resampleBackward->index_tensor_uid().has_value())
+        {
+            continue;
+        }
+        const auto seed = seeds.find(*resampleBackward->index_tensor_uid());
+        if(seed == seeds.end())
+        {
+            continue;
+        }
+        if(auto why
+           = deriveResampleBackwardIndex(graph, *resampleBackward, inputs, ownedUids, seed->second))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "cannot derive the index of resample backward node "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)")
+                + " from a forward: " + *why);
+        }
+    }
+    return FillResult::ok(deviceFilled);
 }
 
 } // namespace hipdnn_integration_tests

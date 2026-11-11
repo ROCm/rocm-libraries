@@ -46,9 +46,28 @@ public:
 __device__ int G::n_alive = 0;
 __device__ bool G::op_run = false;
 
-int main(int, char**)
+// A hip::wthread created on the host requires a trivially copyable callable, which G is not.
+struct H
 {
-#ifdef __HIP_DEVICE_COMPILE__
+    __device__ void operator()() const {}
+};
+
+// A separate __host__ function: a host hip::wthread created directly in the __host__ __device__ main fails at
+// runtime with "Cannot find Symbol".
+__host__ void test_host()
+{
+    hip::wthread t0 = support::make_test_thread(H());
+    hip::wthread::id id = t0.get_id();
+
+    hip::wthread t1 = ::std::move(t0);
+    assert(t1.get_id() == id);
+    assert(t0.get_id() == hip::wthread::id());
+
+    t1.join();
+}
+
+__device__ void test_device()
+{
     assert(G::n_alive == 0);
     assert(!G::op_run);
     {
@@ -69,6 +88,14 @@ int main(int, char**)
     }
     assert(G::n_alive == 0);
     assert(G::op_run);
+}
+
+int main(int, char**)
+{
+#ifdef __HIP_DEVICE_COMPILE__
+    test_device();
+#else
+    test_host();
 #endif
 
     return 0;

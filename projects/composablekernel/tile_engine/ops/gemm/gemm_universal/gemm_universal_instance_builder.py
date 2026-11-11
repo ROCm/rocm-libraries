@@ -24,10 +24,25 @@ def _import_gemm_kernel_builder():
     return gemm_builder_module.GemmKernelBuilder
 
 
+def _import_split_trait():
+    """Import the trait-string splitter shared by the GEMM ops."""
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec = importlib.util.spec_from_file_location(
+        "trait_parse", os.path.join(parent_dir, "trait_parse.py")
+    )
+    trait_parse_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trait_parse_module)
+    return trait_parse_module.split_trait
+
+
 GemmKernelBuilder = _import_gemm_kernel_builder()
+split_trait = _import_split_trait()
 
 
 class GemmUniversalKernelBuilder(GemmKernelBuilder):
+    # gfx1250 WMMA rows (and gfx1201 bf16/fp8/bf8) are not in the shared table.
+    USE_OP_WARP_TILE_ROWS = True
+
     def __init__(
         self,
         kernel_name_prefix,
@@ -40,6 +55,7 @@ class GemmUniversalKernelBuilder(GemmKernelBuilder):
         seed=None,
         tier=None,
         manifest_path=None,
+        c_datatype=None,
     ):
         super().__init__(
             kernel_name_prefix,
@@ -52,6 +68,7 @@ class GemmUniversalKernelBuilder(GemmKernelBuilder):
             seed=seed,
             tier=tier,
             manifest_path=manifest_path,
+            c_datatype=c_datatype,
         )
 
     def _generate_all_individual(self, num_workers=None):
@@ -78,6 +95,7 @@ class GemmUniversalKernelBuilder(GemmKernelBuilder):
                         self.datatype,
                         self.layout,
                         self.config_json,
+                        self.c_datatype,
                     )
                 )
 
@@ -156,11 +174,18 @@ def _generate_single_kernel_individual(work_item):
         datatype,
         layout,
         config_json,
+        c_datatype,
     ) = work_item
 
     # Create a temporary builder instance for this worker
     builder = GemmUniversalKernelBuilder(
-        kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
+        kernel_name_prefix,
+        working_path,
+        gpu_target,
+        datatype,
+        layout,
+        config_json,
+        c_datatype=c_datatype,
     )
 
     try:
@@ -210,6 +235,14 @@ def main():
         help="Matrix layout",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")
+    parser.add_argument(
+        "--c_datatype",
+        default=None,
+        choices=["fp16", "bf16"],
+        help="Output (C) datatype. Default: fp16 for fp8/bf8, else the input "
+        "datatype. bf16 is accepted for fp8/bf8 only and adds a _cbf16 suffix "
+        "to the kernel name",
+    )
     parser.add_argument(
         "--num_workers", type=int, help="Number of parallel workers (default: auto)"
     )
@@ -285,6 +318,7 @@ def main():
         seed=args.seed,
         tier=args.tier,
         manifest_path=args.manifest_path,
+        c_datatype=args.c_datatype,
     )
 
     if args.list_kernels:
@@ -314,8 +348,8 @@ def main():
             "warp_tile_k": int(warp_tile_dims[2]),
         }
 
-        # Parse trait combo
-        trait_parts = args.trait_combo.split("_")
+        # Parse trait combo (pipeline names such as comp_tdm_v2 contain "_")
+        trait_parts = split_trait(args.trait_combo)
         trait_combo = (
             trait_parts[0],  # pipeline
             trait_parts[1],  # epilogue
@@ -327,10 +361,7 @@ def main():
         )
 
         # Generate the kernel
-        builder._generate_kernel_instance(
-            tile_config,
-            trait_combo,
-        )
+        builder._generate_kernel_instance(tile_config, trait_combo, validate=True)
     elif args.gen_all_individual:
         # Generate all individual kernel files
         builder._generate_all_individual(args.num_workers)

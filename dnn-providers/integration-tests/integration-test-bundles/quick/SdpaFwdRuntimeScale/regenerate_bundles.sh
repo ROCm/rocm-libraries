@@ -2,7 +2,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Regenerates all SdpaFwdRuntimeScale test bundles (quick tier).
+# Regenerates all SdpaFwdRuntimeScale test bundles, each in the coverage tier it
+# lives in today (see resolve_tier_outdir).
 #
 # These bundles carry no tensor blobs (see generate_sdpa_runtime_scale_test_bundle.py):
 # the harness synthesizes inputs and reference-verifies outputs at test time, so
@@ -23,10 +24,30 @@ if [[ ! -f "$GENERATOR" ]]; then
     exit 1
 fi
 
+# Bundles are tiered by coverage (quick/standard/comprehensive/full), not by the
+# section of this script that generates them. Regenerate each bundle where it
+# lives today: swap the tier segment of "outdir" for the tier that already holds
+# "<outdir>/<name>". A bundle that exists in no tier keeps the tier given in
+# "outdir".
+resolve_tier_outdir() {
+    local outdir="$1"
+    local name="$2"
+    local rel="${outdir#"$GOLDEN_ROOT"/*/}"
+    local tier
+    for tier in quick standard comprehensive full; do
+        if [[ -d "$GOLDEN_ROOT/$tier/$rel/$name" ]]; then
+            echo "$GOLDEN_ROOT/$tier/$rel"
+            return
+        fi
+    done
+    echo "$outdir"
+}
+
 generate_bundle() {
     local outdir="$1"
     local name="$2"
     shift 2
+    outdir="$(resolve_tier_outdir "$outdir" "$name")"
     mkdir -p "$outdir/$name"
     python3 "$GENERATOR" --base-filename "$outdir/$name/$name" "$@"
 }

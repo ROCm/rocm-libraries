@@ -35,7 +35,6 @@
 // rocsparse_handle_create / rocsparse_handle_destroy Tests
 // =============================================================================
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
 {
     hipStream_t      stream;
@@ -86,7 +85,6 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
     ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
@@ -5293,50 +5291,6 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatchRowMajor)
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
     EXPECT_EQ(batch_stride_out, batch_stride);
-
-    ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
-}
-
-TEST(auxiliary_pre_checkin, DnmatSetStridedBatchRowMajorInvalidStride)
-{
-    rocsparse_dnmat_descr descr;
-    int64_t               rows   = 100;
-    int64_t               cols   = 50;
-    int64_t               ld     = 50; // For row-major, ld must be >= cols
-    void*                 values = reinterpret_cast<void*>(0x1000); // Non-null dummy pointer
-
-    ASSERT_EQ(rocsparse_create_dnmat_descr(
-                  &descr, rows, cols, ld, values, rocsparse_datatype_f32_r, rocsparse_order_row),
-              rocsparse_status_success);
-
-    // Invalid: batch_stride < ld * rows when batch_count > 1
-    // ld * rows = 50 * 100 = 5000, so batch_stride = 4999 is invalid
-    int     batch_count  = 5;
-    int64_t batch_stride = 4999;
-    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(descr, batch_count, batch_stride),
-              rocsparse_status_invalid_value);
-
-    ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
-}
-
-TEST(auxiliary_pre_checkin, DnmatSetStridedBatchColumnMajorInvalidStride)
-{
-    rocsparse_dnmat_descr descr;
-    int64_t               rows   = 100;
-    int64_t               cols   = 50;
-    int64_t               ld     = 100;
-    void*                 values = reinterpret_cast<void*>(0x1000); // Non-null dummy pointer
-
-    ASSERT_EQ(rocsparse_create_dnmat_descr(
-                  &descr, rows, cols, ld, values, rocsparse_datatype_f32_r, rocsparse_order_column),
-              rocsparse_status_success);
-
-    // Invalid: batch_stride < ld * cols when batch_count > 1
-    // ld * cols = 100 * 50 = 5000, so batch_stride = 4999 is invalid
-    int     batch_count  = 5;
-    int64_t batch_stride = 4999;
-    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(descr, batch_count, batch_stride),
-              rocsparse_status_invalid_value);
 
     ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
 }

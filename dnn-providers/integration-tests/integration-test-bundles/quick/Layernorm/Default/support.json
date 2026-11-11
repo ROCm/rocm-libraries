@@ -1,0 +1,45 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_2_3_2_2_bfp16_ndhwc_normalized_dim_count4_a2d513",
+          "2_2_3_2_2_fp16_ncdhw_normalized_dim_count3_8f0dac",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count1_ecb8cd",
+          "2_2_3_2_2_fp32_ndhwc_normalized_dim_count2_0b69bc",
+          "2_2_3_2_bfp16_nhwc_normalized_dim_count1_6d6330",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count3_407c3b",
+          "2_2_3_2_fp32_nchw_normalized_dim_count2_47c149"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

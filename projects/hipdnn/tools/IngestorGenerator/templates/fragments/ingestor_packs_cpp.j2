@@ -1,0 +1,15 @@
+## Splice point 4b: .../kernel_ingestor_engine/IngestorPacks.cpp
+## Add this row to the s_packs table. Both this edit AND the IngestorPacks.hpp declaration
+## edit (ingestor_packs.hpp.txt) are required -- see that fragment.
+##
+## The struct is (label, registerSymbols, resetModuleCache). Check the IngestorPack struct
+## before splicing: this row must match it field for field.
+{% if config.is_packaged -%}
+## resetModuleCache: the generated reset, whose stub must clear the module cache; see
+## IngestorGenerator/README.md "The five CMake/registration splice points".
+        {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, &reset{{ config.engine.pascal_name }}ModuleCache},
+{% else -%}
+## resetModuleCache: nullptr unless the implementation caches modules; see
+## IngestorGenerator/README.md "The five CMake/registration splice points".
+        {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, nullptr},
+{% endif -%}

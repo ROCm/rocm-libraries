@@ -3,13 +3,15 @@
 """Unit tests for the CLI wiring (no-GPU paths, pure)."""
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
+import rocke.benchmark.perf.tool.cli as cli_mod
 from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import cli, store
-import rocke.benchmark.perf.tool.cli as cli_mod
+from rocke.tests.llc import find_llvm_tool, llc_code_object
 
 
 def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None):
@@ -27,6 +29,19 @@ def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None):
     }
 
 
+@contextmanager
+def _code_object(suffix, data):
+    # Close the file before the command reopens it: Windows denies a second open
+    # of a ``NamedTemporaryFile`` that is still open.
+    fd, name = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        yield name
+    finally:
+        os.unlink(name)
+
+
 def _run(argv):
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -35,6 +50,8 @@ def _run(argv):
 
 
 class TestCompareCmd(unittest.TestCase):
+    ARCH = "gfx950"
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.cache = self._tmp.name
@@ -44,7 +61,10 @@ class TestCompareCmd(unittest.TestCase):
 
     def _seed(self, *busies, kernel="k", shape=None):
         for b in busies:
-            store.append(_rec(kernel=kernel, shape=shape, busy=b), cache=self.cache)
+            store.append(
+                _rec(arch=self.ARCH, kernel=kernel, shape=shape, busy=b),
+                cache=self.cache,
+            )
 
     def test_compare_regressed_exit_1(self):
         self._seed(1000, 1200)  # +20%
@@ -54,7 +74,7 @@ class TestCompareCmd(unittest.TestCase):
                 self.cache,
                 "compare",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--op",
                 "gemm",
                 "--kernel-name",
@@ -74,7 +94,7 @@ class TestCompareCmd(unittest.TestCase):
                 self.cache,
                 "compare",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--op",
                 "gemm",
                 "--kernel-name",
@@ -95,7 +115,7 @@ class TestCompareCmd(unittest.TestCase):
                 self.cache,
                 "compare",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--op",
                 "gemm",
                 "--kernel-name",
@@ -114,7 +134,7 @@ class TestCompareCmd(unittest.TestCase):
             [
                 "compare",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--op",
                 "gemm",
                 "--kernel-name",
@@ -148,35 +168,77 @@ class TestCompareCmd(unittest.TestCase):
 
 
 class TestOccupancyCmd(unittest.TestCase):
+    ARCH = "gfx950"
+
     def test_occupancy_reads_and_prints(self):
         fake = {"vgpr": 24, "sgpr": 32, "lds_bytes": 2048, "occupancy": 12}
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: fake
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"\x7fELF fake")
-                f.flush()
-                code, out = _run(["--json", "occupancy", f.name, "--arch", "gfx950"])
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
+                code, out = _run(["--json", "occupancy", path, "--arch", self.ARCH])
         finally:
             cli_mod._occupancy.resources = orig
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["occupancy"], 12)
 
+    def test_occupancy_warns_on_binary_arch_mismatch(self):
+        fake = {"target_arch": "gfx1201", "vgpr": 111, "occupancy": 12}
+        orig = cli_mod._occupancy.resources
+        cli_mod._occupancy.resources = lambda data, arch: fake
+        err = io.StringIO()
+        try:
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
+                with redirect_stderr(err):
+                    code, out = _run(["--json", "occupancy", path, "--arch", self.ARCH])
+        finally:
+            cli_mod._occupancy.resources = orig
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["occupancy"], 12)
+        self.assertIn(f"built for gfx1201, not --arch {self.ARCH}", err.getvalue())
+
+    def test_occupancy_arch_feature_suffix_is_not_a_mismatch(self):
+        fake = {"target_arch": self.ARCH, "vgpr": 64, "occupancy": 8}
+        orig = cli_mod._occupancy.resources
+        cli_mod._occupancy.resources = lambda data, arch: fake
+        err = io.StringIO()
+        try:
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
+                with redirect_stderr(err):
+                    code, _ = _run(
+                        ["--json", "occupancy", path, "--arch", f"{self.ARCH}:xnack-"]
+                    )
+        finally:
+            cli_mod._occupancy.resources = orig
+        self.assertEqual(code, 0)
+        self.assertEqual(err.getvalue(), "")
+
     def test_occupancy_empty_errors(self):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: {}
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"x")
-                f.flush()
+            with _code_object(".hsaco", b"x") as path:
                 with self.assertRaises(SystemExit):
-                    _run(["occupancy", f.name, "--arch", "gfx950"])
+                    _run(["occupancy", path, "--arch", self.ARCH])
         finally:
             cli_mod._occupancy.resources = orig
+
+    def test_occupancy_refuses_an_unmodelled_processor(self):
+        # A real code object for a processor the occupancy model has no data for:
+        # the command stops with the model's reason instead of a traceback.
+        llc = find_llvm_tool("llc")
+        if llc is None or find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        with _code_object(".o", llc_code_object(llc, "gfx1030", 64)) as path:
+            with self.assertRaises(SystemExit) as ctx:
+                _run(["occupancy", path, "--arch", "gfx1030"])
+        self.assertIn("no occupancy model for processor 'gfx1030'", str(ctx.exception))
 
 
 class TestProfileCmd(unittest.TestCase):
     """profile wiring, with the GPU harness monkeypatched."""
+
+    ARCH = "gfx950"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -224,7 +286,7 @@ class TestProfileCmd(unittest.TestCase):
                 self.cache,
                 "profile",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--",
                 "python3",
                 "-m",
@@ -234,7 +296,9 @@ class TestProfileCmd(unittest.TestCase):
         self.assertEqual(self.calls[0]["cmd"], ["python3", "-m", "run_it"])
 
     def test_no_double_dash_also_works(self):
-        _run(["--cache", self.cache, "profile", "--arch", "gfx950", "myprog", "--flag"])
+        _run(
+            ["--cache", self.cache, "profile", "--arch", self.ARCH, "myprog", "--flag"]
+        )
         self.assertEqual(self.calls[0]["cmd"], ["myprog", "--flag"])
 
     def test_label_and_match_passthrough(self):
@@ -244,7 +308,7 @@ class TestProfileCmd(unittest.TestCase):
                 self.cache,
                 "profile",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--kernel-name",
                 "mygemm",
                 "--match-kernel",
@@ -268,7 +332,7 @@ class TestProfileCmd(unittest.TestCase):
                 self.cache,
                 "profile",
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--kernel-name",
                 "k",
                 "--shape",
@@ -296,15 +360,40 @@ class TestProfileCmd(unittest.TestCase):
                     self.cache,
                     "profile",
                     "--arch",
-                    "gfx950",
+                    self.ARCH,
                     "--",
                     "prog",
                 ]
             )
         self.assertEqual(store.load(cache=self.cache), [])
 
+    def test_profile_reports_incompatible_repeat_sources_cleanly(self):
+        original = cli_mod._aggregate.aggregate
+
+        def fail_aggregate(records):
+            raise ValueError("records span multiple timing sources")
+
+        cli_mod._aggregate.aggregate = fail_aggregate
+        try:
+            with self.assertRaisesRegex(SystemExit, "multiple timing sources"):
+                _run(
+                    [
+                        "--cache",
+                        self.cache,
+                        "profile",
+                        "--arch",
+                        self.ARCH,
+                        "--",
+                        "prog",
+                    ]
+                )
+        finally:
+            cli_mod._aggregate.aggregate = original
+
 
 class TestParser(unittest.TestCase):
+    ARCH = "gfx950"
+
     def test_missing_subcommand_errors(self):
         with self.assertRaises(SystemExit):
             _run([])
@@ -315,7 +404,7 @@ class TestParser(unittest.TestCase):
                 [
                     "compare",
                     "--arch",
-                    "gfx950",
+                    self.ARCH,
                     "--op",
                     "gemm",
                     "--kernel-name",
@@ -327,7 +416,7 @@ class TestParser(unittest.TestCase):
 
     def test_negative_warmup_errors(self):
         with self.assertRaises(SystemExit):
-            _run(["profile", "--arch", "gfx950", "--warmup", "-1", "--", "prog"])
+            _run(["profile", "--arch", self.ARCH, "--warmup", "-1", "--", "prog"])
 
     def test_nonpositive_repeats_error(self):
         for repeats in ("0", "-1"):
@@ -336,7 +425,7 @@ class TestParser(unittest.TestCase):
                     [
                         "profile",
                         "--arch",
-                        "gfx950",
+                        self.ARCH,
                         "--repeats",
                         repeats,
                         "--",
@@ -352,7 +441,7 @@ class TestParser(unittest.TestCase):
                     [
                         "profile",
                         "--arch",
-                        "gfx950",
+                        self.ARCH,
                         f"{option}={value}",
                         "--",
                         "prog",
@@ -368,7 +457,7 @@ class TestParser(unittest.TestCase):
         parser = cli_mod._build_parser()
         for command in ("profile", "compare"):
             prefix = (
-                [command, "--arch", "gfx950"]
+                [command, "--arch", self.ARCH]
                 if command == "profile"
                 else [command, "--all"]
             )
@@ -379,6 +468,22 @@ class TestParser(unittest.TestCase):
                 with self.subTest(command=command, value=value):
                     self.assertEqual(args.threshold, float(value))
                     self.assertEqual(args.noise_k, float(value))
+
+
+class TestCompareCmdGfx942(TestCompareCmd):
+    ARCH = "gfx942"
+
+
+class TestOccupancyCmdGfx942(TestOccupancyCmd):
+    ARCH = "gfx942"
+
+
+class TestProfileCmdGfx942(TestProfileCmd):
+    ARCH = "gfx942"
+
+
+class TestParserGfx942(TestParser):
+    ARCH = "gfx942"
 
 
 if __name__ == "__main__":

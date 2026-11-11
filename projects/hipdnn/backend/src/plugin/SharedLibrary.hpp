@@ -5,6 +5,7 @@
 
 #include "PlatformUtils.hpp"
 #include <filesystem>
+#include <optional>
 #include <string_view>
 
 namespace hipdnn_backend::plugin
@@ -49,3 +50,14 @@ private:
 };
 
 } // namespace hipdnn_backend::plugin
+
+namespace hipdnn_backend::plugin::detail
+{
+
+// Builds the decorated shared library file name for a path without an extension.
+// On Windows the decoration adds ".dll". On Linux it adds a "lib" prefix and ".so".
+// Returns no value if the path has an extension or an empty file name.
+// This function does not access the file system.
+std::optional<std::filesystem::path> decoratedLibraryPath(const std::filesystem::path& path);
+
+} // namespace hipdnn_backend::plugin::detail

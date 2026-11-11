@@ -64,7 +64,8 @@ public:
     {}
 
     template<class T>
-    __forceinline__ __host__ __device__ unsigned int operator()(T x) const
+    __forceinline__ __host__ __device__
+    unsigned int operator()(T x) const
     {
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {
@@ -83,9 +84,117 @@ public:
         output[0] = (*this)(input[0]);
     }
 
+    template<class T>
+    __forceinline__ __device__
+    unsigned int generate_lds(T x) const
+    {
+        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+        {
+            return rocrand_device::detail::discrete_alias(x, *get_storage());
+        }
+        else
+        {
+            return rocrand_device::detail::discrete_cdf(x, *get_storage());
+        }
+    }
+
+    template<class T>
+    __forceinline__ __device__
+    void generate_lds(const T (&input)[1], unsigned int output[1]) const
+    {
+        output[0] = generate_lds(input[0]);
+    }
+
+    __forceinline__ __host__ __device__
+    bool check_lds_size() const
+    {
+        return m_distribution.size <= LDS_DISTR_MAX;
+    }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        rocrand_discrete_distribution s_dist = get_storage();
+
+        const unsigned int dist_size = m_distribution.size;
+        if(dist_size > LDS_DISTR_MAX) // Should never be reached
+            return;
+
+        if(tid == 0)
+        {
+            s_dist->size   = dist_size;
+            s_dist->offset = m_distribution.offset;
+            if constexpr((Method & DISCRETE_METHOD_CDF) == 0)
+            {
+                s_dist->cdf = nullptr;
+            }
+            if constexpr((Method & DISCRETE_METHOD_ALIAS) == 0)
+            {
+                s_dist->probability = nullptr;
+                s_dist->alias       = nullptr;
+            }
+        }
+        for(unsigned int i = tid; i < dist_size; i += block_size)
+        {
+            if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
+            {
+                s_dist->cdf[i] = m_distribution.cdf[i];
+            }
+            if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+            {
+                s_dist->probability[i] = m_distribution.probability[i];
+                s_dist->alias[i]       = m_distribution.alias[i];
+            }
+        }
+    }
+
 private:
+    __device__
+    static rocrand_discrete_distribution_st* get_storage()
+    {
+        __shared__
+        rocrand_discrete_distribution_st s_dist;
+
+        if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
+        {
+            __shared__
+            double s_cdf[LDS_DISTR_MAX];
+
+            // Eliminating this write by moving it to stage_to_lds made things slower.
+            // Splitting into per-field __shared__ accessors avoided the regression,
+            // but the improvements were inconclusive. Needs further investigation.
+            s_dist.cdf = s_cdf;
+        }
+        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+        {
+            __shared__
+            double       s_probability[LDS_DISTR_MAX];
+            __shared__
+            unsigned int s_alias[LDS_DISTR_MAX];
+
+            // Eliminating this write by moving it to stage_to_lds made things slower.
+            // Splitting into per-field __shared__ accessors avoided the regression,
+            // but the improvements were inconclusive. Needs further investigation.
+            s_dist.probability = s_probability;
+            s_dist.alias       = s_alias;
+        }
+
+        return &s_dist;
+    }
+
+    // Keeps the LDS usage comfortably under the per-wavegroup ceiling at max occupancy
+    static constexpr unsigned int    LDS_DISTR_MAX = 128;
     rocrand_discrete_distribution_st m_distribution;
 };
+
+template<typename Distribution>
+constexpr bool is_discrete_distribution_v
+    = std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
+                        Distribution>
+      || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
+                           Distribution>
+      || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+                           Distribution>;
 
 /// \brief A collection of static methods for constructing and destroying
 /// instances of `rocrand_discrete_distribution_st`.
@@ -227,15 +336,15 @@ public:
         small.reserve(size);
         large.reserve(size);
 
-        for (unsigned int i = 0; i < size; i++)
+        for(unsigned int i = 0; i < size; i++)
         {
-            if (p[i] >= average)
+            if(p[i] >= average)
                 large.push_back(i);
             else
                 small.push_back(i);
         }
 
-        while (!small.empty() && !large.empty())
+        while(!small.empty() && !large.empty())
         {
             const unsigned int less = small.back();
             small.pop_back();
@@ -243,21 +352,21 @@ public:
             large.pop_back();
 
             h_probability[less] = p[less] * size;
-            h_alias[less] = more;
+            h_alias[less]       = more;
 
             p[more] = (p[more] + p[less]) - average;
 
-            if (p[more] >= average)
+            if(p[more] >= average)
                 large.push_back(more);
             else
                 small.push_back(more);
         }
 
-        for (unsigned int i : small)
+        for(unsigned int i : small)
         {
             h_probability[i] = 1.0;
         }
-        for (unsigned int i : large)
+        for(unsigned int i : large)
         {
             h_probability[i] = 1.0;
         }
@@ -384,7 +493,7 @@ private:
                               h_cdf.data(),
                               sizeof(double) * distribution.size,
                               hipMemcpyHostToDevice);
-            if (error != hipSuccess)
+            if(error != hipSuccess)
             {
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }

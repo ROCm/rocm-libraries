@@ -1,0 +1,37 @@
+# serializer version: 1
+# name: test_mxf4_bf16_subtile_epilogue_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAfQMcxFsB6XFvBypHbDxbmcz9RYMA6AJuzZ6WknL7d00=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAl7otjSRrd6ZowCYMVI42J3e08Jpa5WHYcDY5_ZcLwyU=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_mxf4_bf16_subtile_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgGf9nqScRhdaGCTrN_ReZ2aqYM-JZg6qIwC05OCgk020=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgSIHPjtHWI6aAEF-2p2JTT_uUVYUWNsu6teI5-1sAwXU=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_mxf4_fp32_control_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgDpwsWgfWGgLHEQKI_YF6G4Litfz5PC32jngxKuXraFo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgg_5OWXlJn6IxcLutY1tszEQWQZtPJn9k_FazJpKuk6o=',
+      'err': 0,
+    }),
+  ])
+# ---

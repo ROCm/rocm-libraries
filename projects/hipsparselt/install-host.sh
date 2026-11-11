@@ -42,6 +42,7 @@ function display_help()
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
   echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
   echo "    [--static] build static library"
+  echo "    [--therock] build against a staged hipBLASLt package (find_package) instead of add_subdirectory"
   echo "    [--address-sanitizer] build with address sanitizer"
   echo "    [--codecoverage] build with code coverage profiling enabled"
   echo "    [--build_dir] Specify the name of the build folder"
@@ -320,11 +321,13 @@ install_prefix=hipsparselt-install
 rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
+build_therock=false
 gpu_architecture=all
 cpu_ref_lib=blis
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+tensile_logic="${script_dir}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
 tensile_cov=4
 tensile_fork=
-tensile_merge_files=
 tensile_tag=
 tensile_test_local_path=
 tensile_version=
@@ -348,7 +351,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,disable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,therock,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,disable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -389,6 +392,9 @@ while true; do
         --static)
             build_static=true
             shift ;;
+        --therock)
+            build_therock=true
+            shift ;;
         --address-sanitizer)
             build_address_sanitizer=true
             compiler=amdclang++
@@ -427,12 +433,6 @@ while true; do
         -n|--no_tensile|--no-tensile)
             build_tensile=false
             shift ;;
-        --merge-files)
-            tensile_merge_files=true
-            shift ;;
-        -no-merge-files)
-            tensile_merge_files=false
-            shift 2;;
         -u|--use-custom-version)
             tensile_version=${2}
             shift 2;;
@@ -624,6 +624,15 @@ pushd .
     printf "Forcing compiler to amdclang++ for static library.\n"
   fi
 
+  # Consume a staged hipBLASLt package (find_package) instead of forking its
+  # build tree via add_subdirectory. This is the path that links the shared
+  # libtensilelite-host.so rather than recompiling TensileLite into
+  # libhipsparselt.so. Requires hipBLASLt to be installed under ${rocm_path}.
+  if [[ "${build_therock}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_THEROCK=ON"
+    printf "Building against the staged hipBLASLt package (HIPSPARSELT_ENABLE_THEROCK=ON).\n"
+  fi
+
   # clients
   if [[ "${build_clients}" == true ]]; then
       pushd .
@@ -662,10 +671,6 @@ pushd .
     if [[ ${build_jobs} != $(nproc) ]]; then
       tensile_opt="${tensile_opt} -DTENSILELITE_BUILD_PARALLEL_LEVEL=${build_jobs}"
     fi
-  fi
-
-  if [[ "${tensile_merge_files}" == false ]]; then
-    tensile_opt="${tensile_opt} -DTensile_MERGE_FILES=OFF"
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then

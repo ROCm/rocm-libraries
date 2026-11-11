@@ -58,7 +58,7 @@ struct __attribute__((packed)) fmha_fwd_v3_args
     SgprPad2 _p4;
 
     // ---- Attention scale ---------------------------------------------------
-    float scalar; // co:scalar  Typically 1 / sqrt(D_qk)
+    float scalar; // co:scalar  attn_scale_value, 1.0 when unset
     SgprPad3 _p5;
 
     // ---- Q tensor dimensions and strides -----------------------------------

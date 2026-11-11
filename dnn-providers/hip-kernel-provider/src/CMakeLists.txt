@@ -1,18 +1,36 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# ApplicabilityPool runs worker threads.
+find_package(Threads REQUIRED)
+
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
+    core/ApplicabilityManager.cpp
+    core/ApplicabilityPool.cpp
     core/Handle.cpp
     core/Container.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    utilities/Digest.cpp
+    utilities/sha256.cpp
 )
 
 add_subdirectory(engines)
+
+# --- kpack C runtime library (needed by ASM SDPA and/or kernel ingestor) ---
+# find_package lives here (not in asm_sdpa_engine/) so the imported target is
+# visible to _impl, _private, and the shared hip_kernel_provider.
+set(KPACK_NEEDED FALSE)
+if(ENABLE_ASM_SDPA_ENGINE OR HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(KPACK_NEEDED TRUE)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
+endif()
 
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -20,8 +38,15 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/engines/
 )
+
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
-target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc Threads::Threads)
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_impl PRIVATE dl)
+    endif()
+endif()
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_provider_impl PROPERTIES
@@ -32,7 +57,9 @@ clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
-add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider_private STATIC
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_include_directories(hip_kernel_provider_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
@@ -40,6 +67,12 @@ target_include_directories(hip_kernel_provider_private PUBLIC
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_private PUBLIC dl)
+    endif()
 endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
@@ -79,37 +112,43 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # happened to exist, which also means nothing would ever exercise the installed copy.
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         # Container.cpp resolves this relative to the loaded .so first, so a
         # DESTDIR-staged, relocated, or repackaged install still finds its own
-        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # descriptors; HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
-    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
-    # because it does not compile without the ingestor: KpackArchive.cpp is the only
-    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    # The kpack kernel source adapter, and the loader for saved code objects. Listed here
+    # rather than beside Kernel.cpp above because they do not compile without the
+    # ingestor: KpackArchive.cpp is the only translation unit in the provider that
+    # includes <rocm_kpack/kpack.h>.
     target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/CodeObjectLoad.cpp
         compilation/KpackArchive.cpp
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
     )
 
-    # The object library gets rocm::rocm_kpack for its include directories; the two
-    # targets that actually link have to name it themselves, because they consume the
-    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
-    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
-    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
+    # The plan serialization hooks. They save and load only ingestor plans, so a build
+    # without the ingestor exports none of them.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        core/PluginSerialization.cpp
+    )
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
-add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
-
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
-    # interface, so the plugin has to name the kpack reader itself.
+add_library(hip_kernel_provider SHARED
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
+target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host Threads::Threads)
+if(KPACK_NEEDED)
+    # $<TARGET_OBJECTS:...> carries no link interface, so the plugin has to name
+    # the kpack reader itself (same for _private above).
     target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider PRIVATE dl)
+    endif()
 endif()
 
 if(NOT WIN32)
@@ -136,6 +175,42 @@ set_target_properties(hip_kernel_provider PROPERTIES
 # Tests
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
+
+    # Bundle filters for the attention engines' external integration checks below and
+    # their GPU-reference targets in integration_tests/. Under YAML categorization the
+    # checks' CTest suites select from each engine's
+    # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
+    # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
+    string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
+        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")
+    # Plus the dense BSHD stats (LSE) bundles: no other SdpaFwd bundle binds a stats
+    # output Gfx942AttentionDense serves.
+    set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
+        "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+
+    # The engine-pinned attention engines, each with an external integration check below,
+    # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
+    # engine: <arch> <snake slug> <engine local name> <bundle filter variable>, then its
+    # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
+    # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
+    set(HKP_PINNED_ATTENTION_ENGINES
+        gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx950 unified_2d Gfx950AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx950 unified_3d Gfx950AttentionUnified3D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx942AttentionUnified3d.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML
+        gfx942 dense Gfx942AttentionDense HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
+            hipkernel_Gfx942AttentionDense.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
+    )
 
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
@@ -184,18 +259,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
-        # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
-        # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by
-        # dnn-providers/cmake/Tests.cmake since the raw test name below is never
-        # itself registered as a CTest test in this YAML-categorized mode.
+        # merged with any per-target ENVIRONMENT passed to add_integration_test_target(),
+        # published by dnn-providers/cmake/Tests.cmake since the raw test name below is
+        # never itself registered as a CTest test in this YAML-categorized mode.
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -206,8 +282,55 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
+
+    # Graph-capture lanes. Every engine that reports SUPPORTS_GRAPH_CAPTURE and has an
+    # external integration lane below gets a sibling lane, pinned to the same engine, that
+    # runs a few quick bundle suites with --graph-capture: each case the engine verifies is
+    # also captured into a HIP graph, replayed, and verified again. The suites are
+    # GRAPH_CAPTURE_test_categories_integration.yaml under YAML categorization and this
+    # filter otherwise; keep the two in step.
+    set(HKP_GRAPH_CAPTURE_GTEST_FILTER
+        "quick_Batchnorm_Default.*"
+        "quick_BatchnormBackward_Default.*"
+        "quick_Layernorm_Default.*"
+        "quick_RMSNorm_Default.*"
+        "quick_RMSNorm_Variant2.*"
+        "quick_RMSNorm_Variant3.*"
+        "quick_RMSNormBackward_Variant2.*"
+        "quick_SdpaFwd_*.*"
+        "quick_SdpaBackward_Default.*"
+        "-*DISABLED*"
+        "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
+        "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
+    )
+
+    # _hkp_add_graph_capture_lane(<stem> <install test file> <lane arguments>...)
+    #   Registers <stem>-graph-capture-external-integration-check. The lane arguments are
+    #   those of the engine's own lane (engine, TOML, reference executor, install routing);
+    #   <install test file> receives the categorized suites, as the engine's own lane's do.
+    function(_hkp_add_graph_capture_lane stem install_test_file)
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${install_test_file}"
+                TEST_NAME_PREFIX ${stem}-graph-capture-external-integration
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME    ${stem}-graph-capture-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            EXTRA_ARGS     --graph-capture
+            GTEST_FILTER   ${HKP_GRAPH_CAPTURE_GTEST_FILTER}
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${ARGN}
+            ${_category_args}
+        )
+    endfunction()
 
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
@@ -234,6 +357,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                          "\n# External integration test (cross-provider suite)\n${_external_staging}"
                     )
                 endif()
+                # Consumed. A second drain further down catches external targets
+                # registered below this point; emptying the property here is what stops
+                # that pass re-emitting everything above.
+                set_property(GLOBAL PROPERTY
+                    "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
                 # Install tree.
                 apply_ctest_category_labels(
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
@@ -259,21 +387,28 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
             )
         endif()
+
+        _hkp_add_graph_capture_lane(${PROJECT_NAME} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            ENGINE_NAME    HIP_MLOPS_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
+        )
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 
     set(_asm_sdpa_external_category_args "")
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA)
         list(APPEND _asm_sdpa_external_category_args
             TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-asm-sdpa-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
-    if(TARGET hipdnn_integration_tests)
+    if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA AND TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-asm-sdpa-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -283,6 +418,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ${_asm_sdpa_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-asm-sdpa-external-integration-check target")
+        _hkp_add_graph_capture_lane(${PROJECT_NAME}-asm-sdpa "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            ENGINE_NAME    ASM_SDPA_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/ASM_SDPA_ENGINE.toml
+        )
 
         # Unlike the HIP_MLOPS block above, this target does not re-fold
         # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider or re-apply
@@ -294,8 +434,264 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # test names). ASM_SDPA's own category suites are labeled via
         # TEST_CATEGORIES_YAML/INSTALL_TEST_FILE in
         # _asm_sdpa_external_category_args above.
+    elseif(NOT ENABLE_ASM_SDPA_ENGINE)
+        message(STATUS "ASM SDPA engine disabled - skipping asm-sdpa-external-integration-check")
+    elseif(NOT HIPDNN_ENABLE_SDPA)
+        message(STATUS "hipDNN built with HIPDNN_ENABLE_SDPA=OFF - skipping asm-sdpa-external-integration-check")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
+    endif()
+
+    # _hkp_census_external_test_file(<out> <arch>)
+    #   The per-arch file an engine-pinned entry's categorized suites are appended to, as
+    #   INSTALL_TEST_FILE, for hkp_finalize_census_install() to fold into <arch>'s shard:
+    #   categorized suites reach the install tree only through that file. Created empty on
+    #   first use in each configure, because apply_test_category_labels() appends and a
+    #   stale file would carry entries from a previous configure into this one.
+    function(_hkp_census_external_test_file out_var arch)
+        get_property(_file GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${arch})
+        if(NOT _file)
+            set(_file "${CMAKE_CURRENT_BINARY_DIR}/census_external_${arch}_CTestTestfile.cmake")
+            file(WRITE "${_file}" "")
+            set_property(GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${arch} "${_file}")
+        endif()
+        set(${out_var} "${_file}" PARENT_SCOPE)
+    endfunction()
+
+    # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
+    # serving the bundles its filter variable names (the unified 3D engines serve only
+    # their decode, seqlen_q 1, cases and decline the rest).
+    #
+    # Gated on the same predicate the census uses: the feature flags alone would register
+    # an engine-pinned target on a build whose `product` root ships another bundle, where
+    # it fails as a missing engine rather than reading as absent. It lives in
+    # HkpPackaging.cmake, which only an ingestor build includes -- hence the guard.
+    #
+    # Route the installed entry and its TOML into the engine's architecture shard, rather
+    # than the common arch-neutral file, so pruning to another architecture removes them
+    # along with the engine they name; the gpu_ref registration in
+    # integration_tests/CMakeLists.txt says why that matters. Reserved per engine rather
+    # than earlier so the shard is claimed exactly when something is registered into it.
+    # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
+    # says why.
+    #
+    # Both YAML modes. Each gets a common entrypoint further down -- the categorized file,
+    # or the one install_provider_ctest_files() writes -- and the discovery stub is
+    # appended to whichever it is, so a sharded entry is reachable either way. Both
+    # keywords move together: the staging key alone would divert the uncategorized
+    # fallback out of the drain that serves that path.
+    #
+    # GTEST_FILTER, ENVIRONMENT and ENVIRONMENT_MODIFICATION belong in the call rather than
+    # in _category_args: that list is populated only under YAML categorization, so anything
+    # folded into it is absent from a legacy-label build, which then enumerates the whole
+    # bundle tree pinned to this engine and runs without TEST_ENVIRONMENT (ASAN symbolizer,
+    # HSA_XNACK).
+    #
+    # Of these engines only the ones in _graph_capture_attention_engines report
+    # SUPPORTS_GRAPH_CAPTURE, so only they get a graph-capture lane.
+    set(_graph_capture_attention_engines Gfx950AttentionDense)
+    set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
+    while(_engines)
+        list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
+        string(REPLACE "_" "-" _dash "${_snake}")
+        set(_target ${PROJECT_NAME}-${_arch}-attention-${_dash}-external-integration-check)
+        _hkp_census_external_test_file(_shard_ctest ${_arch})
+
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND DEFINED ${_categories_var})
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML "${${_categories_var}}"
+                INSTALL_TEST_FILE "${_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-${_arch}-attention-${_dash}-external-integration
+            )
+        endif()
+
+        set(_available FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" ${_arch})
+        endif()
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+           AND _available
+           AND TARGET hipdnn_integration_tests)
+            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/${_toml}")
+            hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_config}")
+
+            add_external_integration_test_target(
+                TARGET_NAME    ${_target}
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    "hipkernel:${_local}"
+                INSTALL_SUBDIR hip_kernel_provider
+                INSTALL_DESTINATION "${_shard_dest}"
+                INSTALL_STAGING_KEY hkp_census_${_arch}
+                TEST_CONFIG    ${_config}
+                GTEST_FILTER   "${${_filter_var}}"
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                ${_category_args}
+            )
+            message(STATUS "Created ${_target} target")
+            if(_local IN_LIST _graph_capture_attention_engines)
+                _hkp_add_graph_capture_lane(
+                    ${PROJECT_NAME}-${_arch}-attention-${_dash} "${_shard_ctest}"
+                    ENGINE_NAME    "hipkernel:${_local}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    INSTALL_DESTINATION "${_shard_dest}"
+                    INSTALL_STAGING_KEY hkp_census_${_arch}
+                    TEST_CONFIG    ${_config}
+                )
+            endif()
+        else()
+            message(STATUS "hipkernel:${_local} is not shipped for ${_arch} by this "
+                           "configuration - skipping ${_target}")
+        endif()
+    endwhile()
+
+    # FlyDSL engines against the shared bundles, checked by the GPU reference executor.
+    # One entry per engine and architecture it carries content for, routed into that
+    # architecture's shard like the attention entries above, so pruning an artifact to other
+    # architectures removes it. Gated on FlyDSL content, not GPU_TARGETS: a multi-arch
+    # install pairs this build's host artifacts with other builds' shards.
+    #
+    # A generic-target family ships the same engine in every member's shard, and a
+    # package for the family holds all of them, so each member's entry would run the
+    # whole suite on whichever member the runner has; a build tree holds every entry.
+    # Each entry's TOML therefore skips every other architecture FlyDSL ships for (the
+    # harness has no "only on" form), so on any runner only the entries for its own
+    # architecture run.
+    #
+    # Every FlyDSL engine reports SUPPORTS_GRAPH_CAPTURE (GRAPH_CAPTURE_OPS in
+    # flydsl/gen_descriptors.py), so each entry also gets a graph-capture lane.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND TARGET hipdnn_integration_tests)
+        set(_flydsl_engine_ops
+            rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw
+            sdpa_cdna sdpa_cdna_decode sdpa_cdna_dualwave)
+        set(_flydsl_all_archs "")
+        foreach(_op IN LISTS _flydsl_engine_ops)
+            list(APPEND _flydsl_all_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _flydsl_all_archs)
+        foreach(_op IN LISTS _flydsl_engine_ops)
+            if(_op MATCHES "^sdpa_")
+                if(NOT HIPDNN_ENABLE_SDPA)
+                    continue()
+                endif()
+                set(_bundle SdpaFwd)
+                set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_sdpa_test_categories_integration.yaml")
+            elseif(_op STREQUAL "rmsnorm")
+                set(_bundle RMSNorm)
+                set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_test_categories_integration.yaml")
+            else()
+                set(_bundle RMSNormBackward)
+                set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml")
+            endif()
+            set(_engine "hipkernel:flydsl_${_op}")
+            string(REPLACE "_" "-" _op_dash "${_op}")
+            set(_archs "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}}")
+
+            foreach(_arch IN LISTS _archs)
+                set(_others "${_flydsl_all_archs}")
+                list(REMOVE_ITEM _others "${_arch}")
+                list(TRANSFORM _others PREPEND "\"")
+                list(TRANSFORM _others APPEND "\"")
+                list(JOIN _others ", " _others_toml)
+                set(_toml "${CMAKE_CURRENT_BINARY_DIR}/flydsl_integration/hipkernel_flydsl_${_op}_${_arch}.toml")
+                string(CONCAT _toml_text
+                    "# Generated by hip-kernel-provider/src/CMakeLists.txt for ${_engine}, ${_arch} shard.\n"
+                    "[meta]\nversion = 1\n")
+                if(_others_toml)
+                    string(APPEND _toml_text
+                        "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
+                        "reason = \"${_engine}: this entry runs on ${_arch} only\"\n")
+                endif()
+                # A padded or fully masked query row has LSE = -inf in the engine and in the
+                # reference alike (SEM-008), which plain allclose fails. Only the SDPA stats
+                # output is graded with matching infinities; O keeps the default. That
+                # validator is host-only, so these entries also run with
+                # HIPDNN_TEST_VALIDATOR=cpu (below).
+                set(_lane_environment ${TEST_ENVIRONMENT})
+                if(_op MATCHES "^sdpa_")
+                    string(APPEND _toml_text
+                        "\n[[validator_overrides]]\nfilters = [\"*_SdpaFwd*\"]\n"
+                        "tensors = [\"LSE\", \"*::Stats\"]\n"
+                        "validator = \"allclose_matching_infinities\"\n")
+                    list(APPEND _lane_environment "HIPDNN_TEST_VALIDATOR=cpu")
+                endif()
+                file(WRITE "${_toml}" "${_toml_text}")
+
+                _hkp_census_external_test_file(_shard_ctest ${_arch})
+                # The shard names this TOML, so it is reserved with the shard as well as
+                # passed as TEST_CONFIG; hkp_reserve_census_shard() says why.
+                hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_toml}")
+
+                set(_category_args "")
+                if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+                    list(APPEND _category_args
+                        TEST_CATEGORIES_YAML "${_yaml}"
+                        INSTALL_TEST_FILE "${_shard_ctest}"
+                        TEST_NAME_PREFIX ${PROJECT_NAME}-flydsl-${_op_dash}-${_arch}-external-integration)
+                endif()
+                add_external_integration_test_target(
+                    TARGET_NAME    ${PROJECT_NAME}-flydsl-${_op_dash}-${_arch}-external-integration-check
+                    PLUGIN_TARGET  hip_kernel_provider
+                    ENGINE_NAME    "${_engine}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    INSTALL_DESTINATION "${_shard_dest}"
+                    INSTALL_STAGING_KEY hkp_census_${_arch}
+                    TEST_CONFIG    "${_toml}"
+                    REFERENCE_EXECUTOR gpu
+                    GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
+                    ENVIRONMENT    ${_lane_environment}
+                    ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                    ${_category_args}
+                )
+                _hkp_add_graph_capture_lane(
+                    ${PROJECT_NAME}-flydsl-${_op_dash}-${_arch} "${_shard_ctest}"
+                    ENGINE_NAME    "${_engine}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    INSTALL_DESTINATION "${_shard_dest}"
+                    INSTALL_STAGING_KEY hkp_census_${_arch}
+                    TEST_CONFIG    "${_toml}"
+                    REFERENCE_EXECUTOR gpu
+                )
+            endforeach()
+        endforeach()
+        message(STATUS "Created the FlyDSL external integration targets (one per engine and architecture)")
+    endif()
+
+    # Second drain of the common external staging, after every registration above.
+    #
+    # The first drain sits beside the cross-provider target, far higher up, so it can
+    # only carry what was staged before it, and the property is emptied when consumed --
+    # anything here is by definition late. Nothing is today, every gfx950 and gfx942
+    # registration routing to its own architecture's shard, but an external target
+    # registered below that first drain would otherwise never reach the install tree.
+    #
+    # Only the YAML path needs it. Without categorization there is no common file to
+    # append to and install_provider_ctest_files() below does its own drain, which
+    # already runs after every registration.
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        get_property(_late_external_staging GLOBAL
+            PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider"
+        )
+        if(_late_external_staging)
+            file(APPEND "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                 "\n# External integration tests registered after the first drain\n${_late_external_staging}"
+            )
+            set_property(GLOBAL PROPERTY
+                "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
+
+            # Label what was just folded in. The parser keys on add_test() names in the
+            # file, so entries appended after the earlier pass carry no tier until it is
+            # run again over the grown file. Re-labelling an already-labelled entry is
+            # harmless: ctest honours the last set_tests_properties() per test, which is
+            # the same property the earlier pass relies on.
+            if(COMMAND apply_ctest_category_labels)
+                apply_ctest_category_labels(
+                    "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
+            endif()
+        endif()
     endif()
 
     # Install the ctest files. When YAML-based categorization is active, install the
@@ -303,18 +699,54 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
     # Otherwise, fall back to the project's own install_provider_ctest_files() which
     # emits an unlabeled CTestTestfile.cmake.
+    #
+    # Either way the result is the common entrypoint the census discovery stub is
+    # appended to.
     if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
         install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
                 RENAME "CTestTestfile.cmake"
         )
+        set(_hkp_common_ctest "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}")
     else()
         install_provider_ctest_files("hip_kernel_provider")
+        # The name that function writes in its caller's binary directory. Both modes
+        # ship their entrypoint with install(FILES), which copies at install time rather
+        # than at configure time, so appending below still reaches the artifact.
+        set(_hkp_common_ctest "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
+    endif()
+
+    # Materialise the installed census now that every registration has run and the
+    # common entrypoint exists.
+    #
+    # Placed after the install block, not before it, because the non-categorized
+    # entrypoint does not exist until install_provider_ctest_files() writes it -- and
+    # that function truncates, so a stub appended earlier would be lost.
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_finalize_census_install(
+            COMMON_TEST_FILE   "${_hkp_common_ctest}"
+            BINDIR             "${CMAKE_INSTALL_BINDIR}"
+            PLUGIN_ENGINE_DIR  "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
+        )
     endif()
 endif()
 
 # Process all kernels marked for inlining
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+
+# The plugin embeds production kernels only. A test descriptor set names its sources for
+# the test binary alone, so a test source registered here would ship in the shared
+# library.
+get_target_property(_plugin_kernel_files hip_kernel_provider_impl KERNELEMBEDDING_KERNEL_FILES)
+foreach(_plugin_kernel_file IN LISTS _plugin_kernel_files)
+    if(_plugin_kernel_file MATCHES "(^|/)test_descriptors(/|$)")
+        message(FATAL_ERROR
+                "hip_kernel_provider_impl embeds a test descriptor set's kernel source:\n"
+                "  ${_plugin_kernel_file}\n"
+                "Register it on the test binary instead.")
+    endif()
+endforeach()
+
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
     TARGET hip_kernel_provider_impl
@@ -331,3 +763,11 @@ set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
 set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 
 target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_impl
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}
+        PACK_NAMES product
+    )
+endif()

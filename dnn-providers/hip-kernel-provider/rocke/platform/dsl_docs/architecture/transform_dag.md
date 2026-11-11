@@ -1,5 +1,8 @@
 # TRANSFORM_DAG.md — Coordinate-Transform DAG over SSA Values
 
+> The tiling layer's coordinate graph is documented in [`tensor_transforms_api.md`](../../python/rocke/helpers/tiling/docs/tensor_transforms_api.md); this doc
+> covers `helpers/transforms.py`.
+
 The `rocke.helpers.transforms` module is the Python counterpart of CK Tile's
 `tensor_descriptor` + `transform_tensor_descriptor` machinery. It's
 the cleanest way to express convolution, attention, and reduction
@@ -217,7 +220,7 @@ After the chain:
   - `desc.offset(b, m=m_val, k=k_val)` produces `(i32 offset, i1
     valid)`.
 
-This is the exact descriptor used by `rocke/instances/common/conv_implicit_gemm.py`.
+This is the exact descriptor used by `library/kernels/common/conv_implicit_gemm.py`.
 The kernel body never writes `(m / (Ho*Wo)) * Hi*Wi*C + (m / Wo) % Ho
 * Wi * C + ...` by hand. The algebra captures every offset
 computation, and editing the conv shape (e.g., stride 2 or dilated)

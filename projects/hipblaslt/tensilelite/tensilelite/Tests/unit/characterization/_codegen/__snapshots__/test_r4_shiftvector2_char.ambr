@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_r4_shiftvector2_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x64x16_SN_LDSB0tk_7fN-MiJ81_quSFKcF_kVqzMoOcQd3bZTInW9_AW8=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x128x16_SN_LDSB0a5O9RKyeWJBonDSZkaQrdd_zG4THntbvqit_iUw9_Ig=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_SN_LDSB0_GwP51app9p7qc6NiGRpDEGLFHvSndoqg8occVC2Qlec=',
+      'err': 0,
+    }),
+  ])
+# ---

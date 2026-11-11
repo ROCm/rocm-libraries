@@ -26,6 +26,17 @@
 
 #pragma once
 
+#if defined(__SANITIZE_ADDRESS__)
+#define HIPBLASLT_TEST_ASAN_BUILD 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HIPBLASLT_TEST_ASAN_BUILD 1
+#endif
+#endif
+#ifndef HIPBLASLT_TEST_ASAN_BUILD
+#define HIPBLASLT_TEST_ASAN_BUILD 0
+#endif
+
 #ifdef GOOGLE_TEST
 #include <gtest/gtest.h>
 #endif
@@ -36,6 +47,7 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <future>
@@ -51,25 +63,86 @@
 #include <utility>
 #include <vector>
 
+// Begins the message of every test that stops because memory is short, so the test summary can
+// list those tests.
+#define MEMORY_SHORTAGE_STRING "Not enough memory: "
+
 #ifdef GOOGLE_TEST
 #define CHECK_SUCCESS(ERROR) ASSERT_EQ((ERROR), true)
 // Extra macro so that macro arguments get expanded before calling Google Test
 #define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
 
-#define CHECK_DEVICE_ALLOCATION(ERROR)                   \
-    do                                                   \
-    {                                                    \
-        /* Use error__ in case ERROR contains "error" */ \
-        hipError_t error__ = (ERROR);                    \
-        if(error__ != hipSuccess)                        \
-        {                                                \
-            if(error__ == hipErrorOutOfMemory)           \
-                SUCCEED() << LIMITED_MEMORY_STRING;      \
-            else                                         \
-                FAIL() << hipGetErrorString(error__);    \
-            return;                                      \
-        }                                                \
+// True when HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP is set to a value other than 0, so that a run on a
+// large-memory host fails, rather than skips, any case that does not fit.
+inline bool hipblaslt_memory_skip_fails()
+{
+    const char* value = std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP");
+    return value && *value && strcmp(value, "0") != 0;
+}
+
+// Ends the test because memory is short, as WHY explains: a skip, or a failure under
+// HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP.
+#define SKIP_FOR_MEMORY(WHY)                                 \
+    do                                                       \
+    {                                                        \
+        if(hipblaslt_memory_skip_fails())                    \
+            FAIL() << MEMORY_SHORTAGE_STRING << (WHY);       \
+        else                                                 \
+            GTEST_SKIP() << MEMORY_SHORTAGE_STRING << (WHY); \
+    } while(0)
+
+// The tests that stopped because memory was short, for the summary at the end of the run.
+class MemoryShortageLog
+{
+public:
+    // Records the test when the message of one of its results contains MEMORY_SHORTAGE_STRING.
+    void record(const std::string& test, const char* message)
+    {
+        const char* why = message ? strstr(message, MEMORY_SHORTAGE_STRING) : nullptr;
+        if(!why)
+            return;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_entries.emplace_back(test, why + strlen(MEMORY_SHORTAGE_STRING));
+    }
+
+    size_t count() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_entries.size();
+    }
+
+    // One line per test with the reason, or an empty string when no test was short of memory.
+    std::string summary() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if(m_entries.empty())
+            return {};
+        std::ostringstream s;
+        s << "[ MEMORY   ] " << m_entries.size() << " test" << (m_entries.size() > 1 ? "s" : "")
+          << " stopped because memory was short:\n";
+        for(const auto& [test, why] : m_entries)
+            s << "[ MEMORY   ] " << test << ": " << why << "\n";
+        return s.str();
+    }
+
+private:
+    mutable std::mutex                               m_mutex;
+    std::vector<std::pair<std::string, std::string>> m_entries;
+};
+
+#define CHECK_DEVICE_ALLOCATION(ERROR)                                    \
+    do                                                                    \
+    {                                                                     \
+        /* Use error__ in case ERROR contains "error" */                  \
+        hipError_t error__ = (ERROR);                                     \
+        if(error__ == hipErrorOutOfMemory)                                \
+            SKIP_FOR_MEMORY("a device allocation failed: out of memory"); \
+        else if(error__ != hipSuccess)                                    \
+        {                                                                 \
+            FAIL() << hipGetErrorString(error__);                         \
+            return;                                                       \
+        }                                                                 \
     } while(0)
 
 // This wraps the hipBLASLt call with catch_signals_and_exceptions_as_failures().
@@ -91,6 +164,15 @@
             hipblasStatus_t status_ = status__;               \
             ASSERT_EQ(status_, EXPECT); /* prints "status" */ \
         }                                                     \
+    } while(0)
+
+// WHY is empty when the host allocations succeeded, and otherwise says which one failed.
+#define CHECK_HOST_ALLOCATION(WHY)  \
+    do                              \
+    {                               \
+        std::string why__ = (WHY);  \
+        if(!why__.empty())          \
+            SKIP_FOR_MEMORY(why__); \
     } while(0)
 
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)     \
@@ -142,6 +224,24 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 
 #define CHECK_DEVICE_ALLOCATION CHECK_HIP_ERROR
 
+#define SKIP_FOR_MEMORY(WHY)                                                         \
+    do                                                                               \
+    {                                                                                \
+        hipblaslt_cerr << "error: " << MEMORY_SHORTAGE_STRING << (WHY) << std::endl; \
+        return;                                                                      \
+    } while(0)
+
+#define CHECK_HOST_ALLOCATION(WHY)                                                       \
+    do                                                                                   \
+    {                                                                                    \
+        std::string why__ = (WHY);                                                       \
+        if(!why__.empty())                                                               \
+        {                                                                                \
+            hipblaslt_cerr << "error: " << MEMORY_SHORTAGE_STRING << why__ << std::endl; \
+            exit(EXIT_FAILURE);                                                          \
+        }                                                                                \
+    } while(0)
+
 #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
 
 #define CHECK_SUCCESS(ERROR) \
@@ -178,23 +278,38 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 #ifdef GOOGLE_TEST
 
 /* ============================================================================================ */
-// Function which matches Arguments with a category, accounting for arg.known_bug_platforms
-bool match_test_category(const Arguments& arg, const char* category);
+// Returns true when a parameter is a known bug that must not run on the current
+// GPU platform: either it was tagged unconditionally at gentest time
+// (category == "known_bug" from known_bugs.yaml) or the current arch is listed in
+// the entry's known_bug_platforms. INSTANTIATE_TEST_CATEGORY (below) uses this to
+// drop such parameters before they register as tests.
+bool is_known_bug_for_platform(const Arguments& arg);
 
-// Skip the current TEST_P body when the parameter has been flagged as a known bug
-// for this GPU platform. Used as the first statement in TEST_P bodies. The category
-// field is set to "known_bug" either at gentest time (unconditional matches in
-// known_bugs.yaml) or at registration time by match_test_category() when the current
-// GPU arch matches an entry's known_bug_platforms list.
-#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                            \
-    do                                                                              \
-    {                                                                               \
-        const auto& _kb_arg = GetParam();                                           \
-        if(!strcmp(_kb_arg.category, "known_bug"))                                  \
-        {                                                                           \
-            GTEST_SKIP() << KNOWN_BUG_STRING                                        \
-                         << " (platforms=" << _kb_arg.known_bug_platforms << ")";   \
-        }                                                                           \
+// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
+// filter that selects them, such as the ctest tier patterns, runs them.
+inline bool hipblaslt_category_needs_a_filter(const char* category)
+{
+    return !strcmp(category, "stress") || !strcmp(category, "sdc_hunt");
+}
+
+inline bool hipblaslt_gtest_filter_given()
+{
+    const std::string filter   = ::testing::GTEST_FLAG(filter);
+    const std::string positive = filter.substr(0, filter.find('-'));
+    return !positive.empty() && positive != "*";
+}
+
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
+    do                                                                                      \
+    {                                                                                       \
+        const auto& _sf_arg = GetParam();                                                   \
+        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
+           && !hipblaslt_gtest_filter_given())                                              \
+            GTEST_SKIP() << "the " << _sf_arg.category                                      \
+                         << " fast_check cases run only when a gtest filter selects them, " \
+                            "for example --gtest_filter=*"                                  \
+                         << _sf_arg.category << "*";                                        \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
@@ -205,14 +320,14 @@ bool match_test_category(const Arguments& arg, const char* category);
         category,                                                              \
         testclass,                                                             \
         testing::ValuesIn(HipBlasLt_TestData::begin([](const Arguments& arg) { \
-                              return match_test_category(arg, #category)       \
+                              return !is_known_bug_for_platform(arg)           \
                                      && testclass::function_filter(arg)        \
                                      && testclass::type_filter(arg);           \
                           }),                                                  \
                           HipBlasLt_TestData::end()),                          \
         testclass::PrintToStringParamName());
 
-#if !defined(WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
+#if !defined(_WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
 #define HIPBLASLT_ALLOW_UNINSTANTIATED_GTEST(testclass) \
     GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(testclass);
 #else

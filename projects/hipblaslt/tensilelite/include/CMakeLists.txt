@@ -1,14 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_HOST)
-    set(_tensilelite_header_scope PUBLIC)
-else()
-    set(_tensilelite_header_scope PRIVATE)
-endif()
-
 target_sources(tensilelite-host
-    ${_tensilelite_header_scope}
+    PUBLIC
         FILE_SET tensilelite_public_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
@@ -37,6 +31,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float6.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float8_BFloat8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Half.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8x4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_XFloat32.hpp"
@@ -53,6 +48,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MXScaleFormat.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"
@@ -63,8 +59,10 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PredictionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ProblemKey.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/RocRollerWgmKernargs.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScaleAlphaVec.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Base.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Containers.hpp"
@@ -85,6 +83,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SingleSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Singleton.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionBlobCache.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Task.hpp"
@@ -95,6 +94,8 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelIndex.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/UtilsOrigami.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
@@ -110,7 +111,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 )
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-host
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
@@ -120,7 +121,7 @@ if(HIPBLASLT_ENABLE_YAML)
     )
 else()
     target_sources(tensilelite-host
-        ${_tensilelite_header_scope}
+        PUBLIC
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
@@ -131,15 +132,13 @@ else()
     )
 endif()
 
-if(HIPBLASLT_ENABLE_HOST)
-    get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
-    target_sources(tensilelite-host
-        ${_tensilelite_header_scope}
-            FILE_SET tensilelite_generated_headers TYPE HEADERS
-                BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
-                FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
-            FILE_SET rocisa_public_headers TYPE HEADERS
-                BASE_DIRS "${_rocisa_include_root}"
-                FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
-    )
-endif()
+get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
+target_sources(tensilelite-host
+    PUBLIC
+        FILE_SET tensilelite_generated_headers TYPE HEADERS
+            BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
+            FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
+        FILE_SET rocisa_public_headers TYPE HEADERS
+            BASE_DIRS "${_rocisa_include_root}"
+            FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
+)

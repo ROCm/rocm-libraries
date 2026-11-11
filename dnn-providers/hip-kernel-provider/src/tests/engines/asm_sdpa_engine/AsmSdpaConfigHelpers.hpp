@@ -7,12 +7,12 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -108,35 +108,17 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  */
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
-/**
- * @brief Builds the SDPA forward graph topology described by a GraphTestCase.
- *
- * Uses testCase.withStats to determine whether to enable stats output.
- */
-std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase);
-
-/**
- * @brief Generates compatible graph test case descriptors for all configs.
- * @note ConfigType requires a corresponding configToTestCase and getConfigDescription function
- * @todo If we upgrade to C++20, add a concept that guarantees these functions are declared
- *
- * @tparam ConfigType The config type
- * @param configMap The map of all configs
- * @param withStats When true, generates stats-enabled test cases
- * @return Vector of GraphTestCase descriptors for each config
- */
-template <typename ConfigType>
-std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
-                                bool withStats = false)
+/// An SDPA forward graph together with its STATS output attribute.
+struct SdpaFwdGraph
 {
-    std::vector<GraphTestCase> testCases;
-    testCases.reserve(configMap.size());
-    for(const auto& [key, config] : configMap)
-    {
-        testCases.push_back(configToTestCase(config, withStats));
-    }
-    return testCases;
-}
+    std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
+    /// The log-sum-exp output, or null when the test case does not enable stats.
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> stats;
+};
+
+/// Builds the SDPA forward graph topology described by @p testCase, enabling stats when
+/// testCase.withStats is set and returning that output's attribute alongside the graph so
+/// callers can address it by identity.
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
 
 } // namespace asm_sdpa_engine

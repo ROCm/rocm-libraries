@@ -78,12 +78,14 @@ struct philox4x32_10_device_engine : public ::rocrand_device::philox4x32_10_engi
     typedef ::rocrand_device::philox4x32_10_engine base_type;
     typedef base_type::philox4x32_10_state         state_type;
 
-    __forceinline__ philox4x32_10_device_engine() = default;
+    __forceinline__
+    philox4x32_10_device_engine()
+        = default;
 
-    __forceinline__ __device__ __host__ philox4x32_10_device_engine(
-        const unsigned long long seed,
-        const unsigned long long subsequence,
-        const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    philox4x32_10_device_engine(const unsigned long long seed,
+                                const unsigned long long subsequence,
+                                const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
@@ -106,7 +108,7 @@ struct philox4x32_10_device_engine : public ::rocrand_device::philox4x32_10_engi
     // m_state from base class
 };
 
-template<typename T, typename Distribution>
+template<typename T, typename Distribution, bool UseLDS = false>
 struct generate_philox
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -116,9 +118,9 @@ struct generate_philox
                          dim3                        grid_dim,
                          dim3                        block_dim,
                          philox4x32_10_device_engine engine,
-                         T*                          data,
-                         const size_t                n,
-                         Distribution                distribution)
+                         T* __restrict__ data,
+                         const size_t n,
+                         Distribution distribution)
     {
         constexpr unsigned int input_width  = Distribution::input_width;
         constexpr unsigned int output_width = Distribution::output_width;
@@ -174,6 +176,13 @@ struct generate_philox
         // Save multiple values as one vec_type
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
+            __syncthreads();
+        }
+#endif
         while(index < vec_n)
         {
             const uint4        v     = engine.next4_leap(stride);
@@ -184,7 +193,12 @@ struct generate_philox
                 {
                     input[i] = vs[s * input_width + i];
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
             }
             vec_data[index] = *reinterpret_cast<vec_type*>(output);
             // Next position
@@ -207,7 +221,12 @@ struct generate_philox
                 {
                     input[i] = engine();
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
 
                 for(unsigned int o = 0; o < output_width; ++o)
                 {
@@ -340,23 +359,40 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
-        status = dynamic_dispatch(
-            m_order,
-            [&, this](auto is_dynamic)
-            {
-                return system_type::template launch<generate_philox<T, Distribution>,
-                                                    ConfigProvider,
-                                                    T,
-                                                    is_dynamic>(target_arch,
-                                                                dim3(config.blocks),
-                                                                dim3(config.threads),
-                                                                0,
-                                                                m_stream,
-                                                                m_engine,
-                                                                data,
-                                                                data_size,
-                                                                distribution);
-            });
+        auto launch_with_lds = [&](auto possible_lds_usage)
+        {
+            return dynamic_dispatch(m_order,
+                                    [&, this](auto is_dynamic)
+                                    {
+                                        return system_type::template launch<
+                                            generate_philox<T, Distribution, possible_lds_usage>,
+                                            ConfigProvider,
+                                            T,
+                                            is_dynamic>(target_arch,
+                                                        dim3(config.blocks),
+                                                        dim3(config.threads),
+                                                        0,
+                                                        m_stream,
+                                                        m_engine,
+                                                        data,
+                                                        data_size,
+                                                        distribution);
+                                    });
+        };
+
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            const bool use_lds = distribution.check_lds_size();
+            const auto use_lds_variant
+                = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+            status = std::visit(launch_with_lds, use_lds_variant);
+        }
+        else
+        {
+            status = launch_with_lds(std::false_type{});
+        }
+
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;

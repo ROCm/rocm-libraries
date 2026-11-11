@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,14 +34,50 @@
 
 extern "C" {
 
-/******************** AUXILIARY ********************/
+/******************** HANDLE ********************/
 hipsolverStatus_t hipsolverCreate(hipsolverHandle_t* handle)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCreate((cusolverDnHandle_t*)handle));
+    hipsolver::hipsolverDnHandle* dn = new hipsolver::hipsolverDnHandle;
+    cusolverStatus_t              status;
+    cublasStatus_t                blas_status;
+    cudaStream_t                  stream;
+
+    if((status = cusolverDnCreate(&dn->handle)) != CUSOLVER_STATUS_SUCCESS)
+    {
+        delete dn;
+        return hipsolver::cuda2hip_status(status);
+    }
+
+    if((blas_status = cublasCreate(&dn->blas_handle)) != CUBLAS_STATUS_SUCCESS)
+    {
+        cusolverDnDestroy(dn->handle);
+        delete dn;
+        return hipsolver::cuda2hip_status(blas_status);
+    }
+
+    if((status = cusolverDnGetStream(dn->handle, &stream)) != CUSOLVER_STATUS_SUCCESS)
+    {
+        cusolverDnDestroy(dn->handle);
+        cublasDestroy(dn->blas_handle);
+        delete dn;
+        return hipsolver::cuda2hip_status(status);
+    }
+
+    if((blas_status = cublasSetStream(dn->blas_handle, stream)) != CUBLAS_STATUS_SUCCESS)
+    {
+        cusolverDnDestroy(dn->handle);
+        cublasDestroy(dn->blas_handle);
+        delete dn;
+        return hipsolver::cuda2hip_status(blas_status);
+    }
+
+    *handle = dn;
+
+    return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
 {
@@ -54,21 +90,36 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDestroy((cusolverDnHandle_t)handle));
+    hipsolver::hipsolverDnHandle* dn          = (hipsolver::hipsolverDnHandle*)handle;
+    auto                          status      = cusolverDnDestroy(dn->handle);
+    auto                          blas_status = cublasDestroy(dn->blas_handle);
+    delete dn;
+
+    if(status != CUSOLVER_STATUS_SUCCESS)
+        return hipsolver::cuda2hip_status(status);
+    else
+        return hipsolver::cuda2hip_status(blas_status);
 }
 catch(...)
 {
     return hipsolver::exception2hip_status();
 }
 
+/******************** AUXILIARY ********************/
 hipsolverStatus_t hipsolverSetStream(hipsolverHandle_t handle, hipStream_t streamId)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSetStream((cusolverDnHandle_t)handle, (cudaStream_t)streamId));
+    hipsolver::hipsolverDnHandle* dn     = (hipsolver::hipsolverDnHandle*)handle;
+    auto                          status = cusolverDnSetStream(dn->handle, (cudaStream_t)streamId);
+    auto blas_status                     = cublasSetStream(dn->blas_handle, (cudaStream_t)streamId);
+
+    if(status != CUSOLVER_STATUS_SUCCESS)
+        return hipsolver::cuda2hip_status(status);
+    else
+        return hipsolver::cuda2hip_status(blas_status);
 }
 catch(...)
 {
@@ -81,8 +132,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnGetStream((cusolverDnHandle_t)handle, (cudaStream_t*)streamId));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnGetStream(dn->handle, (cudaStream_t*)streamId));
 }
 catch(...)
 {
@@ -97,8 +148,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSetDeterministicMode(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_deterministic(mode)));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnSetDeterministicMode(dn->handle, hipsolver::hip2cuda_deterministic(mode)));
 #else
     return HIPSOLVER_STATUS_NOT_SUPPORTED;
 #endif
@@ -118,8 +170,9 @@ try
     if(!mode)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    cusolverDeterministicMode_t dmode;
-    CHECK_CUSOLVER_ERROR(cusolverDnGetDeterministicMode((cusolverDnHandle_t)handle, &dmode));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    cusolverDeterministicMode_t   dmode;
+    CHECK_CUSOLVER_ERROR(cusolverDnGetDeterministicMode(dn->handle, &dmode));
     *mode = hipsolver::cuda2hip_deterministic(dmode);
 
     return HIPSOLVER_STATUS_SUCCESS;
@@ -207,8 +260,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnXgesvdjGetResidual((cusolverDnHandle_t)handle, (gesvdjInfo_t)info, residual));
+        cusolverDnXgesvdjGetResidual(dn->handle, (gesvdjInfo_t)info, residual));
 }
 catch(...)
 {
@@ -223,8 +277,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnXgesvdjGetSweeps(
-        (cusolverDnHandle_t)handle, (gesvdjInfo_t)info, executed_sweeps));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnXgesvdjGetSweeps(dn->handle, (gesvdjInfo_t)info, executed_sweeps));
 }
 catch(...)
 {
@@ -305,8 +360,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnXsyevjGetResidual((cusolverDnHandle_t)handle, (syevjInfo_t)info, residual));
+        cusolverDnXsyevjGetResidual(dn->handle, (syevjInfo_t)info, residual));
 }
 catch(...)
 {
@@ -321,8 +377,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnXsyevjGetSweeps((cusolverDnHandle_t)handle, (syevjInfo_t)info, executed_sweeps));
+        cusolverDnXsyevjGetSweeps(dn->handle, (syevjInfo_t)info, executed_sweeps));
 }
 catch(...)
 {
@@ -344,8 +401,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnSorgbr_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -366,8 +424,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnDorgbr_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -388,7 +447,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCungbr_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCungbr_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_side(side),
                                                                   m,
                                                                   n,
@@ -417,7 +477,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungbr_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungbr_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_side(side),
                                                                   m,
                                                                   n,
@@ -448,17 +509,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSorgbr((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_side(side),
-                                                       m,
-                                                       n,
-                                                       k,
-                                                       A,
-                                                       lda,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSorgbr(
+        dn->handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -481,17 +534,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDorgbr((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_side(side),
-                                                       m,
-                                                       n,
-                                                       k,
-                                                       A,
-                                                       lda,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDorgbr(
+        dn->handle, hipsolver::hip2cuda_side(side), m, n, k, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -514,7 +559,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCungbr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCungbr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        m,
                                                        n,
@@ -547,7 +593,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungbr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungbr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        m,
                                                        n,
@@ -572,8 +619,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSorgqr_bufferSize((cusolverDnHandle_t)handle, m, n, k, A, lda, tau, lwork));
+        cusolverDnSorgqr_bufferSize(dn->handle, m, n, k, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -587,8 +635,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDorgqr_bufferSize((cusolverDnHandle_t)handle, m, n, k, A, lda, tau, lwork));
+        cusolverDnDorgqr_bufferSize(dn->handle, m, n, k, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -608,8 +657,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnCungqr_bufferSize(
-        (cusolverDnHandle_t)handle, m, n, k, (cuComplex*)A, lda, (cuComplex*)tau, lwork));
+        dn->handle, m, n, k, (cuComplex*)A, lda, (cuComplex*)tau, lwork));
 }
 catch(...)
 {
@@ -629,14 +679,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungqr_bufferSize((cusolverDnHandle_t)handle,
-                                                                  m,
-                                                                  n,
-                                                                  k,
-                                                                  (cuDoubleComplex*)A,
-                                                                  lda,
-                                                                  (cuDoubleComplex*)tau,
-                                                                  lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungqr_bufferSize(
+        dn->handle, m, n, k, (cuDoubleComplex*)A, lda, (cuDoubleComplex*)tau, lwork));
 }
 catch(...)
 {
@@ -658,8 +703,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSorgqr((cusolverDnHandle_t)handle, m, n, k, A, lda, tau, work, lwork, devInfo));
+        cusolverDnSorgqr(dn->handle, m, n, k, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -681,8 +727,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDorgqr((cusolverDnHandle_t)handle, m, n, k, A, lda, tau, work, lwork, devInfo));
+        cusolverDnDorgqr(dn->handle, m, n, k, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -704,7 +751,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCungqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCungqr(dn->handle,
                                                        m,
                                                        n,
                                                        k,
@@ -735,7 +783,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungqr(dn->handle,
                                                        m,
                                                        n,
                                                        k,
@@ -764,8 +813,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnSorgtr_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -784,8 +834,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnDorgtr_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, lwork));
 }
 catch(...)
 {
@@ -804,13 +855,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCungtr_bufferSize((cusolverDnHandle_t)handle,
-                                                                  hipsolver::hip2cuda_fill(uplo),
-                                                                  n,
-                                                                  (cuComplex*)A,
-                                                                  lda,
-                                                                  (cuComplex*)tau,
-                                                                  lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCungtr_bufferSize(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex*)A, lda, (cuComplex*)tau, lwork));
 }
 catch(...)
 {
@@ -829,7 +876,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungtr_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungtr_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
                                                                   (cuDoubleComplex*)A,
@@ -856,15 +904,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSorgtr((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSorgtr(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -885,15 +927,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDorgtr((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDorgtr(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -914,7 +950,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCungtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCungtr(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuComplex*)A,
@@ -943,7 +980,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZungtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZungtr(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -976,8 +1014,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSormqr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSormqr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_operation(trans),
                                     m,
@@ -1012,8 +1051,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDormqr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDormqr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_operation(trans),
                                     m,
@@ -1048,8 +1088,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCunmqr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCunmqr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_operation(trans),
                                     m,
@@ -1084,8 +1125,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZunmqr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZunmqr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_operation(trans),
                                     m,
@@ -1122,7 +1164,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSormqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSormqr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_operation(trans),
                                                        m,
@@ -1161,7 +1204,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDormqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDormqr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_operation(trans),
                                                        m,
@@ -1200,7 +1244,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCunmqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCunmqr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_operation(trans),
                                                        m,
@@ -1239,7 +1284,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZunmqr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZunmqr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_operation(trans),
                                                        m,
@@ -1277,8 +1323,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSormtr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSormtr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_fill(uplo),
                                     hipsolver::hip2cuda_operation(trans),
@@ -1313,8 +1360,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDormtr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDormtr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_fill(uplo),
                                     hipsolver::hip2cuda_operation(trans),
@@ -1349,8 +1397,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCunmtr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCunmtr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_fill(uplo),
                                     hipsolver::hip2cuda_operation(trans),
@@ -1385,8 +1434,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZunmtr_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZunmtr_bufferSize(dn->handle,
                                     hipsolver::hip2cuda_side(side),
                                     hipsolver::hip2cuda_fill(uplo),
                                     hipsolver::hip2cuda_operation(trans),
@@ -1423,7 +1473,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSormtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSormtr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        hipsolver::hip2cuda_operation(trans),
@@ -1462,7 +1513,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDormtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDormtr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        hipsolver::hip2cuda_operation(trans),
@@ -1501,7 +1553,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCunmtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCunmtr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        hipsolver::hip2cuda_operation(trans),
@@ -1540,7 +1593,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZunmtr((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZunmtr(dn->handle,
                                                        hipsolver::hip2cuda_side(side),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        hipsolver::hip2cuda_operation(trans),
@@ -1567,8 +1621,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgebrd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgebrd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -1581,8 +1635,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnDgebrd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgebrd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -1595,8 +1649,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnCgebrd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgebrd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -1609,8 +1663,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnZgebrd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgebrd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -1634,8 +1688,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgebrd(
-        (cusolverDnHandle_t)handle, m, n, A, lda, D, E, tauq, taup, work, lwork, devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnSgebrd(dn->handle, m, n, A, lda, D, E, tauq, taup, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -1659,8 +1714,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgebrd(
-        (cusolverDnHandle_t)handle, m, n, A, lda, D, E, tauq, taup, work, lwork, devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnDgebrd(dn->handle, m, n, A, lda, D, E, tauq, taup, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -1684,7 +1740,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgebrd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgebrd(dn->handle,
                                                        m,
                                                        n,
                                                        (cuComplex*)A,
@@ -1719,7 +1776,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgebrd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgebrd(dn->handle,
                                                        m,
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -1754,8 +1812,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnSSgels_bufferSize(
-        (cusolverDnHandle_t)handle, m, n, nrhs, A, lda, B, ldb, X, ldx, nullptr, lwork));
+        dn->handle, m, n, nrhs, A, lda, B, ldb, X, ldx, nullptr, lwork));
 }
 catch(...)
 {
@@ -1778,8 +1837,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnDDgels_bufferSize(
-        (cusolverDnHandle_t)handle, m, n, nrhs, A, lda, B, ldb, X, ldx, nullptr, lwork));
+        dn->handle, m, n, nrhs, A, lda, B, ldb, X, ldx, nullptr, lwork));
 }
 catch(...)
 {
@@ -1802,7 +1862,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCCgels_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCCgels_bufferSize(dn->handle,
                                                                   m,
                                                                   n,
                                                                   nrhs,
@@ -1836,7 +1897,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZZgels_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZZgels_bufferSize(dn->handle,
                                                                   m,
                                                                   n,
                                                                   nrhs,
@@ -1873,20 +1935,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSSgels((cusolverDnHandle_t)handle,
-                                                       m,
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       B,
-                                                       ldb,
-                                                       X,
-                                                       ldx,
-                                                       work,
-                                                       lwork,
-                                                       niters,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSSgels(
+        dn->handle, m, n, nrhs, A, lda, B, ldb, X, ldx, work, lwork, niters, devInfo));
 }
 catch(...)
 {
@@ -1912,20 +1963,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDDgels((cusolverDnHandle_t)handle,
-                                                       m,
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       B,
-                                                       ldb,
-                                                       X,
-                                                       ldx,
-                                                       work,
-                                                       lwork,
-                                                       niters,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDDgels(
+        dn->handle, m, n, nrhs, A, lda, B, ldb, X, ldx, work, lwork, niters, devInfo));
 }
 catch(...)
 {
@@ -1951,7 +1991,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCCgels((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCCgels(dn->handle,
                                                        m,
                                                        n,
                                                        nrhs,
@@ -1990,7 +2031,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZZgels((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZZgels(dn->handle,
                                                        m,
                                                        n,
                                                        nrhs,
@@ -2010,6 +2052,387 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** GELS_BATCHED ********************/
+hipsolverStatus_t hipsolverSgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   float*               A[],
+                                                   int                  lda,
+                                                   float*               C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(m < 0 || n < 0 || nrhs < 0 || lda < m || ldc < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   double*              A[],
+                                                   int                  lda,
+                                                   double*              C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(m < 0 || n < 0 || nrhs < 0 || lda < m || ldc < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   hipFloatComplex*     A[],
+                                                   int                  lda,
+                                                   hipFloatComplex*     C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(m < 0 || n < 0 || nrhs < 0 || lda < m || ldc < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   hipDoubleComplex*    A[],
+                                                   int                  lda,
+                                                   hipDoubleComplex*    C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(m < 0 || n < 0 || nrhs < 0 || lda < m || ldc < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        float*               A[],
+                                        int                  lda,
+                                        float*               C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasSgelsBatched(dn->blas_handle,
+                                                         CUBLAS_OP_N,
+                                                         m,
+                                                         n,
+                                                         nrhs,
+                                                         (float* const*)A,
+                                                         lda,
+                                                         (float**)C,
+                                                         ldc,
+                                                         &info,
+                                                         devInfo,
+                                                         batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        double*              A[],
+                                        int                  lda,
+                                        double*              C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasDgelsBatched(dn->blas_handle,
+                                                         CUBLAS_OP_N,
+                                                         m,
+                                                         n,
+                                                         nrhs,
+                                                         (double* const*)A,
+                                                         lda,
+                                                         (double**)C,
+                                                         ldc,
+                                                         &info,
+                                                         devInfo,
+                                                         batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        hipFloatComplex*     A[],
+                                        int                  lda,
+                                        hipFloatComplex*     C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgelsBatched(dn->blas_handle,
+                                                         CUBLAS_OP_N,
+                                                         m,
+                                                         n,
+                                                         nrhs,
+                                                         (cuComplex* const*)A,
+                                                         lda,
+                                                         (cuComplex**)C,
+                                                         ldc,
+                                                         &info,
+                                                         devInfo,
+                                                         batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        hipDoubleComplex*    A[],
+                                        int                  lda,
+                                        hipDoubleComplex*    C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgelsBatched(dn->blas_handle,
+                                                         CUBLAS_OP_N,
+                                                         m,
+                                                         n,
+                                                         nrhs,
+                                                         (cuDoubleComplex* const*)A,
+                                                         lda,
+                                                         (cuDoubleComplex**)C,
+                                                         ldc,
+                                                         &info,
+                                                         devInfo,
+                                                         batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 /******************** GEQRF ********************/
 hipsolverStatus_t hipsolverSgeqrf_bufferSize(
     hipsolverHandle_t handle, int m, int n, float* A, int lda, int* lwork)
@@ -2018,8 +2441,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgeqrf_bufferSize((cusolverDnHandle_t)handle, m, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgeqrf_bufferSize(dn->handle, m, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -2033,8 +2456,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnDgeqrf_bufferSize((cusolverDnHandle_t)handle, m, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgeqrf_bufferSize(dn->handle, m, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -2048,8 +2471,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCgeqrf_bufferSize((cusolverDnHandle_t)handle, m, n, (cuComplex*)A, lda, lwork));
+        cusolverDnCgeqrf_bufferSize(dn->handle, m, n, (cuComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -2063,8 +2487,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgeqrf_bufferSize(
-        (cusolverDnHandle_t)handle, m, n, (cuDoubleComplex*)A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnZgeqrf_bufferSize(dn->handle, m, n, (cuDoubleComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -2085,8 +2510,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSgeqrf((cusolverDnHandle_t)handle, m, n, A, lda, tau, work, lwork, devInfo));
+        cusolverDnSgeqrf(dn->handle, m, n, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -2107,8 +2533,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDgeqrf((cusolverDnHandle_t)handle, m, n, A, lda, tau, work, lwork, devInfo));
+        cusolverDnDgeqrf(dn->handle, m, n, A, lda, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -2129,15 +2556,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgeqrf((cusolverDnHandle_t)handle,
-                                                       m,
-                                                       n,
-                                                       (cuComplex*)A,
-                                                       lda,
-                                                       (cuComplex*)tau,
-                                                       (cuComplex*)work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgeqrf(
+        dn->handle, m, n, (cuComplex*)A, lda, (cuComplex*)tau, (cuComplex*)work, lwork, devInfo));
 }
 catch(...)
 {
@@ -2158,7 +2579,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgeqrf((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgeqrf(dn->handle,
                                                        m,
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -2167,6 +2589,271 @@ try
                                                        (cuDoubleComplex*)work,
                                                        lwork,
                                                        devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** GEQRF_BATCHED ********************/
+hipsolverStatus_t hipsolverSgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, float* A[], int lda, size_t* lwork, int batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, double* A[], int lda, size_t* lwork, int batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipFloatComplex*  A[],
+                                                    int               lda,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipDoubleComplex* A[],
+                                                    int               lda,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         float*            A[],
+                                         int               lda,
+                                         float*            tau[],
+                                         float*            work,
+                                         size_t            lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasSgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         double*           A[],
+                                         int               lda,
+                                         double*           tau[],
+                                         double*           work,
+                                         size_t            lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasDgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipFloatComplex*  A[],
+                                         int               lda,
+                                         hipFloatComplex*  tau[],
+                                         hipFloatComplex*  work,
+                                         size_t            lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgeqrfBatched(
+        dn->blas_handle, m, n, (cuComplex**)A, lda, (cuComplex**)tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipDoubleComplex* A[],
+                                         int               lda,
+                                         hipDoubleComplex* tau[],
+                                         hipDoubleComplex* work,
+                                         size_t            lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgeqrfBatched(dn->blas_handle,
+                                                          m,
+                                                          n,
+                                                          (cuDoubleComplex**)A,
+                                                          lda,
+                                                          (cuDoubleComplex**)tau,
+                                                          &info,
+                                                          batch_count));
 }
 catch(...)
 {
@@ -2190,8 +2877,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnSSgesv_bufferSize(
-        (cusolverDnHandle_t)handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, nullptr, lwork));
+        dn->handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, nullptr, lwork));
 }
 catch(...)
 {
@@ -2214,8 +2902,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnDDgesv_bufferSize(
-        (cusolverDnHandle_t)handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, nullptr, lwork));
+        dn->handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, nullptr, lwork));
 }
 catch(...)
 {
@@ -2238,7 +2927,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCCgesv_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCCgesv_bufferSize(dn->handle,
                                                                   n,
                                                                   nrhs,
                                                                   (cuComplex*)A,
@@ -2272,7 +2962,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZZgesv_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZZgesv_bufferSize(dn->handle,
                                                                   n,
                                                                   nrhs,
                                                                   (cuDoubleComplex*)A,
@@ -2309,20 +3000,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSSgesv((cusolverDnHandle_t)handle,
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       devIpiv,
-                                                       B,
-                                                       ldb,
-                                                       X,
-                                                       ldx,
-                                                       work,
-                                                       lwork,
-                                                       niters,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSSgesv(
+        dn->handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, work, lwork, niters, devInfo));
 }
 catch(...)
 {
@@ -2348,20 +3028,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDDgesv((cusolverDnHandle_t)handle,
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       devIpiv,
-                                                       B,
-                                                       ldb,
-                                                       X,
-                                                       ldx,
-                                                       work,
-                                                       lwork,
-                                                       niters,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDDgesv(
+        dn->handle, n, nrhs, A, lda, devIpiv, B, ldb, X, ldx, work, lwork, niters, devInfo));
 }
 catch(...)
 {
@@ -2387,7 +3056,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCCgesv((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCCgesv(dn->handle,
                                                        n,
                                                        nrhs,
                                                        (cuComplex*)A,
@@ -2426,7 +3096,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZZgesv((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZZgesv(dn->handle,
                                                        n,
                                                        nrhs,
                                                        (cuDoubleComplex*)A,
@@ -2454,8 +3125,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgesvd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -2469,8 +3140,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgesvd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -2484,8 +3155,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgesvd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -2499,8 +3170,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgesvd_bufferSize((cusolverDnHandle_t)handle, m, n, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvd_bufferSize(dn->handle, m, n, lwork));
 }
 catch(...)
 {
@@ -2528,22 +3199,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgesvd((cusolverDnHandle_t)handle,
-                                                       jobu,
-                                                       jobv,
-                                                       m,
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       S,
-                                                       U,
-                                                       ldu,
-                                                       V,
-                                                       ldv,
-                                                       work,
-                                                       lwork,
-                                                       rwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvd(
+        dn->handle, jobu, jobv, m, n, A, lda, S, U, ldu, V, ldv, work, lwork, rwork, devInfo));
 }
 catch(...)
 {
@@ -2571,22 +3229,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgesvd((cusolverDnHandle_t)handle,
-                                                       jobu,
-                                                       jobv,
-                                                       m,
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       S,
-                                                       U,
-                                                       ldu,
-                                                       V,
-                                                       ldv,
-                                                       work,
-                                                       lwork,
-                                                       rwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgesvd(
+        dn->handle, jobu, jobv, m, n, A, lda, S, U, ldu, V, ldv, work, lwork, rwork, devInfo));
 }
 catch(...)
 {
@@ -2614,7 +3259,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgesvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgesvd(dn->handle,
                                                        jobu,
                                                        jobv,
                                                        m,
@@ -2657,7 +3303,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgesvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgesvd(dn->handle,
                                                        jobu,
                                                        jobv,
                                                        m,
@@ -2701,7 +3348,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgesvdj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvdj_bufferSize(dn->handle,
                                                                    hipsolver::hip2cuda_evect(jobz),
                                                                    econ,
                                                                    m,
@@ -2742,7 +3390,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgesvdj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgesvdj_bufferSize(dn->handle,
                                                                    hipsolver::hip2cuda_evect(jobz),
                                                                    econ,
                                                                    m,
@@ -2783,7 +3432,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgesvdj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgesvdj_bufferSize(dn->handle,
                                                                    hipsolver::hip2cuda_evect(jobz),
                                                                    econ,
                                                                    m,
@@ -2824,7 +3474,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgesvdj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgesvdj_bufferSize(dn->handle,
                                                                    hipsolver::hip2cuda_evect(jobz),
                                                                    econ,
                                                                    m,
@@ -2867,7 +3518,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgesvdj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvdj(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         econ,
                                                         m,
@@ -2912,7 +3564,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgesvdj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgesvdj(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         econ,
                                                         m,
@@ -2957,7 +3610,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgesvdj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgesvdj(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         econ,
                                                         m,
@@ -3002,7 +3656,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgesvdj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgesvdj(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         econ,
                                                         m,
@@ -3046,8 +3701,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSgesvdjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSgesvdjBatched_bufferSize(dn->handle,
                                             hipsolver::hip2cuda_evect(jobz),
                                             m,
                                             n,
@@ -3088,8 +3744,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDgesvdjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDgesvdjBatched_bufferSize(dn->handle,
                                             hipsolver::hip2cuda_evect(jobz),
                                             m,
                                             n,
@@ -3130,8 +3787,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCgesvdjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCgesvdjBatched_bufferSize(dn->handle,
                                             hipsolver::hip2cuda_evect(jobz),
                                             m,
                                             n,
@@ -3172,8 +3830,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZgesvdjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZgesvdjBatched_bufferSize(dn->handle,
                                             hipsolver::hip2cuda_evect(jobz),
                                             m,
                                             n,
@@ -3216,7 +3875,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgesvdjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgesvdjBatched(dn->handle,
                                                                hipsolver::hip2cuda_evect(jobz),
                                                                m,
                                                                n,
@@ -3261,7 +3921,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgesvdjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgesvdjBatched(dn->handle,
                                                                hipsolver::hip2cuda_evect(jobz),
                                                                m,
                                                                n,
@@ -3306,7 +3967,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgesvdjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgesvdjBatched(dn->handle,
                                                                hipsolver::hip2cuda_evect(jobz),
                                                                m,
                                                                n,
@@ -3351,7 +4013,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgesvdjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgesvdjBatched(dn->handle,
                                                                hipsolver::hip2cuda_evect(jobz),
                                                                m,
                                                                n,
@@ -3397,8 +4060,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSgesvdaStridedBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSgesvdaStridedBatched_bufferSize(dn->handle,
                                                    hipsolver::hip2cuda_evect(jobz),
                                                    rank,
                                                    m,
@@ -3445,8 +4109,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDgesvdaStridedBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDgesvdaStridedBatched_bufferSize(dn->handle,
                                                    hipsolver::hip2cuda_evect(jobz),
                                                    rank,
                                                    m,
@@ -3493,8 +4158,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCgesvdaStridedBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCgesvdaStridedBatched_bufferSize(dn->handle,
                                                    hipsolver::hip2cuda_evect(jobz),
                                                    rank,
                                                    m,
@@ -3541,8 +4207,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZgesvdaStridedBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZgesvdaStridedBatched_bufferSize(dn->handle,
                                                    hipsolver::hip2cuda_evect(jobz),
                                                    rank,
                                                    m,
@@ -3592,8 +4259,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSgesvdaStridedBatched((cusolverDnHandle_t)handle,
+        cusolverDnSgesvdaStridedBatched(dn->handle,
                                         hipsolver::hip2cuda_evect(jobz),
                                         rank,
                                         m,
@@ -3646,8 +4314,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDgesvdaStridedBatched((cusolverDnHandle_t)handle,
+        cusolverDnDgesvdaStridedBatched(dn->handle,
                                         hipsolver::hip2cuda_evect(jobz),
                                         rank,
                                         m,
@@ -3700,8 +4369,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCgesvdaStridedBatched((cusolverDnHandle_t)handle,
+        cusolverDnCgesvdaStridedBatched(dn->handle,
                                         hipsolver::hip2cuda_evect(jobz),
                                         rank,
                                         m,
@@ -3754,8 +4424,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZgesvdaStridedBatched((cusolverDnHandle_t)handle,
+        cusolverDnZgesvdaStridedBatched(dn->handle,
                                         hipsolver::hip2cuda_evect(jobz),
                                         rank,
                                         m,
@@ -3790,8 +4461,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSgetrf_bufferSize((cusolverDnHandle_t)handle, m, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgetrf_bufferSize(dn->handle, m, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -3805,8 +4476,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnDgetrf_bufferSize((cusolverDnHandle_t)handle, m, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgetrf_bufferSize(dn->handle, m, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -3820,8 +4491,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCgetrf_bufferSize((cusolverDnHandle_t)handle, m, n, (cuComplex*)A, lda, lwork));
+        cusolverDnCgetrf_bufferSize(dn->handle, m, n, (cuComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -3835,8 +4507,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgetrf_bufferSize(
-        (cusolverDnHandle_t)handle, m, n, (cuDoubleComplex*)A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnZgetrf_bufferSize(dn->handle, m, n, (cuDoubleComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -3857,8 +4530,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSgetrf((cusolverDnHandle_t)handle, m, n, A, lda, work, devIpiv, devInfo));
+        cusolverDnSgetrf(dn->handle, m, n, A, lda, work, devIpiv, devInfo));
 }
 catch(...)
 {
@@ -3879,8 +4553,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDgetrf((cusolverDnHandle_t)handle, m, n, A, lda, work, devIpiv, devInfo));
+        cusolverDnDgetrf(dn->handle, m, n, A, lda, work, devIpiv, devInfo));
 }
 catch(...)
 {
@@ -3901,8 +4576,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgetrf(
-        (cusolverDnHandle_t)handle, m, n, (cuComplex*)A, lda, (cuComplex*)work, devIpiv, devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnCgetrf(dn->handle, m, n, (cuComplex*)A, lda, (cuComplex*)work, devIpiv, devInfo));
 }
 catch(...)
 {
@@ -3923,14 +4599,461 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgetrf((cusolverDnHandle_t)handle,
-                                                       m,
-                                                       n,
-                                                       (cuDoubleComplex*)A,
-                                                       lda,
-                                                       (cuDoubleComplex*)work,
-                                                       devIpiv,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgetrf(
+        dn->handle, m, n, (cuDoubleComplex*)A, lda, (cuDoubleComplex*)work, devIpiv, devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** GETRF_BATCHED ********************/
+hipsolverStatus_t hipsolverSgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    float*            A[],
+                                                    int               lda,
+                                                    int               strideP,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    double*           A[],
+                                                    int               lda,
+                                                    int               strideP,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipFloatComplex*  A[],
+                                                    int               lda,
+                                                    int               strideP,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipDoubleComplex* A[],
+                                                    int               lda,
+                                                    int               strideP,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgetrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         float*            A[],
+                                         int               lda,
+                                         float*            work,
+                                         size_t            lwork,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasSgetrfBatched(dn->blas_handle, n, A, lda, devIpiv, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         double*           A[],
+                                         int               lda,
+                                         double*           work,
+                                         size_t            lwork,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasDgetrfBatched(dn->blas_handle, n, A, lda, devIpiv, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipFloatComplex*  A[],
+                                         int               lda,
+                                         hipFloatComplex*  work,
+                                         size_t            lwork,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgetrfBatched(
+        dn->blas_handle, n, (cuComplex**)A, lda, devIpiv, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipDoubleComplex* A[],
+                                         int               lda,
+                                         hipDoubleComplex* work,
+                                         size_t            lwork,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(m != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgetrfBatched(
+        dn->blas_handle, n, (cuDoubleComplex**)A, lda, devIpiv, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** GETRI_BATCHED ********************/
+hipsolverStatus_t hipsolverSgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               n,
+                                                    float*            A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    float*            C[],
+                                                    int               ldc,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               n,
+                                                    double*           A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    double*           C[],
+                                                    int               ldc,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               n,
+                                                    hipFloatComplex*  A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    hipFloatComplex*  C[],
+                                                    int               ldc,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               n,
+                                                    hipDoubleComplex* A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    hipDoubleComplex* C[],
+                                                    int               ldc,
+                                                    size_t*           lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgetriBatched(hipsolverHandle_t handle,
+                                         int               n,
+                                         float*            A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         float*            C[],
+                                         int               ldc,
+                                         float*            work,
+                                         size_t            lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasSgetriBatched(dn->blas_handle, n, A, lda, devIpiv, C, ldc, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetriBatched(hipsolverHandle_t handle,
+                                         int               n,
+                                         double*           A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         double*           C[],
+                                         int               ldc,
+                                         double*           work,
+                                         size_t            lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasDgetriBatched(dn->blas_handle, n, A, lda, devIpiv, C, ldc, devInfo, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetriBatched(hipsolverHandle_t handle,
+                                         int               n,
+                                         hipFloatComplex*  A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         hipFloatComplex*  C[],
+                                         int               ldc,
+                                         hipFloatComplex*  work,
+                                         size_t            lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgetriBatched(dn->blas_handle,
+                                                          n,
+                                                          (cuFloatComplex**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          (cuFloatComplex**)C,
+                                                          ldc,
+                                                          devInfo,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetriBatched(hipsolverHandle_t handle,
+                                         int               n,
+                                         hipDoubleComplex* A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         hipDoubleComplex* C[],
+                                         int               ldc,
+                                         hipDoubleComplex* work,
+                                         size_t            lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(devIpiv && strideP != n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgetriBatched(dn->blas_handle,
+                                                          n,
+                                                          (cuDoubleComplex**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          (cuDoubleComplex**)C,
+                                                          ldc,
+                                                          devInfo,
+                                                          batch_count));
 }
 catch(...)
 {
@@ -4055,7 +5178,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSgetrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSgetrs(dn->handle,
                                                        hipsolver::hip2cuda_operation(trans),
                                                        n,
                                                        nrhs,
@@ -4088,7 +5212,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDgetrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDgetrs(dn->handle,
                                                        hipsolver::hip2cuda_operation(trans),
                                                        n,
                                                        nrhs,
@@ -4121,7 +5246,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCgetrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCgetrs(dn->handle,
                                                        hipsolver::hip2cuda_operation(trans),
                                                        n,
                                                        nrhs,
@@ -4154,7 +5280,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZgetrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZgetrs(dn->handle,
                                                        hipsolver::hip2cuda_operation(trans),
                                                        n,
                                                        nrhs,
@@ -4170,6 +5297,391 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** GETRS_BATCHED ********************/
+hipsolverStatus_t hipsolverSgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    float*               A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  strideP,
+                                                    float*               B[],
+                                                    int                  ldb,
+                                                    size_t*              lwork,
+                                                    int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    double*              A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  strideP,
+                                                    double*              B[],
+                                                    int                  ldb,
+                                                    size_t*              lwork,
+                                                    int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    hipFloatComplex*     A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  strideP,
+                                                    hipFloatComplex*     B[],
+                                                    int                  ldb,
+                                                    size_t*              lwork,
+                                                    int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    hipDoubleComplex*    A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  strideP,
+                                                    hipDoubleComplex*    B[],
+                                                    int                  ldb,
+                                                    size_t*              lwork,
+                                                    int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    handle,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         float*               A[],
+                                         int                  lda,
+                                         int*                 devIpiv,
+                                         int                  strideP,
+                                         float*               B[],
+                                         int                  ldb,
+                                         float*               work,
+                                         size_t               lwork,
+                                         int*                 hInfo,
+                                         int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n && batch_count > 0)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(devIpiv && strideP != n && batch_count > 0)
+    {
+        *hInfo = -7;
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs && batch_count > 0)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasSgetrsBatched(dn->blas_handle,
+                                                          hipsolver::hip2cuda_operation(trans),
+                                                          n,
+                                                          nrhs,
+                                                          (const float**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          B,
+                                                          ldb,
+                                                          &info,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         double*              A[],
+                                         int                  lda,
+                                         int*                 devIpiv,
+                                         int                  strideP,
+                                         double*              B[],
+                                         int                  ldb,
+                                         double*              work,
+                                         size_t               lwork,
+                                         int*                 hInfo,
+                                         int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n && batch_count > 0)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(devIpiv && strideP != n && batch_count > 0)
+    {
+        *hInfo = -7;
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs && batch_count > 0)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasDgetrsBatched(dn->blas_handle,
+                                                          hipsolver::hip2cuda_operation(trans),
+                                                          n,
+                                                          nrhs,
+                                                          (const double**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          B,
+                                                          ldb,
+                                                          &info,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         hipFloatComplex*     A[],
+                                         int                  lda,
+                                         int*                 devIpiv,
+                                         int                  strideP,
+                                         hipFloatComplex*     B[],
+                                         int                  ldb,
+                                         hipFloatComplex*     work,
+                                         size_t               lwork,
+                                         int*                 hInfo,
+                                         int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n && batch_count > 0)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(devIpiv && strideP != n && batch_count > 0)
+    {
+        *hInfo = -7;
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs && batch_count > 0)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgetrsBatched(dn->blas_handle,
+                                                          hipsolver::hip2cuda_operation(trans),
+                                                          n,
+                                                          nrhs,
+                                                          (const cuComplex**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          (cuComplex**)B,
+                                                          ldb,
+                                                          &info,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         hipDoubleComplex*    A[],
+                                         int                  lda,
+                                         int*                 devIpiv,
+                                         int                  strideP,
+                                         hipDoubleComplex*    B[],
+                                         int                  ldb,
+                                         hipDoubleComplex*    work,
+                                         size_t               lwork,
+                                         int*                 hInfo,
+                                         int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n && batch_count > 0)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(devIpiv && strideP != n && batch_count > 0)
+    {
+        *hInfo = -7;
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs && batch_count > 0)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgetrsBatched(dn->blas_handle,
+                                                          hipsolver::hip2cuda_operation(trans),
+                                                          n,
+                                                          nrhs,
+                                                          (const cuDoubleComplex**)A,
+                                                          lda,
+                                                          devIpiv,
+                                                          (cuDoubleComplex**)B,
+                                                          ldb,
+                                                          &info,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 /******************** POTRF ********************/
 hipsolverStatus_t hipsolverSpotrf_bufferSize(
     hipsolverHandle_t handle, hipsolverFillMode_t uplo, int n, float* A, int lda, int* lwork)
@@ -4178,8 +5690,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotrf_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnSpotrf_bufferSize(dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
 }
 catch(...)
 {
@@ -4193,8 +5706,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotrf_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnDpotrf_bufferSize(dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
 }
 catch(...)
 {
@@ -4212,8 +5726,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnCpotrf_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex*)A, lda, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -4231,12 +5746,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotrf_bufferSize((cusolverDnHandle_t)handle,
-                                                                  hipsolver::hip2cuda_fill(uplo),
-                                                                  n,
-                                                                  (cuDoubleComplex*)A,
-                                                                  lda,
-                                                                  lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotrf_bufferSize(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuDoubleComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -4256,14 +5768,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotrf((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSpotrf(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -4283,14 +5790,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotrf((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDpotrf(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -4310,7 +5812,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCpotrf((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCpotrf(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuComplex*)A,
@@ -4337,7 +5840,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotrf((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotrf(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -4454,13 +5958,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotrfBatched((cusolverDnHandle_t)handle,
-                                                              hipsolver::hip2cuda_fill(uplo),
-                                                              n,
-                                                              A,
-                                                              lda,
-                                                              devInfo,
-                                                              batch_count));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSpotrfBatched(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, devInfo, batch_count));
 }
 catch(...)
 {
@@ -4481,13 +5981,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotrfBatched((cusolverDnHandle_t)handle,
-                                                              hipsolver::hip2cuda_fill(uplo),
-                                                              n,
-                                                              A,
-                                                              lda,
-                                                              devInfo,
-                                                              batch_count));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDpotrfBatched(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, devInfo, batch_count));
 }
 catch(...)
 {
@@ -4508,13 +6004,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCpotrfBatched((cusolverDnHandle_t)handle,
-                                                              hipsolver::hip2cuda_fill(uplo),
-                                                              n,
-                                                              (cuComplex**)A,
-                                                              lda,
-                                                              devInfo,
-                                                              batch_count));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCpotrfBatched(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex**)A, lda, devInfo, batch_count));
 }
 catch(...)
 {
@@ -4535,7 +6027,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotrfBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotrfBatched(dn->handle,
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
                                                               (cuDoubleComplex**)A,
@@ -4556,8 +6049,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotri_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnSpotri_bufferSize(dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
 }
 catch(...)
 {
@@ -4571,8 +6065,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotri_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnDpotri_bufferSize(dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, lwork));
 }
 catch(...)
 {
@@ -4590,8 +6085,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnCpotri_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex*)A, lda, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -4609,12 +6105,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotri_bufferSize((cusolverDnHandle_t)handle,
-                                                                  hipsolver::hip2cuda_fill(uplo),
-                                                                  n,
-                                                                  (cuDoubleComplex*)A,
-                                                                  lda,
-                                                                  lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotri_bufferSize(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, (cuDoubleComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -4634,14 +6127,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotri((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSpotri(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -4661,14 +6149,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotri((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDpotri(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -4688,7 +6171,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCpotri((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCpotri(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuComplex*)A,
@@ -4715,7 +6199,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotri((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotri(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -4842,15 +6327,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotrs((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       B,
-                                                       ldb,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSpotrs(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, nrhs, A, lda, B, ldb, devInfo));
 }
 catch(...)
 {
@@ -4873,15 +6352,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotrs((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       nrhs,
-                                                       A,
-                                                       lda,
-                                                       B,
-                                                       ldb,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDpotrs(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, nrhs, A, lda, B, ldb, devInfo));
 }
 catch(...)
 {
@@ -4904,7 +6377,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCpotrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCpotrs(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        nrhs,
@@ -4935,7 +6409,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotrs((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotrs(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        nrhs,
@@ -5068,16 +6543,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSpotrsBatched((cusolverDnHandle_t)handle,
-                                                              hipsolver::hip2cuda_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              A,
-                                                              lda,
-                                                              B,
-                                                              ldb,
-                                                              devInfo,
-                                                              batch_count));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSpotrsBatched(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, nrhs, A, lda, B, ldb, devInfo, batch_count));
 }
 catch(...)
 {
@@ -5101,16 +6569,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDpotrsBatched((cusolverDnHandle_t)handle,
-                                                              hipsolver::hip2cuda_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              A,
-                                                              lda,
-                                                              B,
-                                                              ldb,
-                                                              devInfo,
-                                                              batch_count));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDpotrsBatched(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, nrhs, A, lda, B, ldb, devInfo, batch_count));
 }
 catch(...)
 {
@@ -5134,7 +6595,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCpotrsBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCpotrsBatched(dn->handle,
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
                                                               nrhs,
@@ -5167,7 +6629,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZpotrsBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZpotrsBatched(dn->handle,
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
                                                               nrhs,
@@ -5197,7 +6660,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5224,7 +6688,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5251,7 +6716,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5278,7 +6744,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5307,7 +6774,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevd(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5338,7 +6806,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevd(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5369,7 +6838,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevd(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5400,7 +6870,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevd(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5436,8 +6907,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSsyevdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSsyevdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
                                      hipsolver::hip2cuda_fill(uplo),
@@ -5476,8 +6948,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDsyevdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDsyevdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
                                      hipsolver::hip2cuda_fill(uplo),
@@ -5516,8 +6989,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCheevdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCheevdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
                                      hipsolver::hip2cuda_fill(uplo),
@@ -5556,8 +7030,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZheevdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZheevdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
                                      hipsolver::hip2cuda_fill(uplo),
@@ -5598,7 +7073,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevdx(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
                                                         hipsolver::hip2cuda_fill(uplo),
@@ -5641,7 +7117,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevdx(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
                                                         hipsolver::hip2cuda_fill(uplo),
@@ -5684,7 +7161,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevdx(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
                                                         hipsolver::hip2cuda_fill(uplo),
@@ -5727,7 +7205,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevdx(dn->handle,
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
                                                         hipsolver::hip2cuda_fill(uplo),
@@ -5766,7 +7245,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5797,7 +7277,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5828,7 +7309,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5859,7 +7341,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
@@ -5892,7 +7375,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevj(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5927,7 +7411,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevj(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5962,7 +7447,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevj(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -5997,7 +7483,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevj(dn->handle,
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
@@ -6032,8 +7519,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSsyevjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSsyevjBatched_bufferSize(dn->handle,
                                            hipsolver::hip2cuda_evect(jobz),
                                            hipsolver::hip2cuda_fill(uplo),
                                            n,
@@ -6066,8 +7554,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDsyevjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDsyevjBatched_bufferSize(dn->handle,
                                            hipsolver::hip2cuda_evect(jobz),
                                            hipsolver::hip2cuda_fill(uplo),
                                            n,
@@ -6100,8 +7589,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCheevjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnCheevjBatched_bufferSize(dn->handle,
                                            hipsolver::hip2cuda_evect(jobz),
                                            hipsolver::hip2cuda_fill(uplo),
                                            n,
@@ -6134,8 +7624,9 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZheevjBatched_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZheevjBatched_bufferSize(dn->handle,
                                            hipsolver::hip2cuda_evect(jobz),
                                            hipsolver::hip2cuda_fill(uplo),
                                            n,
@@ -6170,7 +7661,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsyevjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsyevjBatched(dn->handle,
                                                               hipsolver::hip2cuda_evect(jobz),
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
@@ -6207,7 +7699,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsyevjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsyevjBatched(dn->handle,
                                                               hipsolver::hip2cuda_evect(jobz),
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
@@ -6244,7 +7737,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnCheevjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCheevjBatched(dn->handle,
                                                               hipsolver::hip2cuda_evect(jobz),
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
@@ -6281,7 +7775,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZheevjBatched((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZheevjBatched(dn->handle,
                                                               hipsolver::hip2cuda_evect(jobz),
                                                               hipsolver::hip2cuda_fill(uplo),
                                                               n,
@@ -6316,7 +7811,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsygvd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsygvd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -6349,7 +7845,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsygvd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsygvd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -6382,7 +7879,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnChegvd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChegvd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -6415,7 +7913,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhegvd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhegvd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -6450,7 +7949,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsygvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsygvd(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -6487,7 +7987,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsygvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsygvd(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -6524,7 +8025,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnChegvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChegvd(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -6561,7 +8063,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhegvd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhegvd(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -6603,8 +8106,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnSsygvdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnSsygvdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_eform(itype),
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
@@ -6649,8 +8153,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnDsygvdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnDsygvdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_eform(itype),
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
@@ -6695,8 +8200,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnChegvdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnChegvdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_eform(itype),
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
@@ -6741,8 +8247,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnZhegvdx_bufferSize((cusolverDnHandle_t)handle,
+        cusolverDnZhegvdx_bufferSize(dn->handle,
                                      hipsolver::hip2cuda_eform(itype),
                                      hipsolver::hip2cuda_evect(jobz),
                                      hipsolver::hip2cuda_erange(range),
@@ -6789,7 +8296,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsygvdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsygvdx(dn->handle,
                                                         hipsolver::hip2cuda_eform(itype),
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
@@ -6838,7 +8346,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsygvdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsygvdx(dn->handle,
                                                         hipsolver::hip2cuda_eform(itype),
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
@@ -6887,7 +8396,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnChegvdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChegvdx(dn->handle,
                                                         hipsolver::hip2cuda_eform(itype),
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
@@ -6936,7 +8446,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhegvdx((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhegvdx(dn->handle,
                                                         hipsolver::hip2cuda_eform(itype),
                                                         hipsolver::hip2cuda_evect(jobz),
                                                         hipsolver::hip2cuda_erange(range),
@@ -6981,7 +8492,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsygvj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsygvj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -7018,7 +8530,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsygvj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsygvj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -7055,7 +8568,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnChegvj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChegvj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -7092,7 +8606,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhegvj_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhegvj_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_eform(itype),
                                                                   hipsolver::hip2cuda_evect(jobz),
                                                                   hipsolver::hip2cuda_fill(uplo),
@@ -7131,7 +8646,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsygvj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsygvj(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -7172,7 +8688,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsygvj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsygvj(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -7213,7 +8730,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnChegvj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChegvj(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -7254,7 +8772,8 @@ try
     if(!info)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhegvj((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhegvj(dn->handle,
                                                        hipsolver::hip2cuda_eform(itype),
                                                        hipsolver::hip2cuda_evect(jobz),
                                                        hipsolver::hip2cuda_fill(uplo),
@@ -7289,8 +8808,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnSsytrd_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, lwork));
 }
 catch(...)
 {
@@ -7311,8 +8831,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cusolverDnDsytrd_bufferSize(
-        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, lwork));
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, lwork));
 }
 catch(...)
 {
@@ -7333,7 +8854,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnChetrd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChetrd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
                                                                   (cuComplex*)A,
@@ -7362,7 +8884,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhetrd_bufferSize((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhetrd_bufferSize(dn->handle,
                                                                   hipsolver::hip2cuda_fill(uplo),
                                                                   n,
                                                                   (cuDoubleComplex*)A,
@@ -7393,17 +8916,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsytrd((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       D,
-                                                       E,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsytrd(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -7426,17 +8941,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsytrd((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       D,
-                                                       E,
-                                                       tau,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsytrd(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, D, E, tau, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -7459,7 +8966,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnChetrd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnChetrd(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuComplex*)A,
@@ -7492,7 +9000,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZhetrd((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZhetrd(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuDoubleComplex*)A,
@@ -7517,8 +9026,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnSsytrf_bufferSize((cusolverDnHandle_t)handle, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsytrf_bufferSize(dn->handle, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -7532,8 +9041,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cusolverDnDsytrf_bufferSize((cusolverDnHandle_t)handle, n, A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsytrf_bufferSize(dn->handle, n, A, lda, lwork));
 }
 catch(...)
 {
@@ -7547,8 +9056,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cusolverDnCsytrf_bufferSize((cusolverDnHandle_t)handle, n, (cuComplex*)A, lda, lwork));
+        cusolverDnCsytrf_bufferSize(dn->handle, n, (cuComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -7562,8 +9072,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZsytrf_bufferSize(
-        (cusolverDnHandle_t)handle, n, (cuDoubleComplex*)A, lda, lwork));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnZsytrf_bufferSize(dn->handle, n, (cuDoubleComplex*)A, lda, lwork));
 }
 catch(...)
 {
@@ -7584,15 +9095,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnSsytrf((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       ipiv,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnSsytrf(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, ipiv, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -7613,15 +9118,9 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnDsytrf((cusolverDnHandle_t)handle,
-                                                       hipsolver::hip2cuda_fill(uplo),
-                                                       n,
-                                                       A,
-                                                       lda,
-                                                       ipiv,
-                                                       work,
-                                                       lwork,
-                                                       devInfo));
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnDsytrf(
+        dn->handle, hipsolver::hip2cuda_fill(uplo), n, A, lda, ipiv, work, lwork, devInfo));
 }
 catch(...)
 {
@@ -7642,7 +9141,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnCsytrf((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnCsytrf(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuComplex*)A,
@@ -7671,7 +9171,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cusolverDnZsytrf((cusolverDnHandle_t)handle,
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnZsytrf(dn->handle,
                                                        hipsolver::hip2cuda_fill(uplo),
                                                        n,
                                                        (cuDoubleComplex*)A,

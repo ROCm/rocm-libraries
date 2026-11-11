@@ -83,12 +83,89 @@ def test_create_bench_input_no_compute_dtype_path(tmp_path: Path) -> None:
     assert verify_file is None
 
 
+def test_create_bench_input_mx_block_uses_arch_mx_scale(tmp_path: Path) -> None:
+    lib = _mk_lib(problem_overrides={"MXBlockA": 32, "MXBlockB": 32})
+    bench_file, _ = lib.create_bench_input(tmp_path, verify=False)
+    gemms = yaml.safe_load(Path(bench_file).read_text())
+    assert gemms[0]["scaleA"] == 1001  # gfx950 mx_scale
+    assert gemms[0]["scaleB"] == 1001
+
+
+def test_create_bench_input_mx_block_unknown_arch_uses_canonical_scale(tmp_path: Path) -> None:
+    lib = _mk_lib(problem_overrides={"MXBlockA": 32, "MXBlockB": 32})
+    lib.data[2] = "gfx_unknown"
+    bench_file, _ = lib.create_bench_input(tmp_path, verify=False)
+    gemms = yaml.safe_load(Path(bench_file).read_text())
+    assert gemms[0]["scaleA"] == 3
+    assert gemms[0]["scaleB"] == 3
+
+
 def test_add_epilogues_updates_solution_names() -> None:
     lib = _mk_lib(problem_overrides={"DataType": 11, "DestDataType": 11, "UseScaleAB": "Vector"})
     lib.add_epilogues()
     assert lib.problem["Activation"] is True
     assert "BiasDataTypeList" in lib.problem
     assert "Bias" in lib.solutions[0]["BaseName"]
+
+
+def _mk_i8_lib(compute=0, base="Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x64") -> Library:
+    # Shipped int8 libraries carry an empty (off) UseScaleAB.
+    overrides = {"DataType": 8, "DestDataType": 8, "ComputeDataType": compute, "UseScaleAB": ""}
+    solutions = [{"SolutionIndex": 0, "StaggerU": 0, "BaseName": base}]
+    lib = _mk_lib(problem_overrides=overrides, solutions=solutions)
+    if compute is None:
+        del lib.problem["ComputeDataType"]
+    return lib
+
+
+def test_add_epilogues_i8_float_compute_has_bias() -> None:
+    lib = _mk_i8_lib(compute=0)
+    lib.add_epilogues()
+    assert lib.problem["UseBias"] == 1
+    assert lib.problem["BiasDataTypeList"] == [0]
+    assert lib.solutions[0]["BaseName"] == "Cijk_Ailk_Bljk_I8II_BH_BiasS_HAS_SAV_UserArgs_MT64x64"
+    assert lib.problem["UseScaleAB"] == ""
+
+
+@pytest.mark.parametrize("compute", [6, None])
+def test_add_epilogues_i8_int_or_missing_compute_has_no_bias(compute) -> None:
+    lib = _mk_i8_lib(compute=compute)
+    lib.add_epilogues()
+    assert lib.problem["UseBias"] == 0
+    assert lib.problem["BiasDataTypeList"] == []
+    # TensileLite tags the activation with the compute type: int32 -> HAI.
+    assert lib.solutions[0]["BaseName"] == "Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT64x64"
+
+
+def test_add_epilogues_replaces_stale_has_tag_with_hai() -> None:
+    lib = _mk_i8_lib(compute=6, base="Cijk_I8II_BH_HAS_SAV_UserArgs_MT64x64")
+    lib.add_epilogues()
+    assert lib.solutions[0]["BaseName"] == "Cijk_I8II_BH_HAI_SAV_UserArgs_MT64x64"
+
+
+def test_add_epilogues_strips_stale_int_bias_tag() -> None:
+    lib = _mk_i8_lib(compute=0, base="Cijk_I8II_BH_BiasI_UserArgs_MT64x64")
+    lib.add_epilogues()
+    assert lib.solutions[0]["BaseName"] == "Cijk_I8II_BH_BiasS_HAS_SAV_UserArgs_MT64x64"
+
+
+def test_add_epilogues_i8_name_update_is_idempotent() -> None:
+    lib = _mk_i8_lib(compute=0)
+    lib.add_epilogues()
+    once = lib.solutions[0]["BaseName"]
+    lib.add_epilogues()
+    assert lib.solutions[0]["BaseName"] == once
+
+
+def test_create_bench_input_i8_forces_rand_int(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    lib = _mk_i8_lib(compute=0)
+    with caplog.at_level("WARNING"):
+        bench_file, _ = lib.create_bench_input(tmp_path, verify=False, initialization="trig_float")
+    assert any("rand_int" in rec.getMessage() for rec in caplog.records)
+    gemms = yaml.safe_load(Path(bench_file).read_text())
+    assert gemms[0]["initialization"] == "rand_int"
+    assert gemms[0]["a_type"] == "i8_r"
+    assert gemms[0]["compute_type"] == "c_f32_r"
 
 
 def test_trim_removes_duplicate_size_entries() -> None:
@@ -199,3 +276,28 @@ def test_dict_library_supports_property_access_and_dump(tmp_path: Path) -> None:
     assert dumped["ExactLogic"] == [[[8, 8, 1, 8], [1, 100.0]]]
     assert dumped["PerfMetric"] == "OtherMetric"
     assert dumped["LibraryType"] == "GridBased"
+
+
+@pytest.mark.parametrize(
+    "schedule_name,arch,expected",
+    [
+        ("gfx1250-strict", "gfx1250-strict", "gfx1250-strict"),
+        ("gfx1250", "gfx1250", "gfx1250"),
+        ("aquavanjaram", "gfx942", "gfx942"),
+        (None, "gfx950", "gfx950"),
+    ],
+)
+def test_schedule_is_an_architecture_create_library_accepts(schedule_name, arch, expected) -> None:
+    lib = _mk_lib()
+    lib.data[1] = schedule_name
+    lib.data[2] = arch
+    assert lib.schedule == expected
+
+
+def test_schedule_rejects_retired_gfx1250v0_logic() -> None:
+    """Old A0 logic would otherwise be built into the gfx1250 (B0) library."""
+    lib = _mk_lib()
+    lib.data[1] = "gfx1250v0"
+    lib.data[2] = "gfx1250"
+    with pytest.raises(ValueError, match="gfx1250-strict"):
+        lib.schedule
