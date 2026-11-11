@@ -12,6 +12,7 @@ from tensilelite.LibraryLogic import (
     LogicAnalyzer,
     customKernelTile,
     isCustomKernelSolution,
+    isRocRollerCapture,
     libraryDeviceNames,
     preferredExactCustomKernel,
 )
@@ -491,3 +492,41 @@ def test_f6_library_does_not_grow_the_pure_mx_rows():
 
     assert (2560, 16384, 1, 2560, 2560, 16384, 2560, 2560) not in analyzer.exactWinners
     assert (512, 512, 1, 4096, 512, 512, 4096, 4096) not in analyzer.exactWinners
+
+
+_CAPTURED_RR_KERNEL = (
+    "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_"
+)
+
+
+def test_a_rocroller_capture_gets_no_size_window():
+    captured = _Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4")
+    stub = _names(("FP8_FP4_Half_Half_Float", "32x32x64"))[0]
+    size = (1024, 1024, 1, 4096, 1024, 1024, 4096, 4096)
+    analyzer = _analyzer([captured, stub], exactWinners={size: [0, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+    assert "CustomKernelSizePredicate" not in captured._state
+
+    analyzer = _analyzer([captured, stub], exactWinners={size: [1, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+    assert stub["CustomKernelSizePredicate"][0] == {
+        "tag": "SizeGreaterThan", "index": 0, "value": 1023
+    }
+
+
+_NON_MX_RR_KERNEL = (
+    "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
+    "LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_"
+    "SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e"
+)
+
+
+def test_a_capture_is_recognized_by_its_custom_config():
+    assert isRocRollerCapture(_Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4"))
+    # Named like the family, but no checked-in custom.config declares it.
+    assert not isRocRollerCapture(_names(("FP8_FP4_Half_Half_Float", "32x32x64"))[0])
+    # A rocRoller capture without MX scales has no tile predicates to rely on.
+    assert not isRocRollerCapture(_Kernel(_NON_MX_RR_KERNEL, (64, 64, 64), False, "H", "H"))
+    generated = _Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4")
+    generated["CustomKernel"]["generated"] = True
+    assert not isRocRollerCapture(generated)

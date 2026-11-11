@@ -32,6 +32,7 @@ from .Common import print1, print2, HR, printExit, \
 from .Common.DataType import DataType
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
 from .Common.TimingInstrumentation import timing_context
+from .CustomKernels import isRocRollerMXCapture
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 from .SolutionStructs.Problem import isFusedA2A
 
@@ -86,6 +87,21 @@ def isCustomKernelSolution(solution) -> bool:
     return True
   custom = _solutionField(solution, "CustomKernel")
   return isinstance(custom, dict) and bool(custom.get("name") or custom.get("macrotile"))
+
+
+def isRocRollerCapture(solution) -> bool:
+  """Whether the solution's custom kernel is a rocRoller MX capture.
+
+  Read from its custom.config (CustomKernels.isRocRollerMXCapture): the family
+  Contractions gives tile, batch and buffer-addressing predicates.
+  """
+  custom = _solutionField(solution, "CustomKernel")
+  if isinstance(custom, dict) and custom.get("generated", False):
+    return False
+  name = _solutionField(solution, "CustomKernelName")
+  if not name and isinstance(custom, dict):
+    name = custom.get("name")
+  return isRocRollerMXCapture(name)
 
 
 def customKernelTile(solution):
@@ -842,6 +858,11 @@ class LogicAnalyzer:
     SizeGreaterThan predicate per index, read back when the library is
     written. There is no upper bound: a kernel stays correct at every larger
     size its own predicates admit, and a cap would hide it from those sizes.
+
+    A captured rocRoller kernel gets no bound at all. Its tile, batch and
+    buffer predicates (Contractions.py) already say where it is correct, and
+    the rocRoller-off selector picks it by configuration, whatever size it
+    won here.
     """
     wins = {}
     for size, winner in self.exactWinners.items():
@@ -866,7 +887,7 @@ class LogicAnalyzer:
 
     for idx, solution in enumerate(self.solutions):
       chosen = wins.get(idx)
-      if not chosen:
+      if not chosen or isRocRollerCapture(solution):
         continue
       preds = []
       preds += _bound(0, [size[0] for size in chosen])
