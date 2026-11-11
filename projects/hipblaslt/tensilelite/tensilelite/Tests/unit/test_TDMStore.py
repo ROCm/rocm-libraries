@@ -103,6 +103,12 @@ def test_accepts_dynamic_gsu(algorithm, aga):
   {"UseBias": 1},
   {"UseScaleAlphaVec": 1},
   {"UseScaleAlphaVec": 5},
+  {"UseBias": 2},
+  {"UseBias": 3},
+  {"UseScaleAlphaVec": 2},
+  {"UseScaleAlphaVec": 3},
+  {"UseScaleAlphaVec": 6},
+  {"UseScaleAlphaVec": 7},
   {"UseScaleAB": "Scalar"},
   {"UseScaleAB": "Vector"},
   {"UseScaleCD": True},
@@ -114,8 +120,8 @@ def test_accepts_dynamic_gsu(algorithm, aga):
 ])
 def test_accepts_supported_options(overrides):
   """AdaptiveGemm, the automatic StoreRemapVectorWidth (-1, which Solution resolves and checks), the
-  epilogue vectors along M, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB, ScaleCD, GroupedGemm
-  and the activations."""
+  epilogue vectors along M, N or either, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB,
+  ScaleCD, GroupedGemm and the activations."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -129,7 +135,6 @@ _ACROSS_TILES = \
   "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
-_ALONG_M = "TDMStoreInst supports bias and ScaleAlphaVec only along M"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
 
@@ -152,10 +157,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"Gradient": True}, _SIDE_EFFECTS),
   ({"UseGateResidual": True}, _SIDE_EFFECTS),
   ({"OutputAmaxD": True}, _SIDE_EFFECTS),
-  ({"UseBias": 2}, _ALONG_M),
-  ({"UseBias": 3}, _ALONG_M),
-  ({"UseScaleAlphaVec": 2}, _ALONG_M),
-  ({"UseScaleAlphaVec": 6}, _ALONG_M),
   ({"NumThreads": 96}, "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"),
 ])
 def test_rejects_unsupported(overrides, reason):
@@ -377,9 +378,10 @@ def _stores(asm):
   return paths
 
 
-def _tdmBlock(asm, beta, slot):
-  """The GSU1 TDM block of `beta`, the Then block of vector width `slot`, up to its tensor_store_from_lds."""
-  then = re.search(r"^label_GW_B%s_FD0_VW%u_GSU1_Then:" % (beta, slot), asm, re.M)
+def _tdmBlock(asm, beta, slot, factorDim=0):
+  """The GSU1 TDM block of `beta`, the Then block of vector width `slot` in the store tree of `factorDim`, up
+  to its tensor_store_from_lds."""
+  then = re.search(r"^label_GW_B%s_FD%u_VW%u_GSU1_Then:" % (beta, factorDim, slot), asm, re.M)
   assert then, "no GSU1 Then block of vector width %u for beta %s" % (slot, beta)
   return asm[then.end():asm.index("tensor_store_from_lds ", then.end())]
 
@@ -589,6 +591,24 @@ def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, ca
   assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
 
 
+@pytest.mark.parametrize("useBias, factorDims", [(2, {"1"}), (3, {"0", "1"})], ids=["along_n", "along_m_or_n"])
+def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, capsys, useBias, factorDims):
+  """Bias and ScaleAlphaVec along N (UseBias 2), or along M or N as the kernel argument picks (UseBias 3):
+  generateBetaModules builds the store tree of each factor dim, and at level 3 each of them stores through
+  the TDM block."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3,
+                       ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
+  assert sol.get("Valid"), capsys.readouterr().out
+  stored, factorDim = set(), None
+  for line in asm.splitlines():
+    m = re.match(r"label_GW_B\d_FD(\d)_", line)
+    if m:
+      factorDim = m.group(1)
+    elif factorDim is not None and "tensor_store_from_lds " in line:
+      stored.add(factorDim)
+  assert factorDims <= stored, stored
+
+
 def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a level-2
   kernel multiplies its elements by ScaleD, as the buffer_store path does."""
@@ -680,13 +700,15 @@ def test_persistent_kernels_stage_and_fence(gp_gfx1250, gfx1250_iim, assembler, 
     assert barrier is not None and (load is None or barrier < load), lines[store]
 
 
+@pytest.mark.parametrize("useBias, factorDim", [(1, 0), (2, 1)], ids=["along_m", "along_n"])
 @pytest.mark.parametrize("streamk", [0, 3])
-def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
-  """The bias and ScaleAlphaVec vectors keep LDS offset 0, as without TDMStoreInst, and the TDM block stages
-  the D tile from a 256-byte boundary after them: its setup and the descriptors of the C load and the D
-  store add that offset."""
+def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, capsys, streamk,
+                                                     useBias, factorDim):
+  """The bias and ScaleAlphaVec vectors, along M or N, keep LDS offset 0, as without TDMStoreInst, and the TDM
+  block stages the D tile from a 256-byte boundary after them: its setup and the descriptors of the C load and
+  the D store add that offset."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, StreamK=streamk,
-                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1})
+                       ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
   assert sol.get("Valid"), capsys.readouterr().out
   staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
   assert tdmStoreLdsBytes(sol) == staged
@@ -698,7 +720,9 @@ def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, as
   # The vectors overlap the main-loop LDS, so every preload barriers before its stores.
   assert_every_vector_preload_barriers(asm)
   for beta, descriptors in (("0", 1), ("1", 2)):
-    adds = [_code(line) for line in _tdmBlock(asm, beta, 8).splitlines() if "LDS offset of the staged tile" in line]
+    slot = int(re.search(r"^label_GW_B%s_FD%u_VW(\d+)_GSU1_Then:" % (beta, factorDim), asm, re.M).group(1))
+    adds = [_code(line) for line in _tdmBlock(asm, beta, slot, factorDim).splitlines()
+            if "LDS offset of the staged tile" in line]
     assert sum(add.startswith("v_add") for add in adds) == 1, adds
     assert sum(add.startswith("s_add_u32") for add in adds) == descriptors, adds
     assert all(str(offset) in add or hex(offset) in add for add in adds), adds
