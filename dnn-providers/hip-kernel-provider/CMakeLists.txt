@@ -766,6 +766,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
                 PATTERN "*.provenance.json.gz" EXCLUDE)
+        # UHD training branch only: the UHD pipeline finds an engine's per-arch root as the
+        # directory holding kpack/, and a shard that packs only embedded_source kernels (the
+        # conv group) writes no archive and so no kpack/. Give each installed shard an empty
+        # one; the loader walks it and finds nothing.
+        install(CODE "
+            file(GLOB _hkp_archs RELATIVE \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}\"
+                 \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/gfx*\")
+            foreach(_hkp_arch IN LISTS _hkp_archs)
+                file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/\${_hkp_arch}/kpack\")
+            endforeach()")
 
         # Same relative layout as the runtime tree, so a reader given this folder as its
         # provenance root finds each descriptor's sidecar at the descriptor's own relative
