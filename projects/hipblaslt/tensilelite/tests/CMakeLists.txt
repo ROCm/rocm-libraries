@@ -216,13 +216,23 @@ endif()
 enable_testing()
 
 if(TARGET tensilelite-client)
-    add_test(
-        NAME TensileLiteClient.version
-        COMMAND "${CMAKE_COMMAND}"
-            "-DCLIENT=$<TARGET_FILE:tensilelite-client>"
-            "-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/check_client_version.cmake"
-    )
+    foreach(_query IN ITEMS version source-revision build-rocm)
+        if(_query STREQUAL "version")
+            set(_expected "${TENSILELITE_DISTRIBUTION_VERSION}")
+        elseif(_query STREQUAL "source-revision")
+            set(_expected "${TENSILELITE_CLIENT_SOURCE_REVISION}")
+        else()
+            set(_expected "${TENSILELITE_CLIENT_BUILD_ROCM}")
+        endif()
+        add_test(
+            NAME TensileLiteClient.${_query}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DCLIENT=$<TARGET_FILE:tensilelite-client>"
+                "-DQUERY=--${_query}"
+                "-DEXPECTED=${_expected}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/check_client_version.cmake"
+        )
+    endforeach()
 endif()
 
 #################################################

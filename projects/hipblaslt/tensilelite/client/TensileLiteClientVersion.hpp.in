@@ -3,4 +3,10 @@
 
 #pragma once
 
+// The tensilelite distribution version from the same configure.
 #define TENSILELITE_CLIENT_VERSION "@TENSILELITE_DISTRIBUTION_VERSION@"
+// The rocm-libraries commit this client was built from, or "none". The
+// tensilelite package must carry the same value to drive this client.
+#define TENSILELITE_CLIENT_SOURCE_REVISION "@TENSILELITE_CLIENT_SOURCE_REVISION@"
+// "<identity> <full|base|unknown>": the ROCm this client was compiled against.
+#define TENSILELITE_CLIENT_BUILD_ROCM "@TENSILELITE_CLIENT_BUILD_ROCM@"

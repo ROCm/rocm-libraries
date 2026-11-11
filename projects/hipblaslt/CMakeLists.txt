@@ -285,20 +285,96 @@ hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilel
 
 if(TENSILELITE_ENABLE_CLIENT)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
-    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+
+    # The client and the tensilelite package are paired by the rocm-libraries
+    # commit they were built from (release_metadata.py source-revision).
+    set(_tensilelite_metadata_command "${Python3_EXECUTABLE}")
+    if(TENSILELITE_SOURCE_REVISION)
+        set(_tensilelite_metadata_command
+            "${CMAKE_COMMAND}" -E env "TENSILELITE_SOURCE_REVISION=${TENSILELITE_SOURCE_REVISION}"
+            "${Python3_EXECUTABLE}")
+    endif()
     execute_process(
-        COMMAND "${Python3_EXECUTABLE}"
-            "${_tensilelite_source_root}/release_metadata.py"
-            "${HIPBLASLT_BUILD_ROCM_ROOT}"
+        COMMAND ${_tensilelite_metadata_command}
+            "${_tensilelite_source_root}/release_metadata.py" version
         OUTPUT_VARIABLE TENSILELITE_DISTRIBUTION_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         COMMAND_ERROR_IS_FATAL ANY
     )
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    execute_process(
+        COMMAND ${_tensilelite_metadata_command}
+            "${_tensilelite_source_root}/release_metadata.py" source-revision
+        OUTPUT_VARIABLE TENSILELITE_CLIENT_SOURCE_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING
+            "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+
+    # The commit is read at configure time, so configure again when HEAD moves.
+    set(_tensilelite_configure_depends
         "${_tensilelite_source_root}/VERSION"
         "${_tensilelite_source_root}/release_metadata.py"
-        "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+        "${_tensilelite_source_root}/tensilelite/_source_revision.py"
+        "${_tensilelite_source_root}/tensilelite/_build_rocm.py"
     )
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -c safe.directory=* symbolic-ref -q HEAD
+            WORKING_DIRECTORY "${_tensilelite_source_root}"
+            OUTPUT_VARIABLE _tensilelite_head_ref
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        set(_tensilelite_git_paths HEAD packed-refs ${_tensilelite_head_ref})
+        foreach(_git_path IN LISTS _tensilelite_git_paths)
+            execute_process(
+                COMMAND "${GIT_EXECUTABLE}" -c safe.directory=* rev-parse
+                    --path-format=absolute --git-path "${_git_path}"
+                WORKING_DIRECTORY "${_tensilelite_source_root}"
+                OUTPUT_VARIABLE _tensilelite_git_file
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _tensilelite_git_result
+                ERROR_QUIET
+            )
+            if(_tensilelite_git_result EQUAL 0 AND EXISTS "${_tensilelite_git_file}")
+                list(APPEND _tensilelite_configure_depends "${_tensilelite_git_file}")
+            endif()
+        endforeach()
+    endif()
+
+    # The ROCm the client is compiled against (tensilelite-client --build-rocm).
+    # It is recorded on the client only; the wheel's version never reads it.
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+            "${_tensilelite_source_root}/tensilelite/_build_rocm.py"
+            "${HIPBLASLT_BUILD_ROCM_ROOT}"
+        OUTPUT_VARIABLE TENSILELITE_CLIENT_BUILD_ROCM
+        ERROR_VARIABLE _tensilelite_build_rocm_warning
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    if(_tensilelite_build_rocm_warning)
+        message(WARNING "${_tensilelite_build_rocm_warning}")
+    endif()
+    foreach(_rocm_file IN ITEMS ".info/version" "share/therock/therock_manifest.json")
+        if(EXISTS "${HIPBLASLT_BUILD_ROCM_ROOT}/${_rocm_file}")
+            list(APPEND _tensilelite_configure_depends "${HIPBLASLT_BUILD_ROCM_ROOT}/${_rocm_file}")
+        endif()
+    endforeach()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_tensilelite_configure_depends})
     configure_file(
         "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
