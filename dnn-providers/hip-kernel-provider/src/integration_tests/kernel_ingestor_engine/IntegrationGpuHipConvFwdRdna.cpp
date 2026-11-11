@@ -153,7 +153,8 @@ float floatToleranceEpsilons(const ConvCase& convCase)
     {
         taps *= extent;
     }
-    return static_cast<float>(convCase.c / convCase.groups * taps);
+    const int64_t terms = convCase.c / convCase.groups * taps;
+    return static_cast<float>(terms);
 }
 
 /// HALF / BFLOAT16: the fixture's epsilons are float's, which only an output bit-identical
@@ -289,7 +290,7 @@ std::vector<uint8_t> patternBytes(DataType dtype, int64_t count, int seed)
         }
         else if(dtype == DataType::HALF)
         {
-            const _Float16 half = static_cast<_Float16>(value);
+            const auto half = static_cast<_Float16>(value);
             std::memcpy(slot, &half, 2);
         }
         else

@@ -114,7 +114,11 @@ using LaunchInputs = HipConvFwdRdnaLaunchInputs;
 int64_t fmaTileN(const ConvProblem& problem)
 {
     const int64_t kPerGroup = problem.outChannelsPerGroup();
-    return kPerGroup <= 32 ? 32 : (kPerGroup <= 64 ? 64 : 128);
+    if(kPerGroup <= 32)
+    {
+        return 32;
+    }
+    return kPerGroup <= 64 ? 64 : 128;
 }
 
 int64_t fmaGridXBlocks(const ConvProblem& problem)
@@ -297,8 +301,11 @@ private:
 /// The kernel's CONV_DTYPE for a dtype.
 int fmaDtypeCode(data_objects::DataType dtype)
 {
-    return dtype == data_objects::DataType::FLOAT ? 0
-                                                  : (dtype == data_objects::DataType::HALF ? 1 : 2);
+    if(dtype == data_objects::DataType::FLOAT)
+    {
+        return 0;
+    }
+    return dtype == data_objects::DataType::HALF ? 1 : 2;
 }
 
 /// Mirrors the argument list of ConvFwdFmaIgemm and the launch() below one for one.
@@ -364,9 +371,9 @@ LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
     }
     requireOnlyLaunchValues(inputs, names);
 
-    constexpr int64_t intMax = std::numeric_limits<int>::max();
+    constexpr int64_t INT_MAX_VALUE = std::numeric_limits<int>::max();
     const auto positive = [&inputs](std::string_view name) {
-        return static_cast<int>(requireLaunchInt(inputs, name, 1, intMax));
+        return static_cast<int>(requireLaunchInt(inputs, name, 1, INT_MAX_VALUE));
     };
 
     LaunchInputs launch;
@@ -383,7 +390,8 @@ LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
         problem.in[axis] = positive(IN_VALUES[axis]);
         problem.filter[axis] = positive(FILTER_VALUES[axis]);
         problem.out[axis] = positive(OUT_VALUES[axis]);
-        problem.pad[axis] = static_cast<int>(requireLaunchInt(inputs, PAD_VALUES[axis], 0, intMax));
+        problem.pad[axis]
+            = static_cast<int>(requireLaunchInt(inputs, PAD_VALUES[axis], 0, INT_MAX_VALUE));
         problem.stride[axis] = positive(STRIDE_VALUES[axis]);
         problem.dilation[axis] = positive(DILATION_VALUES[axis]);
     }
