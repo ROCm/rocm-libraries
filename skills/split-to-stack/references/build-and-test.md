@@ -4,9 +4,9 @@ Read by the Builder and, for Phase 8.1, the orchestrator. Also read `concepts.md
 
 ## Phase 7: Build
 
-**Before building:** the plan is approved and recorded in `run.md` (`approval: user` or `auto (--implement)`); `scripts/check_plan.py` passes; every `$BR(NN)` name passes `git check-ref-format --branch` and is free locally and on `origin`, or is recorded in `refs.tsv` at its current SHA (a rebuild or resume; `check_plan.py` checks this); no `$BR(NN)` is checked out in any worktree.
+**Before building:** the plan is approved and recorded in `run.md` (`approval: user` or `auto (--implement)`); `scripts/check_plan.py` passes; every `$BR(NN)` name passes `git check-ref-format --branch` and is free locally and on `$PUSH_REMOTE`, or is recorded in `refs.tsv` at its current SHA (a rebuild or resume; `check_plan.py` checks this); no `$BR(NN)` is checked out in any worktree.
 
-**Build.** Run `scripts/build_stack.py --repo <repo> --run $RUN --prefix users/<you>/ --refs create`. The script computes every branch from the base and the plan (no patch application, no agent edits), creates one commit per group chained from B, and exits non-zero unless `tree(top) == tree(L)`; on a tree mismatch it records nothing and moves no ref. Otherwise it writes `stack.tsv` (the commits it built) and then moves all `$BR(NN)` branches in one atomic transaction; if that transaction is refused, no branch moved and `refs.tsv` (what was published) is unchanged. A non-zero exit is a plan problem: read the printed differing files or the file/directory clash, fix the plan (below) and rebuild. When `refs.tsv` exists (a rebuild or a resume), use `--refs update`, which creates missing branches and moves existing ones only if they still point at the SHA in `refs.tsv`.
+**Build.** Run `scripts/build_stack.py --repo <repo> --run $RUN --prefix users/<you>/ --refs create`. The script computes every branch from the base and the plan (no patch application, no agent edits), creates one commit per group chained from B, and exits non-zero unless `tree(top) == tree(L)`; on a tree mismatch it records nothing and moves no ref. Otherwise it writes `stack.tsv` (the commits it built) and then moves all `$BR(NN)` branches in one atomic transaction; if that transaction is refused, no branch moved and `refs.tsv` (what this run set) is unchanged. A non-zero exit is a plan problem: read the printed differing files or the file/directory clash, fix the plan (below) and rebuild. When `refs.tsv` exists (a rebuild or a resume), use `--refs update`, which creates missing branches and moves existing ones only if they still point at the SHA in `refs.tsv`.
 
 Commit content comes from `groups.tsv`:
 - **Author:** the author of the source commits the group's entries came from; if several contributed, the one with the most lines, plus `Co-authored-by:` trailers. The committer is whoever runs the skill.
@@ -15,6 +15,12 @@ Commit content comes from `groups.tsv`:
 - One commit per branch. No merge commits.
 
 Write `stack.md`: each branch with its SHA and notes. Keep it current after every rebuild.
+
+### Dependents (single-branch scope)
+
+Dependents are restacked, never re-cut. After every successful build, replay each one, bottom first, in `$WT` without moving any branch: `git -C "$WT" switch --detach <its original SHA>`, then `git -C "$WT" rebase --onto <new parent> <old parent>`. The first dependent's old parent is S and its new parent is `$BR(top)`; each next one uses the previous dependent's original and new SHA. Always start from the original SHAs recorded in `run.md`. Resolve conflicts by intent and record them in `stack.md`; a range that contains merges, or a genuinely ambiguous conflict, is `## Blocked`. Record each dependent's original and new SHA in `stack.md`.
+
+At the end of Phase 8 the orchestrator asks explicit permission, listing each dependent with both SHAs, then moves them in one `git update-ref --stdin` transaction that checks the original SHAs. A dependent checked out in a worktree is moved only if the user detaches it first.
 
 ## Phase 8: Verify
 
@@ -32,7 +38,7 @@ The user's choice (asked at start, or at implementation start in plan-only mode)
 0. **Hardware first.** Before choosing commands, check what the machine has: `rocminfo | rg gfx` and `rocm-smi --showproductname`. A GPU that `rocminfo` lists is usable without any permission escalation; if none is listed in a sandboxed session, say so and ask the user to grant device access instead of silently skipping GPU tests. Record the architecture in `tests.md`: a test written for another architecture (for example gfx1250 or the OCP FP8 formats) fails on the one you have, and belongs under "known-broken on the base", not to a branch. Do not assume the target architecture of the tests is the architecture of the machine.
 1. **Base gate.** (After Phase 7 created the branches and before any branch is compiled or tested.) Run on B in `$WT` (`git -C "$WT" switch --detach B`), with the build directory in `$RUN/build`, the selected test commands **whose targets exist on B** (the union of the branches' commands; a command for a target a branch adds is recorded as "n/a on base"). Hooks are not part of the base gate. The base must pass. If any test fails, **stop** and report it under `## Blocked`: the user either fixes the base first, or gives an explicit opt-out that **names the failing tests**. Record an opt-out in `run.md` and `tests.md`; opted-out tests are known-broken and are never blamed on a branch. Nothing is built or walked until the base passes or the opt-out is recorded, also under `--implement`.
 2. **Source-tip run.** Run the same tests on L (the same tree as the top). Record the failing tests as **source problems**.
-3. **Walk, bottom to top.** For each branch: `git -C "$WT" switch --detach $BR(NN)`, build, run its tests and its hooks. Collect the failures of the **whole stack** first; do not stop at the first failing branch. Classify each failure at branch NN:
+3. **Walk, bottom to top.** For each branch: `git -C "$WT" switch --detach $BR(NN)`, build, run its tests and its hooks. The restacked dependents follow the top branch, with the top branch's commands; for them, "the source tip" means the original dependent. Collect the failures of the **whole stack** first; do not stop at the first failing branch. Classify each failure at branch NN:
    - fails on the base (opted out): known-broken, ignore;
    - also fails on the source tip: **source problem**: record and report it, do not fix it (a fix would change the final tree), no fix attempt is spent;
    - passes on the source tip: **split error**: this branch's cut is wrong.
@@ -52,7 +58,7 @@ A fix changes the plan, never a built branch. No hand edits, no amend, no restac
 - reorder or merge branches (edit `groups.tsv` and `plan_assign.tsv`);
 - correct a stored intermediate state under `$RUN/states/` (a wrong hand-written state is fixed by correcting the text).
 
-After editing, regenerate any transition `stored` file whose path gained or lost an entry inside its window. Then re-run `check_plan.py` and `build_stack.py --refs update`: it rebuilds from the plan, keeps every branch below the first changed one at the same SHA, and moves a branch only if it still points at the SHA recorded in `refs.tsv`. Re-check 8.1.
+After editing, regenerate any transition `stored` file whose path gained or lost an entry inside its window. Then re-run `check_plan.py` and `build_stack.py --refs update`: it rebuilds from the plan, keeps every branch below the first changed one at the same SHA, and moves a branch only if it still points at the SHA recorded in `refs.tsv`. A branch that would move and has a remote-tracking ref (it is published) makes the script refuse and move nothing: rerun with `--allow-published` only with the user's explicit permission, which also covers force-pushing those branches at publishing. Re-check 8.1.
 
 **Transition code.** If a branch truly cannot stand alone without temporary compatibility code, do not add it: write the proposal under `## Blocked` as described in `concepts.md` (Transition code). If the user approves, add it to `transitions.tsv` and rebuild. A failure caused by a bad split is fixed by changing the split.
 

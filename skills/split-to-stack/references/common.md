@@ -13,6 +13,8 @@
 | `$L` | the **SHA** of L, recorded in `run.md` and `linear.md` (refs are for humans; a moving branch such as S itself is never used as `$L`). |
 | `$SPLIT` | helper-branch prefix, see Naming. |
 | `$WT` | the scratch worktree. |
+| `$CO` | the invoking checkout: the worktree the user ran the skill from, recorded in `run.md` at start. |
+| `$BASE_REMOTE`, `$PUSH_REMOTE` | the remote of the repository the PRs target, and the remote the stack's branches live in. See Remotes. |
 | `$RUN` | the run directory. |
 | `$BR(NN)` | the final branch of group NN: `users/<you>/<suffix>`. |
 | `<you>` | the namespace the person running the skill already uses for their branches (`users/<you>/`), see Naming. |
@@ -25,17 +27,25 @@
 - If the user declined the update: `git merge-base --all S T`. Exactly one commit is B. More than one (criss-cross history): stop, show the candidates, and recommend updating (0e), which makes B unambiguous.
 The Survey only *estimates* B (for the "Nothing to split" check); the Updater computes the real B before hook pass 2 and records it.
 
+## Remotes
+
+The orchestrator resolves two remotes at start and records them in `run.md`; no command names any other remote. Match remote URLs to repositories by `owner/name`, ignoring protocol and `.git`; no match or several matches: ask.
+- `$BASE_REMOTE`: the remote of the repository the PRs target (`gh pr view --json baseRepository`; without a PR, the repository `gh repo view` resolves). The target is fetched from it.
+- `$PUSH_REMOTE`: the remote of the repository the stack's branches live in (`headRepository`; without a PR, the branch's upstream remote). The Setup sync, `--check-remote` and every push use it.
+
+When they are the same, every `gh stack` command gets `--remote "$PUSH_REMOTE"` (without it, gh stack prompts when several remotes exist). When they differ, the run is in **fork mode**, detected automatically and stated in the proposal: GitHub stacks need every branch in the base repository, so gh stack is not used and publishing follows the fork-mode rules in `publish-and-cleanup.md`.
+
 ## Naming
 
-- **`<you>`.** It is the namespace the user already uses, which is not always their GitHub login (here the login is `Alex-Vasile` but every branch is under `users/alvasile/`). Collect candidates: `gh api user --jq .login`, `git config github.user`, and the `users/<x>/` namespaces of the local branches whose tip is authored by `git config user.email`. Keep the candidates for which `git ls-remote --heads origin 'users/<x>/*'` is non-empty. If exactly one remains, use it; if several or none, ask the user. Never derive it from the source branch (it may be someone else's). Record it in `run.md`; the user may also pin it with `git config split-to-stack.user <x>`, which wins.
+- **`<you>`.** It is the namespace the user already uses, which is not always their GitHub login (here the login is `Alex-Vasile` but every branch is under `users/alvasile/`). Collect candidates: `gh api user --jq .login`, `git config github.user`, and the `users/<x>/` namespaces of the local branches whose tip is authored by `git config user.email`. Keep the candidates for which `git ls-remote --heads "$PUSH_REMOTE" 'users/<x>/*'` is non-empty. If exactly one remains, use it; if several or none, ask the user. Never derive it from the source branch (it may be someone else's). Record it in `run.md`; the user may also pin it with `git config split-to-stack.user <x>`, which wins.
 - **Final branches** are `users/<you>/<suffix>`, written `$BR(NN)`. `<suffix>` is a short, descriptive, unique, kebab-case name chosen by the Planner, optionally with a common topic prefix and the stack number (for example `kfa-rr-mx-05-ranker-without-rocroller-headers`). The split branches exist under exactly one name each; there are no second, scratch copies.
-- **Helper branches** are ordinary local branches: `$SPLIT/00-updated` (only if S' differs from S) and `$SPLIT/00-linear` (only if Phase 1 was not a no-op), with `SPLIT=<source branch name with its remote prefix removed>-split`. Remove a leading `origin/` or any other remote name from the source before deriving names. The `-split/` prefix avoids the leaf-versus-directory ref collision with the source branch itself.
-- Validate every name with `git check-ref-format --branch`. Before creating anything, check that neither a ref `$SPLIT` (leaf) nor any `$SPLIT/*` ref exists. The final names are checked by `check_plan.py --prefix users/<you>/ --check-remote origin` before the user approves the plan: it fails if a `$BR(NN)` exists locally (unless this run published it) or on the remote, or if two suffixes cannot coexist (`feat` and `feat/more`). If something exists, handle it as in **Resume** (SKILL.md) or choose another name.
+- **Helper branches** are ordinary local branches: `$SPLIT/00-updated` (only if S' differs from S) and `$SPLIT/00-linear` (only if Phase 1 was not a no-op), with `SPLIT=<source branch name with its remote prefix removed>-split`. Remove a leading remote name (`<remote>/`) from the source before deriving names. The `-split/` prefix avoids the leaf-versus-directory ref collision with the source branch itself.
+- Validate every name with `git check-ref-format --branch`. Before creating anything, check that neither a ref `$SPLIT` (leaf) nor any `$SPLIT/*` ref exists. The final names are checked by `check_plan.py --prefix users/<you>/ --check-remote "$PUSH_REMOTE"` before the user approves the plan: it fails if a `$BR(NN)` exists locally (unless this run set it) or on the remote, or if two suffixes cannot coexist (`feat` and `feat/more`). If something exists, handle it as in **Resume** (SKILL.md) or choose another name.
 
 ## Workspace
 
 Do all mutating work that needs a checkout in a dedicated scratch worktree so the user's checkout and its dirty state are never touched: `WT=$(mktemp -d)`; `git worktree add --detach "$WT" <start>`. Create each helper ref inside it with `git -C "$WT" switch -c <ref> <start>`. Never check out S or the target in `$WT`.
-- Every git command that reads or changes `$WT` runs as `git -C "$WT" …`. Never `cd` into `$WT` or the repo root, with one exception: commands that have no `-C` (`gh stack`, `pre-commit`, builds, tests) run as a subshell `(cd "$WT" && …)`; never in the user's checkout. Before running hooks, check that `git -C "$WT" rev-parse --show-toplevel` equals `$WT`.
+- Every git command that reads or changes `$WT` runs as `git -C "$WT" …`. Never `cd` into `$WT` or the repo root, with one exception: commands that have no `-C` (`gh stack`, `pre-commit`, builds, tests) run as a subshell `(cd "$WT" && …)`; never in the user's checkout, except the approved `gh stack` commands of the Setup sync and Phase 9, which run in `$CO`. Before running hooks, check that `git -C "$WT" rev-parse --show-toplevel` equals `$WT`.
 - Every file edit uses an absolute path under `$WT`. Never edit files in the user's checkout.
 - Keep build directories **outside** `$WT` (under `$RUN/build`, or a symlink there to a `mktemp -d` directory: a large build does not belong inside `.git/`), so removing the worktree is never blocked by build output.
 - The orchestrator creates `$WT` as an empty `mktemp -d` directory and passes it; the Updater runs `git worktree add --detach "$WT" <start>` in it. A replacement agent never creates a second one (see Resume in SKILL.md).
@@ -64,7 +74,7 @@ The product is a restructure plan and a stack of branches, delivered quickly. It
 
 ## Constraints
 
-- The source `S` and the user's local target are never modified, except a user-approved fast-forward of the local target in 0b.
+- The source `S` and the user's local target are never modified, except a user-approved fast-forward of the local target in 0b and the user-approved Setup sync, which runs before S is recorded. Dependents are moved only by the approved restack (`build-and-test.md`).
 - No publishing (`git push`, `gh stack submit/push/sync`, `gh pr create/edit/close/merge`, comments, reviews) unless the user explicitly asks; then follow `references/publish-and-cleanup.md`.
 - No interactive editor sessions: export `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true`, use `--no-edit` on `merge` and `--continue`.
 - No merge commits in the output; the result is one linear stack with one commit per branch.

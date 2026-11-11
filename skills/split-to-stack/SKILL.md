@@ -36,17 +36,17 @@ Flags: `--implement` (build and verify straight after the plan, no approval wait
 
 - Whenever the user says "stack", ask first: "Do you mean a `gh stack`, or plain stacked branches (PR base chains)?" Record the answer in `run.md`.
 - For `--from` and `--stack` the Survey finds the branches (`references/survey-and-update.md`, 0a). The orchestrator shows the list with each branch's PR, author and review state and **waits for confirmation before continuing**. `--from` on the top branch is a single-branch scope; `--stack` on a branch that is in no stack reports that and asks what the user meant.
-- Single branch: branches stacked on top of it are not re-cut or rebased. They are listed as dependents left unchanged, and the user is told they need rebasing onto the new top branch.
+- Single branch: only that branch is re-cut. Branches stacked on top of it (dependents) are restacked onto the new top branch, with the user's permission, and stay members of the stack.
 - The new branches go under `users/<current user>/` (`references/common.md`, Naming).
 - No PRs at all (a local branch) is fine: there is nothing to retire and no thread mapping.
 
-**Tests.** Ask once: "Run the tests on every branch, or skip them (for example to inspect the branches first)?" With `--implement`, ask it in the order-at-start step below; in plan-only mode (the default), ask it when the user asks to implement. Record the answer in `run.md`. A user who skipped can ask later to test an existing stack: the orchestrator creates a fresh `$WT` and runs `references/build-and-test.md` 8.2 against the SHAs in `stack.tsv` (fixes then rebuild with `--refs update`; allowed only while the branches are unpublished).
+**Tests.** Ask once: "Run the tests on every branch, or skip them (for example to inspect the branches first)?" With `--implement`, ask it in the order-at-start step below; in plan-only mode (the default), ask it when the user asks to implement. Record the answer in `run.md`. A user who skipped can ask later to test an existing stack: the orchestrator creates a fresh `$WT` and runs `references/build-and-test.md` 8.2 against the SHAs in `stack.tsv` (fixes then rebuild with `--refs update`; a published branch is moved only with the user's explicit permission, `build-and-test.md` Fixes).
 
 **Small-input path.** After the Survey, the Updater and the Linearizer (always run as usual) the orchestrator measures: `git diff --numstat B $L` (hand-written = excluding the default generated globs of `concepts.md`), `git rev-list --count B..$L`, and the merges in `B..S'`. If all hold: ≤ 800 hand-written changed lines, ≤ 15 commits, no merges from other branches, one component (the first two path components under `projects/`, `shared/` or `dnn-providers/`), then a single Planner does the Inventory and the plan (reading commits itself, no commit readers, no separate Inventory), and one Builder does Phases 7–8. It follows the same files, scripts, gates and table. The Planner never runs hooks or asks the user; if it finds an entangled entry or a broken threshold it stops with `## Blocked: needs-full-pipeline`; the orchestrator then keeps `ledger.tsv` and `inventory.md`, deletes the plan files, and runs the commit readers and a fresh Planner.
 
 ## Symbols
 
-`S` source branch (top of the scope, never modified); `T` resolved target SHA; `P` topmost kept (external) parent, if any; `S'` the copy of S after hooks and update; `B` base of the split; `L` the linear chain on B with `tree(L) == tree(S')` (equal to `S'` when the Phase 1 no-op check applies); `$L` the SHA of L, recorded in `run.md`; `$SPLIT` helper-branch prefix; `$WT` scratch worktree; `$RUN` run directory; `$BR(NN)` the final branch of group NN. Full definitions: `references/common.md`.
+`S` source branch (top of the scope, never modified); `T` resolved target SHA; `P` topmost kept (external) parent, if any; `S'` the copy of S after hooks and update; `B` base of the split; `L` the linear chain on B with `tree(L) == tree(S')` (equal to `S'` when the Phase 1 no-op check applies); `$L` the SHA of L, recorded in `run.md`; `$SPLIT` helper-branch prefix; `$WT` scratch worktree; `$CO` the invoking checkout; `$BASE_REMOTE` and `$PUSH_REMOTE` the remotes of the base and head repositories; `$RUN` run directory; `$BR(NN)` the final branch of group NN. Full definitions: `references/common.md`.
 
 ## Orchestration
 
@@ -72,7 +72,7 @@ The main session is the **orchestrator**; each phase's work is done by a **subag
 | Phase | Agent | Writes | Reads (besides common.md) | Output |
 |---|---|---|---|---|
 | 0a–0d | Survey | no | `survey-and-update.md` | `survey.md` (scope, target, merges, PRs, tools); `pr.md` when PRs are involved |
-| decisions | orchestrator | `run.md`, user refs (approved fast-forward of the local target only) | `survey.md` | scope, T, P, kept/re-cut PRs and ownership, update answer |
+| decisions | orchestrator | `run.md`, user refs and their remote copies (approved fast-forward of the local target; approved Setup sync) | `survey.md`, `survey-and-update.md` (Setup sync) | scope, T, P, kept/re-cut PRs and ownership, sync, update answer |
 | 0e | Updater | `$WT`, refs | `survey-and-update.md` | `update.md`: S', B, hook commits and findings, merge residue and duplicate scan, conflicts |
 | 1 | Linearizer | `$WT`, refs | `linearize.md`, `concepts.md` | `linear.md` (`$L`, or "no-op: L = S'") |
 | 2 | Commit readers (parallel batches) | no | `analyze-and-plan.md` | `commits/<sha>.md` |
@@ -81,28 +81,28 @@ The main session is the **orchestrator**; each phase's work is done by a **subag
 | 6 | orchestrator | `run.md` | `analyze-and-plan.md` (Phase 6) | proposal; approval recorded in `run.md` |
 | 7–8 | Builder (one agent) | refs, `$WT`, plan files (8.2 fixes) | `build-and-test.md`, `concepts.md`, `files.md` | `stack.tsv`, `stack.md`, `tests.md` |
 | 8.1 | orchestrator | — | `build-and-test.md` | independent `verify_stack.py` run |
-| 9 | orchestrator | `.git/gh-stack`, `$WT`, helper refs, remote (only on request) | `publish-and-cleanup.md` | final report, cleanup, publishing on request |
+| 9 | orchestrator | gh stack state and checked-out branch in `$CO` (approved), `$WT`, helper refs, remote (only on request) | `publish-and-cleanup.md` | final report, cleanup, publishing on request |
 
 Wherever a phase text says "ask the user" or "stop and ask", a subagent writes it under `## Blocked`.
 
 **Order at start:**
 1. Resolve the argument to its head branch and compute `<key>`; check whether `$RUN` already exists: if so, handle **Resume** (below) before creating anything.
-2. Resolve `<you>` (`common.md`, Naming) and record it. Create `$RUN` and `run.md` (scope, flags, `<you>`). Settle the stack kind if the user said "stack".
+2. Resolve `$BASE_REMOTE` and `$PUSH_REMOTE` (`common.md`, Remotes), then `<you>` (`common.md`, Naming), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO` = `git rev-parse --show-toplevel` of the invoking directory). Settle the stack kind if the user said "stack".
 3. With `--implement`: ask the Tests question now.
-4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date.
+4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date. Then run the Setup sync (`survey-and-update.md`): every branch of the stack equals its remote copy before anything else happens.
 5. Now that S is confirmed, check `$SPLIT` and `$SPLIT/*`: if helper refs exist without a `run.md`, show them with their SHAs and let the user choose another name or delete them (the Restart procedure).
 6. Create an **empty** `$WT` directory (`mktemp -d`), record it in `run.md`, and start the Updater, which runs `git worktree add --detach` in it.
 
 **Gates** (the orchestrator enforces them; scripts are in `scripts/`):
 1. Phase 1: `tree(L) == tree(S')` (trivially true for the no-op). The Inventory starts only after this gate.
-2. End of Phase 5 (and after every plan edit or renumbering): `check_plan.py` passes (every ledger entry assigned, steps and names valid, the ledger reproduces, no existing branch name is taken). Run it with `--check-remote origin` before Phase 6, so names are checked on the remote before the user approves them.
+2. End of Phase 5 (and after every plan edit or renumbering): `check_plan.py` passes (every ledger entry assigned, steps and names valid, the ledger reproduces, no existing branch name is taken). Run it with `--check-remote "$PUSH_REMOTE"` before Phase 6, so names are checked on the remote before the user approves them.
 2b. End of Phase 5: `plan.md` has a `## Grouping critique` section that passes the check in `analyze-and-plan.md` (no group is split on language, directory, test framework, size or a dependency alone). With three or more groups, the attack pass on the critique has run and its result is in `run.md`. Only then run Phase 6.
 3. Phase 6: the plan is approved and recorded verbatim in `run.md` (`approval: user`, or `approval: auto (--implement)`), and `groups.tsv`, `plan_assign.tsv`, `transitions.tsv` and `states/` are copied to `$RUN/approved/`. The default run stops here.
 4. Phase 7: `build_stack.py` exits 0 (`tree(top) == tree(L)`).
 5. Phase 8.1: the orchestrator runs `verify_stack.py` itself (independent of the Builder).
 6. If tests were chosen: the base must pass before anything is built (`build-and-test.md`).
 
-**`--implement` stops** (it never skips these): the current user cannot be determined; a conflict is ambiguous (in the update or in the Phase 1 replay); Phase 1 finds an octopus merge or cannot reach `tree(L) == tree(S')` in 3 passes; the plan contains a hand-written `stored:` state (note `synthesized`) or any transition code, or a Phase 8 failure leads to a transition proposal (all are hand-written code nobody has reviewed; a `subtractive:` state that passes `check_plan.py` is not a stop, because it is proven to add no text); the base tests fail and the user has not opted out; a PR in scope or kept is queued for merge; the ledger is empty (everything already landed).
+**`--implement` stops** (it never skips these): the current user cannot be determined; the Setup sync has any action or conflict; dependents are ready to be moved; a conflict is ambiguous (in the update, the Phase 1 replay or a dependent restack); Phase 1 finds an octopus merge or cannot reach `tree(L) == tree(S')` in 3 passes; the plan contains a hand-written `stored:` state (note `synthesized`) or any transition code, or a Phase 8 failure leads to a transition proposal (all are hand-written code nobody has reviewed; a `subtractive:` state that passes `check_plan.py` is not a stop, because it is proven to add no text); the base tests fail and the user has not opted out; a PR in scope or kept is queued for merge; the ledger is empty (everything already landed).
 
 **Validation between phases:** every SHA in an output file exists, and the `$SPLIT/*` refs and `$BR(NN)` branches match `update.md`, `linear.md`, `stack.tsv` and `refs.tsv`.
 

@@ -21,7 +21,7 @@ Checks (every failure is listed):
      directory) where it exists, windows on one path do not overlap, no deletion/rename/type change of
      the path inside the window; entries of the same path inside a window are listed as warnings
   6. branch names are valid, and do not already exist locally (or on --check-remote) unless this run
-     published them (RUN/refs.tsv)
+     set them (RUN/refs.tsv)
 """
 import argparse
 import os
@@ -464,7 +464,7 @@ def main():
         )
         if live and pub.get(full) != live:
             err(
-                "group %s: branch %s already exists locally and was not published by this run"
+                "group %s: branch %s already exists locally and was not set by this run"
                 % (g["NN"], full)
             )
         parts = full.split("/")

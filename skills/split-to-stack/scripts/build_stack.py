@@ -2,7 +2,7 @@
 """Build the stack of branches from the plan files. No worktree, no checkout.
 
 usage: build_stack.py --repo REPO --run RUN --prefix users/<name>/ [--refs none|create|update]
-                      [--date ISO8601]
+                      [--allow-published] [--date ISO8601]
 
 Reads RUN/ledger.tsv, groups.tsv, plan_assign.tsv, transitions.tsv (optional), states/.
 For group k the content of every file is computed from the BASE blob plus the ledger entries
@@ -256,6 +256,12 @@ def main():
     ap.add_argument("--prefix", required=True, help="e.g. users/alvasile/")
     ap.add_argument("--refs", choices=["none", "create", "update"], default="none")
     ap.add_argument(
+        "--allow-published",
+        action="store_true",
+        help="with --refs update, also move branches that have a remote-tracking ref "
+        "(only with the user's explicit permission)",
+    )
+    ap.add_argument(
         "--date", help="fixed commit date (ISO 8601); default: RUN/build_date"
     )
     a = ap.parse_args()
@@ -370,13 +376,15 @@ def main():
     write_tsv(os.path.join(run, "stack.tsv"), ["NN", "branch", "sha", "tree"], stack)
 
     if a.refs != "none":
-        pub_file = os.path.join(run, "refs.tsv")
-        published = {}
-        if os.path.exists(pub_file):
-            _, prows = read_tsv(pub_file)
-            published = {r["branch"]: r["sha"] for r in prows}
+        set_file = os.path.join(run, "refs.tsv")
+        set_by_run = {}
+        if os.path.exists(set_file):
+            _, prows = read_tsv(set_file)
+            set_by_run = {r["branch"]: r["sha"] for r in prows}
         busy = worktree_branches(repo)
+        remotes = git_text(repo, "remote").split()
         lines = ["start"]
+        on_remote = []
         for s in stack:
             ref = "refs/heads/" + s["branch"]
             if ref in busy:
@@ -391,24 +399,42 @@ def main():
             elif a.refs == "create":
                 die("%s already exists" % ref)
             else:
-                old = published.get(s["branch"])
+                old = set_by_run.get(s["branch"])
                 if old != live:
                     die(
-                        "%s is at %s, but this run last published %s; someone else moved it (or it was "
+                        "%s is at %s, but this run last set it to %s; someone else moved it (or it was "
                         "not created by this run)"
                         % (ref, live[:10], (old or "nothing")[:10])
                     )
+                if live != s["sha"] and not a.allow_published:
+                    for rem in remotes:
+                        tracking = "refs/remotes/%s/%s" % (rem, s["branch"])
+                        if git(
+                            repo,
+                            "rev-parse",
+                            "--verify",
+                            "--quiet",
+                            tracking,
+                            check=False,
+                        ).strip():
+                            on_remote.append("%s (%s)" % (s["branch"], tracking))
                 lines.append("update %s %s %s" % (ref, s["sha"], live))
+        if on_remote:
+            die(
+                "these branches would move but are published (a remote-tracking ref exists); "
+                "nothing was moved. Rerun with --allow-published only with the user's explicit "
+                "permission:\n  " + "\n  ".join(on_remote)
+            )
         lines += ["prepare", "commit"]
         git(repo, "update-ref", "--stdin", input=("\n".join(lines) + "\n").encode())
         for s in stack:
-            published[s["branch"]] = s["sha"]
+            set_by_run[s["branch"]] = s["sha"]
         write_tsv(
-            pub_file,
+            set_file,
             ["branch", "sha"],
-            [dict(branch=k, sha=v) for k, v in sorted(published.items())],
+            [dict(branch=k, sha=v) for k, v in sorted(set_by_run.items())],
         )
-        stale = [k for k in published if k not in {s["branch"] for s in stack}]
+        stale = [k for k in set_by_run if k not in {s["branch"] for s in stack}]
         if stale:
             print(
                 "NOTE: branches recorded in refs.tsv but no longer in the plan (not touched): "
