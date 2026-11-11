@@ -306,6 +306,11 @@ TEST_F(ExtraSpmatScale, formats_float)
     run_all_formats<float>(handle);
 }
 
+TEST_F(ExtraSpmatScale, formats_double)
+{
+    run_all_formats<double>(handle);
+}
+
 TEST_F(ExtraSpmatScale, formats_float_complex)
 {
     run_all_formats<rocsparse_float_complex>(handle);

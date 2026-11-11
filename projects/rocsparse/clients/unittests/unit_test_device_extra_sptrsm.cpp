@@ -24,9 +24,10 @@
 
 //
 // rocsparse_sptrsm: numeric solves of op(A) * Y = alpha * op(X) for CSR, CSC and
-// COO matrices (lower / upper, unit / non-unit diagonal, A and X transposed or
-// not, row / column ordered dense matrices, host / device alpha, f64 alpha with
-// f32 data, strided batch)
+// COO matrices (lower / upper, unit / non-unit diagonal, diagonal solve with and
+// without the absolute value of the diagonal, A and X transposed or not, row /
+// column ordered dense matrices, host / device alpha, f64 alpha with f32 data,
+// strided batch)
 // compared with a host substitution on a diagonally dominant matrix. Also the
 // singularity outputs of the descriptor and the stage ordering errors.
 //

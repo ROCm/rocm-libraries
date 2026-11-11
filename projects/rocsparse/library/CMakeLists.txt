@@ -142,7 +142,11 @@ if(BUILD_CODE_COVERAGE)
   # Instrument host code only. -Xarch_host keeps the instrumentation off the
   # device image, which avoids the HIP runtime abort while dumping a device
   # profile (AISPARSE-778). ccache < 4.12.1 drops -Xarch_* arguments
-  # (ccache/ccache#1632), so the launcher is cleared on this target.
+  # (ccache/ccache#1632). With these host-only flags a dropped -Xarch_host
+  # leaves the build green and the profiles empty, instead of that abort.
+  # The launcher is cleared on this target so the flags reach clang. That
+  # clear does nothing when ccache is the compiler itself
+  # (CXX=/usr/lib/ccache/amdclang++).
   target_compile_options(rocsparse PRIVATE
     "SHELL:-Xarch_host -fprofile-instr-generate"
     "SHELL:-Xarch_host -fcoverage-mapping")
