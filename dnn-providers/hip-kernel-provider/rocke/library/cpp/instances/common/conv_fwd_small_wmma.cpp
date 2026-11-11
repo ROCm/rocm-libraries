@@ -12,6 +12,7 @@
  * leaves the evaluation order of call arguments unspecified.
  */
 #include "rocke/instance_conv_fwd_small_wmma.h"
+#include "rocke/instance_conv_fwd_small_wmma_internal.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -36,16 +37,14 @@
 #define FSW_SMALLC_MAX_C 4
 #define FSW_SMALLK_MAX_K 8
 
-namespace
-{
-
 /* _common_shape_reason(p, square): the problem shapes small C and small K
  * both serve (square=false: small K, rectangular filters too). On failure
- * writes reason and returns false. */
-bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
-                             bool square,
-                             char* reason,
-                             size_t reason_cap)
+ * writes reason and returns false. Shared with the wave64 MFMA forms
+ * (conv_fwd_small_mfma.cpp). */
+bool rocke_fwd_small_common_shape_ok(const rocke_direct_conv_problem_t* p,
+                                     bool square,
+                                     char* reason,
+                                     size_t reason_cap)
 {
     char msg[512];
     if(p->groups != 1 || p->dil_h != 1 || p->dil_w != 1)
@@ -82,6 +81,9 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
     return rocke_wmma_fwd_tensor_bytes_ok(p, reason, reason_cap);
 }
 
+namespace
+{
+
 /* _common_reason(p, arch, name, wave_size, square): the WMMA forward gate
  * (any column padding unless square), then the shared problem shapes. On success stores the resolved target in
  * `*target_out` and returns true; otherwise writes reason and returns false. */
@@ -96,7 +98,7 @@ bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
 {
     if(!rocke_wmma_fwd_gate(p, arch, name, wave_size, !square, target_out, reason, reason_cap))
         return false;
-    return fsw_common_shape_reason(p, square, reason, reason_cap);
+    return rocke_fwd_small_common_shape_ok(p, square, reason, reason_cap);
 }
 
 /* ---- FwdSmallcWmmaSpec @property helpers the builder shares. */

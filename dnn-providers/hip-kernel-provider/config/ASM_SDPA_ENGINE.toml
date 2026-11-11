@@ -43,15 +43,6 @@ filters = ["*_SdpaBackward_Golden_*.*_fp16_*"]
 atol = 2.5e-3
 rtol = 2.5e-3
 
-# SdpaBackward defect DEF-06 (test plan sdpa-bwd.md §4.2): a valid graph this
-# engine accepts today and computes wrong. The fix is a typed decline in
-# SdpaBwdPlanBuilder::isApplicable(); once it lands the engine declines these
-# cases itself, so the entry is temporary: delete it in the pull request that
-# adds the decline. Any other engine runs them.
-[[test_skips]]
-filters = ["*_SdpaBackward_*.def06*"]
-reason = "DEF-06: an attention scale of 0 or below gives NaN and Inf; tracked as ALMIOPEN-3043 (fix: asm-sdpa-decline-nonpositive-scale)"
-
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here:
