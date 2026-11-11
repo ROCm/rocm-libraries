@@ -1420,6 +1420,52 @@ class SearchCoordinator:
             "confirmation": self.confirmation,
         }, final=True)
 
+    def _confirmation_finalists(self):
+        cf = self.settings.confirm
+        finalists = {
+            p: sorted(p.best, key=lambda k: (p.best[k][0], k))[:cf.finalists]
+            for p in self.problems
+        }
+        calls = {(p.key, k): [] for p, keys in finalists.items() for k in keys}
+        if self.log is not None and calls:
+            limit = "up to " if cf.mode == "race" else ""
+            self.log(f"  [search] confirming {len(calls)} finalist(s) of "
+                     f"{sum(bool(keys) for keys in finalists.values())} problem(s), "
+                     f"{limit}{cf.fresh_calls} fresh call(s) each")
+        return finalists, calls
+
+    def _confirmation_round(self, ordered, j, calls):
+        reqs = [
+            PairRequest(p.key, k, p.by_key[k].kernel_name, p.best[k][1], self._call_id("c"))
+            for p, k in ordered
+        ]
+        self.counts["confirm_calls"] += len(reqs)
+        self.ledger.confirm_calls += len(reqs)
+        got = self._exchange("confirm", self.adapter.confirm, reqs)
+        checked = []
+        for (p, _), r in zip(ordered, reqs):
+            outcome = got[r.call_id]
+            status, lat, diag = _checked(outcome)
+            calls[(p.key, r.candidate_key)].append((status, lat))
+            self._event("confirm", problem=p.key, kernel=r.kernel_name,
+                        trial_uid=r.trial_uid, call_id=r.call_id, call=j,
+                        status=status, latency_ms=lat, diag=diag, device=outcome.device)
+            checked.append((p, r, outcome.device, status, lat))
+        return checked
+
+    def _unconfirmed(self, p, keys, calls, stop):
+        if keys:
+            why = "no finalist passed confirmation (" + "; ".join(
+                p.by_key[k].kernel_name + ": "
+                + ",".join(st for st, _ in calls[(p.key, k)]) for k in keys
+            ) + ")"
+        elif not p.cands:
+            why = p.finished
+        else:
+            why = f"no verified discovery measurement (search: {p.finished or stop})"
+        self.unresolved[p.key] = why
+        self._event("final", problem=p.key, unresolved=why)
+
     def _confirm(self, stop: str) -> Dict[str, dict]:
         """Re-measure each problem's finalists with ``fresh_calls`` fresh verified
         calls. Call j of every surviving finalist goes into one adapter call, so
@@ -1430,59 +1476,31 @@ class SearchCoordinator:
         cf = self.settings.confirm
         if cf.mode == "race":
             return self._confirm_race(stop)
-        fins = {
-            p: sorted(p.best.items(), key=lambda kv: (kv[1][0], kv[0]))[: cf.finalists]
-            for p in self.problems
-        }
-        calls = {(p.key, ck): [] for p, best in fins.items() for ck, _ in best}
-        if self.log is not None and calls:
-            self.log(f"  [search] confirming {len(calls)} finalist(s) of "
-                     f"{sum(1 for b in fins.values() if b)} problem(s), "
-                     f"{cf.fresh_calls} fresh call(s) each")
+        fins, calls = self._confirmation_finalists()
         for j in range(cf.fresh_calls):
-            reqs = [
-                PairRequest(p.key, ck, p.by_key[ck].kernel_name, uid, self._call_id("c"))
-                for p, best in fins.items() for ck, (_lat, uid) in best
+            ordered = [
+                (p, ck) for p, keys in fins.items() for ck in keys
                 if all(st == "ok" for st, _ in calls[(p.key, ck)])
             ]
-            if not reqs:
+            if not ordered:
                 break
-            self.counts["confirm_calls"] += len(reqs)
-            self.ledger.confirm_calls += len(reqs)
-            got = self._exchange("confirm", self.adapter.confirm, reqs)
-            for r in reqs:
-                status, lat, diag = _checked(got[r.call_id])
-                calls[(r.problem_key, r.candidate_key)].append((status, lat))
-                self._event("confirm", problem=r.problem_key, kernel=r.kernel_name,
-                            trial_uid=r.trial_uid, call_id=r.call_id, call=j,
-                            status=status, latency_ms=lat, diag=diag,
-                            device=got[r.call_id].device)
+            self._confirmation_round(ordered, j, calls)
         winners = {}
-        for p, best in fins.items():
+        for p, keys in fins.items():
             passed = []
-            for ck, (lat, _uid) in best:
+            for ck in keys:
                 res = calls[(p.key, ck)]
                 if len(res) == cf.fresh_calls and all(st == "ok" for st, _ in res):
                     vals = [v for _, v in res]
                     name = p.by_key[ck].kernel_name
-                    passed.append((statistics.median(vals), name, vals, lat))
+                    passed.append((statistics.median(vals), name, vals, p.best[ck][0]))
             if passed:
                 med, name, vals, lat = min(passed)
                 winners[p.key] = {"kernel": name, "median_ms": med, "calls_ms": vals,
                                   "discovery_ms": lat}
                 self._event("final", problem=p.key, kernel=name, median_ms=med)
                 continue
-            if best:
-                why = "no finalist passed confirmation (" + "; ".join(
-                    p.by_key[ck].kernel_name + ": "
-                    + ",".join(st for st, _ in calls[(p.key, ck)]) for ck, _ in best
-                ) + ")"
-            elif not p.cands:
-                why = p.finished
-            else:
-                why = f"no verified discovery measurement (search: {p.finished or stop})"
-            self.unresolved[p.key] = why
-            self._event("final", problem=p.key, unresolved=why)
+            self._unconfirmed(p, keys, calls, stop)
         return winners
 
     def _confirm_race(self, stop: str) -> Dict[str, dict]:
@@ -1496,10 +1514,7 @@ class SearchCoordinator:
         cf = self.settings.confirm
         race = self._ck.Race(alpha=cf.alpha, margin=cf.margin, min_samples=cf.min_calls)
         max_looks = cf.fresh_calls - cf.min_calls + 1
-        finalists = {
-            p: sorted(p.best, key=lambda k: (p.best[k][0], k))[:cf.finalists]
-            for p in self.problems
-        }
+        finalists, outcomes = self._confirmation_finalists()
         live = {p: list(keys) for p, keys in finalists.items()}
         samples = {p: {k: [] for k in keys} for p, keys in finalists.items()}
         hypotheses = {p: [(a, b) for a in keys for b in keys if a != b]
@@ -1512,39 +1527,26 @@ class SearchCoordinator:
                 "eliminated": [], "failed": {}, "device": None,
             }
         for j in range(cf.fresh_calls):
-            reqs, owners = [], {}
+            ordered = []
             for p, keys in live.items():
                 if p in stopped:
                     continue
                 # Rotate order to avoid giving the discovery leader first slot
                 # in every timing block.
                 order = keys[j % len(keys):] + keys[:j % len(keys)] if keys else []
-                for k in order:
-                    req = PairRequest(p.key, k, p.by_key[k].kernel_name,
-                                      p.best[k][1], self._call_id("c"))
-                    reqs.append(req)
-                    owners[req.call_id] = p
-            if not reqs:
+                ordered.extend((p, k) for k in order)
+            if not ordered:
                 break
-            self.counts["confirm_calls"] += len(reqs)
-            self.ledger.confirm_calls += len(reqs)
-            got = self._exchange("confirm", self.adapter.confirm, reqs)
-            for r in reqs:
-                p = owners[r.call_id]
-                outcome = got[r.call_id]
-                status, lat, diag = _checked(outcome)
-                self._event("confirm", problem=p.key, kernel=r.kernel_name,
-                            trial_uid=r.trial_uid, call_id=r.call_id, call=j,
-                            status=status, latency_ms=lat, diag=diag, device=outcome.device)
+            for p, r, device, status, lat in self._confirmation_round(ordered, j, outcomes):
                 if status != "ok":
                     live[p].remove(r.candidate_key)
                     self.confirmation[p.key]["failed"][r.kernel_name] = status
                     continue
-                if not outcome.device or devices.setdefault(p, outcome.device) != outcome.device:
+                if not device or devices.setdefault(p, device) != device:
                     raise ContractError(
                         f"race confirmation for {p.key}: requires one known device "
                         "across all finalists and calls")
-                self.confirmation[p.key]["device"] = outcome.device
+                self.confirmation[p.key]["device"] = device
                 values = samples[p][r.candidate_key]
                 values.append((j, lat))
                 if len(values) % 2 == 0:
@@ -1592,10 +1594,7 @@ class SearchCoordinator:
                 }
                 self._event("final", problem=p.key, **winners[p.key])
             else:
-                why = ("no finalist passed race confirmation" if finalists[p] else
-                       p.finished or f"no verified discovery measurement (search: {stop})")
-                self.unresolved[p.key] = why
-                self._event("final", problem=p.key, unresolved=why)
+                self._unconfirmed(p, finalists[p], outcomes, stop)
         return winners
 
     # ------------------------------------------------------------ finish

@@ -21,10 +21,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from adaptive_search import SearchSettings, SettingsError, sha256_file, valid_latency  # noqa: E402
 
-ARMS = (
-    "baseline", "listed_tpe", "broad_prior", "diverse_warm", "confirmation_control", "race", "build_aware",
-    "portfolio_control", "portfolio_tpe", "combined",
-)
+# Each arm names its control and the settings patches it applies, in order.
+ARMS = {
+    "baseline": ("baseline", ()),
+    "listed_tpe": ("baseline", ("listed_tpe",)),
+    "broad_prior": ("baseline", ("prior",)),
+    "diverse_warm": ("baseline", ("warm",)),
+    "confirmation_control": ("baseline", ("long_confirm",)),
+    "race": ("confirmation_control", ("long_confirm", "race")),
+    "build_aware": ("baseline", ("build",)),
+    "portfolio_control": ("baseline", ("portfolio",)),
+    "portfolio_tpe": ("portfolio_control", ("portfolio", "tpe_member")),
+    "combined": ("baseline", (
+        "prior", "warm", "long_confirm", "race", "build", "portfolio", "tpe_member")),
+}
 
 
 def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
@@ -40,6 +50,16 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
     ranked_csv, diverse_pairs = Path(ranked_csv).resolve(), Path(diverse_pairs).resolve()
     if not ranked_csv.is_file() or not diverse_pairs.is_file():
         raise SettingsError("ranked CSV and diverse pairs must be existing files")
+    patches = {
+        "listed_tpe": {"tpe_candidate_pool": "listed"},
+        "prior": {"warm_start": {"ranked_csv": str(ranked_csv), "use_prior": True}},
+        "warm": {"warm_start": {"pairs_file": str(diverse_pairs)}},
+        "long_confirm": {"confirm": {"fresh_calls": max(9, baseline.confirm.fresh_calls)}},
+        "race": {"confirm": {"mode": "race", "min_calls": 3}},
+        "build": {"build_aware": {"rank_fraction": 0.1, "explore_probability": 0.2}},
+        "portfolio": {"strategy": "portfolio"},
+        "tpe_member": {"portfolio_members": ["hill", "gp", "de", "tpe"]},
+    }
     output = Path(output).resolve()
     planned = []
     for seed in seeds:
@@ -47,22 +67,12 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
         for arm in ARMS:
             data = copy.deepcopy(baseline.to_json())
             data["seed"] = seed
-            if arm == "listed_tpe":
-                data["tpe_candidate_pool"] = "listed"
-            if arm in ("broad_prior", "combined"):
-                data["warm_start"].update(ranked_csv=str(ranked_csv), use_prior=True)
-            if arm in ("diverse_warm", "combined"):
-                data["warm_start"]["pairs_file"] = str(diverse_pairs)
-            if arm in ("confirmation_control", "race", "combined"):
-                data["confirm"]["fresh_calls"] = max(9, baseline.confirm.fresh_calls)
-            if arm in ("race", "combined"):
-                data["confirm"].update(mode="race", min_calls=3)
-            if arm in ("build_aware", "combined"):
-                data["build_aware"] = {"rank_fraction": 0.1, "explore_probability": 0.2}
-            if arm in ("portfolio_control", "portfolio_tpe", "combined"):
-                data["strategy"] = "portfolio"
-            if arm in ("portfolio_tpe", "combined"):
-                data["portfolio_members"] = ["hill", "gp", "de", "tpe"]
+            for patch in ARMS[arm][1]:
+                for key, value in patches[patch].items():
+                    if isinstance(value, dict):
+                        data.setdefault(key, {}).update(value)
+                    else:
+                        data[key] = value
             validated = SearchSettings.from_json(data).to_json()
             name = f"{arm}-seed-{seed}"
             cases.append({
@@ -87,6 +97,15 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
     return manifest
 
 
+def _setup_failed(meta, summary):
+    # Only the coordinator's explicit minimal failure record bypasses validation.
+    # Incomplete/malformed successful-setup records must still fail loudly.
+    return (bool(meta.get("error"))
+            and not {"context", "problems", "warm_start_sha256"} & set(meta)
+            and summary["status"] == "no_winner" and summary["exit_code"] != 0
+            and not summary["winners"])
+
+
 def _read_run(case):
     directory = Path(case["output_dir"])
     paths = [directory / name for name in ("run.json", "summary.json")]
@@ -95,9 +114,11 @@ def _read_run(case):
     meta, summary = [json.loads(p.read_text()) for p in paths]
     if meta["settings"] != case["settings"]:
         raise ValueError(f"{directory}: settings differ from the prepared comparison")
+    if _setup_failed(meta, summary):
+        return meta, summary
     if meta.get("warm_start_sha256") != case["warm_start_sha256"]:
         raise ValueError(f"{directory}: warm/prior inputs changed after comparison preparation")
-    if case["arm"] in ("broad_prior", "combined") and any(
+    if case["settings"]["warm_start"].get("use_prior") and any(
         p["strategy"] != "exhaustive" and p["prior_entries"] != p["eligible"]
         for p in meta["problems"].values()
     ):
@@ -108,31 +129,46 @@ def _read_run(case):
     return meta, summary
 
 
-def _same_domain(a, b):
+def _check_comparable(a, b, directory):
     ca, cb = a["context"], b["context"]
     fields = ("arch", "dtype", "layout", "variant", "domain_sha256", "devices",
               "timing_environment", "build", "sources")
-    return (set(a["problems"]) == set(b["problems"])
-            and all(ca.get(k) == cb.get(k) for k in fields)
-            and ca.get("domain_sha256") is not None
-            and all(ca.get("measurement", {}).get(k) == cb.get("measurement", {}).get(k)
-                    for k in ("verify", "verify_tol", "kernel_timeout", "batch_size")))
+    differences = [k for k in fields if ca.get(k) != cb.get(k)]
+    if ca.get("domain_sha256") is None:
+        differences.append("missing domain_sha256")
+    differences.extend("measurement." + k
+                       for k in ("verify", "verify_tol", "kernel_timeout", "batch_size")
+                       if ca.get("measurement", {}).get(k) != cb.get("measurement", {}).get(k))
+    # Enabled caches have a fresh per-run directory (and may have a free-space
+    # derived byte cap). Compare the mode, not those runtime allocation details.
+    if ((ca.get("measurement", {}).get("host_cache") is None)
+            != (cb.get("measurement", {}).get("host_cache") is None)):
+        differences.append("measurement.host_cache mode")
+    if set(a["problems"]) != set(b["problems"]):
+        differences.append("problems")
+    else:
+        differences.extend(f"warm_start count for {p}"
+                           for p in a["problems"]
+                           if len(a["problems"][p]["warm_start"])
+                           != len(b["problems"][p]["warm_start"]))
+    if differences:
+        raise ValueError(f"{directory}: control differs in {', '.join(differences)}; "
+                         "do not pool these runs")
 
 
 def summarize(manifest, stream):
     cases = json.loads(Path(manifest).read_text())["runs"]
     runs = {(c["arm"], c["seed"]): _read_run(c) for c in cases}
-    fields = ("arm", "seed", "control_arm", "status", "exit_code", "winners", "problems",
-              "exhaustive_problems", "paired_winners", "control_relative_quality",
+    fields = ("arm", "seed", "control_arm", "status", "exit_code", "error", "winners", "problems",
+              "exhaustive_problems", "paired_winners", "same_winners", "control_relative_quality",
               "builds", "measurements", "confirmation_calls",
               "wall_s", "ask_s", "build_s", "measure_s", "confirm_s", "ck_commit")
     writer = csv.DictWriter(stream, fieldnames=fields)
     writer.writeheader()
     complete = True
-    for case in sorted(cases, key=lambda c: (c["seed"], ARMS.index(c["arm"]))):
+    for case in sorted(cases, key=lambda c: (c["seed"], list(ARMS).index(c["arm"]))):
         row = dict.fromkeys(fields, "")
-        control = {"race": "confirmation_control", "portfolio_tpe": "portfolio_control"}.get(
-            case["arm"], "baseline")
+        control = ARMS[case["arm"]][0]
         row.update(arm=case["arm"], seed=case["seed"], control_arm=control)
         current = runs[(case["arm"], case["seed"])]
         if current is None:
@@ -140,11 +176,16 @@ def summarize(manifest, stream):
             complete = False
         else:
             meta, summary = current
+            row.update(status=summary["status"], exit_code=summary["exit_code"],
+                       error=summary["error"], winners=len(summary["winners"]))
+            if _setup_failed(meta, summary):
+                row.update(status="setup_failed", error=summary["error"] or meta["error"])
+                complete = False
+                writer.writerow(row)
+                continue
             baseline = runs.get((control, case["seed"]))
             n = len(meta["problems"])
-            row.update(status=summary["status"], exit_code=summary["exit_code"],
-                       winners=len(summary["winners"]),
-                       problems=n, builds=summary["budget"]["builds_charged"],
+            row.update(problems=n, builds=summary["budget"]["builds_charged"],
                        measurements=summary["counts"]["measured"],
                        confirmation_calls=summary["counts"]["confirm_calls"],
                        wall_s=summary["wall_s"],
@@ -155,13 +196,14 @@ def summarize(manifest, stream):
                                ("measure", "measure_pairs"), ("confirm", "confirm")):
                 row[label + "_s"] = summary.get("phase_s", {}).get(key, "")
             complete &= summary["status"] == "complete" and summary["exit_code"] == 0
-            if baseline is not None:
+            if baseline is not None and not _setup_failed(*baseline):
                 base_meta, base_summary = baseline
-                if not _same_domain(meta, base_meta):
-                    raise ValueError(f"{case['output_dir']}: baseline domain or execution "
-                                     "context differs; do not pool these runs")
+                _check_comparable(meta, base_meta, case["output_dir"])
                 paired = set(summary["winners"]) & set(base_summary["winners"])
                 row["paired_winners"] = len(paired)
+                row["same_winners"] = sum(summary["winners"][p]["kernel"]
+                                          == base_summary["winners"][p]["kernel"]
+                                          for p in paired)
                 if n and len(paired) == n:
                     row["control_relative_quality"] = math.exp(sum(
                         math.log(base_summary["winners"][p]["median_ms"])
