@@ -443,7 +443,7 @@ suites:
         archs: [cpu-emulation]
         gates: false
         notes: "Advisory (expect_failure) TheRock test on CPU runners, gfx942 and gfx950."
-        evidence: ["external:therock"]
+        evidence: ["repo:projects/hipblaslt/clients/scripts/rocjitsu/rocjitsu_race_smoke.py", "external:therock"]
         action: keep
     target:
       - {system: therock, cadence: presubmit}

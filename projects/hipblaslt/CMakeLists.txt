@@ -798,6 +798,22 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Race check run under CPU rocjitsu by TheRock's hipblaslt-rocjitsu-race
+    # test; it locates the ROCm installation from this install location.
+    # rocjitsu is Linux-only.
+    if(NOT WIN32)
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke.py"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+        rocm_install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke_tensilelite.yaml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         rocm_install(
             TARGETS hipblaslt-bench-a2a
