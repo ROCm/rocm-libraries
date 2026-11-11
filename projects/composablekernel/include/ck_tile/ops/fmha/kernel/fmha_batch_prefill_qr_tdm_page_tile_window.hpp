@@ -568,6 +568,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                     // Serialized after the group transfer (both write the tail group's LDS). The
                     // schedule's partial tensor waits still hold: this transfer takes the group
                     // transfer's place in issue order, and everything older has completed.
+                    // Written out here and in tdm_issue_vectorized_lean, not shared: a helper that
+                    // takes the LDS base as a pointer makes the compiler form the LDS addresses of
+                    // the full-group transfers as 64-bit flat addresses, scalar work before every
+                    // V transfer of the P16 path (P16 D128 runs slower).
                     s_wait_tensorcnt<0>();
                     const uint32_t tail_dims[3] = {
                         static_cast<uint32_t>(tail_rows), static_cast<uint32_t>(HeadDim_), 1};
@@ -701,7 +705,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                     slice_ptr, lds_ptr, dims, strides, box, config));
             if(tail_rows != 0)
             {
-                // Same serialized partial-group copy as tdm_issue_vectorized (tail tile only).
+                // Same serialized partial-group copy as tdm_issue_vectorized (tail tile only;
+                // written out in both paths, see there).
                 s_wait_tensorcnt<0>();
                 const auto lds_view         = lds_window.get_bottom_tensor_view();
                 const auto lds_origin       = lds_window.get_window_origin();
