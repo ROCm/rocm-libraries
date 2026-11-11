@@ -1591,6 +1591,181 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
     EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
 }
 
+// ── summation-order coefficient ─────────────────────────────────────────────
+
+// An engine's coefficient multiplies the summation-order term of atol and leaves rtol alone for
+// half and bfloat16, whose default is 1.
+TYPED_TEST(ConvFpropOutputToleranceFixture, SummationOrderCoefficientScalesTheSumTermOfAtol)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto unset = calculateConvFpropOutputTolerance<T>(s);
+    ConvFpropCoefficients one;
+    one.summationOrder = 1.0;
+    const auto explicitOne = calculateConvFpropOutputTolerance<T>(s, one);
+    EXPECT_DOUBLE_EQ(explicitOne.atol, unset.atol);
+    EXPECT_DOUBLE_EQ(explicitOne.rtol, unset.rtol);
+
+    ConvFpropCoefficients five;
+    five.summationOrder = 5.0;
+    const auto wider = calculateConvFpropOutputTolerance<T>(s, five);
+    // sqrt(144) * 2^-24 * sigma (4) = 48 * 2^-24 more per unit of coefficient
+    EXPECT_NEAR(wider.atol - unset.atol, 4.0 * 12.0 * std::ldexp(1.0, -24) * 4.0, 1e-12);
+    EXPECT_DOUBLE_EQ(wider.rtol, unset.rtol);
+}
+
+// A coefficient that is not finite and positive is rejected, for every output type.
+TYPED_TEST(ConvFpropOutputToleranceFixture, InvalidSummationOrderCoefficientIsRejected)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    for(const double bad : {0.0,
+                            -1.0,
+                            std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity()})
+    {
+        ConvFpropCoefficients coefficients;
+        coefficients.summationOrder = bad;
+        EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s, coefficients), std::invalid_argument)
+            << bad;
+    }
+}
+
+// ── float outputs ───────────────────────────────────────────────────────────
+//
+// For a float output the one rounding is of the float result itself: rtol is 2 eps of float plus
+// the summation-order term, which atol carries on sigma: c * sqrt(K) * u32 on |ref| and on
+// sigma, with c = DEFAULT_FLOAT_SUMMATION_ORDER (3) unless the engine sets it.
+
+// K = 144, sigma = 4, c = 3: written out here, not taken from the library.
+TEST(TestConvFpropOutputToleranceFloat, ConstantsAtAFixedScale)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<float>(s);
+    const double sumTerm = 3.0 * 12.0 * std::ldexp(1.0, -24);
+    EXPECT_NEAR(tol.rtol, std::ldexp(1.0, -22) + sumTerm, 1e-15);
+    EXPECT_NEAR(tol.atol, sumTerm * 4.0 + std::ldexp(1.0, -126), 1e-15);
+}
+
+// With no coefficient set the default is used, and the default is 3.
+TEST(TestConvFpropOutputToleranceFloat, BaseCoefficientIsUsedWhenTheEngineSetsNone)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    ConvFpropCoefficients base;
+    base.summationOrder = 3.0;
+    const auto unset = calculateConvFpropOutputTolerance<float>(s);
+    const auto three = calculateConvFpropOutputTolerance<float>(s, base);
+    EXPECT_DOUBLE_EQ(unset.atol, three.atol);
+    EXPECT_DOUBLE_EQ(unset.rtol, three.rtol);
+    EXPECT_DOUBLE_EQ(DEFAULT_FLOAT_SUMMATION_ORDER, 3.0);
+}
+
+// An engine's coefficient replaces the default in atol and in rtol.
+TEST(TestConvFpropOutputToleranceFloat, EngineCoefficientReplacesTheBaseOne)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    ConvFpropCoefficients engine;
+    engine.summationOrder = 9.0;
+    const auto base = calculateConvFpropOutputTolerance<float>(s);
+    const auto wider = calculateConvFpropOutputTolerance<float>(s, engine);
+    const double perUnit = 12.0 * std::ldexp(1.0, -24);
+    EXPECT_NEAR(wider.rtol - base.rtol, 6.0 * perUnit, 1e-15);
+    EXPECT_NEAR(wider.atol - base.atol, 6.0 * perUnit * 4.0, 1e-15);
+}
+
+// A float output has no lambda term: atol is the summation-order term and nothing else.
+TEST(TestConvFpropOutputToleranceFloat, HasNoPartialResultTerm)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 65536;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<float>(s);
+    const double sigma = std::sqrt(65536.0) / 3.0;
+    EXPECT_LT(tol.atol,
+              1.001 * (3.0 * 256.0 * std::ldexp(1.0, -24) * sigma + std::ldexp(1.0, -126)));
+}
+
+// A tree-ordered sum and the exact sum stay within the tolerance of the reference's sequential
+// float sum at every reduction length.
+TEST(TestConvFpropOutputToleranceFloat, CorrectSumsInAnyOrderPass)
+{
+    for(const uint64_t k : {uint64_t{16}, uint64_t{1152}, uint64_t{65536}})
+    {
+        for(unsigned seed = 0; seed < 32; ++seed)
+        {
+            const auto p = makeDotProblem<float>(k, seed);
+            const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+            const auto ref = static_cast<double>(sequentialDot(p));
+            const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
+            EXPECT_TRUE(withinTolerance<float>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
+            EXPECT_TRUE(withinTolerance<float>(exactDot(p), ref, tol))
+                << "K=" << k << " seed=" << seed;
+        }
+    }
+}
+
+// An output near zero has only the summation-order term to lean on: the sequential and the tree
+// sum of products that cancel differ by a random walk of roundings.
+TEST(TestConvFpropOutputToleranceFloat, NearZeroOutputsNeedTheSummationOrderTerm)
+{
+    for(const uint64_t k : {uint64_t{1152}, uint64_t{65536}})
+    {
+        double largestOverTerm = 0.0;
+        for(unsigned seed = 0; seed < 32; ++seed)
+        {
+            const auto p = makeCancellingProblem<float>(k, seed);
+            const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+            const auto ref = static_cast<double>(sequentialDot(p));
+            const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
+            EXPECT_TRUE(withinTolerance<float>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
+            largestOverTerm = std::max(largestOverTerm, std::abs(tree - ref) / tol.atol);
+        }
+        // Check on the test itself: the sums really do differ, by a good part of atol, so that
+        // removing the term fails the comparison above.
+        EXPECT_GT(largestOverTerm, 0.02) << "K=" << k;
+    }
+}
+
+// Leaving out the largest of 1152 products (an error of up to about 1) is far outside a float
+// tolerance, at every draw.
+TEST(TestConvFpropOutputToleranceFloat, MissingTermFails)
+{
+    const uint64_t k = 1152;
+    for(unsigned seed = 0; seed < 32; ++seed)
+    {
+        const auto p = makeDotProblem<float>(k, seed);
+        uint64_t largest = 0;
+        for(uint64_t i = 0; i < k; ++i)
+        {
+            if(std::abs(p.x[i] * p.w[i]) > std::abs(p.x[largest] * p.w[largest]))
+            {
+                largest = i;
+            }
+        }
+        const auto tol = calculateConvFpropOutputTolerance<float>(scaleOf(p));
+        const auto withoutLargest = static_cast<double>(pairwiseDot(p, 0, k, largest));
+        const auto ref = static_cast<double>(sequentialDot(p));
+        EXPECT_FALSE(withinTolerance<float>(withoutLargest, ref, tol)) << "seed=" << seed;
+    }
+}
+
 // C/groups times the filter volume, for 1D, 2D and 3D weights.
 TEST(TestConvFpropAccumulationLength, MultipliesEveryWeightDimensionButTheFirst)
 {

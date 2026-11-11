@@ -946,8 +946,8 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
 
-// The two types differ in atol (half carries the lambda term, bfloat16 does not) and in rtol
-// (2^-9 and 2^-6), so a swap of the dispatch shows in the values.
+// The three types differ in atol (half carries the lambda term, bfloat16 and float do not) and in
+// rtol (2^-9, 2^-6 and about 2^-22), so a swap of the dispatch shows in the values.
 TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
@@ -960,8 +960,12 @@ TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<half>(scale);
     const auto expectedBfloat16
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<bfloat16>(scale);
+    const auto expectedFloat
+        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale);
     ASSERT_NE(expectedHalf.atol, expectedBfloat16.atol);
     ASSERT_NE(expectedHalf.rtol, expectedBfloat16.rtol);
+    ASSERT_NE(expectedFloat.rtol, expectedBfloat16.rtol);
+    ASSERT_NE(expectedFloat.atol, expectedBfloat16.atol);
 
     const auto halfTolerance = tol::convFwdOutputTolerance(scale, DataType::HALF);
     ASSERT_TRUE(halfTolerance.has_value());
@@ -972,15 +976,41 @@ TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
     ASSERT_TRUE(bfloat16Tolerance.has_value());
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->atol, expectedBfloat16.atol);
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->rtol, expectedBfloat16.rtol);
+
+    const auto floatTolerance = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
+    ASSERT_TRUE(floatTolerance.has_value());
+    EXPECT_DOUBLE_EQ(floatTolerance->atol, expectedFloat.atol);
+    EXPECT_DOUBLE_EQ(floatTolerance->rtol, expectedFloat.rtol);
 }
 
-TEST(TestConvFwdDynamicTolerance, OnlyHalfAndBfloat16OutputsGetADynamicTolerance)
+// The coefficients an engine sets reach the tolerance of the type they are passed with.
+TEST(TestConvFwdDynamicTolerance, EngineCoefficientsReachTheToleranceOfTheirOutputType)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::FLOAT).has_value());
+    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    coefficients.summationOrder = 11.0;
+
+    const auto withDefault = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
+    const auto withEngine = tol::convFwdOutputTolerance(scale, DataType::FLOAT, coefficients);
+    const auto expected
+        = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
+                                                                                     coefficients);
+    ASSERT_TRUE(withDefault.has_value());
+    ASSERT_TRUE(withEngine.has_value());
+    EXPECT_DOUBLE_EQ(withEngine->atol, expected.atol);
+    EXPECT_DOUBLE_EQ(withEngine->rtol, expected.rtol);
+    EXPECT_GT(withEngine->atol, withDefault->atol);
+}
+
+TEST(TestConvFwdDynamicTolerance, OnlyHalfBfloat16AndFloatOutputsGetADynamicTolerance)
+{
+    hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
+    scale.accumulationLength = 144;
+    scale.inputMeanSquare = 1.0 / 3.0;
+    scale.weightMeanSquare = 1.0 / 3.0;
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::DOUBLE).has_value());
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::INT32).has_value());
 }
@@ -1001,7 +1031,7 @@ TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFu
     }
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::HALF));
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::BFLOAT16));
-    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::FLOAT));
+    EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::FLOAT));
     EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::DOUBLE));
 }
 

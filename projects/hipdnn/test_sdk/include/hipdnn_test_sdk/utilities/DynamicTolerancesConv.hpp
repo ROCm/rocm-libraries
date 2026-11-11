@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -333,49 +334,76 @@ struct AbsRelTolerance
     double rtol = 0.0;
 };
 
+/// The summation-order coefficient of a float output when nothing sets it: the smallest constant
+/// that no solver MIOpen runs, Winograd aside, exceeds on the calibration data (see tolerances.md).
+/// An engine whose solvers err more sets its own.
+inline constexpr double DEFAULT_FLOAT_SUMMATION_ORDER = 3.0;
+
+/// The coefficients of the output tolerance an engine may set; an unset one keeps the default of
+/// the output type.
+struct ConvFpropCoefficients
+{
+    /// Multiplies sqrt(K) * u32 in the summation-order term. Default: 1 for half and bfloat16,
+    /// DEFAULT_FLOAT_SUMMATION_ORDER for float. Finite and positive.
+    std::optional<double> summationOrder;
+};
+
 /**
- * @brief Per-element tolerance for a convolution-forward output stored as half or bfloat16, with
- * float accumulation, graded against a float-accumulating reference.
+ * @brief Per-element tolerance for a convolution-forward output stored as half, bfloat16 or
+ * float, with float accumulation, graded against a float-accumulating reference.
  *
  *   |impl_i - ref_i| <= rtol * |ref_i| + atol
- *   rtol = 2 * eps
- *   atol = (sqrt(K) * u32 + lambda * eps) * sigma
+ *   rtol = 2 * eps                       (half, bfloat16)
+ *   rtol = 2 * eps + c * sqrt(K) * u32   (float)
+ *   atol = (c * sqrt(K) * u32 + lambda * eps) * sigma
  *          + sum over the rounding points of (slope * eps_p * magnitude) + minNormal
  *   sigma = sqrt(K * mean(x^2) * mean(w^2)) * outputScale
  *
  * - eps is the machine epsilon of the output type, u32 the unit roundoff of float (2^-24),
  *   minNormal the smallest normal number of the output type.
- * - lambda is 12 for half and 0 for bfloat16.
+ * - c is the summation-order coefficient: 1 for half and bfloat16, and for float
+ *   DEFAULT_FLOAT_SUMMATION_ORDER, unless `coefficients` sets it.
+ * - lambda is 12 for half and 0 for bfloat16 and float.
  * - sigma is the typical magnitude of an output element, and holds only for inputs with a zero
  *   mean: for a nonzero mean the partial sums do not cancel, the output is larger than sigma, and
  *   only the rtol term grows with it.
  *
- * The terms cover the two roundings of the float result to the output type (rtol), the order of
- * the float summation (sqrt(K) * u32 * sigma), partial results that some half kernels keep in
- * half (lambda * eps * sigma), the roundings of intermediates to half or bfloat16 (the rounding
- * points; see RoundingPoint) and flushed denormals (minNormal). The derivation, the calibration
- * of lambda and the comparison with calculateConvFpropTolerance() are in tolerances.md in the
- * documentation of the integration tests.
+ * The terms cover the two roundings of the float result to the output type (2 * eps), the order of
+ * the float summation (c * sqrt(K) * u32, on sigma and for float on |ref|), partial results that
+ * some half kernels keep in half (lambda * eps * sigma), the roundings of intermediates to half
+ * or bfloat16 (the rounding points; see RoundingPoint) and flushed denormals (minNormal). The
+ * derivation, the calibration of lambda and c and the comparison with calculateConvFpropTolerance()
+ * are in tolerances.md in the documentation of the integration tests.
  *
- * @tparam OutputType half or bfloat16.
+ * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvFpropErrorScale.
+ * @param coefficients Engine-set coefficients; see ConvFpropCoefficients.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument if scale.accumulationLength is 0, a mean square is negative or
- * not finite, outputScale is not finite, or a rounding point has a negative or not finite field.
+ * not finite, outputScale is not finite, a rounding point has a negative or not finite field, or
+ * the summation-order coefficient is not finite and positive.
  * @throws std::overflow_error if atol exceeds the largest value of OutputType, or if sigma is not
  * a number (an overflowing product of the mean squares against a zero factor).
  */
 template <typename OutputType>
-AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& scale)
+AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& scale,
+                                                  const ConvFpropCoefficients& coefficients = {})
 {
-    static_assert(std::is_same_v<OutputType, half> || std::is_same_v<OutputType, bfloat16>,
-                  "calculateConvFpropOutputTolerance models half and bfloat16 outputs only");
+    static_assert(std::is_same_v<OutputType, half> || std::is_same_v<OutputType, bfloat16>
+                      || std::is_same_v<OutputType, float>,
+                  "calculateConvFpropOutputTolerance models half, bfloat16 and float outputs only");
 
     const auto validMoment = [](double v) { return std::isfinite(v) && v >= 0.0; };
     const bool validPoints = std::all_of(
         scale.roundingPoints.begin(), scale.roundingPoints.end(), [&](const RoundingPoint& p) {
             return validMoment(p.epsilon) && validMoment(p.magnitude) && validMoment(p.slope);
         });
+    if(coefficients.summationOrder.has_value()
+       && !(std::isfinite(*coefficients.summationOrder) && *coefficients.summationOrder > 0.0))
+    {
+        throw std::invalid_argument("calculateConvFpropOutputTolerance: the summation-order "
+                                    "coefficient must be finite and positive.");
+    }
     if(scale.accumulationLength == 0 || !validMoment(scale.inputMeanSquare)
        || !validMoment(scale.weightMeanSquare) || !std::isfinite(scale.outputScale) || !validPoints)
     {
@@ -411,9 +439,20 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
         roundingPointError += point.slope * point.epsilon * point.magnitude;
     }
 
+    // The summation-order error of a float output is relative to the partial sums, which are
+    // about the size of the output or larger: the same coefficient on |ref| as on sigma. For
+    // half and bfloat16 that term is below 1 % of the rounding of the output and is left out.
+    const double summationOrder = coefficients.summationOrder.value_or(
+        std::is_same_v<OutputType, float> ? DEFAULT_FLOAT_SUMMATION_ORDER : 1.0);
+    const double summationError = summationOrder * std::sqrt(k) * floatUnitRoundoff;
+
     AbsRelTolerance tolerance;
     tolerance.rtol = OUTPUT_ROUNDING_MARGIN * eps;
-    tolerance.atol = (std::sqrt(k) * floatUnitRoundoff + IO_INTERMEDIATE_LAMBDA * eps) * sigma
+    if constexpr(std::is_same_v<OutputType, float>)
+    {
+        tolerance.rtol += summationError;
+    }
+    tolerance.atol = (summationError + IO_INTERMEDIATE_LAMBDA * eps) * sigma
                      + ROUNDING_POINT_MARGIN * roundingPointError + minNormal;
     hipdnn_test_sdk::utilities::validateToleranceRange<OutputType>(tolerance.atol);
     return tolerance;

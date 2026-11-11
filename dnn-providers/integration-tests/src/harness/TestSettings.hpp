@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -91,6 +92,16 @@ struct ValidatorOverride
 //   filters = ["*KnownBroken*"]
 //   reason  = "tracked in #1234"
 //
+//   # Coefficient of the convolution-forward dynamic tolerance for float outputs
+//   [conv_fwd_tolerance.float]
+//   summation_order = 9.0
+//
+// [conv_fwd_tolerance.float] 'summation_order' multiplies sqrt(K) * u32 in the dynamic
+// tolerance of a float convolution-forward output (see ConvFwdDynamicTolerance.hpp); omitted,
+// the harness uses the SDK's default. It must be a finite positive number. Output types other
+// than "float" and keys other than 'summation_order' are load errors. A matching
+// [[tolerance_overrides]] entry still replaces the dynamic tolerance as a whole.
+//
 // Filters use GTest-style globs (globMatch with * wildcards).
 // For tolerance_overrides, later entries take precedence over earlier
 // ones when multiple filters match.
@@ -150,6 +161,11 @@ public:
             {
                 _skips.push_back(parseTestSkip(node));
             }
+        }
+
+        if(const auto convFwdTolerance = table["conv_fwd_tolerance"])
+        {
+            parseConvFwdTolerance(*convFwdTolerance.node());
         }
     }
 
@@ -278,6 +294,14 @@ public:
         }
 
         return std::nullopt;
+    }
+
+    // The coefficient of the summation-order term of the convolution-forward dynamic tolerance
+    // that this engine's file sets for outputs of `outputType` ("float"); nullopt when it sets
+    // none, which keeps the default of the harness.
+    std::optional<double> convFwdSummationOrder(std::string_view outputType) const
+    {
+        return outputType == "float" ? _floatSummationOrder : std::nullopt;
     }
 
     size_t skipEntryCount() const
@@ -465,6 +489,57 @@ private:
         return parsed;
     }
 
+    // [conv_fwd_tolerance.<output type>] sets the coefficients of the convolution-forward
+    // dynamic tolerance for that output type. Only "float" and its 'summation_order' exist;
+    // anything else is a load error, so that a coefficient for a type or a term the harness
+    // does not read cannot sit in a file unnoticed.
+    void parseConvFwdTolerance(const toml::node& node)
+    {
+        static constexpr const char* K_SECTION = "TestSettings: [conv_fwd_tolerance]";
+
+        const auto* table = node.as_table();
+        if(table == nullptr)
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " is not a table");
+        }
+        for(const auto& [typeName, typeNode] : *table)
+        {
+            if(typeName.str() != "float")
+            {
+                throw std::runtime_error(std::string(K_SECTION) + " has unknown output type '"
+                                         + std::string(typeName.str())
+                                         + R"~(' (expected "float"))~");
+            }
+            const auto* typeTable = typeNode.as_table();
+            if(typeTable == nullptr)
+            {
+                throw std::runtime_error(std::string(K_SECTION) + ".float is not a table");
+            }
+            for(const auto& [key, value] : *typeTable)
+            {
+                if(key.str() != "summation_order")
+                {
+                    throw std::runtime_error(std::string(K_SECTION) + ".float has unknown key '"
+                                             + std::string(key.str())
+                                             + "' (expected 'summation_order')");
+                }
+                const auto number = value.value<double>();
+                if(!number.has_value())
+                {
+                    throw std::runtime_error(std::string(K_SECTION)
+                                             + ".float 'summation_order' must be a number");
+                }
+                if(!std::isfinite(*number) || !(*number > 0.0))
+                {
+                    throw std::runtime_error(std::string(K_SECTION)
+                                             + ".float 'summation_order' must be finite and "
+                                               "positive");
+                }
+                _floatSummationOrder = *number;
+            }
+        }
+    }
+
     static SkipEntry parseTestSkip(const toml::node& node)
     {
         static constexpr const char* K_SECTION = "TestSettings: [[test_skips]]";
@@ -498,6 +573,7 @@ private:
     std::vector<OverrideEntry> _overrides;
     std::vector<ValidatorEntry> _validatorOverrides;
     std::vector<SkipEntry> _skips;
+    std::optional<double> _floatSummationOrder;
 };
 
 } // namespace hipdnn_integration_tests
