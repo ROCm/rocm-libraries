@@ -70,8 +70,6 @@ constexpr PackSymbols GFX950_CONV_DGRAD_AOT{"hipkernel:Gfx950ConvDgradAot",
                                             "gfx950_conv_dgrad.dx.uid"};
 constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_dgrad.problem";
 
-}
-
 GraphFixture fixtureOf(const DgradShape& shape,
                        data_objects::DataType dtype = data_objects::DataType::HALF)
 {
