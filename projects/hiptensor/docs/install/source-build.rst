@@ -585,11 +585,13 @@ Depending on the resources available to the machine running the selected tests,
 hipTensor test runtimes can last an hour or more. Here are some things you can do to reduce test runtimes:
 
 *  CTest runs the entire test suite, but you can invoke tests individually by name.
-*  Use GoogleTest filters to target specific test cases:
+*  Use GoogleTest filters to target specific test cases. Set the ``GTEST_FILTER`` environment
+   variable; the test binaries reject the ``--gtest_filter`` flag because their own option parser
+   runs first:
 
    .. code-block:: bash
 
-      <test_exe> --gtest_filter=*name_filter*
+      GTEST_FILTER='*name_filter*' <test_exe>
 
 *  Manually adjust the test case coverage. Use a text editor to modify the test YAML configs to adjust the test parameter coverage.
 *  Alternatively, use your own YAML config for testing with a reduced parameter set.
