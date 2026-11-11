@@ -2161,7 +2161,8 @@ namespace TensileLite
     }
 
     // A leading dimension that is a multiple of this many bytes starts every row on the
-    // same DRAM channels (gfx1151).
+    // same DRAM channels (gfx1151). Measured; HIP/HSA expose only the bus width, not the
+    // channel interleave.
     constexpr size_t kStaggerAliasBytes = 2048;
 
     static bool ldAliasesChannels(size_t ld, float bpe)
@@ -2268,7 +2269,7 @@ namespace TensileLite
             // padded away it only breaks L2 sharing, so start all workgroups in phase.
             if(pAMDGPU->processor == AMDGPU::Processor::gfx1151 && defaultStaggerU != 0
                && callerPaddedAwayAliasing(problem))
-                defaultStaggerUMapping = 4;
+                defaultStaggerUMapping = StaggerUMapping::InPhase;
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
@@ -2293,7 +2294,7 @@ namespace TensileLite
             const bool rowUniformStaggerCapable
                 = internalArgsSupport.staggerU
                   && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
-            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
+            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == StaggerUMapping::WG1))
             {
                 defaultStaggerUMapping     = 0;
                 defaultStaggerU            = 0;
@@ -2301,8 +2302,7 @@ namespace TensileLite
             }
         }
 
-        // Mapping should be in this range: [0, 1, 2, 3, 4]
-        assert(defaultStaggerUMapping < 5);
+        assert(defaultStaggerUMapping <= StaggerUMapping::InPhase);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
         // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]

@@ -356,6 +356,16 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
+    // StaggerUMapping values: which workgroup index selects a tile's K start offset.
+    namespace StaggerUMapping
+    {
+        constexpr size_t WG0      = 0;
+        constexpr size_t WG1      = 1;
+        constexpr size_t WG2      = 2;
+        constexpr size_t WGSerial = 3;
+        constexpr size_t InPhase  = 4; // every workgroup starts at the same offset
+    }
+
     // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
     enum class TileProcessingStrategy { None, DataParallel, StreamK };
     enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
