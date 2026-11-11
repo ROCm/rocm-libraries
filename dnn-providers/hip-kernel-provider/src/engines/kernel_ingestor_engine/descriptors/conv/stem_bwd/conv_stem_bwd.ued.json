@@ -18,7 +18,8 @@
     "fm",
     "sh",
     "sw",
-    "ft"
+    "ft",
+    "sd"
   ],
   "behavior_notes": [
     "runtime_compilation"

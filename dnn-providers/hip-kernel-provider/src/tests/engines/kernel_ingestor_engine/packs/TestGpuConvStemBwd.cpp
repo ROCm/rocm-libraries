@@ -182,6 +182,7 @@ conv_stem_bwd::StemBwdConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelD
     c.sh = kernel.getIntMetadata("sh");
     c.sw = kernel.getIntMetadata("sw");
     c.ft = kernel.getIntMetadata("ft");
+    c.sd = kernel.getIntMetadata("sd");
     return c;
 }
 
@@ -350,6 +351,16 @@ std::vector<DeviceCase> deviceCases()
     threeD.stride = {1, 2, 2};
     threeD.dilation = {1, 1, 1};
     cases.push_back({"ThreeDOfDepthOne", threeD});
+    // Stride 1 (space-to-depth configs too): odd extents (a half super-pixel at each far
+    // edge), padding on one side per axis, true convolution.
+    cases.push_back({"Stem3x3S1OddExtents", stem(3, 16, {13, 31}, 3, 1, 1)});
+    auto oneSided = stem(3, 16, {12, 22}, 3, 1, 0);
+    oneSided.prePadding = {0, 2};
+    oneSided.postPadding = {2, 0};
+    cases.push_back({"Stem3x3S1OneSidedPadding", oneSided});
+    auto convolutionS1 = stem(3, 16, {11, 19}, 5, 1, 2, true);
+    convolutionS1.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Stem5x5S1TrueConvolutionNhwc", convolutionS1});
     // 3-D stems: the dx planes in the grid, the depth taps in the reduction (unit depth stride).
     const auto stem3d = [](int64_t c,
                            int64_t k,
@@ -557,8 +568,8 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 12> KNOBS{
-        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft"};
+    static constexpr std::array<const char*, 13> KNOBS{
+        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft", "sd"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {

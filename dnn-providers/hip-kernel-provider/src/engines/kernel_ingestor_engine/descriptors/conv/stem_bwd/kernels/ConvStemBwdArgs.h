@@ -27,6 +27,10 @@ struct ConvStemBwdArgs
     // dxd the planes' element strides. The grid's z is n d.
     int d, dout, pd, kpr;
     long long dyd, dxd;
+    // Space-to-depth (CONV_SB_SD, stride 1): super-pixels of SD x SD dx pixels on a virtual
+    // stride SD; super-row y of dy holds rows SD y + sdh + e (e < SD; columns alike), the
+    // reduction runs over (e, k) with kp = SD SD kpr. ho and wo stay dy's own extents.
+    int sdh, sdw;
 };
 
 /// b[nb = (c, p, q)][u][v][k] = w[k][c][r][s] with r = sh (u - oh) + p + ph and s = sw (v - ow)
@@ -44,6 +48,9 @@ struct ConvStemBwdTransformArgs
     // depth stride.
     int ft, kpr;
     long long wsd;
+    // Space-to-depth: b's k axis is ((eh, ew), k), kpr per sub-pixel; tap r = sh (u - oh) + p +
+    // ph - dh - eh (sh the virtual stride; columns alike).
+    int dh, dw;
 };
 
 /// Elements a staged k run is padded by: 16 bytes, which keeps every run's 16-byte stores

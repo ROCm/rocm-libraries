@@ -62,6 +62,10 @@
     {
       "name": "ft",
       "type": "int"
+    },
+    {
+      "name": "sd",
+      "type": "int"
     }
   ]
 }
