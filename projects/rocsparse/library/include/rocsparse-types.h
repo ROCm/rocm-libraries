@@ -47,9 +47,9 @@
 // form, which gcc and clang accept there.
 #if(defined(__cplusplus) && __cplusplus >= 201703L)   \
     || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) \
-    || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ > 201710L)
+    || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
 #define ROCSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) || defined(__clang__)
 #define ROCSPARSE_DEPRECATED_MSG(MSG) __attribute__((__deprecated__(MSG)))
 #else
 #define ROCSPARSE_DEPRECATED_MSG(MSG)
@@ -760,7 +760,7 @@ typedef enum rocsparse_itilu0_alg_
     rocsparse_itilu0_alg_sync_split_fusion ROCSPARSE_DEPRECATED_MSG(
         "rocsparse_itilu0_alg_sync_split_fusion is deprecated and will be removed in a future "
         "release.")
-    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. */
+    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. \deprecated This algorithm will be removed in a future release. */
 } rocsparse_itilu0_alg;
 
 /*! \ingroup types_module
@@ -874,8 +874,9 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
     rocsparse_spmv_alg_sell         = 9, /**< SLICED ELL SpMV algorithm for SLICED ELL matrices. */
     rocsparse_spmv_alg_csr_stream ROCSPARSE_DEPRECATED_MSG(
-        "rocsparse_spmv_alg_csr_stream is deprecated. Use rocsparse_spmv_alg_csr_rowsplit instead.")
-    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
+        "rocsparse_spmv_alg_csr_stream is deprecated and will be removed in a future release. Use "
+        "rocsparse_spmv_alg_csr_rowsplit instead.")
+    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_spmv_alg_csr_rowsplit instead. */
 } rocsparse_spmv_alg;
 
 /*! \ingroup types_module
