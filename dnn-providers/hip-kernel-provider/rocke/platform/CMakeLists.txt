@@ -642,7 +642,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_PYTEST "python -m pytest -p rocke.tests.ctest_shard")
 
     # Tiers past quick that a pytest suite registers an entry for, as
-    # _ROCKE_PYTEST_TIERS_<name> (see rocke_pytest_suite).
+    # _ROCKE_PYTEST_TIERS_<name> (see rocke_pytest_suite and rocke/TESTING.md).
     # A suite opts in with one line here, for example
     #   list(APPEND _ROCKE_PYTEST_TIERS_rocke_library_gdn_pytest standard)
     # APPEND keeps a value given on the configure line.

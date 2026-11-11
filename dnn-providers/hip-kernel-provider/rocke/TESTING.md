@@ -649,6 +649,8 @@ Before execution, use `ctest --test-dir build/bin/hip_kernel_provider -N -V`
 with the same selection flags to check the selected names, working directory,
 commands, and environment. `ROCKE_ENGINE_test_categories_external.yaml` in the
 provider and TheRock's categorization script determine tier membership. A
+pytest suite that opts in to tiers also has one `<name>-<tier>` entry for each
+listed tier ([§5.3](#53-choosing-a-tier)). A
 passing command that selected zero tests is not validation. In particular,
 check that the `rocke_pytest_*` entries are selected when they are part of the
 intended coverage.
@@ -686,7 +688,8 @@ the entry has tests but no test falls in this shard, pytest exits with 77. Every
 installed pytest entry sets `SKIP_RETURN_CODE 77`, so CTest shows the entry as
 Skipped. When the selection is empty before the split (for example, a `-k`
 typo), the entry fails on every shard. A run with no shard keeps its pytest exit
-code.
+code. A tier entry ([§5.3](#53-choosing-a-tier)) selects its tier first and then
+divides that tier's tests between the shards.
 
 The split relies on TheRock running every entry on every shard. If TheRock also
 divides the entries between the shards, about 3/4 of the tests do not run. The
@@ -838,6 +841,84 @@ def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
 - **Dependencies**: the helper imports no `torch`.
 
 The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
+
+### 5.3 Choosing a tier
+
+TheRock CI selects the installed tests by tier: quick, standard, comprehensive
+or full. The quick tier runs every test of an entry on one CI shard, so a slow
+test makes every quick job slow. The standard tier divides each entry between
+the CI shards. A test without a tier marker is in the quick tier. It runs in
+every tier that its entry is labelled for: most entries are in all four tiers,
+but `rocke_library_attention_cache_key_sweep_pytest` is in standard and above
+only. Give a slow test a tier marker to move it out of quick:
+
+| Marker | Tiers that run the test |
+|---|---|
+| none | the tiers of its entry (for most entries quick, standard, comprehensive, full) |
+| `@pytest.mark.tier_standard` | standard, comprehensive, full |
+| `@pytest.mark.tier_comprehensive` | comprehensive, full |
+| `@pytest.mark.tier_full` | full |
+
+Put the marker on a test function, a class (also a `unittest.TestCase`), a
+module (`pytestmark = pytest.mark.tier_full`) or one parameter set
+(`pytest.param(..., marks=pytest.mark.tier_full)`). `platform/tests/pytest.ini`
+and `library/tests/pytest.ini` register the three markers.
+
+**Opt the suite in.** An installed pytest suite runs a marked test only when
+the suite registers an entry for the tier of that test. Add one line to the
+opt-in table beside `_ROCKE_PYTEST` in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), for example:
+
+```cmake
+list(APPEND _ROCKE_PYTEST_TIERS_rocke_library_gdn_pytest standard)
+```
+
+`rocke_pytest_suite` then registers two entries with the same properties.
+`rocke_library_gdn_pytest` runs the tests that have no tier marker.
+`rocke_library_gdn_pytest-standard` runs the tests marked `tier_standard`. The
+`rocke-tier-*` categories in `ROCKE_ENGINE_test_categories_external.yaml` give
+the second entry the labels standard, comprehensive and full, but not quick.
+A tier entry carries no `ffm-*` label, so the fast-feedback (FFM) selection
+runs only the unmarked tests of the suite.
+Each entry passes `--rocke-tier` and `--rocke-suite-tiers` to
+`rocke.tests.ctest_shard`, which selects the tests. A platform part opts in by
+its entry name, for example `_ROCKE_PYTEST_TIERS_rocke_pytest_core`.
+
+**Mistakes fail the entry.** The plugin stops with a usage error (exit 4) for:
+
+- a marked test in a suite that has no entry for its tier; the message names
+  the opt-in variable;
+- two different tier markers on one test;
+- an unknown `tier_*` marker, for example `tier_standrad`.
+
+A tier entry whose suite has no test for that tier exits with 77, and CTest
+shows it as Skipped. A selection that is empty before the tier filter (for
+example, a `-k` typo) still fails. The summary shows the tier result, for
+example `rocke-ctest-tier standard: kept 3 of 40`.
+
+**Time limits.** A tier entry uses the CTest and per-test time limits of its
+suite. Tests that need a longer limit keep a separate entry. For example,
+`rocke_library_attention_cache_key_sweep_pytest` selects the sweep with `-k`
+and has its own limits.
+
+To run one tier entry from the installed tree:
+
+```text
+ctest --test-dir build/bin/hip_kernel_provider -V -R '^rocke_library_gdn_pytest-standard$'
+```
+
+To run one tier from a checkout, from `library/`, list in `--rocke-suite-tiers`
+quick and every tier that the markers of the selected files use, for example:
+
+```text
+PYTHONPATH=../platform/python python -m pytest -p rocke.tests.ctest_shard --rocke-tier standard --rocke-suite-tiers quick,standard,full tests/test_gdn_decode_spec.py
+```
+
+A run without the two options on files with marked tests stops with a usage
+error that suggests these options.
+
+`platform/tests/test_engine_linkage.py::test_an_opted_in_pytest_suite_registers_one_entry_per_tier`
+checks the entries, their commands and their labels.
 
 ## 6. Invariants & contracts
 

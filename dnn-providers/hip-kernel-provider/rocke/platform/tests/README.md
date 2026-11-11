@@ -97,7 +97,7 @@ do not all edit one central file:
 | `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
-| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+| `platform/CMakeLists.txt` | Installed Python and library CTest entries, each pytest suite through `rocke_pytest_suite` (one entry per opted-in tier; see [Choosing a tier](../../TESTING.md#53-choosing-a-tier)); not build-tree C++ ownership |
 
 Add a native target to its concern-owned fragment. Do not put registration back
 in the orchestrator, and do not create a generic catch-all fragment. Keep unusual

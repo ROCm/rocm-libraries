@@ -57,6 +57,17 @@
 # tests do not run. A pytest entry that no category here lists never runs in
 # CI. rocke/platform/tests/test_engine_linkage.py checks that every installed
 # pytest entry gets a tier.
+#
+# A pytest suite can opt in to tiers with _ROCKE_PYTEST_TIERS_<name> in
+# rocke/platform/CMakeLists.txt (see rocke/TESTING.md). For each tier that it
+# lists, the suite also registers <name>-<tier>, which runs the tests marked
+# tier_<tier>. The rocke-tier-* categories at the end label these entries.
+# Their names are not tier names, so the parser adds no tier labels of its
+# own: each category lists its tier and the tiers above it, and never quick.
+# A tier entry carries no ffm-* label, so the FFM selection does not run it.
+# The patterns above cannot match a name with a hyphen, so a tier entry gets
+# only the labels of its rocke-tier-* category.
+# rocke/platform/tests/test_engine_linkage.py checks these labels.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -227,3 +238,27 @@ test_categories:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  rocke-tier-standard:
+    description: "rocKE pytest entries for the tests marked tier_standard"
+    test_patterns:
+      - "rocke_[a-z0-9_]+-standard"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+  rocke-tier-comprehensive:
+    description: "rocKE pytest entries for the tests marked tier_comprehensive"
+    test_patterns:
+      - "rocke_[a-z0-9_]+-comprehensive"
+    labels:
+      - "comprehensive"
+      - "full"
+
+  rocke-tier-full:
+    description: "rocKE pytest entries for the tests marked tier_full"
+    test_patterns:
+      - "rocke_[a-z0-9_]+-full"
+    labels:
+      - "full"

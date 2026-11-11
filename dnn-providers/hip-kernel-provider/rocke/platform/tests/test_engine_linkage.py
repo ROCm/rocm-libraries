@@ -522,6 +522,89 @@ def test_rocke_pytest_suite_writes_one_entry_per_tier(tmp_path):
     assert "_ROCKE_PYTEST_TIERS_rocke_x_pytest lists slow" in failed.stderr
 
 
+def _properties_without_directory(test):
+    return {
+        prop["name"]: prop["value"]
+        for prop in test["properties"]
+        if prop["name"] != "WORKING_DIRECTORY"
+    }
+
+
+@requires_cmake
+def test_an_opted_in_pytest_suite_registers_one_entry_per_tier(tmp_path):
+    """A suite that lists tiers in _ROCKE_PYTEST_TIERS_<name> keeps its entry
+    for the unmarked tests and gets <name>-<tier> for each listed tier. Each
+    entry passes its tier and the suite tiers to rocke.tests.ctest_shard and
+    keeps the command and properties of the suite. A tier entry gets exactly
+    its tier and the tiers above it, so TheRock CI never runs it in quick.
+    The suites that do not opt in do not change."""
+    configured = {}
+    for name, arguments in (
+        ("default", ()),
+        (
+            "tiers",
+            (
+                "-D_ROCKE_PYTEST_TIERS_rocke_library_conv_pytest=standard;full",
+                "-D_ROCKE_PYTEST_TIERS_rocke_pytest_core=standard",
+            ),
+        ),
+    ):
+        (tmp_path / name).mkdir()
+        _, ctest_dir = configure_installed_ctest(tmp_path / name, *arguments)
+        configured[name] = {
+            test["name"]: test for test in list_installed_ctests(ctest_dir)
+        }
+    default, tiers = configured["default"], configured["tiers"]
+
+    expected = {
+        "rocke_library_conv_pytest": ("quick", "quick,standard,full"),
+        "rocke_library_conv_pytest-standard": ("standard", "quick,standard,full"),
+        "rocke_library_conv_pytest-full": ("full", "quick,standard,full"),
+        "rocke_pytest_core": ("quick", "quick,standard"),
+        "rocke_pytest_core-standard": ("standard", "quick,standard"),
+    }
+    assert set(tiers) == set(default) | set(expected)
+    for name, (tier, suite_tiers) in expected.items():
+        suite = default[suite_of(name)]
+        assert tiers[name]["command"] == [
+            *suite["command"][:5],
+            "--rocke-tier",
+            tier,
+            "--rocke-suite-tiers",
+            suite_tiers,
+            *suite["command"][5:],
+        ], name
+        assert _properties_without_directory(
+            tiers[name]
+        ) == _properties_without_directory(suite), name
+    for name in set(default) - set(expected):
+        assert tiers[name].get("command") == default[name].get("command"), name
+        assert _properties_without_directory(
+            tiers[name]
+        ) == _properties_without_directory(default[name]), name
+
+    tier_entries = {
+        "rocke_library_conv_pytest-standard": "standard",
+        "rocke_library_conv_pytest-comprehensive": "comprehensive",
+        "rocke_library_conv_pytest-full": "full",
+        "rocke_pytest_core-standard": "standard",
+        "rocke_sdpa_gpu_gfx942_pytest-standard": "standard",
+        "rocke_sdpa_reference_unit_pytest-full": "full",
+    }
+    labels = provider_category_labels(
+        ["rocke_library_conv_pytest", "rocke_pytest_core", *tier_entries],
+        tmp_path,
+    )
+    tiers_in_order = ["quick", "standard", "comprehensive", "full"]
+    for suite in ("rocke_library_conv_pytest", "rocke_pytest_core"):
+        assert set(tiers_in_order) <= labels.get(suite, set()), suite
+    for name, tier in tier_entries.items():
+        assert labels.get(name) == {
+            f"rocke-tier-{tier}",
+            *tiers_in_order[tiers_in_order.index(tier) :],
+        }, name
+
+
 def split_ignored_files(selection):
     """Split a part's pytest selection into its leading paths and the files its
     trailing ``--ignore`` pairs name."""
