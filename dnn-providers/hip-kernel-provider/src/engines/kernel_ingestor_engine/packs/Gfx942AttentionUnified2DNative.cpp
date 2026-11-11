@@ -78,9 +78,14 @@ constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_unified_2d
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_unified_2d.dispatch";
 
 // KMD fields (11-field schema). Fields a shipped variant holds at one value across the whole
-// catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches, the
-// codegen flag stacks) are absent: a variant that moved one of them would have to add it
-// here first, or the candidates collide on the catalog key and the loader drops one.
+// catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches, most
+// codegen flag stacks) are absent: a variant that moved one of them independently would have
+// to add it here first, or the candidates collide on the catalog key and the loader drops one.
+// Two codegen flags do move, but only with the geometry: use_q_direct_global and
+// use_conflict_free_v_store are on exactly for the D64 8-warp x 32-row kernels, the one
+// geometry that fits the LDS only with them, so num_warps and block_m_per_warp already tell
+// those kernels apart. registry_enumerator.py refuses a catalog whose kernel names repeat,
+// which a geometry shipped with both flag settings would produce.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERIES_PER_KV_FIELD = "num_queries_per_kv";

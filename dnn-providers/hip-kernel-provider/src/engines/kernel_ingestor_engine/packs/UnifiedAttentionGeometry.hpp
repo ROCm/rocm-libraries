@@ -100,13 +100,17 @@ inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTrait
     return detail::isOneOf(traits.blockSizes, blockSize);
 }
 
-/// The smallest `block_size` any candidate of the architecture is built with.
+/// The smallest `block_size` any candidate of the architecture is built with. `blockSizes` is
+/// fixed-size, so an architecture listing fewer sizes leaves zero slots; those are skipped.
 constexpr int64_t unifiedAttentionSmallestBlockSize(const UnifiedAttentionArchTraits& traits)
 {
-    int64_t smallest = traits.blockSizes[0];
+    int64_t smallest = 0;
     for(const auto blockSize : traits.blockSizes)
     {
-        smallest = blockSize < smallest ? blockSize : smallest;
+        if(blockSize > 0 && (smallest == 0 || blockSize < smallest))
+        {
+            smallest = blockSize;
+        }
     }
     return smallest;
 }

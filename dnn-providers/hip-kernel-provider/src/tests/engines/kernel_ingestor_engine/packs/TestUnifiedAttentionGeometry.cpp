@@ -41,6 +41,10 @@ constexpr UnifiedAttentionArchTraits Q_MAJOR_WAVE32{
 constexpr UnifiedAttentionArchTraits UNSORTED_BLOCKS{
     "gfxtest", 64, false, 0x7FFF0000, {64, 32, 8}, 16, 8, {1, 2, 4, 8}, {16, 32}};
 
+/// Two block sizes in the three-slot array: the unused slot is zero.
+constexpr UnifiedAttentionArchTraits TWO_BLOCKS{
+    "gfxtest", 64, false, 0x7FFF0000, {16, 32}, 16, 8, {1, 2, 4, 8}, {16, 32}};
+
 } // namespace
 
 /// D128 4 warps x 16 rows, Hq 8 / Hkv 2 (block_q 16), batch 2 x Sq 512: total_q 1024,
@@ -68,6 +72,7 @@ TEST(TestUnifiedAttentionGeometry, SmallestBlockSizeIsTheMinimumOfTheTraits)
     static_assert(unifiedAttentionSmallestBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS) == 16);
     static_assert(unifiedAttentionSmallestBlockSize(GFX942_UNIFIED_ATTENTION_TRAITS) == 16);
     static_assert(unifiedAttentionSmallestBlockSize(UNSORTED_BLOCKS) == 8);
+    static_assert(unifiedAttentionSmallestBlockSize(TWO_BLOCKS) == 16);
     EXPECT_EQ(unifiedAttentionSmallestBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS),
               GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL);
 }
