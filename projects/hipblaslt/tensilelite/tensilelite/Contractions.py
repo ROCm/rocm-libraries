@@ -924,7 +924,8 @@ class CustomKernel:
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'generated',
-                 'uniformSummationOrder']
+                 'uniformSummationOrder',
+                 'unroll']
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -942,7 +943,10 @@ class CustomKernel:
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
-                   uniformSummationOrder=d.get('uniformSummationOrder', False))
+                   uniformSummationOrder=d.get('uniformSummationOrder', False),
+                   # rocRoller's K-loop unroll. 0 means "not declared"; the
+                   # rocRoller-off selector never picks such a kernel.
+                   unroll=d.get('unroll', 0))
 
     def state(self):
         rv = {key: state(getattr(self, key)) for key in self.StateKeys}
