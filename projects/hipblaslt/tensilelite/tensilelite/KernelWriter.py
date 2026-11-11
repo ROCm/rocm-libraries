@@ -9868,7 +9868,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr("GSUSumIdx", 2, 2)
       self.defineSgpr("GSULog2BpeC", 1)
       self.defineSgpr("GSULog2BpeD", 1)
-    self.defineSgpr("StaggerU", 1)
+    if self.states.staggerUCode or kernel["StaggerU"] != 0 \
+       or kernel["InternalSupportParams"]["SupportCustomStaggerU"]:
+      self.defineSgpr("StaggerU", 1)
     self.defineSgpr("WGM", 1)
 
     if kernel["LocalSplitU"] > 1:
@@ -10229,7 +10231,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.preloadScaleA = True
       self.states.preloadScaleB = True
       self.defineSgpr("AddressScaleA", 2, 2)
-      self.defineSgpr("AddressScaleB", 2, 2)
+      # B has no block scale: its pointer argument stays in the kernarg layout
+      # (preloadScaleB keeps the offsets), but nothing reads it, so it gets no SGPRs.
+      # Rows are padded so that no stagger is needed (StaggerU 0 that the host cannot
+      # set): the packed StaggerU argument is not kept in an SGPR either.
       # Row stride of the dense [M][ceil(K/ScaleBlockSizeA)] scale tensor, in
       # scale *elements*, computed from SizeL at kernel entry (the tensor is
       # dense, so it needs no stride kernel argument), plus its buffer SRD.

@@ -2554,7 +2554,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["UseScaleAB"] in ("Scalar", "Block"):
       sgprOffset = self.argLoader.getOffset()
       for preloadScale, name in zip([self.states.preloadScaleA, self.states.preloadScaleB], ['A','B']):
-        if preloadScale:
+        if preloadScale and ("AddressScale%s"%name) in self.sgprs:
           kernelArgs.add(self.argLoader.loadKernArg("AddressScale%s"%name, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
         sgprOffset += (self.states.rpga * self.states.bpr)
       # scaleZeroA is appended right after scaleB by ContractionSolution.
@@ -3003,8 +3003,9 @@ class KernelWriterAssembly(KernelWriter):
             moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0+%u"%i), src=sgpr(preloadSgprStartIdx+self.states.numSgprPreload+i), \
                         comment="restore workgroup id"))
 
-      moduleRegInit.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF0000), comment="Restore StaggerU related vars"))
-      moduleRegInit.add(SLShiftRightB32(dst=sgpr("StaggerU"), shiftHex=hex(16), src=sgpr("StaggerU")))
+      if "StaggerU" in self.sgprs:
+        moduleRegInit.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF0000), comment="Restore StaggerU related vars"))
+        moduleRegInit.add(SLShiftRightB32(dst=sgpr("StaggerU"), shiftHex=hex(16), src=sgpr("StaggerU")))
       if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
         if kernel["ProblemType"]["UseScaleAB"] == "Block" and kernel["GlobalSplitU"] != 0:
@@ -3514,7 +3515,7 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["UseScaleAB"] in ("Scalar", "Block"):
             sgprOffset = self.externalArgLoader.getOffset()
             for preloadScale, name in zip([self.states.preloadScaleA, self.states.preloadScaleB], ['A','B']):
-              if preloadScale:
+              if preloadScale and ("AddressScale%s"%name) in self.sgprs:
                 moduleExternalArgs.add(self.externalArgLoader.loadKernArg("AddressScale%s"%name, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
               sgprOffset += self.states.userArgsInfo.scaleASize
             if kernel["ProblemType"]["ScaleZeroPointA"]:
@@ -9796,7 +9797,10 @@ class KernelWriterAssembly(KernelWriter):
         # No exit case, no code is necessary except for final Loop
 
         # decrement by 2 if PGR=2 and StaggerU is 0, else 1
-        if kernel["PrefetchGlobalRead"]==2:
+        if kernel["PrefetchGlobalRead"]==2 and "StaggerU" not in self.sgprs:
+          # No StaggerU (none at run time): always the decrement by 2.
+          decCode = SSubU32(dst=loopCounter, src0=loopCounter, src1=2, comment="dec counter%s"%(loopChar))
+        elif kernel["PrefetchGlobalRead"]==2:
           with self.allocTmpSgpr(2, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
             module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="SCC = StaggerU amount != 0"))
