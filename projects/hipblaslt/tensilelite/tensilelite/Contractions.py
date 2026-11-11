@@ -33,6 +33,7 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .CustomKernels import isRocRollerMXCapture
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -763,12 +764,13 @@ class ProblemPredicate(Properties.Predicate):
         # (getRocRollerSelectedSolutions) guards all three; that is stricter than
         # correctness requires.
         customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
-        if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
+        if (customKernel and not customKernel.get('generated', False)
+                and isRocRollerMXCapture(customKernel.get('name'))):
             # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
-            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
-            # RR_GEMM_ prefix, which is how matchesRocRollerSelectedKernel in
-            # tensile_host.cpp identifies the same family. Other custom-kernel
-            # families are deliberately untouched: no equivalent measurement.
+            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped to
+            # the rocRoller MX captures (Source.Origin rocroller with MX scales),
+            # the family measured above. Other custom kernels, including non-MX
+            # rocRoller captures, are deliberately untouched.
             macroTile = customKernel.get('macrotile') or []
             if len(macroTile) == 3:
                 tileM, _, depthU = macroTile

@@ -27,6 +27,7 @@ from .Common.ValidParameters import checkParametersAreValid, validParameters, ne
 
 from .ExecutionPolicy import isPersistent, isPersistentDataParallel
 
+import functools
 import re
 import yaml
 
@@ -137,6 +138,71 @@ def isCustomKernelConfig(config):
     if isinstance(ck, dict) and ck.get("name"):
         return not ck.get("generated", False)
     return bool(config.get("CustomKernelName", ""))
+
+
+def _readCaptureTraits(name, directory):
+    """(origin, hasMXScales) from a kernel's ``custom.config``; (None, False)
+    when it cannot be read."""
+    try:
+        config = readCustomKernelConfig(name, directory)
+    except (RuntimeError, OSError):
+        return None, False
+    source = config.get("Source")
+    origin = source.get("Origin") if isinstance(source, dict) else None
+    problemType = config.get("ProblemType")
+    if not isinstance(problemType, dict):
+        problemType = {}
+    hasMXScales = bool(problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0))
+    return origin, hasMXScales
+
+
+# Each lookup walks the bundled tree and reads a whole kernel, and library
+# builds ask once per solution. Only the bundled tree is cached: it does not
+# change while the process runs, whereas a caller's directory may.
+@functools.lru_cache(maxsize=None)
+def _bundledKernelNames():
+    return frozenset(custom_kernel_names())
+
+
+@functools.lru_cache(maxsize=None)
+def _bundledCaptureTraits(name):
+    if name not in _bundledKernelNames():
+        return None, False
+    return _readCaptureTraits(name, None)
+
+
+def _captureTraits(name, directory):
+    if not name or not isinstance(name, str):
+        return None, False
+    if directory is None:
+        return _bundledCaptureTraits(name)
+    return _readCaptureTraits(name, directory)
+
+
+def customKernelOrigin(name, directory=None):
+    """The ``Source.Origin`` a captured kernel's ``custom.config`` declares.
+
+    ``None`` for a Tensile-generated kernel, which has no ``Source`` block, and
+    for a kernel whose metadata cannot be read. ``getCustomKernelConfig`` drops
+    ``Source`` from the solution state, so a caller holding only the state asks
+    here.
+    """
+    return _captureTraits(name, directory)[0]
+
+
+def isRocRollerMXCapture(name, directory=None):
+    """Whether a kernel is a rocRoller MX capture: its ``custom.config``
+    declares ``Source.Origin: rocroller`` and MX scales (``MXBlockA`` or
+    ``MXBlockB``).
+
+    This is the family the rocRoller tile, batch and buffer-addressing
+    predicates were measured on and are emitted for. Every checked-in
+    ``RR_GEMM_`` kernel is one and no other kernel is, which is what lets the
+    C++ selectors key the same family on that prefix.
+    """
+    origin, hasMXScales = _captureTraits(name, directory)
+    return origin == "rocroller" and hasMXScales
+
 
 def supportsUserSgprKernargPreload(rocmVersion):
     """Return whether a ROCm version passes TensileLite's preload gate.
@@ -616,18 +682,15 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
 
-    # Fallback: parse macrotile from kernel name if computed values are zero.
-    # rocRoller spells its workgroup tile WGT_<m>x<n>x<k> rather than
-    # MT<m>x<n>x<k>, and a captured rocRoller kernel carries no
-    # MatrixInstruction/DepthU for the computation above to use. The tile is
-    # load-bearing for Stream-K -- it is the divisor in every hoisted kernarg
-    # and it sizes the partial-tile workspace -- so a zero here must not
-    # survive.
+    # Fallback: parse macrotile from kernel name if computed values are zero
     if macrotile[0] == 0 or macrotile[1] == 0:
-        m = re.search(r'(?:MT|WGT_)(\d+)x(\d+)x(\d+)', kernelName)
+        m = re.search(r'MT(\d+)x(\d+)x(\d+)', kernelName)
         if m:
             macrotile = [int(m.group(1)), int(m.group(2)), int(m.group(3))]
 
+    # The tile is load-bearing for Stream-K -- it is the divisor in every
+    # hoisted kernarg and it sizes the partial-tile workspace -- so a zero here
+    # must not survive.
     if isRocRollerSK and (
         macrotile[0] <= 0 or macrotile[1] <= 0 or macrotile[2] <= 0
     ):
@@ -635,8 +698,8 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"Custom kernel '{kernelName}' is a rocRoller Stream-K kernel but "
             f"its macrotile resolved to {macrotile}. Stream-K divides by the "
             f"macrotile to derive every hoisted kernarg, so it cannot be "
-            f"inferred later; give the kernel a WGT_<m>x<n>x<k> name or "
-            f"declare MatrixInstruction/MIWaveTile/DepthU in custom.config."
+            f"inferred later; declare a CustomKernel block with its macrotile, "
+            f"or MatrixInstruction/MIWaveTile/DepthU, in custom.config."
         )
 
     threads = [kernelMeta.get(".max_flat_workgroup_size", 256), 1, 1]

@@ -12,11 +12,31 @@ and they return wrong, run-to-run nondeterministic answers.
 N is deliberately unconstrained -- measured clean at N = 160, 192 and 320
 against a 128-wide tile -- because a predicate that rejects working sizes
 makes the kernels unreachable, which is the opposite failure.
+
+The family is the kernels whose custom.config declares Source.Origin
+rocroller and MX scales, the captures the predicates were measured on, so these
+tests name kernels that are checked in.
 """
 
 import pytest
 
 from tensilelite.Contractions import ProblemPredicate
+from tensilelite.CustomKernels import (
+    customKernelOrigin,
+    getAllCustomKernelNames,
+    getCustomKernelConfig,
+    isRocRollerMXCapture,
+)
+from tensilelite.resources import custom_kernel_names, custom_kernel_text
+
+_RR_KERNEL = "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_"
+# A gfx942 half-precision rocRoller capture: no MX scales, not named RR_GEMM_.
+_LEGACY_RR_KERNEL = (
+    "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
+    "LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_"
+    "SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e"
+)
+_AITER_KERNEL = "_ZN5aiter24bf16gemm_bf16_tn_256x256E"
 
 
 M_TAG = "Free0SizeMultiple"
@@ -36,8 +56,8 @@ class _ProblemTypeStub:
         self.aType = _DataTypeStub()
 
 
-def _state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_256x128x128_UR_2",
-           macrotile=(256, 128, 128), customKernel=True, **overrides):
+def _state(name=_RR_KERNEL, macrotile=(256, 128, 128), customKernel=True,
+           generated=False, **overrides):
     state = {
         "ProblemType": {
             "SwizzleTensorA": False,
@@ -59,6 +79,8 @@ def _state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_256x128x128_UR_2",
     }
     if customKernel:
         state["CustomKernel"] = {"name": name, "macrotile": list(macrotile)}
+        if generated:
+            state["CustomKernel"]["generated"] = True
     state.update(overrides)
     return state
 
@@ -114,12 +136,111 @@ def test_non_custom_solutions_are_untouched():
     "Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgs_MT64x64x256",
     "wvSpltK_bf16_tn_m1",
     "Custom_Cijk_Alik_Bljk_BBS_BH_UserArgs",
+    _AITER_KERNEL,
 ])
 def test_other_custom_kernel_families_are_untouched(name):
-    """Scoped to RR_GEMM_ because that is the family that was measured. The
-    AITER and generated custom kernels keep their existing behaviour."""
+    """Scoped to the rocRoller captures because that is the family that was
+    measured. The AITER and generated custom kernels keep their existing
+    behaviour."""
     tags = _by_tag(_state(name=name))
     assert M_TAG not in tags and K_TAG not in tags
+
+
+def test_a_family_name_without_a_checked_in_capture_is_untouched():
+    tags = _by_tag(_state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_not_checked_in"))
+    assert M_TAG not in tags and BATCH_TAG not in tags
+
+
+def _predicates(state):
+    return sorted(
+        (p.tag, p.index, repr(p.value))
+        for p in ProblemPredicate.CompoundPredicates(state, _ProblemTypeStub())
+    )
+
+
+def _state_from_custom_config(name):
+    config = getCustomKernelConfig(name, {"KernArgsVersion": 0})
+    state = _state(name=name)
+    state["CustomKernel"] = config["CustomKernel"]
+    return state
+
+
+def test_a_rocroller_capture_without_mx_scales_gets_no_rocroller_predicates():
+    """The predicates were measured on the gfx950 MX captures. The gfx942 half
+    capture's solution declares the same predicates as a solution with no
+    custom kernel."""
+    assert _predicates(_state_from_custom_config(_LEGACY_RR_KERNEL)) == _predicates(
+        _state(customKernel=False)
+    )
+
+
+def test_an_mx_capture_gets_its_predicates_from_its_custom_config():
+    tags = _by_tag(_state_from_custom_config(_RR_KERNEL))
+    assert tags[M_TAG][0].value == 256 and tags[K_TAG][0].value == 128
+    assert BATCH_TAG in tags and BUFFER_TAG in tags
+
+
+def test_a_generated_kernel_is_untouched_whatever_it_is_called():
+    tags = _by_tag(_state(generated=True))
+    assert M_TAG not in tags and BATCH_TAG not in tags
+
+
+def test_origin_is_read_from_custom_config():
+    assert customKernelOrigin(_RR_KERNEL) == "rocroller"
+    assert customKernelOrigin(_LEGACY_RR_KERNEL) == "rocroller"
+    assert customKernelOrigin(_AITER_KERNEL) == "aiter"
+    assert customKernelOrigin("") is None
+    assert customKernelOrigin("no-such-kernel-anywhere") is None
+
+
+def test_the_family_is_read_from_custom_config():
+    assert isRocRollerMXCapture(_RR_KERNEL)
+    assert not isRocRollerMXCapture(_LEGACY_RR_KERNEL)
+    assert not isRocRollerMXCapture("_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E")
+    assert not isRocRollerMXCapture("")
+    assert not isRocRollerMXCapture("no-such-kernel-anywhere")
+
+
+def _write_capture(directory, name, origin, mx):
+    mx_lines = "    MXBlockA: 32\n    MXBlockB: 32\n" if mx else ""
+    (directory / f"{name}.s").write_text(
+        ".amdgpu_metadata\n---\ncustom.config:\n"
+        f"  Source:\n    Origin: {origin}\n"
+        "  ProblemType:\n    OperationType: GEMM\n"
+        f"{mx_lines}"
+        "amdhsa.kernels: []\n...\n"
+    )
+
+
+@pytest.mark.parametrize("origin,mx,expected", [
+    ("rocroller", True, True),
+    ("rocroller", False, False),
+    ("aiter", True, False),
+])
+def test_the_family_needs_the_origin_and_mx_scales(tmp_path, origin, mx, expected):
+    _write_capture(tmp_path, "capture", origin, mx)
+    assert isRocRollerMXCapture("capture", str(tmp_path)) is expected
+
+
+def test_a_caller_directory_is_read_again_after_it_changes(tmp_path):
+    _write_capture(tmp_path, "capture", "rocroller", False)
+    assert not isRocRollerMXCapture("capture", str(tmp_path))
+    _write_capture(tmp_path, "capture", "rocroller", True)
+    assert isRocRollerMXCapture("capture", str(tmp_path))
+
+
+def test_the_family_is_exactly_the_rr_gemm_kernels():
+    """The C++ selectors key the family on the RR_GEMM_ prefix, so on the
+    shipped corpus the prefix and the custom.config fields must agree."""
+    names = [n for n in getAllCustomKernelNames() if n.startswith("RR_GEMM_")]
+    assert names
+    assert [n for n in names if not isRocRollerMXCapture(n)] == []
+    others = [
+        n for n in custom_kernel_names()
+        if not n.startswith("RR_GEMM_") and "Origin: rocroller" in custom_kernel_text(n)
+    ]
+    assert _LEGACY_RR_KERNEL in others
+    assert [n for n in others if isRocRollerMXCapture(n)] == []
 
 
 def test_a_unit_tile_emits_nothing():

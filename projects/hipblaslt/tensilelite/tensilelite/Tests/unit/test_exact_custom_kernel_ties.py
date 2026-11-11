@@ -21,13 +21,20 @@ class _Kernel:
     """Solution-shaped stub: fields live behind __getitem__, not attributes.
 
     LibraryLogic merges Tensile Solution objects, which store CustomKernelName
-    in state and do not expose it as an attribute.
+    in state and do not expose it as an attribute. The tile, workgroup mapping
+    and operand types live where a real solution keeps them: the CustomKernel
+    macrotile, an RR_WorkgroupMapping kernarg, and the ProblemType. The name is
+    a label only.
     """
 
-    def __init__(self, name):
+    def __init__(self, name, macrotile, wgm, typeA, typeB):
+        args = [{"type": "address", "semantic": "AddressD"}]
+        if wgm:
+            args.append({"type": "int32", "semantic": "RR_WorkgroupMapping"})
         self._state = {
             "CustomKernelName": name,
-            "CustomKernel": {"name": name},
+            "CustomKernel": {"name": name, "macrotile": list(macrotile), "args": args},
+            "ProblemType": {"DataTypeA": typeA, "DataTypeB": typeB},
         }
 
     def __getitem__(self, key):
@@ -43,20 +50,26 @@ class _Kernel:
         return hash(self._state["CustomKernelName"])
 
 
-def _kernel(name):
-    return _Kernel(name)
+_TYPE_CHARS = {"FP6": "F6", "BF6": "B6", "FP8": "F8", "BF8": "B8", "FP4": "F4"}
 
 
 def _names(*tiles):
+    """One stub per (pair, tile): pair is "<A>_<B>_...", tile "MxNxK[_WGM]"."""
     prefix = "RR_GEMM_TN_{pair}_SA_BE8M0_32_SB_BE8M0_32_WGT_{tile}"
     out = []
     for pair, tile in tiles:
-        suffix = "_WGM_" if "WGM" in tile or tile.endswith("wgm") else ""
-        tile = tile.replace("_wgm", "")
-        if tile.endswith("WGM"):
-            suffix = "_WGM_"
-            tile = tile[: -len("WGM")].rstrip("_")
-        out.append(_kernel(prefix.format(pair=pair, tile=tile) + suffix))
+        wgm = tile.endswith("WGM")
+        tile = tile[: -len("WGM")].rstrip("_") if wgm else tile
+        typeA, typeB = (_TYPE_CHARS[t] for t in pair.split("_")[:2])
+        out.append(
+            _Kernel(
+                prefix.format(pair=pair, tile=tile) + ("_WGM_" if wgm else ""),
+                [int(x) for x in tile.split("x")],
+                wgm,
+                typeA,
+                typeB,
+            )
+        )
     return out
 
 
@@ -150,9 +163,12 @@ def test_gfx950_without_a_supported_id_uses_mi355_ids():
     assert libraryDeviceNames("gfx950", "Device 75a3") == "Device 75a3"
 
 
+_WGM_ARG = {"type": "int32", "semantic": "RR_WorkgroupMapping"}
+
+
 def test_custom_kernel_tile_sources():
-    wgm = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_"
-    assert customKernelTile({"CustomKernel": {"name": wgm}}) == (128, 128, 128, True)
+    wgm = {"macrotile": [128, 128, 128], "args": [_WGM_ARG]}
+    assert customKernelTile({"CustomKernel": wgm}) == (128, 128, 128, True)
     assert customKernelTile({"CustomKernel": {"macrotile": [64, 32, 128, 1]}}) == (
         64,
         32,
@@ -164,13 +180,65 @@ def test_custom_kernel_tile_sources():
 
     # Not subscriptable: fields fall back to attributes.
     plain = SimpleNamespace(
-        CustomKernelName="RR_GEMM_TN_FP6_FP6_Float_Float_Float_WGT_32x32x64"
+        CustomKernelName="RR_GEMM_TN_FP6_FP6_Float_Float_Float_WGT_32x32x64",
+        CustomKernel={"macrotile": [32, 32, 64]},
     )
     assert customKernelTile(plain) == (32, 32, 64, False)
     assert isCustomKernelSolution(plain)
     assert isCustomKernelSolution({"CustomKernel": {"macrotile": [16, 16, 128]}})
     assert not isCustomKernelSolution({"CustomKernel": {}})
     assert not isCustomKernelSolution({})
+
+
+def test_custom_kernel_tile_does_not_read_the_name():
+    name = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_"
+    # A name alone carries no tile.
+    assert customKernelTile({"CustomKernelName": name, "CustomKernel": {"name": name}}) is None
+    # The macrotile and the kernargs decide, whatever the name says.
+    assert customKernelTile(
+        {"CustomKernelName": name, "CustomKernel": {"name": name, "macrotile": [32, 32, 64]}}
+    ) == (32, 32, 64, False)
+    plain = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+    assert customKernelTile(
+        {"CustomKernel": {"name": plain, "macrotile": [256, 256, 128], "args": [_WGM_ARG]}}
+    ) == (256, 256, 128, True)
+
+
+@pytest.mark.parametrize(
+    "problemType, sixBit",
+    [
+        ({"DataTypeA": "F6", "DataTypeB": "F6"}, True),
+        ({"DataTypeA": "B6", "DataTypeB": "F6"}, True),
+        ({"DataTypeA": "F6", "DataTypeB": "F8"}, False),
+        ({"DataTypeA": "F8", "DataTypeB": "B6"}, False),
+        ({"DataTypeA": "F4", "DataTypeB": "F4"}, False),
+        # A custom.config can leave DataTypeA/B to DataType, as ProblemType does.
+        ({"DataType": "B6"}, True),
+        ({"DataType": "F8"}, False),
+        ({}, False),
+    ],
+)
+def test_six_bit_pair_reads_the_problem_type(problemType, sixBit):
+    """3072 WGM launches 256x256 only for an FP6/BF6 pair on both operands."""
+    solutions = _names(
+        ("FP8_FP4_Half_Half_Float", "128x128x128_WGM"),
+        ("FP8_FP4_Half_Half_Float", "256x256x128_WGM"),
+    )
+    for solution in solutions:
+        solution["ProblemType"] = problemType
+    expected = solutions[1] if sixBit else solutions[0]
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is expected
+
+
+def test_six_bit_pair_does_not_read_the_name():
+    # Named FP6_FP6, typed FP8 x FP4: the ProblemType decides.
+    solutions = _names(
+        ("FP6_FP6_Half_Half_Float", "128x128x128_WGM"),
+        ("FP6_FP6_Half_Half_Float", "256x256x128_WGM"),
+    )
+    for solution in solutions:
+        solution["ProblemType"] = {"DataTypeA": "F8", "DataTypeB": "F4"}
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is solutions[0]
 
 
 def test_preferred_kernel_without_a_parsable_tile():
@@ -324,8 +392,8 @@ def _pureMxSolutions(pair, withWgmSmall=False):
 
 
 def test_pure_mx_same_type_pair_walks_the_whole_ladder():
-    # FP8_FP8 / BF8_BF8 / FP4_FP4 are same-type pairs, so _SIX_BIT_PAIR_RE never
-    # matches and _sixBitPair() is False for the entire family.
+    # FP8_FP8 / BF8_BF8 / FP4_FP4 have no 6-bit operand, so _sixBitPair() is
+    # False for the entire family.
     solutions = _pureMxSolutions("FP8_FP8_Half_Half_Float")
     small, mid, big, wgm = solutions
 
