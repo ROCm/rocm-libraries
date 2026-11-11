@@ -30,13 +30,13 @@ constexpr unsigned CHANNELS_FIRST_BIT = 1U;
 constexpr unsigned CHANNELS_LAST_BIT = 2U;
 
 /// The layouts @p tensor is packed in (dims in NC(D)HW order). Zero when it is in neither,
-/// not rank 4 or 5, or has an extent outside [1, INT_MAX].
+/// not rank 3, 4 or 5, or has an extent outside [1, INT_MAX].
 unsigned packedLayouts(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || (dims->size() != 4 && dims->size() != 5))
+    if(dims == nullptr || strides == nullptr || strides->size() != dims->size() || dims->size() < 3
+       || dims->size() > 5)
     {
         return 0;
     }

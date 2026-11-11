@@ -43,8 +43,8 @@
  *
  * The engine serves a graph of exactly one conv-forward node on RDNA (gfx11-generic,
  * gfx12-generic). Its kernels use no matrix instructions. Kernel family `fma_igemm` is an
- * FMA implicit GEMM (kernels/ConvFwdFmaIgemm.cpp) for 2-D and 3-D problems, packed
- * NC(D)HW or N(D)HWC, FLOAT / HALF / BFLOAT16, any stride, dilation and padding, and groups
+ * FMA implicit GEMM (kernels/ConvFwdFmaIgemm.cpp) for 1-D, 2-D and 3-D problems, packed
+ * NC[D][H]W or N[D][H]WC, FLOAT / HALF / BFLOAT16, any stride, dilation and padding, and groups
  * with at least MIN_OUT_CHANNELS_PER_GROUP output channels each. The matcher refuses
  * everything else, so another engine gets the plan.
  */
