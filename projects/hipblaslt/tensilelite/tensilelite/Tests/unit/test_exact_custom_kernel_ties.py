@@ -142,7 +142,8 @@ def test_tied_custom_kernels_are_kept_and_exact_sizes_remap():
     assert analyzer.exactWinners[huge][0] == 1
     small = solutions[2]["CustomKernelSizePredicate"]
     big = solutions[1]["CustomKernelSizePredicate"]
-    assert {"tag": "SizeLessThan", "index": 0, "value": 129} in small
+    assert not any(pred["tag"] == "SizeLessThan" for pred in small + big)
+    assert {"tag": "SizeGreaterThan", "index": 0, "value": 63} in small
     assert {"tag": "SizeGreaterThan", "index": 0, "value": 3071} in big
 
 
@@ -312,8 +313,10 @@ def test_ties_without_wgm_kernels_add_no_large_sizes():
     assert analyzer.exactWinners[(64, 96, 1, 128, 64, 96, 128, 128)][0] == 1
     assert (3072, 3072, 1, 16384, 3072, 3072, 16384, 16384) not in analyzer.exactWinners
     assert (4096, 4096, 1, 16384, 4096, 4096, 16384, 16384) not in analyzer.exactWinners
-    assert {"tag": "SizeLessThan", "index": 0, "value": 97} in solutions[0][
-        "CustomKernelSizePredicate"
+    assert solutions[0]["CustomKernelSizePredicate"] == [
+        {"tag": "SizeGreaterThan", "index": 0, "value": 95},
+        {"tag": "SizeGreaterThan", "index": 1, "value": 95},
+        {"tag": "SizeGreaterThan", "index": 3, "value": 127},
     ]
 
 
@@ -328,14 +331,19 @@ def test_size_predicates_follow_the_k_index(problemType, kIndex):
     analyzer.problemType = problemType
     analyzer._assignCustomKernelSizePredicates()
 
-    # M starts at 0, so it has no lower bound.
+    # M starts at 0, so it has no lower bound, and no index gets an upper one.
     assert solutions[0]["CustomKernelSizePredicate"] == [
-        {"tag": "SizeLessThan", "index": 0, "value": 129},
         {"tag": "SizeGreaterThan", "index": 1, "value": 63},
-        {"tag": "SizeLessThan", "index": 1, "value": 65},
         {"tag": "SizeGreaterThan", "index": kIndex, "value": 127},
-        {"tag": "SizeLessThan", "index": kIndex, "value": 257},
     ]
+
+
+def test_a_winner_from_zero_gets_no_size_predicate():
+    solutions = _names(("FP6_FP6_Float_Float_Float", "32x32x64"))
+    analyzer = _analyzer(solutions, exactWinners={(0, 0, 1, 0, 0, 0, 0, 0): [0, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+
+    assert "CustomKernelSizePredicate" not in solutions[0]._state
 
 
 def test_least_important_solution_skips_must_keep_kernels():

@@ -790,8 +790,8 @@ class ProblemPredicate(Properties.Predicate):
             # problems in RocRollerGemmKernel::exceedsBufferAddressingLimit.
             rv += [cls('BufferAddressingLimitCheck')]
 
-        # Exact-size custom kernels record the M/N/K window they won. Without
-        # it, a multi-solution lookup also accepts the neighboring tile.
+        # Exact-size custom kernels record the smallest M/N/K they won. Without
+        # it, a multi-solution lookup also accepts them at smaller sizes.
         size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
         if size_bounds:
             for bound in size_bounds:
