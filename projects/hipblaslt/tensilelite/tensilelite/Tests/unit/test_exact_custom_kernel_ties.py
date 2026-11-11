@@ -148,12 +148,11 @@ def test_tied_custom_kernels_are_kept_and_exact_sizes_remap():
     assert {"tag": "SizeGreaterThan", "index": 0, "value": 3071} in big
 
 
-def test_gfx950_without_a_supported_id_uses_mi355_ids():
-    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == [
-        "Device 75a3",
-        "Device 75a2",
-    ]
-    assert libraryDeviceNames("gfx950", "fallback") == ["Device 75a3", "Device 75a2"]
+def test_gfx950_without_a_supported_id_adds_the_default_chip_id():
+    generated = ["Device 75a3", "Device 75a2", "Device 75a0"]
+    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == generated
+    assert libraryDeviceNames("gfx950", "fallback") == generated
+    assert libraryDeviceNames("gfx950", None) == generated
     assert libraryDeviceNames("gfx950", ["Device 75a3", "Device 75a2"]) == [
         "Device 75a3",
         "Device 75a2",
@@ -163,6 +162,15 @@ def test_gfx950_without_a_supported_id_uses_mi355_ids():
         "Device 0050",
     ]
     assert libraryDeviceNames("gfx950", "Device 75a3") == "Device 75a3"
+    assert libraryDeviceNames("gfx950", ["Device 75a0"]) == ["Device 75a0"]
+
+
+def test_every_other_gfx950_chip_id_falls_back_to_75a0():
+    from tensilelite.Common.Architectures import GFX_CHIP_IDS, SUPPORTED_CHIP_ID_FALLBACKS
+
+    for chipId in GFX_CHIP_IDS["gfx950"]:
+        if chipId != "75a0":
+            assert SUPPORTED_CHIP_ID_FALLBACKS["id=" + chipId] == ["id=75a0"], chipId
 
 
 _WGM_ARG = {"type": "int32", "semantic": "RR_WorkgroupMapping"}
