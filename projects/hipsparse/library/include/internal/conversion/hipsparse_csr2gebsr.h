@@ -67,6 +67,7 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz()
 *                     and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,
@@ -125,6 +126,7 @@ hipsparseStatus_t hipsparseScsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz()
 *                     and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,
@@ -182,6 +184,7 @@ hipsparseStatus_t hipsparseDcsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz()
 *                     and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,
@@ -239,6 +242,7 @@ hipsparseStatus_t hipsparseCcsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz()
 *                     and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,

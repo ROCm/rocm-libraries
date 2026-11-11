@@ -198,6 +198,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* always_valid_d,
                                      const rocke_tensor_descriptor_t* D_desc,
                                      rocke_value_t* k_out_group_base,
+                                     rocke_value_t* slab_base,
                                      rocke_value_t* bound_m,
                                      rocke_value_t* bound_n)
 {
@@ -209,7 +210,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
      * untouched and dense. */
     rocke_direct_epilogue_t epi;
 
-    epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    /* atom=spec.atom: keyed on the MMA dtype (the TF32 atom under TF32). */
+    epi.atom = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                               spec->warp_tile_m,
+                               spec->warp_tile_n,
+                               spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -240,7 +245,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
         dctx.k_out_group_base = k_out_group_base;
-        dctx.slab_base = NULL; /* split-K is WMMA-only */
+        dctx.slab_base = slab_base; /* split-K: the slice's fp32 slab */
         rocke_direct_epilogue_store(b,
                                     &epi,
                                     accs,
@@ -491,8 +496,12 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     }
     else
     {
+        /* atom=spec.atom: keyed on the MMA dtype (the TF32 atom under TF32). */
         const rocke_mfma_atom_t* atom
-            = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+            = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                              spec->warp_tile_m,
+                              spec->warp_tile_n,
+                              spec->warp_tile_k);
         epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     }
     /* out_dtype: the stored element type. dtype_d, except the split-K binary,
@@ -711,8 +720,12 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     /* else: */
     else
     {
+        /* Split-K stores fp32 partials into the slice's slab, as on WMMA. */
+        rocke_implicit_gemm_conv_spec_t epi_spec = *spec;
+        if(ctx->fwd_split)
+            epi_spec.dtype_d = "fp32";
         rocke_conv_emit_direct_epilogue(b,
-                                        spec,
+                                        &epi_spec,
                                         final_accs,
                                         num_accs,
                                         &ctx->grid,
@@ -721,6 +734,7 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                         ctx->ir_always_valid_d,
                                         ctx->D_desc,
                                         ctx->d_k_out_group_base,
+                                        ctx->fwd_split ? ctx->fwd_slab_base : NULL,
                                         ctx->p_M,
                                         ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }

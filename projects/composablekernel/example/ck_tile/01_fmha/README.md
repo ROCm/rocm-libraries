@@ -54,6 +54,21 @@ See [codegen](codegen/ops/fmha_fwd.py) for dispatch selection and
 [argument validation](../../../include/ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp)
 for runtime requirements.
 
+### Basic TDM forward feature coverage
+
+On gfx125, FP16/BF16 `qr_tdm` supports logits soft cap, dropout, group-mode
+`skip_min_seqlen_q`, and padded Q/V head dimensions that are not multiples of eight.
+Dropout preserves the forward/backward Philox mapping and computes LSE from the
+undropped probability mass. Group skip compares the logical Q length with the
+threshold and leaves skipped outputs untouched. Batch dispatch reuses `skip=false`
+instances because the threshold only applies to group mode. All gfx125 receipts
+accept batch `skip_min_seqlen_q=true`; custom tune `filters.skip` applies only to
+group mode on this architecture.
+
+FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
+The existing D192/V128 bias/dropout and softcap-with-bias exclusions still apply.
+FP8 and the split-KV/paged-KV APIs retain their separate inventories.
+
 ### Scheduled TDM forward pipeline
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
@@ -394,13 +409,16 @@ P_sink[h,q] = exp(sink[h] - LSE[h,q])
 d_sink[h]   = -sum_q P_sink[h,q] * D[h,q]
 ```
 
-The sum runs over every query row of every batch, so `d_sink` has shape `[nhead]` and is
-accumulated with `atomicAdd` from `fmha_bwd_dot_do_o`. Two consequences follow:
+The sum runs over every query row of every batch, so `d_sink` has shape `[nhead]`.
+`fmha_bwd_dot_do_o` stores one partial sum per block in the workspace, and the partials are added
+in a fixed order afterwards, by `fmha_bwd_convert_dq` or, for kernel sets without it, by the last
+`fmha_bwd_dot_do_o` block of each head. That makes `d_sink` bit-reproducible. The launcher takes
+this path for every deterministic run, and otherwise only when the traits set `has_sink_grad` and
+the kernel set has `fmha_bwd_convert_dq`; other runs accumulate with `atomicAdd`, whose result
+varies in the low bits from run to run.
 
 - **The caller must zero `d_sink_ptr` before the call.** The kernel only accumulates into it and
   never initialises it.
-- `d_sink` is not bit-reproducible across runs even with `-deterministic=1`, because that flag
-  controls the `dQ` reduction only.
 
 The `LSE` handed to the backward call must be the **post-sink** `LSE`, that is
 `log(exp(LSE_nosink) + exp(sink))`, which is what the forward kernel writes when a sink is

@@ -14,8 +14,9 @@
  *     conv_direct_fwd_gstream_wmma.cpp;
  *   - ROCKE_FWD_WMMA_CH_PAD: the four TDM-staging families above;
  *   - the WMMA atom (ROCKE_FWD_WMMA_*, rocke_wmma_ab_dtype,
- *     rocke_wmma_fwd_op_id): all of the above and conv_direct_dw_fwd_wmma.cpp,
- *     which uses neither the gate nor the validator tail.
+ *     rocke_wmma_fwd_op_id): all of the above. conv_direct_dw_fwd_wmma.cpp
+ *     uses none of this header: it builds on the windowed depthwise Toeplitz
+ *     builder, which picks the same 16x16x32 atom.
  *
  *   Python (conv_fwd_wmma_gate.py)       C++ (this header)
  *   ----------------------------------   ----------------------------------
