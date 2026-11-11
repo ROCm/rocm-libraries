@@ -50,7 +50,7 @@ auto get_elimit(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
 {
     double rtol = 1e-5;
     double atol = 1e-5;
@@ -58,7 +58,7 @@ auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1e-2;
@@ -66,7 +66,7 @@ auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -74,7 +74,7 @@ auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -82,7 +82,7 @@ auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -90,23 +90,23 @@ auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
+inline auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
 {
     return get_elimit<FmhaFwdMxFp8>(init_method);
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 {
     double rtol = 1e-1;
     double atol = 2.6e-1;
     return ck_tile::make_tuple(rtol, atol);
 }
 
-int num_splits_heuristic(int batch_nhead_mblocks,
-                         int num_SMs,
-                         int max_splits,
-                         float fill_threshold = 0.8f)
+inline int num_splits_heuristic(int batch_nhead_mblocks,
+                                int num_SMs,
+                                int max_splits,
+                                float fill_threshold = 0.8f)
 {
     // If we have enough to almost fill the SMs, then just use 1 split
     if(batch_nhead_mblocks >= fill_threshold * num_SMs)
@@ -139,14 +139,14 @@ int num_splits_heuristic(int batch_nhead_mblocks,
     return 1;
 }
 
-int override_num_splits_if_necessary(int batch,
-                                     int nhead,
-                                     int max_seqlen_q,
-                                     int max_seqlen_k,
-                                     int hdim_q,
-                                     int hdim_v,
-                                     float p_drop,
-                                     int num_splits)
+inline int override_num_splits_if_necessary(int batch,
+                                            int nhead,
+                                            int max_seqlen_q,
+                                            int max_seqlen_k,
+                                            int hdim_q,
+                                            int hdim_v,
+                                            float p_drop,
+                                            int num_splits)
 {
     int device;
     auto status = hipGetDevice(&device);
