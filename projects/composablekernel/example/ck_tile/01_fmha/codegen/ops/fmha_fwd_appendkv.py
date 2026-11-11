@@ -345,7 +345,7 @@ class KernelComponentFactoryBase:
                 "128": FmhaFwdAppendKVTileSize(64, 64, 128, 128, -1),
                 "256": FmhaFwdAppendKVTileSize(64, 64, 256, 256, -1),
             }
-        elif dtype in ["fp8", "bf8"]:
+        elif dtype in ["fp8"]:
             return {
                 "64": FmhaFwdAppendKVTileSize(64, 64, 64, 64, -1),
                 "128": FmhaFwdAppendKVTileSize(64, 64, 128, 128, -1),
@@ -373,7 +373,7 @@ class KernelComponentFactoryBase:
 
                 pipelines.append(FmhaFwdAppendKVPipeline(vlayout, "f", "t", "t", "f", "half", pagedkv))  # fmt: skip
                 pipelines.append(FmhaFwdAppendKVPipeline(vlayout, "t", "t", "t", "t", "half", pagedkv))  # fmt: skip
-        elif dtype in ["fp8", "bf8"]:
+        elif dtype in ["fp8"]:
             # rope/paged-kv is not supported
             pipelines.append(FmhaFwdAppendKVPipeline("row", "t", "t", "t", "t", "no", "f"))  # fmt: skip
         elif dtype in ["fp8fp16", "fp8bf16"]:

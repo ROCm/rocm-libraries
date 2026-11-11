@@ -35,7 +35,6 @@ FWD_DTYPE_MAP = {
     "fp16": "FmhaFwdFp16",
     "bf16": "FmhaFwdBf16",
     "fp8": "FmhaFwdFp8",
-    "bf8": "FmhaFwdBf8",
     "fp8fp16": "FmhaFwdFp8Fp16",
     "fp8bf16": "FmhaFwdFp8Bf16",
 }

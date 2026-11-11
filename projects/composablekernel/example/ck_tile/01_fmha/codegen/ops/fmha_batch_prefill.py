@@ -46,7 +46,6 @@ DTYPE_BITS = {
     "bf16": 16,
     "fp8": 8,
     "fp8bf16": 8,
-    "bf8": 8,
 }
 
 # Element size in bytes per dtype, used by the auto-generated dispatcher to
