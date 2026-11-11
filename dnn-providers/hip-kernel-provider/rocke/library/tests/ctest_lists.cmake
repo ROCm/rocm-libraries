@@ -208,7 +208,8 @@ else()
 endif()
 
 # Library attention CPU tests (no GPU required): gfx942 Q staging when K is
-# read from HBM on the emitted IR, gfx950 LDS budget model,
+# read from HBM on the emitted IR, the paged attention tests' fp16/bf16-only
+# host encoding, gfx950 LDS budget model,
 # dense block-order decodes, the dense paged launch checks, spec-wrapper
 # parity gate, the 3D decode split rule and K/V cache policy, the scalar
 # fallback's cache key and block-table stride kernarg, the unified attention running-max carry and keyless
@@ -238,6 +239,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_gfx942_k_hbm_direct_q_staging.py"
+    "tests/library/tests/test_attention_paged_reference.py"
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
