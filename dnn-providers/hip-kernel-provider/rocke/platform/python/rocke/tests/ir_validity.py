@@ -20,6 +20,11 @@ module docstring.
 
 ``assert_target_accepts`` turns ``"cannot_judge"`` into a named pytest skip, so a
 host whose toolchain predates a target reports the gap instead of passing.
+``arbiter_llvm_flavor`` names the LLVM flavor of the clang the arbiter compiles
+with, for a test that must lower its module at that flavor
+(``require_arbiter_llvm_flavor`` skips when there is none), and
+``assert_kernel_target_accepts`` lowers a kernel at that flavor and requires the
+module to compile and link.
 ``target_instructions`` compiles the same way and returns the code object's
 disassembled instruction lines, and ``target_mnemonics`` their mnemonics, for a
 test that pins the instruction LLVM selected and its operands.
@@ -40,13 +45,17 @@ import pytest
 
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.assets import platform_tools_dir
+from rocke.core.ir import KernelDef
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
 __all__ = [
     "Verdict",
+    "arbiter_llvm_flavor",
     "arbiter_verdict",
+    "assert_kernel_target_accepts",
     "assert_target_accepts",
+    "require_arbiter_llvm_flavor",
     "target_instructions",
     "target_mnemonics",
 ]
@@ -114,6 +123,26 @@ def _module_dir(module: ModuleType) -> Path | None:
     return Path(file).resolve().parent if file else None
 
 
+def arbiter_llvm_flavor() -> tuple[str | None, str]:
+    """The LLVM flavor of the clang :func:`arbiter_verdict` compiles with, as ``(flavor, "")``.
+
+    A module the arbiter judges must be lowered at its clang's flavor. ``(None, reason)`` when
+    there is no such clang here, or its ``--version`` banner names no flavor rocke lowers for.
+    """
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    tool = _validity_tool()
+    if tool is None:
+        return None, "rocke platform tools not found"
+    clang = tool.llvm_tool("clang")
+    if clang is None:
+        return None, "no host clang to compile lowered IR"
+    flavor = tool.flavor_of_clang(tool.tool_identity(clang))
+    if flavor not in LLVM_FLAVORS:
+        return None, f"host clang {clang} reports no LLVM flavor rocke lowers for"
+    return flavor, ""
+
+
 def arbiter_verdict(ir_text: str, target: str) -> tuple[Verdict, str]:
     """Compile and link ``ir_text`` for ``target`` with the host clang.
 
@@ -128,22 +157,24 @@ def _compile_in(ir_text: str, target: str, work: Path) -> tuple[Verdict, str]:
     tool = _validity_tool()
     if tool is None:
         return "cannot_judge", "rocke platform tools not found"
-    clang = tool._llvm_tool("clang")
+    clang = tool.llvm_tool("clang")
     if clang is None:
         return "cannot_judge", "no host clang to compile lowered IR"
     source = work / "module.ll"
     source.write_text(ir_text)
-    accepted, diagnostic = tool._compile(clang, source, target, work / "module.hsaco")
+    accepted, diagnostic = tool.compile_code_object(
+        clang, source, target, work / "module.hsaco"
+    )
     if accepted:
         return "accepted", ""
-    if tool._target_unsupported(diagnostic):
+    if tool.target_unsupported(diagnostic):
         return "cannot_judge", f"host clang cannot target {target}"
     if _toolchain_incomplete(diagnostic):
         return (
             "cannot_judge",
             f"host clang {clang} cannot link: {diagnostic.splitlines()[0]}",
         )
-    return "rejected", tool._first_diagnostic(diagnostic)
+    return "rejected", tool.first_diagnostic(diagnostic)
 
 
 def _toolchain_incomplete(diagnostic: str) -> bool:
@@ -155,6 +186,27 @@ def assert_target_accepts(ir_text: str, target: str) -> None:
     """Fail unless ``ir_text`` compiles and links for ``target``; skip, naming
     the reason, when no verdict is possible on this host."""
     _require_accepted(*arbiter_verdict(ir_text, target), target)
+
+
+def require_arbiter_llvm_flavor() -> str:
+    """:func:`arbiter_llvm_flavor`'s flavor; skip the calling test, naming the reason, when there
+    is none."""
+    flavor, why_not = arbiter_llvm_flavor()
+    if flavor is None:
+        pytest.skip(why_not)
+    return flavor
+
+
+def assert_kernel_target_accepts(kernel: KernelDef, target: str) -> None:
+    """Lower ``kernel`` for ``target`` with the Python engine, whose IR the C++ engine must match,
+    at the flavor of the arbiter's clang, and fail unless the module compiles and links; skip,
+    naming the reason, when no verdict is possible on this host."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    flavor = require_arbiter_llvm_flavor()
+    assert_target_accepts(
+        _lower_kernel_to_llvm_python(kernel, arch=target, llvm_flavor=flavor), target
+    )
 
 
 def _require_accepted(verdict: Verdict, text: str, target: str) -> None:
@@ -181,7 +233,7 @@ def target_instructions(ir_text: str, target: str) -> list[str]:
     """
     with tempfile.TemporaryDirectory() as work:
         _require_accepted(*_compile_in(ir_text, target, Path(work)), target)
-        objdump = _validity_tool()._llvm_tool("llvm-objdump")
+        objdump = _validity_tool().llvm_tool("llvm-objdump")
         if objdump is None:
             pytest.skip("no llvm-objdump to disassemble the code object")
         listing = subprocess.run(
