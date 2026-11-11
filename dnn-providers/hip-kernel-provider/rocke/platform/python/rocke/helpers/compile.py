@@ -100,6 +100,21 @@ from ..runtime.comgr import (
 # compiles it in a fresh process. Compile policy only: no lowerer reads it, so
 # the LLVM IR is the same with or without it.
 COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
+# Kernel attribute for ``-amdgpu-expert-scheduling-mode`` (compile policy only,
+# like the attribute above).
+EXPERT_SCHEDULING_ATTR = "amdgpu_expert_scheduling_mode"
+# Kernel attribute that turns off LLVM's pre- and post-RA machine schedulers,
+# so instructions keep the order the kernel emits them in (compile policy only,
+# like the attributes above).
+SOURCE_ORDER_ATTR = "source_order_schedule"
+# Kernel attribute for ``-greedy-regclass-priority-trumps-globalness``: the
+# register allocator places class-restricted values (gfx1250 WMMA scale
+# operands, v0-v255 only) before long-lived ones, so accumulators do not fill
+# the low range first (compile policy only, like the attributes above).
+REGCLASS_PRIORITY_ATTR = "greedy_regclass_priority"
+# Kernel attribute: how many leading kernel arguments LLVM preloads into SGPRs
+# (``-amdgpu-kernarg-preload-count``; compile policy only).
+KERNARG_PRELOAD_COUNT_ATTR = "amdgpu_kernarg_preload_count"
 
 
 @dataclass
@@ -535,6 +550,17 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    if kernel.attrs.get(EXPERT_SCHEDULING_ATTR):
+        options.extend(["-mllvm", "-amdgpu-expert-scheduling-mode"])
+    if kernel.attrs.get(SOURCE_ORDER_ATTR):
+        options.extend(
+            ["-mllvm", "-enable-misched=false", "-mllvm", "-enable-post-misched=false"]
+        )
+    if kernel.attrs.get(REGCLASS_PRIORITY_ATTR):
+        options.extend(["-mllvm", "-greedy-regclass-priority-trumps-globalness"])
+    preload = int(kernel.attrs.get(KERNARG_PRELOAD_COUNT_ATTR, 0))
+    if preload > 0:
+        options.extend(["-mllvm", f"-amdgpu-kernarg-preload-count={preload}"])
     return options
 
 
