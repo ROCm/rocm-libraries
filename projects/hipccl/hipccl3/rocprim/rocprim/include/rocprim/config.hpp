@@ -42,7 +42,7 @@
 #endif
 
 #ifndef ROCPRIM_USE_LEGACY_API
-    #define ROCPRIM_USE_LEGACY_API 0
+    #define ROCPRIM_USE_LEGACY_API 1
 #endif
 
 // Inline namespace (e.g. ROCPRIM_300400_NS where 300400 is the rocPRIM version) is used to
