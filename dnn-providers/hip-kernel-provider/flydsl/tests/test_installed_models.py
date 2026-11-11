@@ -112,6 +112,8 @@ def test_a_metric_less_model_binds_from_its_arch_folder(tmp_path: Path) -> None:
     assert ued["sort_kernel_catalog"] == {"default": native, "gfx942": ["ranker"]}
     # The candidate generators (future JIT) are a list like every role.
     assert ued["predict_applicable_kernels"] == {"gfx950": ["applicable"]}
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
