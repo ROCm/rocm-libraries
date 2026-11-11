@@ -362,8 +362,10 @@ def gather_paged_kv(
             raise ValueError(
                 f"block_table row {b} references block ids outside [0, {num_blocks - 1}]"
             )
-        latent = c_kv[ids].reshape(needed * block_size, -1)[:seq_len]
-        rope = k_rope[ids].reshape(needed * block_size, -1)[:seq_len]
+        # Explicit widths, not -1: an empty sequence (S_k = 0, needed = 0) has
+        # zero elements, and reshape cannot infer an axis from zero.
+        latent = c_kv[ids].reshape(needed * block_size, c_kv.shape[2])[:seq_len]
+        rope = k_rope[ids].reshape(needed * block_size, k_rope.shape[2])[:seq_len]
         out.append((latent, rope))
     return out
 

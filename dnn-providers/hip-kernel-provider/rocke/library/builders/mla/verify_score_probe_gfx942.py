@@ -1001,6 +1001,10 @@ def _dispatched_spec(
 ) -> MlaPrefillSpec:
     """The forward spec the MLA dispatcher selects for this case.
 
+    Pinned to the prefill candidate, which this harness grades. Prefill admits
+    ``max_seqlen_q >= 2`` only; a one-query-per-sequence scenario is refused
+    and falls back to the default spec below.
+
     ``agpr`` forces dispatch's agpr_acc choice on (True) or off (False) through
     its ``_AGPR_FORCE`` hook; None applies the shipped rule. A forced layout
     admission refuses (e.g. the llvm20 flavor) falls back as dispatch would.
@@ -1018,11 +1022,13 @@ def _dispatched_spec(
                 num_heads=heads,
                 total_q=int(sum(q_lens)),
                 num_seqs=len(q_lens),
+                max_seqlen_q=int(max(q_lens)),
                 max_seqlen_k=int(max(k_lens)),
                 arch=arch or "gfx942",
                 # make_problem's pool at the request's default 16-key page.
                 num_kv_blocks=pool_blocks(k_lens, MLARequest.page_block_size),
                 absorbed_query=absorbed_query,
+                algorithm="mla_prefill_chunked",
             )
         ).spec
     except ValueError:

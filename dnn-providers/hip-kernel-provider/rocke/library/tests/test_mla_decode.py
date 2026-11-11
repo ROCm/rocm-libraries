@@ -1,0 +1,791 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""CPU coverage for the MLA decode kernels (latent + split-KV combine).
+
+No GPU: spec validation, per-arch admission, launch geometry, and a full lower
+of every emitted ``KernelDef``. The lowering checks pin the per-arch operand
+choices -- gfx942 must not pick up gfx950's transpose read (it would lower and
+then fault on the device), and gfx950 must actually use the wide-K atom and the
+transpose read it claims to. A comgr-compiled resource guard checks the gate's
+static half: no scratch, and the VGPR/LDS budget of two workgroups per CU.
+
+Numeric correctness is the on-device lane, ``test_mla_decode_numeric.py``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import unittest
+
+import pytest
+
+from dispatch.mla.decode import choose_num_seg
+from kernels.mla.mla_decode import (
+    MlaDecodeSpec,
+    build_mla_decode,
+    check_mla_decode_extents,
+    mla_decode_block,
+    mla_decode_combine_spec,
+    mla_decode_grid,
+    mla_decode_signature,
+    mla_decode_workspace_shapes,
+    supports_mla_decode,
+)
+from kernels.mla.mla_decode_combine import (
+    MlaDecodeCombineSpec,
+    build_mla_decode_combine,
+    mla_decode_combine_grid,
+    mla_decode_combine_signature,
+    supports_mla_decode_combine,
+)
+from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec, build_mla_decode_gfx950
+from kernels.mla.mla_prefill_gfx942 import MlaPrefillSpec, mla_prefill_fwd_signature
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+from ._compiler_test_utils import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
+
+SPECS = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}
+
+
+def _pool_bytes(ir: str, name: str) -> int:
+    m = re.search(rf"@smem_pool\.{re.escape(name)} = .*?\[(\d+) x i8\]", ir)
+    assert m, f"no LDS pool for {name}"
+    return int(m.group(1))
+
+
+class TestSpec:
+    def test_defaults(self):
+        spec = MlaDecodeSpec(num_heads=128)
+        assert (spec.block_h, spec.qa_cols, spec.threads) == (64, 576, 256)
+        assert not spec.split_kv
+        assert spec.kernel_name().startswith("mla_decode_gfx942_h128")
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            ({"dtype": "fp16"}, "bf16 only"),
+            ({"num_heads": 0}, "num_heads must be positive"),
+            ({"num_seg": 0}, "num_seg must be positive"),
+            ({"num_warps": 3}, "num_warps must be one of"),
+            ({"page_block_size": 32}, "page_block_size must equal block_k"),
+            ({"block_k": 48, "page_block_size": 48}, "block_k must be a power of two"),
+        ],
+    )
+    def test_impossible_specs_raise(self, kw, match):
+        kw.setdefault("num_heads", 128)
+        with pytest.raises(ValueError, match=match):
+            MlaDecodeSpec(**kw)
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            # A bool or float is not a count: True would pass "> 0", and 2.0
+            # would select the split-KV variant.
+            ({"num_seg": True}, "num_seg must be an int, got bool True"),
+            ({"num_seg": 2.0}, "num_seg must be an int, got float 2.0"),
+            ({"num_heads": 128.0}, "num_heads must be an int, got float"),
+            ({"num_warps": True}, "num_warps must be an int, got bool"),
+        ],
+    )
+    def test_non_int_counts_are_type_errors(self, kw, match):
+        kw.setdefault("num_heads", 128)
+        with pytest.raises(TypeError, match=match):
+            MlaDecodeSpec(**kw)
+
+    def test_name_records_split_but_not_the_count(self):
+        # num_seg is a launch parameter; only split vs single pass is IR.
+        a = MlaDecodeSpec(num_heads=128, num_seg=2)
+        b = MlaDecodeSpec(num_heads=128, num_seg=7)
+        assert a.kernel_name() == b.kernel_name()
+        assert a.kernel_name().endswith("_split_bf16")
+        assert "_split" not in MlaDecodeSpec(num_heads=128).kernel_name()
+
+    def test_arch_is_in_the_name(self):
+        # Same fields, different IR: the names must differ, or a name-keyed
+        # cache would hand one arch's code object to the other.
+        a = MlaDecodeSpec(num_heads=64)
+        b = MlaDecodeGfx950Spec(num_heads=64)
+        assert a.kernel_name() != b.kernel_name()
+        assert a != b
+
+    def test_identity_is_the_binary_not_the_launch(self):
+        # num_seg is a launch argument: specs that differ only in it share a
+        # binary. The arch is a class attribute asdict cannot see, so it has to
+        # be in the identity explicitly.
+        a = MlaDecodeSpec(num_heads=128, num_seg=4)
+        assert a.identity() == MlaDecodeSpec(num_heads=128, num_seg=16).identity()
+        assert a.identity() != MlaDecodeSpec(num_heads=128).identity()
+        assert a.identity() != MlaDecodeGfx950Spec(num_heads=128, num_seg=4).identity()
+
+    def test_gfx950_pads_for_16_byte_reads(self):
+        assert MlaDecodeSpec(num_heads=64).lds_pad == 4
+        assert MlaDecodeGfx950Spec(num_heads=64).lds_pad == 8
+
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    def test_lds_budget_is_the_arch_catalogs(self, monkeypatch, arch):
+        # The per-workgroup LDS capacity comes from the target catalog, not a
+        # constant in the kernel: admission follows the catalog's value.
+        from kernels.mla import mla_decode
+        from kernels.mla.mla_decode import _lds_bytes
+
+        spec = SPECS[arch](num_heads=64)
+        need, asked = _lds_bytes(spec), []
+
+        def capacity(budget):
+            def query(a):
+                asked.append(a)
+                return budget
+
+            return query
+
+        assert supports_mla_decode(spec, arch=arch) == (True, "")
+        monkeypatch.setattr(mla_decode, "attention_lds_capacity_bytes", capacity(need))
+        assert supports_mla_decode(spec, arch=arch) == (True, "")  # exactly fits
+        monkeypatch.setattr(
+            mla_decode, "attention_lds_capacity_bytes", capacity(need - 1)
+        )
+        ok, why = supports_mla_decode(spec, arch=arch)
+        assert not ok and f"needs {need} B of LDS, over {arch}'s {need - 1} B" in why
+        assert set(asked) == {arch}  # the spec's own arch, never another's
+
+    @pytest.mark.parametrize(
+        "arch, budget", [("gfx942", 64 * 1024), ("gfx950", 160 * 1024)]
+    )
+    def test_lds_catalog_matches_the_retired_constants(self, arch, budget):
+        from kernels.common.attention_arch import attention_lds_capacity_bytes
+
+        assert attention_lds_capacity_bytes(arch) == budget
+
+
+class TestGate:
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    @pytest.mark.parametrize("heads", [64, 128])
+    def test_bring_up_geometry_admitted(self, arch, heads):
+        assert supports_mla_decode(SPECS[arch](num_heads=heads), arch=arch) == (
+            True,
+            "",
+        )
+
+    @pytest.mark.parametrize(
+        "arch, other", [("gfx942", "gfx950"), ("gfx950", "gfx942")]
+    )
+    def test_spec_class_is_bound_to_its_arch(self, arch, other):
+        ok, why = supports_mla_decode(SPECS[arch](num_heads=128), arch=other)
+        assert not ok and arch in why
+
+    def test_head_count_must_fill_whole_workgroups(self):
+        ok, why = supports_mla_decode(MlaDecodeSpec(num_heads=96), arch="gfx942")
+        assert not ok and "BLOCK_H" in why
+
+    def test_heads_per_wave_is_the_atom_n(self):
+        ok, why = supports_mla_decode(
+            MlaDecodeSpec(num_heads=128, heads_per_wave=32, num_warps=2), arch="gfx942"
+        )
+        assert not ok and "heads_per_wave" in why
+
+    def test_wide_atom_needs_d_rope_in_whole_k_steps(self):
+        ok, why = supports_mla_decode(
+            MlaDecodeGfx950Spec(num_heads=64, d_rope=48), arch="gfx950"
+        )
+        assert not ok and "d_rope" in why
+
+    def test_build_refuses_a_mismatched_arch(self):
+        with pytest.raises(NotImplementedError):
+            build_mla_decode(MlaDecodeSpec(num_heads=128), arch="gfx950")
+
+    def test_arch_without_a_score_schedule_is_refused(self):
+        # The gate must refuse what the build cannot emit: a spec class whose
+        # arch has no DECODE_SCORE_PREFETCH / DECODE_SCORE_FENCE_EVERY entry
+        # falls through dispatch instead of reaching a KeyError inside
+        # build_mla_decode.
+        other = type("_OtherArchSpec", (MlaDecodeSpec,), {"ARCH": "gfx90a"})
+        spec = other(num_heads=64)
+        ok, why = supports_mla_decode(spec, arch="gfx90a")
+        assert not ok and "DECODE_SCORE_FENCE_EVERY" in why and "gfx90a" in why
+        with pytest.raises(NotImplementedError, match="gfx90a"):
+            build_mla_decode(spec)
+
+    def test_arch_missing_from_one_score_table_is_refused(self, monkeypatch):
+        monkeypatch.setattr(
+            "kernels.mla.mla_decode.DECODE_SCORE_FENCE_EVERY", {"gfx950": 4}
+        )
+        ok, why = supports_mla_decode(MlaDecodeSpec(num_heads=64), arch="gfx942")
+        assert not ok and "['gfx950']" in why
+
+    def test_build_defaults_to_the_spec_class_arch(self):
+        spec = MlaDecodeGfx950Spec(num_heads=64)
+        assert build_mla_decode(spec).name == build_mla_decode_gfx950(spec).name
+
+
+class TestLaunchGeometry:
+    def test_grid_is_head_groups_by_sequences_by_segments(self):
+        spec = MlaDecodeSpec(num_heads=128, num_seg=5)
+        assert mla_decode_grid(spec, num_seqs=7) == (2, 7, 5)
+        assert mla_decode_block(spec) == (256, 1, 1)
+        with pytest.raises(ValueError):
+            mla_decode_grid(spec, num_seqs=0)
+
+    def test_single_pass_pack_is_the_prefill_absorbed_pack(self):
+        # The same 12 arguments, so the prefill absorbed_query kernel can run
+        # on decode's buffers as an independent oracle (dispatch never swaps
+        # one for the other).
+        decode = [a["name"] for a in mla_decode_signature(MlaDecodeSpec(num_heads=128))]
+        prefill = [
+            a["name"]
+            for a in mla_prefill_fwd_signature(
+                MlaPrefillSpec(
+                    num_heads=128, heads_per_wg=4, block_q=16, absorbed_query=True
+                )
+            )
+        ]
+        assert decode == prefill
+        assert len(decode) == 12
+
+    def test_split_pack_swaps_outputs_for_the_workspace(self):
+        spec = MlaDecodeSpec(num_heads=128, num_seg=4)
+        names = [a["name"] for a in mla_decode_signature(spec)]
+        assert names[:2] == ["part_acc_ptr", "part_ml_ptr"]
+        assert names[-1] == "num_seg" and len(names) == 13
+        assert mla_decode_workspace_shapes(spec, total_q=3) == {
+            "part_acc_ptr": (3, 4, 128, 512),
+            "part_ml_ptr": (3, 4, 128, 2),
+        }
+        assert (
+            mla_decode_workspace_shapes(MlaDecodeSpec(num_heads=128), total_q=3) == {}
+        )
+
+    def test_extents_track_the_widest_tensor(self):
+        # qa: 576 per head; split workspace: 512 * num_seg per head.
+        single = MlaDecodeSpec(num_heads=128)
+        assert check_mla_decode_extents(single, total_q=29127, max_seqlen_k=1)[0]
+        ok, why = check_mla_decode_extents(single, total_q=29128, max_seqlen_k=1)
+        assert not ok and "i32 offsets" in why
+        split = MlaDecodeSpec(num_heads=128, num_seg=64)
+        assert check_mla_decode_extents(split, total_q=511, max_seqlen_k=1)[0]
+        assert not check_mla_decode_extents(split, total_q=512, max_seqlen_k=1)[0]
+
+    def test_extents_bound_the_tile_count(self):
+        # The kernel rounds the key count up to tiles in i32: s_k + block_k - 1.
+        spec = MlaDecodeSpec(num_heads=128)
+        top = 2**31 - spec.block_k
+        assert check_mla_decode_extents(spec, total_q=1, max_seqlen_k=top)[0]
+        ok, why = check_mla_decode_extents(spec, total_q=1, max_seqlen_k=top + 1)
+        assert not ok and "tile count" in why
+
+
+class TestChooseNumSeg:
+    def test_fills_the_device(self):
+        # 1 sequence x 2 head groups, 304 CUs x 2 workgroups -> 304 wanted,
+        # capped by 8192 / 16 / 32 = 16 tiles-per-segment floor.
+        kw = dict(block_k=16, num_cus=304, wgs_per_cu=2)
+        assert choose_num_seg(num_seqs=1, head_groups=2, max_seqlen_k=8192, **kw) == 16
+
+    def test_large_batches_do_not_split(self):
+        kw = dict(block_k=16, num_cus=304, wgs_per_cu=2)
+        assert choose_num_seg(num_seqs=512, head_groups=2, max_seqlen_k=8192, **kw) == 1
+
+    def test_cap_boundary(self):
+        kw = dict(num_seqs=1, head_groups=1, block_k=16, num_cus=304, wgs_per_cu=2)
+        assert choose_num_seg(max_seqlen_k=1008, **kw) == 1  # 63 tiles
+        assert choose_num_seg(max_seqlen_k=1009, **kw) == 2  # 64 tiles
+
+    def test_unknown_cu_count_still_splits(self):
+        assert (
+            choose_num_seg(
+                num_seqs=1,
+                head_groups=1,
+                max_seqlen_k=8192,
+                block_k=16,
+                num_cus=0,
+                wgs_per_cu=2,
+            )
+            == 2
+        )
+
+    def test_short_keys_never_split_below_the_floor(self):
+        kw = dict(block_k=16, num_cus=304, wgs_per_cu=2)
+        assert choose_num_seg(num_seqs=1, head_groups=1, max_seqlen_k=511, **kw) == 1
+        assert choose_num_seg(num_seqs=1, head_groups=1, max_seqlen_k=0, **kw) == 1
+
+
+@pytest.fixture(scope="module", params=sorted(SPECS))
+def lowered(request):
+    arch = request.param
+    out = {}
+    for split in (False, True):
+        spec = SPECS[arch](num_heads=128, num_seg=4 if split else 1)
+        kernel = build_mla_decode(spec, arch=arch)
+        out[split] = (kernel, lower_kernel_to_llvm(kernel, arch=arch))
+    return arch, out
+
+
+class TestLowering:
+    def test_lowers_with_the_predicted_pool(self, lowered):
+        from kernels.mla.mla_decode import _lds_bytes
+
+        arch, kernels = lowered
+        for split, (kernel, ir) in kernels.items():
+            assert kernel.name in ir
+            spec = SPECS[arch](num_heads=128, num_seg=4 if split else 1)
+            # Under 32 KiB: two workgroups per CU on either arch.
+            assert _pool_bytes(ir, kernel.name) == _lds_bytes(spec) <= 32768
+            assert '"amdgpu-flat-work-group-size"="64,256"' in ir
+            assert "scratch" not in ir
+
+    def test_kv_pages_are_addressed_from_a_64_bit_base(self, lowered):
+        # Each page gets its own descriptor off a 64-bit pointer; a single
+        # cache-wide descriptor (0x7FFF0000 bytes) with an i32 byte offset
+        # would wrap past 2 GiB of cache.
+        _arch, kernels = lowered
+        for _split, (_kernel, ir) in kernels.items():
+            assert str(0x7FFF0000) not in ir
+            assert "getelementptr inbounds i8, ptr addrspace(1)" in ir
+
+    def test_per_arch_operands(self, lowered):
+        arch, kernels = lowered
+        for _split, (_kernel, ir) in kernels.items():
+            if arch == "gfx942":
+                # CDNA3 has neither the transpose read nor a wide-K bf16 atom.
+                assert "ds.read.tr" not in ir
+                assert "16x16x32" not in ir
+                assert "mfma.f32.16x16x16bf16" in ir
+            else:
+                assert "ds.read.tr16.b64" in ir
+                assert "16x16x32" in ir
+
+    def test_split_count_is_not_ir(self):
+        a = build_mla_decode(MlaDecodeSpec(num_heads=64, num_seg=2), arch="gfx942")
+        b = build_mla_decode(MlaDecodeSpec(num_heads=64, num_seg=9), arch="gfx942")
+        assert lower_kernel_to_llvm(a, arch="gfx942") == lower_kernel_to_llvm(
+            b, arch="gfx942"
+        )
+
+
+class TestCombine:
+    def test_spec_follows_the_decode_spec(self):
+        spec = mla_decode_combine_spec(MlaDecodeGfx950Spec(num_heads=64, num_seg=3))
+        assert spec == MlaDecodeCombineSpec(num_heads=64)
+        assert spec.cols_per_lane == 8
+
+    @pytest.mark.parametrize(
+        "kw, exc, match",
+        [
+            ({"num_heads": 0}, ValueError, "num_heads must be positive"),
+            ({"num_heads": True}, TypeError, "num_heads must be an int"),
+            ({"num_heads": 128, "r_kv": 512.0}, TypeError, "r_kv must be an int"),
+            (
+                {"num_heads": 128, "num_warps": True},
+                TypeError,
+                "num_warps must be an int",
+            ),
+            (
+                {"num_heads": 128, "num_warps": 3},
+                ValueError,
+                "num_warps must be one of",
+            ),
+        ],
+    )
+    def test_impossible_specs_raise(self, kw, exc, match):
+        with pytest.raises(exc, match=match):
+            MlaDecodeCombineSpec(**kw)
+
+    def test_geometry_and_pack(self):
+        spec = MlaDecodeCombineSpec(num_heads=128)
+        assert mla_decode_combine_grid(spec, total_q=5) == (32, 5, 1)
+        names = [a["name"] for a in mla_decode_combine_signature(spec)]
+        assert names == ["out_ptr", "lse_ptr", "part_acc_ptr", "part_ml_ptr", "num_seg"]
+
+    def test_gate(self):
+        assert supports_mla_decode_combine(
+            MlaDecodeCombineSpec(num_heads=128), arch="gfx950"
+        ) == (True, "")
+        ok, why = supports_mla_decode_combine(
+            MlaDecodeCombineSpec(num_heads=128), arch="gfx1201"
+        )
+        assert not ok and "wave64" in why
+        ok, why = supports_mla_decode_combine(
+            MlaDecodeCombineSpec(num_heads=128, r_kv=320), arch="gfx942"
+        )
+        assert not ok and "r_kv" in why
+
+    @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+    def test_lowers_arch_neutral(self, arch):
+        kernel = build_mla_decode_combine(
+            MlaDecodeCombineSpec(num_heads=128), arch=arch
+        )
+        ir = lower_kernel_to_llvm(kernel, arch=arch)
+        assert "mfma" not in ir and "smem_pool" not in ir
+
+
+def _blocks_with(ir: str, pattern: str) -> list[str]:
+    """Basic-block label of every IR line matching ``pattern``."""
+    blocks, current = [], None
+    for line in ir.splitlines():
+        label = re.match(r"^([\w.]+):", line)
+        if label:
+            current = label.group(1)
+        elif re.search(pattern, line):
+            blocks.append(current)
+    return blocks
+
+
+class TestEmptySegments:
+    def test_split_epilogue_guards_the_acc_store(self):
+        # An empty segment stores only (m, l): every 512-wide acc store
+        # (<4 x float>) sits in one conditional block, apart from the (m, l)
+        # writer (<2 x float>).
+        ir = lower_kernel_to_llvm(
+            build_mla_decode(MlaDecodeSpec(num_heads=64, num_seg=4), arch="gfx942"),
+            arch="gfx942",
+        )
+        acc_blocks = set(_blocks_with(ir, r"store <4 x float>"))
+        ml_blocks = set(_blocks_with(ir, r"store <2 x float>"))
+        assert len(acc_blocks) == 1 and len(ml_blocks) == 1, (acc_blocks, ml_blocks)
+        (acc_block,) = acc_blocks
+        assert acc_block.startswith("if.then"), acc_block
+        assert acc_blocks != ml_blocks
+
+    @pytest.mark.parametrize("num_seg", [1, 4])
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    def test_a_segment_with_no_tiles_reads_no_cache(self, monkeypatch, arch, num_seg):
+        # The prologue's two descriptors (c_kv page, k_rope page) are bounded
+        # by select(has_tiles, page bytes, 0): with no tiles every staging load
+        # is out of range and touches no memory, so an empty cache is safe.
+        # Pinned to llvm22, the oldest flavor decode serves: its IR spells the
+        # bound as an i32 widened to the intrinsic's i64 by a zext.
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+        spec = SPECS[arch](num_heads=64, num_seg=num_seg)
+        ir = lower_kernel_to_llvm(build_mla_decode(spec, arch=arch), arch=arch)
+        c_bytes = spec.page_block_size * spec.r_kv * 2
+        kr_bytes = spec.page_block_size * spec.d_rope * 2
+        c_sel = re.findall(rf"(%\S+) = select i1 (%\S+), i32 {c_bytes}, i32 0", ir)
+        kr_sel = re.findall(rf"(%\S+) = select i1 (%\S+), i32 {kr_bytes}, i32 0", ir)
+        assert len(c_sel) == 1 and len(kr_sel) == 1, (c_sel, kr_sel)
+        assert c_sel[0][1] == kr_sel[0][1]  # one has_tiles predicate
+        # The selects bound the first descriptor pair (the prologue); every
+        # later staging descriptor (the loop's) keeps the full page bound.
+        zext = dict(re.findall(r"(%\S+) = zext i32 (\S+) to i64", ir))
+        bounds = [
+            zext[n]
+            for n in re.findall(
+                r"make\.buffer\.rsrc\.p8\.p1\(ptr addrspace\(1\) %\S+, i16 0, "
+                r"i64 (%\S+),",
+                ir,
+            )
+        ]
+        assert bounds[:2] == [c_sel[0][0], kr_sel[0][0]], bounds
+        assert set(bounds[2:]) == {str(c_bytes), str(kr_bytes)}, bounds
+
+    def test_combine_reads_acc_only_for_live_segments(self):
+        # The combine reads a segment's acc row (<4 x float>) only behind its
+        # l > 0 trip count, never in the block that reads (m, l).
+        ir = lower_kernel_to_llvm(
+            build_mla_decode_combine(
+                MlaDecodeCombineSpec(num_heads=128), arch="gfx942"
+            ),
+            arch="gfx942",
+        )
+        ml_blocks = set(_blocks_with(ir, r"load <2 x float>"))
+        acc_blocks = set(_blocks_with(ir, r"load <4 x float>"))
+        assert len(ml_blocks) == 1 and acc_blocks
+        assert not acc_blocks & ml_blocks, (acc_blocks, ml_blocks)
+
+
+# Compile + introspect one kernel in a child process: comgr's option parser
+# calls exit(1) on a flag the loaded LLVM does not know, which no except can
+# catch and which would otherwise end the whole pytest run. Exit code 77: the
+# host takes a different LLVM version or IR flavor than decode serves, always a
+# skip. Exit code 78: a tool the gate needs is missing, a skip unless the run
+# requires the tools. Anything else non-zero is a failure, reported with the
+# child's output.
+_RESOURCE_PROBE = r"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+arch, num_seg = sys.argv[1], int(sys.argv[2])
+try:
+    import torch  # noqa: F401 -- binds the torch-bundled comgr
+except ImportError:
+    pass
+try:
+    from rocke.analysis.isa import analyze_hsaco
+    from rocke.helpers.compile import compile_kernel
+except ImportError as exc:
+    print(f"comgr / resource tools unavailable: {exc}")
+    sys.exit(78)
+from rocke.core.lower_llvm import _resolve_llvm_flavor
+from kernels.mla._mla_body import flavor_honors_agpr_alloc
+try:
+    flavor = _resolve_llvm_flavor()
+except RuntimeError as exc:
+    print(f"LLVM flavor undeterminable: {exc}")
+    sys.exit(78)
+if not flavor_honors_agpr_alloc(flavor):
+    print(f"decode needs a flavor that honors agpr_alloc; host lowers {flavor}")
+    sys.exit(77)
+from kernels.mla.mla_decode import MlaDecodeSpec, build_mla_decode
+from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
+spec_cls = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}[arch]
+kernel = build_mla_decode(spec_cls(num_heads=128, num_seg=num_seg), arch=arch)
+try:
+    art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
+except ImportError as exc:
+    print(f"comgr toolchain unavailable: {exc}")
+    sys.exit(78)
+except RuntimeError as exc:
+    # A forced ROCKE_LLVM_FLAVOR the loaded comgr cannot take is an
+    # environment mismatch; any other compile failure is real.
+    if "mismatch" not in str(exc):
+        raise
+    print(f"comgr cannot take this IR flavor: {exc}")
+    sys.exit(77)
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "mla_decode.hsaco"
+    path.write_bytes(bytes(art.hsaco))
+    try:
+        res = analyze_hsaco(path).resources
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"HSACO introspection unavailable: {exc}")
+        sys.exit(78)
+print(json.dumps({"scratch": res.scratch_bytes, "vgpr": res.vgpr_count,
+                  "lds": res.lds_bytes}))
+"""
+
+
+#: The probe's exit codes (see the comment above ``_RESOURCE_PROBE``).
+_EXIT_HOST_MISMATCH = 77
+_EXIT_TOOLS_MISSING = 78
+#: What the probe prints for a host whose flavor decode refuses.
+_HOST_MISMATCH_REASON = (
+    "decode needs a flavor that honors agpr_alloc; host lowers llvm20"
+)
+
+
+def _probe_could_not_run(
+    returncode: int, stdout: str, stderr: str
+) -> tuple[str, str] | None:
+    """``("tools" | "skip", reason)`` when the probe could not run the gate, else None.
+
+    ``"tools"``: the host cannot build or read the kernel, because a tool the
+    gate needs is missing or its comgr rejects a compile option. Whether that
+    fails or skips is the rule shared with the prefill resource guards
+    (:func:`_compiler_test_utils.require_tools_or_skip`). ``"skip"``: nothing is
+    missing, but the host takes a different LLVM version or IR flavor than decode
+    serves, so the gate has nothing to check.
+    """
+    output = (stdout + stderr).strip()
+    # The probe prints its reason on stdout; stderr may end in an unrelated
+    # warning.
+    reason = (stdout.strip().splitlines() or [output])[-1]
+    if returncode == _EXIT_TOOLS_MISSING:
+        return "tools", reason
+    if returncode == _EXIT_HOST_MISMATCH:
+        return "skip", reason
+    if (
+        # comgr's option parser exit(1)s with this message and no Python
+        # traceback; a traceback is a real failure, whatever its text. It is a
+        # comgr too old for the flags decode compiles with: the loaded compiler
+        # cannot build this kernel, so this is a "tools" case.
+        returncode == 1
+        and "Unknown command line argument" in stderr
+        and "Traceback" not in stderr
+    ):
+        return "tools", f"the loaded comgr rejects a compile option: {output[-300:]}"
+    return None
+
+
+def _skip_if_probe_declined(returncode: int, stdout: str, stderr: str) -> None:
+    """Skip, or fail where the run requires the compiler tools and one is missing,
+    when the probe could not run the gate; return when it did."""
+    verdict = _probe_could_not_run(returncode, stdout, stderr)
+    if verdict is None:
+        return
+    kind, reason = verdict
+    if kind == "tools":
+        require_tools_or_skip(f"the resource gate cannot run: {reason}")
+    pytest.skip(reason)
+
+
+class TestResources:
+    """Compiled through comgr: the static half of the resource gate.
+
+    Zero scratch, and at most 256 VGPRs and 32 KiB of LDS, which is what two
+    workgroups of four waves need per CU on both arches. Skipped where comgr,
+    llvm-objdump or llvm-readelf is missing, or where the loaded comgr rejects a
+    compile option -- unless ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (set by the CTest
+    entry when it supplies ROCm's tools), which turns that skip into a failure.
+    A host whose LLVM version or IR flavor decode does not serve skips either
+    way.
+    """
+
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    @pytest.mark.parametrize("num_seg", [1, 4])
+    def test_no_spills_two_workgroups_per_cu(self, arch, num_seg):
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", _RESOURCE_PROBE, arch, str(num_seg)],
+                capture_output=True,
+                text=True,
+                env=env,
+                # Under the CTest lane's per-test --timeout=120, so this
+                # failure, with the probe's output, is the one reported.
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(
+                f"resource probe timed out after 90 s: {(exc.stderr or '')[-1000:]}"
+            )
+        output = (proc.stdout + proc.stderr).strip()
+        _skip_if_probe_declined(proc.returncode, proc.stdout, proc.stderr)
+        assert proc.returncode == 0, output[-2000:]
+        res = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert res["scratch"] == 0
+        assert res["vgpr"] <= 256
+        assert res["lds"] <= 32768
+
+
+class TestResourceGateVerdict:
+    """How the resource gate classifies a probe that could not run it.
+
+    A missing tool, or a compile option the loaded comgr rejects, is handed to
+    the rule shared with the prefill resource guards
+    (:func:`_compiler_test_utils.require_tools_or_skip`); a host that takes a
+    different LLVM version or IR flavor skips either way, because nothing the
+    gate needs is missing there.
+    """
+
+    _OPTION_ERROR = "error: Unknown command line argument '-amdgpu-foo'"
+
+    def test_host_mismatch_is_a_skip(self):
+        verdict = _probe_could_not_run(
+            _EXIT_HOST_MISMATCH,
+            _HOST_MISMATCH_REASON + "\n",
+            "",
+        )
+        assert verdict == ("skip", _HOST_MISMATCH_REASON)
+
+    def test_a_missing_tool_is_the_tools_verdict(self):
+        verdict = _probe_could_not_run(
+            _EXIT_TOOLS_MISSING,
+            "HSACO introspection unavailable: llvm-objdump failed\n",
+            "a trailing warning\n",
+        )
+        assert verdict == (
+            "tools",
+            "HSACO introspection unavailable: llvm-objdump failed",
+        )
+
+    def test_comgr_rejecting_a_compile_option_is_the_tools_verdict(self):
+        verdict = _probe_could_not_run(1, "", self._OPTION_ERROR)
+        assert verdict is not None and verdict[0] == "tools"
+        assert self._OPTION_ERROR in verdict[1]
+
+    def test_a_traceback_is_a_real_failure(self):
+        stderr = f"Traceback (most recent call last):\n  ...\n{self._OPTION_ERROR}\n"
+        assert _probe_could_not_run(1, "", stderr) is None
+
+    @pytest.mark.parametrize("returncode", [0, 2, 134])
+    def test_other_exits_are_not_the_gate_declining(self, returncode):
+        assert _probe_could_not_run(returncode, "", "") is None
+
+
+class TestRequireToolsOrSkip:
+    """The rule the two resource gates share: fail where the run requires the
+    compiler tools, skip elsewhere."""
+
+    def test_fails_where_the_run_requires_the_tools(self, monkeypatch):
+        monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+        # A SkipTest here must fail this test, not skip it: catch it explicitly.
+        try:
+            require_tools_or_skip("llvm-objdump failed")
+        except AssertionError as exc:
+            assert str(exc) == f"{REQUIRE_COMPILER_TOOLS_ENV}=1 but llvm-objdump failed"
+        except unittest.SkipTest:
+            pytest.fail("skipped where the run requires the compiler tools")
+        else:
+            pytest.fail("returned where the run requires the compiler tools")
+
+    @pytest.mark.parametrize("value", [None, "", "0", "true"])
+    def test_skips_elsewhere(self, monkeypatch, value):
+        if value is None:
+            monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+        else:
+            monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, value)
+        with pytest.raises(unittest.SkipTest, match="^llvm-objdump failed$"):
+            require_tools_or_skip("llvm-objdump failed")
+
+
+class TestSkipIfProbeDeclined:
+    """What the gate does for each probe outcome, with the compiler tools
+    optional and required: where the verdict and the shared rule meet."""
+
+    TOOLS_MISSING = (
+        _EXIT_TOOLS_MISSING,
+        "HSACO introspection unavailable: llvm-objdump failed\n",
+        "a trailing warning\n",
+    )
+    HOST_MISMATCH = (
+        _EXIT_HOST_MISMATCH,
+        _HOST_MISMATCH_REASON + "\n",
+        "",
+    )
+    OPTION_ERROR = (1, "", TestResourceGateVerdict._OPTION_ERROR)
+    OPTION_FAILS = (
+        f"fails: {REQUIRE_COMPILER_TOOLS_ENV}=1 but the resource gate cannot run: "
+        f"the loaded comgr rejects a compile option: "
+        f"{TestResourceGateVerdict._OPTION_ERROR}"
+    )
+    RAN = (0, '{"scratch": 0, "vgpr": 1, "lds": 2}\n', "")
+    FAILS = (
+        f"fails: {REQUIRE_COMPILER_TOOLS_ENV}=1 but the resource gate cannot run: "
+        "HSACO introspection unavailable: llvm-objdump failed"
+    )
+
+    @staticmethod
+    def _outcome(probe) -> str:
+        """How the call ends, as a value: a gate that wrongly skips then reads as
+        a red assertion, not as one more skipped test."""
+        try:
+            _skip_if_probe_declined(*probe)
+        except (unittest.SkipTest, pytest.skip.Exception):
+            return "skips"
+        except AssertionError as exc:
+            return f"fails: {exc}"
+        return "returns"
+
+    @pytest.mark.parametrize(
+        ("probe", "required", "outcome"),
+        [
+            (TOOLS_MISSING, False, "skips"),
+            (TOOLS_MISSING, True, FAILS),
+            (HOST_MISMATCH, False, "skips"),
+            (HOST_MISMATCH, True, "skips"),
+            (OPTION_ERROR, False, "skips"),
+            (OPTION_ERROR, True, OPTION_FAILS),
+            (RAN, False, "returns"),
+            (RAN, True, "returns"),
+        ],
+        ids=[
+            "tools-missing-optional",
+            "tools-missing-required",
+            "host-mismatch-optional",
+            "host-mismatch-required",
+            "comgr-option-optional",
+            "comgr-option-required",
+            "ran-optional",
+            "ran-required",
+        ],
+    )
+    def test_each_probe_outcome(self, monkeypatch, probe, required, outcome):
+        if required:
+            monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+        else:
+            monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+        assert self._outcome(probe) == outcome

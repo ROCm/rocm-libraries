@@ -3,16 +3,34 @@
 
 """gfx942 MLA candidates.
 
-One kernel today: the chunked bf16 prefill forward kernel. It takes the
-query already projected by ``W_UQ`` and RoPE-rotated; neither step is in-tree,
-and the pre-kernel that does both is a follow-up. It is registered three
-times: the production candidate ships the layout the agpr_acc rule picks, and
-two opt-in candidates each pin one fixed two-heads layout (``agpr_acc`` and
-``row16``) so sweeps and tuning records can name a layout that does not move
-when the rule or the LLVM flavor changes. Registration is an
-explicit ``register(registry)`` call rather than an import side effect, so the
-registry contents stay a readable list and a test can assemble a registry from a
-subset of arch modules.
+Two candidates serve the one MLA op, told apart by the request's
+``max_seqlen_q``; the request's ``absorbed_query`` states the input contract
+(see :class:`MLARequest`):
+
+* the weight-absorbed **decode** kernel, for ``max_seqlen_q == 1``, absorbed
+  contract only (it requires the feature): ``qa = [Q_nope @ W_UK_nopeᵀ |
+  Q_rope]`` in, the normalized latent (before ``W_UV``) and the LSE out
+  (``dispatch.mla.decode``);
+* the chunked bf16 **prefill** forward kernel, for ``max_seqlen_q >= 2``,
+  either contract: fused, the query already projected by ``W_UQ`` and
+  RoPE-rotated (``[total_q, H, d_nope + d_rope]``) and the per-head ``W_UK``
+  in, the attention output (``W_UV`` applied) and the LSE out; or absorbed,
+  as decode (two-heads layouts only). Neither ``W_UQ`` nor the rotation is
+  in-tree; the pre-kernel that does both is a follow-up.
+  Prefill is registered three times: the production candidate ships the
+  layout the agpr_acc rule picks, and two opt-in candidates each pin one fixed
+  two-heads layout (``agpr_acc`` and ``row16``) so sweeps and tuning records
+  can name a layout that does not move when the rule or the LLVM flavor
+  changes.
+
+The ranges do not overlap. Prefill could compute ``S_q = 1``, under either
+contract, but decode owns that regime, so prefill is not a fallback for
+decode: a one-query request that decode cannot serve (a head count off its
+64-head workgroup) is refused.
+
+Registration is an explicit ``register(registry)`` call rather than an import
+side effect, so the registry contents stay a readable list and a test can
+assemble a registry from a subset of arch modules.
 """
 
 from __future__ import annotations
@@ -20,6 +38,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Tuple
 
+from kernels.mla.mla_decode import MlaDecodeSpec, build_mla_decode
 from kernels.mla.mla_prefill_gfx942 import (
     MLA_MAX_NUM_SEQS,
     MlaPrefillSpec,
@@ -46,7 +65,9 @@ from .common import (
     _request_errors,
     _selector_matches,
     num_q_blocks_for,
+    resolve_num_cus,
 )
+from .decode import make_mla_decode_candidate
 
 
 # Shipped one-wave-per-head layout: a workgroup holds _HEADS_PER_WG heads x
@@ -92,26 +113,6 @@ _AGPR_ROWS_PER_WAVE = 32
 _AGPR_FORCE = None
 
 
-def _resolve_num_cus(req: MLARequest) -> int:
-    """Device CU count, or 0 when unknown.
-
-    Taken from ``req.num_cus`` when the caller sets it, else from the live
-    device -- but only when the build box is the requested arch, so a
-    cross-compile never bakes another part's count into the kernel.
-    """
-    n = int(req.num_cus)
-    if n > 0:
-        return n
-    try:
-        from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
-
-        if (get_device_arch() or "").split(":")[0] == req.arch.split(":")[0]:
-            return int(get_device_num_cus() or 0)
-    except Exception:
-        pass
-    return 0
-
-
 def _num_xcds(num_cus: int) -> int:
     """XCD count for the workgroup reorder, or 0 to keep launch order.
 
@@ -133,7 +134,7 @@ def _use_agpr_layout(
 ) -> bool:
     """Enough rows per sequence and enough row-carrying workgroups.
 
-    See _AGPR_MIN_AVG_ROWS. ``num_cus`` defaults to :func:`_resolve_num_cus`;
+    See _AGPR_MIN_AVG_ROWS. ``num_cus`` defaults to :func:`resolve_num_cus`;
     unknown (<= 0) fails the fill term.
     """
     if _AGPR_FORCE is not None:
@@ -143,7 +144,7 @@ def _use_agpr_layout(
     if total_q < int(min_avg_rows) * num_seqs:
         return False
     if num_cus is None:
-        num_cus = _resolve_num_cus(req)
+        num_cus = resolve_num_cus(req)
     if num_cus <= 0:
         return False
     block_q = _AGPR_ROWS_PER_WAVE * _Q_TILES_PER_WG
@@ -214,7 +215,7 @@ def _spec_for(
             )
             return base, (False, why)
         return base, supports_mla_prefill(base, arch=req.arch)
-    num_cus = _resolve_num_cus(req)
+    num_cus = resolve_num_cus(req)
 
     def packed(agpr: bool) -> MlaPrefillSpec:
         return dataclasses.replace(
@@ -321,6 +322,9 @@ def _make_gfx942_mla_prefill_candidate(*, layout: str | None = None) -> KernelCa
                 ShapeRange("kv_lora_rank", allowed=(512,)),
                 ShapeRange("page_block_size", allowed=(16,)),
                 ShapeRange("total_q", min=1),
+                # One query per sequence is decode's regime, under either
+                # contract; see the module docstring.
+                ShapeRange("max_seqlen_q", min=2),
                 # The in-kernel seq_idx binary search runs a fixed
                 # MLA_BINARY_SEARCH_ITERS iterations, which resolve at most
                 # 2**iters - 1 sequences.
@@ -370,7 +374,23 @@ def sweep_skips(req: OperatorRequest, candidate: KernelCandidate) -> bool:
     )
 
 
+# The decode kernel holds about 256 VGPRs and 27 KB of LDS, so a CU holds two
+# workgroups; the split-KV count aims to fill every CU that many times.
+_DECODE_WGS_PER_CU = 2
+# CU count assumed when neither the request nor the live device supplies one:
+# an upper bound for the arch. Too high only splits further than needed.
+_DECODE_FALLBACK_NUM_CUS = 304
+
+
 def register(registry: CandidateRegistry) -> None:
+    registry.register(
+        make_mla_decode_candidate(
+            spec_cls=MlaDecodeSpec,
+            build_fn=build_mla_decode,
+            wgs_per_cu=_DECODE_WGS_PER_CU,
+            fallback_num_cus=_DECODE_FALLBACK_NUM_CUS,
+        )
+    )
     registry.register(_make_gfx942_mla_prefill_candidate())
     for layout in _LAYOUTS:
         registry.register(_make_gfx942_mla_prefill_candidate(layout=layout))

@@ -102,6 +102,7 @@ from kernels.mla._mla_body import (
     WT_PAD,
     KernelArg,
     acc_iter_args,
+    flavor_honors_agpr_alloc,
     kernel_signature,
     key_mask,
     lane_ids,
@@ -111,6 +112,7 @@ from kernels.mla._mla_body import (
     open_kernel,
     pack_p,
     pick4,
+    require_int_fields,
     rescale_if_any,
     run_k_loops,
     scale_frag,
@@ -343,8 +345,8 @@ class MlaPrefillSpec:
     num_xcds: int = 0
     # Latent accumulator in AGPRs (one-wave-per-head layout). It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
-    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs the
-    # llvm22 or llvm23 flavor.
+    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs a
+    # flavor that honors ``agpr_alloc``.
     agpr_acc: bool = False
     # Unfused head projections. False (the default) is the fused kernel: it
     # takes the projected query and ``W_UK`` and applies both head projections
@@ -380,27 +382,25 @@ class MlaPrefillSpec:
                 raise TypeError(
                     f"{name} must be a bool, got {type(value).__name__} {value!r}"
                 )
-        for name in (
-            "num_heads",
-            "d_nope",
-            "d_rope",
-            "d_v",
-            "r_kv",
-            "block_q",
-            "block_k",
-            "r_kv_tile",
-            "num_warps",
-            "page_block_size",
-            "binary_search_iters",
-            "heads_per_wg",
-            "q_tiles_per_wg",
-            "num_xcds",
-        ):
-            value = getattr(self, name)
-            if type(value) is not int:
-                raise TypeError(
-                    f"{name} must be an int, got {type(value).__name__} {value!r}"
-                )
+        require_int_fields(
+            self,
+            (
+                "num_heads",
+                "d_nope",
+                "d_rope",
+                "d_v",
+                "r_kv",
+                "block_q",
+                "block_k",
+                "r_kv_tile",
+                "num_warps",
+                "page_block_size",
+                "binary_search_iters",
+                "heads_per_wg",
+                "q_tiles_per_wg",
+                "num_xcds",
+            ),
+        )
         positive = (
             "num_heads",
             "d_nope",
@@ -741,13 +741,13 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, st
             f"block_q={spec.block_q}"
         )
     if spec.agpr_acc:
-        from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
 
         flavor = _resolve_llvm_flavor()
-        if not _is_modern_flavor(flavor):
+        if not flavor_honors_agpr_alloc(flavor):
             return False, (
-                "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
-                f"keep the backend out of the AGPR file), got {flavor}"
+                "agpr_acc needs a flavor that honors agpr_alloc (llvm20 does "
+                f"not keep the backend out of the AGPR file), got {flavor}"
             )
         # The key-tile DMA moves 256 B per wave instruction: a latent row must
         # be a whole number of them, and a RoPE row exactly half of one (two
