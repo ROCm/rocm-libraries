@@ -18,9 +18,9 @@ ProblemType:
   ComplexConjugateB: false
   ComputeDataType: 0
   DataType: 17
-  DataTypeA: 15
+  DataTypeA: 17
   DataTypeAmaxD: 0
-  DataTypeB: 16
+  DataTypeB: 17
   DataTypeE: 0
   DataTypeMXSA: 22
   DataTypeMXSB: 22
