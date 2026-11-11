@@ -26,7 +26,8 @@
 // ---- hipkernel:hip_conv_fwd_rdna on the GPU ----
 //
 // Each case pins the engine, builds one conv-forward graph, runs it on the device and
-// checks it against the CPU reference graph executor. The cases cover 1-D (as H = 1), 2-D
+// checks it against the CPU reference graph executor. The cases cover 1-D (rank 3, and as
+// H = 1), 2-D
 // and 3-D problems, both packed layouts, stride, padding, asymmetric padding, dilation,
 // non-square filters, groups, each channel tile width (K per group up to 32, up to 64,
 // above 64), channel counts that leave a partial 16-channel chunk, and every dtype.
@@ -185,6 +186,8 @@ const std::vector<ConvCase>& cases()
         {"F32Groups4Dil2",      F32, false, 1, 32,  64, 4, {20, 20},     {3, 3},    {2, 2},    {2, 2},    {1, 1},    {2, 2}},
         {"F32Groups2K96",       F32, false, 2, 48, 192, 2, {9, 11},      {3, 3},    {1, 1},    {1, 1},    {2, 1},    {1, 1}},
         {"F32Conv1dDil3",       F32, false, 2, 32,  32, 1, {1, 300},     {1, 7},    {0, 9},    {0, 9},    {1, 1},    {1, 3}},
+        {"F32Conv1dNclDil3", F32, false, 2, 32, 32, 1, {300}, {7}, {9}, {9}, {1}, {3}},
+        {"F16Conv1dNlcStride2", F16, true, 1, 24, 48, 1, {301}, {5}, {2}, {1}, {2}, {1}},
         {"F32NhwcPad1",         F32, true,  2, 24,  40, 1, {13, 11},     {3, 3},    {1, 1},    {1, 1},    {1, 1},    {1, 1}},
         {"F32NhwcGroups2S2",    F32, true,  1, 64, 128, 2, {16, 16},     {3, 3},    {1, 1},    {1, 1},    {2, 2},    {1, 1}},
         {"F32Conv3dPad1",       F32, false, 1, 16,  32, 1, {6, 10, 12},  {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},

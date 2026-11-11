@@ -238,6 +238,18 @@ TEST(TestHipConvFwdRdnaGraphMatcher, AcceptsEveryServedShape)
     EXPECT_TRUE(matches(threeD(GraphSpec{})));
     EXPECT_TRUE(matches(threeD(nhwc)));
     EXPECT_TRUE(matches(threeD(grouped)));
+
+    // Rank 3 (NCL / NLC), the 1-D form some frontends send instead of H = 1.
+    GraphSpec rank3;
+    rank3.in = {40};
+    rank3.filter = {5};
+    rank3.prePad = {2};
+    rank3.postPad = {1};
+    rank3.stride = {2};
+    rank3.dilation = {3};
+    EXPECT_TRUE(matches(rank3));
+    rank3.channelsLast = true;
+    EXPECT_TRUE(matches(rank3));
 }
 
 TEST(TestHipConvFwdRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
@@ -277,14 +289,15 @@ TEST(TestHipConvFwdRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
     indivisibleChannels.wChannelsOverride = 3;
     EXPECT_FALSE(matches(indivisibleChannels)) << "x channels not a multiple of w channels";
 
-    GraphSpec rank3;
-    rank3.in = {16};
-    rank3.filter = {3};
-    rank3.prePad = {1};
-    rank3.postPad = {1};
-    rank3.stride = {1};
-    rank3.dilation = {1};
-    EXPECT_FALSE(matches(rank3)) << "rank 3";
+    GraphSpec rank2;
+    rank2.n = 16;
+    rank2.in = {};
+    rank2.filter = {};
+    rank2.prePad = {};
+    rank2.postPad = {};
+    rank2.stride = {};
+    rank2.dilation = {};
+    EXPECT_FALSE(matches(rank2)) << "rank 2";
 }
 
 TEST(TestHipConvFwdRdnaBinding, BindsTheOperandsAndTheGroupedFlops)
