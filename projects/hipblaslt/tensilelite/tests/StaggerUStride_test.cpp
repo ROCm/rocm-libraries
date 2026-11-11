@@ -15,7 +15,7 @@ using namespace TensileLite;
 
 namespace
 {
-    constexpr size_t kTunedMapping = 1;
+    constexpr size_t kTunedMapping = StaggerUMapping::WG1;
     constexpr size_t kTunedStagger = 16;
 
     hip::HipAMDGPU makeDevice(AMDGPU::Processor processor)
@@ -61,11 +61,11 @@ TEST(StaggerUStrideTest, PackedAliasedStridesKeepTunedMapping)
     EXPECT_EQ(mappingFor(makeProblem(512, 512, 512)), kTunedMapping);
 }
 
-TEST(StaggerUStrideTest, PaddedAwayAliasingUsesMapping4)
+TEST(StaggerUStrideTest, PaddedAwayAliasingStartsInPhase)
 {
-    EXPECT_EQ(mappingFor(makeProblem(512, 528, 528)), 4u);
+    EXPECT_EQ(mappingFor(makeProblem(512, 528, 528)), StaggerUMapping::InPhase);
     // NN, m = 500: only B would alias when packed.
-    EXPECT_EQ(mappingFor(makeProblem(512, 500, 528, false, 500)), 4u);
+    EXPECT_EQ(mappingFor(makeProblem(512, 500, 528, false, 500)), StaggerUMapping::InPhase);
 }
 
 TEST(StaggerUStrideTest, RemainingAliasedStrideKeepsTunedMapping)
