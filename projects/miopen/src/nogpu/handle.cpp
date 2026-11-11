@@ -241,7 +241,7 @@ std::size_t Handle::GetWavefrontWidth() const { return this->impl->warp_size; }
 std::size_t Handle::GetMaxMemoryAllocSize() const
 {
     if(this->impl->max_mem_alloc_size == 0)
-        return floor(0.85 * this->impl->global_mem_size);
+        return floor(UsableMemoryFraction * this->impl->global_mem_size);
     else
         return this->impl->max_mem_alloc_size;
 }

@@ -43,22 +43,14 @@
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "../tensor_holder.hpp"
+#include "find_db.hpp"
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT)
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT_FACTOR)
 
 namespace {
 
-struct ScopedFindDb
-{
-    ScopedFindDb() : prev_(miopen::debug::testing_find_db_enabled)
-    {
-        miopen::debug::testing_find_db_enabled = false;
-    }
-    ~ScopedFindDb() { miopen::debug::testing_find_db_enabled = prev_; }
-
-    bool prev_;
-};
+using miopen::ScopedFindDb;
 
 std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8)
 {

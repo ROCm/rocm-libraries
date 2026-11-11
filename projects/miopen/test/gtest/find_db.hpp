@@ -52,6 +52,22 @@ private:
     TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
 };
 
+// Disables find-db lookups and records for the lifetime of the object.
+struct ScopedFindDb
+{
+    ScopedFindDb() : cached(debug::testing_find_db_enabled)
+    {
+        debug::testing_find_db_enabled = false;
+    }
+    ~ScopedFindDb() { debug::testing_find_db_enabled = cached; }
+
+    ScopedFindDb(const ScopedFindDb&)            = delete;
+    ScopedFindDb& operator=(const ScopedFindDb&) = delete;
+
+private:
+    bool cached;
+};
+
 inline auto Duration(const std::function<void()>& func)
 {
     const auto start = std::chrono::steady_clock::now();
