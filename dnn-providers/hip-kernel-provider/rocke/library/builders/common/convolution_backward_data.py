@@ -113,13 +113,6 @@ _HELPER_VARIANTS = (
 )
 #: The MFMA pipelines, which launch weight transforms before their compute pass.
 _MFMA_VARIANTS = (DIRECT_VARIANT_MFMA, DIRECT_VARIANT_MFMA_RTC)
-#: The gfx1250 WMMA pipelines. Each bakes the channel counts it needs and reads the
-#: rest at run time (cpg or kpg 0), and the dense one also takes a dilation.
-_WMMA_VARIANTS = (
-    DIRECT_VARIANT_WMMA,
-    DIRECT_VARIANT_SMALLC_WMMA,
-    DIRECT_VARIANT_PATCH_WMMA,
-)
 
 #: Each dgrad direct-sweep algorithm (``direct_kernel_sweep.DIRECT_CAPABILITIES`` and
 #: its helper variants) and the ``(kernel_family, direct_variant)`` an instance of it
@@ -1239,20 +1232,27 @@ def _direct_error(spec: ConvDgradAotSpec) -> str:
     for name in ("filter_h", "filter_w"):
         if getattr(spec, name) == 0:
             return f"{name} must be positive"
-    wmma = spec.direct_variant in _WMMA_VARIANTS
     # cpg == kpg == 0 is rocKE's "runtime channel counts" (DirectCaps): the
     # runtime-channel MFMA pipeline takes them as kernargs and bakes only its
     # channel *tile* counts, so one binary per filter serves every channel count.
-    # Either both are runtime or neither is. The WMMA pipelines bake what their
-    # code needs (the small-C stem its C, a packed group its channels) and read
-    # the rest; which they may leave runtime is rocKE's validator to say.
-    if not wmma:
+    # The native matcher (ConvDgradAotGeometry.hpp, parseAotInstance) admits: a
+    # small-C or patch stem bakes its few input channels (cpg >= 1) and reads K
+    # either way; the dense WMMA pipeline takes both from the problem or bakes both
+    # (its packed groups); every other kernel bakes both unless it is a
+    # runtime-channel one, which takes both.
+    if spec.direct_variant in (DIRECT_VARIANT_SMALLC_WMMA, DIRECT_VARIANT_PATCH_WMMA):
+        if spec.cpg == 0:
+            return f"a {spec.direct_variant} stem bakes its input channels (cpg >= 1)"
+    else:
         if (spec.cpg == 0) != (spec.kpg == 0):
             return "cpg and kpg are both runtime (0) or both baked"
-        if spec.cpg == 0 and not spec.is_runtime_channels:
+        if spec.direct_variant != DIRECT_VARIANT_WMMA and (spec.cpg == 0) != (
+            spec.is_runtime_channels
+        ):
             return (
-                f"only the runtime-channel pipeline takes runtime channel counts; "
-                f"{spec.direct_variant} bakes them"
+                f"only the runtime-channel pipeline takes runtime channel counts, "
+                f"and it takes them; {spec.direct_variant} "
+                f"{'takes' if spec.is_runtime_channels else 'bakes'} them"
             )
     if spec.filter_h != spec.filter_w:
         return "the direct sweep builds square filters only"

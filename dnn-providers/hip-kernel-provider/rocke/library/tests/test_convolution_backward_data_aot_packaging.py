@@ -859,6 +859,7 @@ def _guard_cases(arch: str, catalog) -> list:
         lambda s: s.direct_variant in ("dgrad_smallc_wmma", "dgrad_patch_wmma")
     )
     helper = first(lambda s: s.is_helper)
+    runtime_channels = first(lambda s: s.is_runtime_channels)
     wave = f"wave_size must be {target.wave_size} on {arch}"
     foreign_pipeline = next(p for p in other.pipelines if p not in target.pipelines)
     foreign_variant = {"gfx950": DIRECT_VARIANT_WMMA, "gfx1250": DIRECT_VARIANT_MFMA}
@@ -938,6 +939,15 @@ def _guard_cases(arch: str, catalog) -> list:
             f"{unused} must be a int",
         ),
     ]
+    if runtime_channels is not None:
+        cases.append(
+            (
+                "baked channels of a runtime-channel pipeline",
+                replace(runtime_channels, cpg=8, kpg=8),
+                None,
+                "and it takes them",
+            )
+        )
     if helper is not None:
         cases.append(
             (
@@ -958,6 +968,16 @@ def _guard_cases(arch: str, catalog) -> list:
                 )
                 for axis in ("dilation_h", "dilation_w")
             ),
+            # The native matcher pairs a dense WMMA binary's channel counts.
+            *(
+                (
+                    f"WMMA one runtime channel count {pair}",
+                    replace(wmma, **pair),
+                    None,
+                    "both runtime",
+                )
+                for pair in ({"cpg": 0, "kpg": 8}, {"cpg": 8, "kpg": 0})
+            ),
             ("WMMA string knob", replace(wmma, sched=0), None, "sched must be a str"),
             (
                 "WMMA bool knob",
@@ -973,6 +993,14 @@ def _guard_cases(arch: str, catalog) -> list:
             ),
         ]
     if wmma_undilated is not None:
+        cases.append(
+            (
+                "runtime input channels of a WMMA stem",
+                replace(wmma_undilated, cpg=0),
+                None,
+                "bakes its input channels",
+            )
+        )
         cases += [
             (
                 f"dilation {axes} of an undilated WMMA variant",
