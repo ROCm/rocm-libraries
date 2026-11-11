@@ -1,20 +1,20 @@
 {
   "version": "1.0",
-  "id": "752302de-deb9-43ce-82ae-f2038c1a8e70",
+  "id": "2e852f30-1df1-5fbe-911c-98933a471ff9",
   "name": "hipkernel:hip_conv_fwd_rdna",
   "arch": [
     "gfx11-generic",
     "gfx12-generic"
   ],
   "matchers": [
-    "4eca87aa-649d-45c3-b7d9-fcb0ae6d1ba1"
+    "170b083e-29cf-59a7-80e1-94b8083967ad"
   ],
-  "engine": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-  "dispatch": "ccbd5790-6e75-4375-9452-3c16bd8c5316",
+  "engine": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+  "dispatch": "1efdba66-68bb-585b-8e28-42ded51419bf",
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "6befccca-cfa8-5068-8354-0932048fd65a",
+      "id": "cbf7adb2-e564-53cb-98c7-6fe56c30a003",
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -41,8 +41,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -59,7 +59,7 @@
     },
     {
       "version": "1.0",
-      "id": "99cf746b-26ff-5850-b394-bc4567666566",
+      "id": "15269453-bb16-56b1-b568-2a5ab1dd5c33",
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -86,8 +86,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -104,7 +104,7 @@
     },
     {
       "version": "1.0",
-      "id": "ad84e77a-3c5f-5fab-97b8-cacfe9da7795",
+      "id": "41fa0f14-18e7-5339-aa6e-8e1331d9c092",
       "name": "hip_conv_fwd_rdna.fma_f32_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -131,8 +131,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -149,7 +149,7 @@
     },
     {
       "version": "1.0",
-      "id": "93b6aab8-8252-5cec-a021-95c3d017a946",
+      "id": "5fe6da05-812d-5f80-8bd1-f54507788b46",
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -176,8 +176,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -194,7 +194,7 @@
     },
     {
       "version": "1.0",
-      "id": "4136d5ad-3479-5249-b89e-be0d693fbce7",
+      "id": "dc5be7db-b392-50c3-a6cb-72d0f357149c",
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -221,8 +221,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -239,7 +239,7 @@
     },
     {
       "version": "1.0",
-      "id": "f6dc6bdf-7938-55e2-a980-b842fa6c7dad",
+      "id": "71b90b43-63a7-543c-8446-ef1708aaf23a",
       "name": "hip_conv_fwd_rdna.fma_f32_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -266,8 +266,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -284,7 +284,7 @@
     },
     {
       "version": "1.0",
-      "id": "cf755e59-be3e-5e3f-8fcd-1f6eb269654e",
+      "id": "bf99eda7-8859-5dd9-82eb-131de6394456",
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -311,8 +311,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -329,7 +329,7 @@
     },
     {
       "version": "1.0",
-      "id": "77743873-729a-5239-8b84-83cd6a411da3",
+      "id": "c2a61396-c481-553c-9eae-d2a0a77aa058",
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -356,8 +356,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -374,7 +374,7 @@
     },
     {
       "version": "1.0",
-      "id": "c0ab5924-05e7-55ca-a50f-cacbd3c3b467",
+      "id": "6f651855-8aef-5df1-836f-389dc01bcaa0",
       "name": "hip_conv_fwd_rdna.fma_f16_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -401,8 +401,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -419,7 +419,7 @@
     },
     {
       "version": "1.0",
-      "id": "cd1ad970-a1d8-5296-9fc3-90319fb51cf5",
+      "id": "ecff271f-83ee-5be5-940c-9195a99e8d4e",
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -446,8 +446,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -464,7 +464,7 @@
     },
     {
       "version": "1.0",
-      "id": "90b972b0-006e-5b26-a0a3-43fc401065ee",
+      "id": "01933eed-4775-54af-97ce-8906d3d4e809",
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -491,8 +491,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -509,7 +509,7 @@
     },
     {
       "version": "1.0",
-      "id": "042ac8fd-c263-508f-92b9-ab0ebf11fd61",
+      "id": "7e5b7a3b-5a9e-54e0-b63c-282ef3c648dd",
       "name": "hip_conv_fwd_rdna.fma_f16_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -536,8 +536,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -554,7 +554,7 @@
     },
     {
       "version": "1.0",
-      "id": "b4fd55ec-97dd-59eb-bfd6-7e3282aa5d10",
+      "id": "22b01d6a-972b-5e45-b5d9-f6627d0535bb",
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -581,8 +581,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -599,7 +599,7 @@
     },
     {
       "version": "1.0",
-      "id": "2646f145-6a11-5e5c-8498-51ab6634995f",
+      "id": "3bb52b67-33e2-5fa0-827f-788523543f3d",
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -626,8 +626,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -644,7 +644,7 @@
     },
     {
       "version": "1.0",
-      "id": "2b34d59f-a7b2-5d21-9ab8-6ce49b92fa1e",
+      "id": "c800de87-ba0c-59e8-a338-5d6f09c824f3",
       "name": "hip_conv_fwd_rdna.fma_bf16_nchw_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -671,8 +671,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -689,7 +689,7 @@
     },
     {
       "version": "1.0",
-      "id": "8b21293e-ec30-59de-b2ac-418b60279120",
+      "id": "18c58edd-6956-592f-9e15-416d52b9cfdb",
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n32",
       "kernel_source": {
         "kind": "hip",
@@ -716,8 +716,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -734,7 +734,7 @@
     },
     {
       "version": "1.0",
-      "id": "16d7413a-8bb5-5ea0-8967-854bbb0667d3",
+      "id": "8d39ba63-a7d6-5c7c-baad-6a075e65764c",
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n64",
       "kernel_source": {
         "kind": "hip",
@@ -761,8 +761,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
@@ -779,7 +779,7 @@
     },
     {
       "version": "1.0",
-      "id": "0d5820a3-50dc-5fa6-958a-ffaeceab7d75",
+      "id": "532d8485-7b41-58c3-b0cf-17f9f826a8a9",
       "name": "hip_conv_fwd_rdna.fma_bf16_nhwc_tile_n128",
       "kernel_source": {
         "kind": "hip",
@@ -806,8 +806,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "3099827c-98e8-443c-aa7c-9ad3bec8d14a",
-              "kmd_id": "549d3ad2-2cb7-42ab-aefa-36933279cb7f",
+              "engine_id": "8c8bac66-7ada-56b4-8e94-9ddb05f1952b",
+              "kmd_id": "2d9e70c9-8a0b-5931-97f9-069c60806b7d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "kernel_family",
