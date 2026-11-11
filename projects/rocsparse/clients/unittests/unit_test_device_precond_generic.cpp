@@ -235,10 +235,10 @@ namespace
         return pivots;
     }
 
-    // Calls `check(opt, what)` with tolerances above every pivot of ILU(0) of `a`, between
-    // the pivots and below every pivot, each passed as a float or a double, in host or
-    // device memory. The float is followed by 0x7fefffff, so an 8-byte read boosts every
-    // pivot: only the tolerances below some pivot tell it apart.
+    // Calls `check(opt, what)` with tolerances between the pivots of ILU(0) of `a` and
+    // below every pivot, each passed as a float or a double, in host or device memory. The
+    // float is followed by 0x7fefffff, so an 8-byte read boosts every pivot: a tolerance
+    // above every pivot would not tell it apart.
     template <typename T, typename F>
     void for_ilu_boost_inputs(const csr_matrix<T>& a, F&& check)
     {
@@ -254,7 +254,7 @@ namespace
         ASSERT_TRUE(clear_of_pivots(boosted_pivots, between));
         ASSERT_GT(boosted_count, 0);
         ASSERT_LT(boosted_count, a.n);
-        for(const double tol : {2.0 * largest, between, 0.5 * smallest})
+        for(const double tol : {between, 0.5 * smallest})
         {
             for(const bool float_tol : {false, true})
             {
