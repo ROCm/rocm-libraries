@@ -1,28 +1,46 @@
 # TensileLite
 
 TensileLite is hipBLASLt's Python generator, logic validator, and tuning
-workflow. Released Python wheels are part of a matched ROCm SDK. The intended
-final runtime contract has two installation models:
+workflow. It ships as one pure-Python wheel, `tensilelite`, plus a native
+benchmark client, `tensilelite-client`.
 
-- **Python SDK packages:** the active `rocm-sdk-core.__version__` is the full
-  ROCm publication identity. Core tool trampolines from that Python
-  environment run the compiler and toolchain commands. The final client model
-  uses a `rocm-sdk-libraries` trampoline for its library-owned native payload.
-  Until that payload ships, a client request reports that it is unavailable.
-- **Conventional prefix:** an explicitly selected prefix from `ROCM_PATH`,
-  `/opt/rocm`, or a ROCm tool discovered on `PATH` supplies root-relative
-  tools and the native client. Its `.info/version` is authoritative only for
-  the base `A.B.C` compatibility line, so it cannot distinguish nightly, RC,
-  or CI publications on that line.
+## Versions
 
-The two models do not borrow paths from each other. `rocisa` is a
-separately prepared Python dependency; TensileLite requires it to be importable
-but does not prescribe its ABI or native-artifact layout.
+| Version | Built by | Meaning |
+| --- | --- | --- |
+| `5.0.0+g<commit>` | `pip install <path>`, tox, `invoke install`, standalone CMake | A development build of that rocm-libraries commit. It makes no ROCm claim. |
+| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; the exact changes are recorded in a digest in `_build_info.py`. |
+| `5.0.0+rocm<identity>` | TheRock release, release-candidate and nightly builds | Released as part of that ROCm build. |
+| `5.0.0+devrocm<identity>` | TheRock CI and development builds | Built in that TheRock development build. |
 
-At present, the Python-SDK path and strict wheel/ROCm version comparison are
-implemented but deliberately gated off until TheRock forwards the required
-package identity and SDK payload. Production uses conventional-prefix discovery
-and bypasses the version comparison during that transition.
+`VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format
+written to logic and configuration files and must remain equal. The commit is
+always recorded in the installed package (`tensilelite/_build_info.py`), also
+for `+rocm`/`+devrocm` wheels.
+
+## ROCm installations
+
+TensileLite selects one ROCm installation when it is imported:
+
+| Installation | How it is found | ROCm identity |
+| --- | --- | --- |
+| TheRock Python SDK (`pip install rocm[...]`) | `rocm_sdk_core` in the same Python | `rocm_sdk_core.__version__` (full) |
+| TheRock native install (`/opt/rocm`, packages) | `ROCM_PATH`, `/opt/rocm`, or `hipconfig` on `PATH` | `share/therock/therock_manifest.json` (full); `.info/version` if the manifest is missing |
+| Older ROCm install | same | `.info/version` (`X.Y.Z` only) |
+
+Older installs are supported on a best-effort basis without CI: generation
+works, and benchmarking needs a client you build against that ROCm and bind
+(see [Source development](#source-development)). They ship no
+`tensilelite-client`.
+
+A `+rocm`/`+devrocm` wheel must match its ROCm installation, comparing full
+identities (or `X.Y.Z` on an older install). A `+g<commit>` wheel makes no ROCm
+claim and is not compared. `rocisa` is a separately prepared Python dependency;
+TensileLite requires it to be importable but does not prescribe its layout.
+
+At present the Python-SDK path and the strict wheel/ROCm comparison are
+implemented but gated off until TheRock forwards the required package identity
+and SDK payload.
 
 
 ## Supported interface
@@ -42,9 +60,17 @@ tensilelite update-library --help
 python -m tensilelite --help
 ```
 
-The default wheel exposes `import tensilelite`; it does not provide the legacy
-`Tensile` namespace or `Tensile/bin` launchers. An optional
-`tensilelite-tensile-compat` wheel supplies deprecated command aliases only.
+The wheel exposes `import tensilelite` and the `tensilelite` command family
+only. The legacy `Tensile` namespace, `Tensile/bin` launchers and `Tensile*`
+console scripts are gone, with no compatibility package:
+
+| Legacy command | Use instead |
+| --- | --- |
+| `Tensile` | `tensilelite run` |
+| `TensileCreateLibrary` | `tensilelite create-library` |
+| `TensileLogic` | `tensilelite logic` |
+| `TensileGetPath` | No command: read packaged files through `tensilelite.resources` |
+| Other `Tensile<Name>` scripts | `tensilelite --help` lists the subcommands |
 
 
 ## Released installation
@@ -126,8 +152,7 @@ existing client executable:
 python -m pip install -r requirements-dev-common.txt
 invoke build-client --gpu-targets gfx942
 
-TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH:-/opt/rocm}/.info/version")" \
-  python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install --no-build-isolation --no-deps -e .
 python -m tensilelite_configure_client \
   --client "$PWD/build_tmp/tensilelite/client/tensilelite-client"
 
@@ -136,9 +161,24 @@ python -m tensilelite_configure_client \
 python -m tensilelite_configure_client --reset
 ```
 
-The client value must be an absolute executable whose exact `--version`
-matches the installed distribution. A configured binding is exclusive: a
-broken configured path never falls back to the production client. Configuration
+The package and the client are paired by the rocm-libraries commit they were
+built from (`tensilelite-client --source-revision`):
+
+- an installed package and its client must report exactly the same commit,
+  including the `.dirty.<digest>` suffix of a build with uncommitted changes;
+- an editable install computes its commit from the checkout when the client is
+  first requested, so the client must be built from the same commit; local
+  uncommitted changes on either side only warn;
+- a package or client built without a commit never pairs. Build from a git
+  checkout, or pass the commit with `TENSILELITE_SOURCE_REVISION` (pip) or
+  `-DTENSILELITE_SOURCE_REVISION` (CMake).
+
+The client also records the ROCm it was compiled against
+(`tensilelite-client --build-rocm`). A different major ROCm version than the
+selected installation is an error; other differences warn once.
+
+The client value must be an absolute executable. A configured binding is
+exclusive: a broken configured path never falls back to the production client. Configuration
 does not alter the wheel, and the client selection is frozen after its first
 request in a process. Use a fresh process after changing or resetting a binding.
 
@@ -166,24 +206,27 @@ Useful variables:
 The optional affected-tests hook is installed with:
 
 ```bash
-TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH:-/opt/rocm}/.info/version")" uv sync
+uv sync
 invoke build-client --gpu-targets gfx942
 invoke configure-client --build-dir build_tmp
 uv run invoke precommit-install
 ```
 
-`VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format and
-must remain equal. The command above uses the selected SDK's ROCm publication
-identity so the editable package and the client built by the hook agree.
+Rebuild the client after committing; it must be built from the same commit as
+the editable package.
 
 
 ## CMake integration
 
-Device generation builds the canonical controlled-artifact wheel, installs it
-into the single CMake-selected Python with `--force-reinstall --no-deps`, and
-uses only the in-tree raw rocisa package through a command-scoped `PYTHONPATH`.
-It does not resolve or bind `tensilelite-client`. Do not run two configurations
-concurrently against one Python environment.
+Device generation builds the `tensilelite` wheel, unpacks it into the build
+tree (`<build>/tensilelite-wheel`) and runs it with the in-tree raw rocisa build
+through a command-scoped `PYTHONPATH`. Nothing is installed into the selected
+Python. It does not resolve or bind `tensilelite-client`.
+
+The configure records the rocm-libraries commit for the wheel and the client,
+and re-runs when `HEAD` moves. Building from a tree without git records no
+commit and warns that client pairing is disabled; pass
+`-DTENSILELITE_SOURCE_REVISION=<commit>` to record one.
 
 Device-generation builds require Python 3.10 and Python development headers;
 stable-ABI rocisa builds require Python 3.12. A true host-only build does not
