@@ -454,7 +454,7 @@ that holds its graph; the levels cascade.
 | Model (M) | — | M2, M9, M11 | M1–M12 × every pair of its rank | — |
 | Corpus (R) | — | 30 graphs (one per signature that fits) | 60 graphs (realistic size, every model) | 47 graphs (production size) |
 | Stress | — | — | — | X1–X4 (X3 fp16 and bf16) |
-| Fusion core (6 topologies × 18) | 1 per cell; ReLU family rotated | `act`, `bias_act`: 2× core; the others 1×; all 13 activations over the cells | `act`: every S shape × every pair, activation rotated; `bias_act`: the same in fp32, and one fp16 / bf16 case per activation × core cell (T10); the other four topologies: from quick and PR (T9) | `act`: the executed activations × core and × every S and L shape (T8); `bias_act`: activation × core in fp32 (T10); the other four topologies: from quick and PR (T9) |
+| Fusion core (6 topologies × 18) | 1 per cell; ReLU family rotated | `act`, `bias_act`: 2× core; the others 1×; all 13 activations over the cells | `act` and `bias_act`: every S shape × every pair, activation rotated; the other four topologies: from quick and PR (T9) | `act`: the executed activations × core and × every S and L shape (T8); `bias_act`: activation × core; the other four topologies: from quick and PR (T9) |
 | Fusion features F25–F31 | — | each variant once | each variant × rank (`bias_act`, `scale_bias_act`, `act`) | — |
 | Fusion at size | — | — | every L shape once per `act` and `bias_act`; M2, M3, M6, M9 × every pair | — |
 | Golden (§5) | G1, G7 (deferred) | G2–G6, G8–G15 (deferred) | G16, G17 (deferred) | — |
@@ -465,13 +465,13 @@ Cases generated (own level / cumulative):
 |---|---|---|---|---|---|---|---|
 | quick | 30 | 109 | **139** | 139 | 62 | 77 | 0 |
 | PR | 194 | 164 | **358** | 497 | 177 | 181 | 0 |
-| nightly | 1,338 | 824 | **2,162** | 2,659 | 1,262 | 898 | 2 |
-| full | 965 | 776 | **1,741** | 4,400 | 966 | 775 | 0 |
+| nightly | 1,338 | 1,021 | **2,359** | 2,856 | 1,336 | 1,021 | 2 |
+| full | 965 | 920 | **1,885** | 4,741 | 1,023 | 862 | 0 |
 
-By size class: quick S 139. PR S 307, H 18, M 3, R 30. Nightly S 1,481, L 341,
-M 106, H 162, A 12, R 60. Full S 843, L 831, R 47, X 20. 541 distinct conv
-geometries in all. The trims T8–T12 (§4.3) remove 4,139 of the generated
-synthetic cases and the R set adds 137. Counts are those of the generator;
+By size class: quick S 139. PR S 307, H 18, M 3, R 30. Nightly S 1,618, L 385,
+M 122, H 162, A 12, R 60. Full S 987, L 831, R 47, X 20. 541 distinct conv
+geometries in all. The trims T8, T9, T11 and T12 (§4.3) remove 3,798 of the
+generated synthetic cases and the R set adds 137. Counts are those of the generator;
 `generate_conv_fwd_bundles.py --report` prints them again, with the trimmed
 count per level and trim.
 
@@ -528,18 +528,22 @@ decision, not an omission: a reviewer can see what was traded and why.
 | T7 | Any 3-way product beyond activation × layout × dtype | not counted | Pairwise coverage catches the large majority of interaction faults at a fraction of the cases. | Pairwise (§4 rules). | A 3-way fault is found. Add that triple, not the whole product. |
 | T8 | Activation × every S and L shape on `act` in full, for the activations no engine executes: ReLU lower clip, leaky ReLU, elu, gelu, gelu-tanh, swish, softplus, identity | 1,776 | No engine executed one of these graphs on gfx942 or gfx90a (§4.5), so each case repeats the same decline. | Each activation keeps all 18 core cells on `act` and on `bias_act`, and about 70 cases over about 65 distinct tensor shapes in quick, PR and nightly. | An engine executes the activation: add it to `EXECUTED_ACTS` in `conv_fwd_plan.py`, which restores its full product. |
 | T9 | Plain repeats of `scale_bias_act`, `add_relu`, `bias_add_relu` and `act_add` in nightly and full | 476 | No engine executed a graph of these topologies on gfx942 or gfx90a (§4.5) except fp32 `add_relu`, which MIOpen accepts and computes wrongly (ALMIOPEN-3009); the quick and PR cases reach that defect too. | Each topology's 18 core cells in quick and PR (run by every level through the cascade); the F27 scale variants. | An engine executes the topology: remove it from `UNEXECUTED_TOPOLOGIES`. |
-| T10 | fp16 and bf16 `bias_act` in nightly and full | 341 | MIOpen declined every fp16 and bf16 `bias_act` graph on both architectures. | One case per activation × core cell that no other case covers (133 cases in nightly), so every activation keeps 18 of 18 cells; fp32 `bias_act` and the F25 bias variants are untouched. | An engine claims fp16 or bf16 `bias_act`. |
 | T11 | F13 `CONVOLUTION`, F19 extra types and F35 override shape, each paired with every S shape in full | 198 | No engine executes these features, and no reference can judge F13 or F19 (§6); each pairing repeats one decline. | Each feature × core in nightly (F13 18 cases, F19 36, F35 9). | An engine claims the feature; for F13 and F19 the reference fixes of §6 must land too. |
 | T12 | The geometry classes S24–S46 (and L24–L46) crossed with the fused topologies or with the feature probes, in nightly and full | 1,348 | They are geometry classes: they select solver paths of the convolution itself. An epilogue is element-wise (T1) and a layout or type feature is per tensor (T2, T4), so neither depends on which geometry class runs underneath. | Each class in plain conv in every level from PR up, over every layout × dtype pair in nightly and at medium size (L) in nightly and full; the fused topologies and features keep their cover on S1–S23. | A defect is found whose trigger needs one of these classes together with a fusion or a feature, or an engine picks fused kernels by geometry class. |
 
-T8–T11 rest on measured execution, not on the API; T12 is a design trade-off
-like T1–T7. All five are applied after the fact: the level rules build the
+T8, T9 and T11 rest on measured execution, not on the API; T12 is a design trade-off
+like T1–T7. All four are applied after the fact: the level rules build the
 complete products, case ids are assigned, and the generator then removes the
 trimmed cases (`conv_fwd_plan.TRIMS`). The cases that remain keep their ids,
 seeds and claims, and undoing a trim brings back exactly the cases it removed.
 No trim removes the last probe of a feature from any level: every feature keeps
 its probes, directly or through the cascade. Strict `expected_rejection`
 bundles are never trimmed.
+
+T10 (fp16 and bf16 `bias_act` in nightly and full, 341 cases) was lifted: MIOpen
+declined those graphs only because the generator typed the bias node `float`
+while the bias tensor had the io type, and MIOpen requires the two to match. The
+generator now types the bias node by its bias tensor. The id T10 is not reused.
 
 ### 4.4 Cost
 

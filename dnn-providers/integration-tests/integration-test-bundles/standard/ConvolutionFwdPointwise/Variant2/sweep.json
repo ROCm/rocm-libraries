@@ -23,6 +23,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "elu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -177,6 +178,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "gelu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -331,6 +333,7 @@
             2
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "gelu_approx_tanh_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -485,6 +488,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "swish_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -639,6 +643,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "softplus_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -793,6 +798,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -951,6 +957,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "gelu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1121,6 +1128,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "gelu_approx_tanh_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1291,6 +1299,7 @@
             2
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "swish_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1461,6 +1470,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "softplus_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1631,6 +1641,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1801,6 +1812,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -1974,6 +1986,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "gelu_approx_tanh_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -2160,6 +2173,7 @@
             2
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "swish_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -2346,6 +2360,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "softplus_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -2532,6 +2547,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -2718,6 +2734,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -2903,6 +2920,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -3080,6 +3098,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "swish_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -3234,6 +3253,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "softplus_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -3388,6 +3408,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -3542,6 +3563,7 @@
             3
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -3695,6 +3717,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -3848,6 +3871,7 @@
             2
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -4006,6 +4030,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "softplus_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -4176,6 +4201,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -4346,6 +4372,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -4515,6 +4542,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -4684,6 +4712,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -4853,6 +4882,7 @@
             2
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -5026,6 +5056,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "identity",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -5212,6 +5243,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -5397,6 +5429,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -5582,6 +5615,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -5767,6 +5801,7 @@
             3
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": 0.1,
           "act_relu_lower_clip_slope": null,
@@ -5952,6 +5987,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "bfloat16",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": 0.1,
@@ -6133,6 +6169,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -6304,6 +6341,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -6475,6 +6513,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "float",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,
@@ -6646,6 +6685,7 @@
             1
           ],
           "conv_y_virtual": true,
+          "bias_compute": "half",
           "act_operation": "relu_fwd",
           "act_relu_lower_clip": null,
           "act_relu_lower_clip_slope": null,

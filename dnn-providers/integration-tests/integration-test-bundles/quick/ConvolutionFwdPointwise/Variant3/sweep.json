@@ -22,7 +22,8 @@
           "stride": [
             2
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -204,7 +205,8 @@
           "stride": [
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -386,7 +388,8 @@
           "stride": [
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -568,7 +571,8 @@
           "stride": [
             2
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -750,7 +754,8 @@
           "stride": [
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {
@@ -932,7 +937,8 @@
           "stride": [
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {
@@ -1118,7 +1124,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -1320,7 +1327,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -1522,7 +1530,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -1724,7 +1733,8 @@
             2,
             2
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -1926,7 +1936,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {
@@ -2128,7 +2139,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {
@@ -2334,7 +2346,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -2556,7 +2569,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "float"
         },
         "tensors": [
           {
@@ -2778,7 +2792,8 @@
             2,
             2
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -3000,7 +3015,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "half"
         },
         "tensors": [
           {
@@ -3222,7 +3238,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {
@@ -3444,7 +3461,8 @@
             1,
             1
           ],
-          "conv_y_virtual": true
+          "conv_y_virtual": true,
+          "bias_compute": "bfloat16"
         },
         "tensors": [
           {

@@ -916,11 +916,12 @@ ACCUM_SHAPES = {
 
 
 # --------------------------------------------------------------------------
-# Trimmed products (plan section 4.3, trade-off register T8-T12). The level rules
-# generate the complete products; the generator then removes these cases, so the
-# cases that remain keep their ids, seeds and claims. T8-T11 remove products that
-# no engine executed on the measured architectures (gfx942 and gfx90a, see plan
-# section 4.5); activations that an engine executes are never trimmed. T12 keeps
+# Trimmed products (plan section 4.3, trade-off register T8, T9, T11, T12; T10 was
+# lifted). The level rules generate the complete products; the generator then
+# removes these cases, so the cases that remain keep their ids, seeds and claims.
+# T8, T9 and T11 remove products that no engine executed on the measured
+# architectures (gfx942 and gfx90a, see plan section 4.5); activations that an
+# engine executes are never trimmed. T12 keeps
 # the geometry classes S24-S62 to plain convolution in nightly and full: an
 # epilogue or a tensor feature does not depend on the geometry class (T1, T4).
 # Each trim names the trigger that brings its product back.
@@ -936,7 +937,6 @@ GEOMETRY_CLASS_SHAPES = tuple(f"{p}{i}" for p in "SL" for i in range(24, 63))
 TRIMS = {
     "T8": "full: act x every S and L shape for activations no engine executes",
     "T9": "comprehensive and full: plain repeats of the four fused topologies no engine executes",
-    "T10": "comprehensive and full: fp16 and bf16 bias_act, except one case per activation x core cell",
     "T11": "full: F13, F19 and F35 paired with every S shape",
     "T12": "comprehensive and full: geometry classes S24-S62 crossed with fused topologies or features",
 }
@@ -944,7 +944,8 @@ TRIMS = {
 
 def trim(c, level):
     """The trim (key of TRIMS) that removes case ``c`` from ``level``, or None.
-    T10's per-cell exception is applied by the generator, which sees all levels."""
+    T10 (fp16 and bf16 bias_act in nightly and full) was lifted once the generator
+    typed the bias node by the bias tensor; its key is not reused."""
     tagged = any(i.startswith("F") for i in c["ids"])
     topo = c["topo"]
     if level == "full" and topo == "act" and c["act"] not in EXECUTED_ACTS:
@@ -958,8 +959,6 @@ def trim(c, level):
         and any(i in GEOMETRY_CLASS_SHAPES for i in c["ids"])
     ):
         return "T12"
-    if late and topo == "bias_act" and c["xt"] in ("half", "bfloat16") and not tagged:
-        return "T10"
     if (
         level == "full"
         and topo == "conv"
@@ -967,11 +966,6 @@ def trim(c, level):
     ):
         return "T11"
     return None
-
-
-def core_cell(c):
-    """The core cell of a fused case, per activation: (act, rank, layout, dtype)."""
-    return (c["act"], c["rank"], c["xl"], c["xt"])
 
 
 # --------------------------------------------------------------------------

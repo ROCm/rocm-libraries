@@ -3,8 +3,8 @@
 Each plan in this folder covers one operation or fusion family. It states what
 must be tested at each tier, how results are judged, and which products are
 deliberately not run and why. Every plan follows the
-[methodology](methodology.md), which also holds the plan template, a review
-checklist and the lessons learned so far. The bundles under
+[methodology](methodology.md), which points to the plan template and review
+checklist of RFC 0022 §13 and holds the lessons learned so far. The bundles under
 [`integration-test-bundles/`](../../integration-test-bundles/) implement the
 plan:
 

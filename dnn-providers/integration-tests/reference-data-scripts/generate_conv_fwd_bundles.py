@@ -108,7 +108,17 @@ def _conv_node(u):
     }
 
 
-def _pw(name, op, in0, in1, out, act_placeholders=False, in0_ph=None, in1_ph=None):
+def _pw(
+    name,
+    op,
+    in0,
+    in1,
+    out,
+    act_placeholders=False,
+    in0_ph=None,
+    in1_ph=None,
+    compute="float",
+):
     inputs = {
         "axis_tensor_uid": None,
         "elu_alpha": None,
@@ -138,12 +148,18 @@ def _pw(name, op, in0, in1, out, act_placeholders=False, in0_ph=None, in1_ph=Non
     if in1_ph:
         inputs["in_1_tensor_uid"] = ph("attributes." + in1_ph)
     return {
-        "compute_data_type": "float",
+        "compute_data_type": compute,
         "inputs": inputs,
         "name": name,
         "outputs": {"out_0_tensor_uid": out},
         "type": "PointwiseAttributes",
     }
+
+
+# The bias-add node computes in the bias tensor's type: MIOpen's conv-bias-activation
+# fusion declines a bias node whose compute type differs from its bias tensor
+# (MiopenConvFwdBiasActivPlanBuilder.cpp, checkComputeTypes). Every other node is float.
+BIAS_COMPUTE = ph("attributes.bias_compute")
 
 
 def template(topo):
@@ -168,6 +184,7 @@ def template(topo):
                 u["t1"],
                 in0_ph="bias_in_0",
                 in1_ph="bias_in_1",
+                compute=BIAS_COMPUTE,
             )
         )
         nodes.append(
@@ -183,7 +200,9 @@ def template(topo):
         inter = {u["t1"]: "Pointwise_1::OUT_0"}
     elif topo == "scale_bias_act":
         nodes.append(_pw("Pointwise_1", "mul", u["y"], u["scale"], u["t1"]))
-        nodes.append(_pw("Pointwise_2", "add", u["t1"], u["bias"], u["t2"]))
+        nodes.append(
+            _pw("Pointwise_2", "add", u["t1"], u["bias"], u["t2"], compute=BIAS_COMPUTE)
+        )
         nodes.append(_pw("Pointwise_3", "relu_fwd", u["t2"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0", u["t2"]: "Pointwise_2::OUT_0"}
     elif topo == "add_relu":
@@ -191,7 +210,9 @@ def template(topo):
         nodes.append(_pw("Pointwise_2", "relu_fwd", u["t1"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0"}
     elif topo == "bias_add_relu":
-        nodes.append(_pw("Pointwise_1", "add", u["y"], u["bias"], u["t1"]))
+        nodes.append(
+            _pw("Pointwise_1", "add", u["y"], u["bias"], u["t1"], compute=BIAS_COMPUTE)
+        )
         nodes.append(_pw("Pointwise_2", "add", u["t1"], u["res"], u["t2"]))
         nodes.append(_pw("Pointwise_3", "relu_fwd", u["t2"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0", u["t2"]: "Pointwise_2::OUT_0"}
@@ -331,6 +352,8 @@ def case_values(c):
     }
     if topo != "conv":
         attrs["conv_y_virtual"] = c["conv_y_virtual"]
+    if "bias" in u:
+        attrs["bias_compute"] = c["bias_t"]
     if topo in P.HAS_ACT_PLACEHOLDERS:
         op, lo, slope, hi, alpha, sbeta, pbeta = P.ACT_PARAMS[c["act"]]
         attrs.update(
@@ -852,25 +875,13 @@ def build():
 
 
 def apply_trims(result):
-    """Remove the products of ``P.TRIMS``. A T10 case survives when no other
-    surviving bias_act case covers its activation x core cell; levels are visited
-    lowest first, so that case is the lowest and first one. Runs after the ids
-    are assigned, so the cases that remain keep their ids."""
+    """Remove the products of ``P.TRIMS``. Runs after the ids are assigned, so the
+    cases that remain keep their ids."""
     removed = Counter()
-    covered = {
-        P.core_cell(c)
-        for level, items in result.items()
-        for c, _ in items
-        if c["topo"] == "bias_act" and P.trim(c, level) is None
-    }
     for level, items in result.items():
         keep = []
         for item in items:
-            c = item[0]
-            t = P.trim(c, level)
-            if t == "T10" and P.core_cell(c) not in covered:
-                covered.add(P.core_cell(c))
-                t = None
+            t = P.trim(item[0], level)
             if t:
                 removed[f"{level}: trimmed {t}"] += 1
             else:

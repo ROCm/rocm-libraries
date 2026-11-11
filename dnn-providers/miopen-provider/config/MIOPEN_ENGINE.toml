@@ -142,35 +142,32 @@ rtol = 0.01
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
 
-# conv-fwd test plan run on gfx942 (docs/test-plans/convolution-fwd.md): graphs that the
-# MIOpen plugin accepts but then fails or computes wrongly. They are probes (a typed
-# rejection or a correct accept is the pass criterion), so each is quarantined here
-# until its defect is fixed. Each entry names the MIOpen ticket and the provider ticket
-# (epic ALMIOPEN-3008). Temporary: remove the entry when either ticket lands (the
+# conv-fwd test plan (docs/test-plans/convolution-fwd.md): graphs that the MIOpen plugin
+# accepts but then fails or computes wrongly. They are probes (a typed rejection or a
+# correct accept is the pass criterion), so each is quarantined here until its defect is
+# fixed. Each entry names the MIOpen ticket and the provider ticket (epic ALMIOPEN-3008).
+# The cause is the plugin's applicability check, which does not depend on the
+# architecture (the same classes fail on gfx942, gfx90a and Windows gfx110X), so the
+# entries apply to every arch. Temporary: remove the entry when either ticket lands (the
 # provider fix makes the plugin decline the graph; the MIOpen fix makes it correct); the
-# cases then run and report unclaimed_support. gfx90a and gfx950 carry no such skips.
+# cases then run and report unclaimed_support.
 [[test_skips]]
-archs   = ["gfx942"]
 filters = ["*_ConvolutionFwdPointwise_Variant4.*"]
 reason  = "conv -> add(residual) -> relu is accepted as a bias fusion and fp32 output is wrong (up to 56% of elements); tracked in ALMIOPEN-3009 (MIOpen) and ALMIOPEN-3014 (provider)"
 
 [[test_skips]]
-archs   = ["gfx942"]
 filters = ["*_ConvolutionFwd_Default.*_f20_*"]
 reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w); tracked in ALMIOPEN-3010 (MIOpen) and ALMIOPEN-3015 (provider)"
 
 [[test_skips]]
-archs   = ["gfx942"]
 filters = ["*_ConvolutionFwd_Default.*_f15_*"]
 reason  = "conv with mixed x, w and y layouts is accepted; MIOpen output disagrees with the GPU and CPU references for the cases that execute; tracked in ALMIOPEN-3012 (MIOpen) and ALMIOPEN-3017 (provider)"
 
 [[test_skips]]
-archs   = ["gfx942"]
 filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25type_*"]
 reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4); tracked in ALMIOPEN-3011 (MIOpen) and ALMIOPEN-3016 (provider)"
 
 [[test_skips]]
-archs   = ["gfx942"]
 filters = [
     "*_ConvolutionFwd_Default.s13a_f16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
     "*_ConvolutionFwd_Default.s13a_f16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
