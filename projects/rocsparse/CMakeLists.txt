@@ -225,7 +225,7 @@ if( AMDGPU_TARGETS AND NOT GPU_TARGETS )
 elseif( GPU_TARGETS )
   set( GFX_LIST ${GPU_TARGETS} )
 else ()
-  set( GFX_LIST ${DEFAULT_AMDGPU_TARGETS} ) # default if not set
+  set( GFX_LIST ${DEFAULT_GPU_TARGETS} ) # default if not set
 endif()
 
 set(GPU_TARGETS "${GFX_LIST}" CACHE STRING "GPU architectures to build for")

@@ -32,6 +32,7 @@ Documentation for rocSPARSE is available at
 * Fixed a null pointer dereference in `rocsparse_csric0_set_tolerance` when `info` is a null pointer. The routine validated `handle` twice and never `info`. It now returns `rocsparse_status_invalid_pointer`, as documented.
 * Fixed `rocsparse_Xcsrsm_solve`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) returning incorrect results for complex types when `trans_B` is `rocsparse_operation_conjugate_transpose` and there is a single right-hand side.
 * Fixed `rocsparse_v2_spmv` ignoring the `rocsparse_spmv_input_nnz_use_starting_block_ids` input. The CSR nnz-split analysis never received the value set with `rocsparse_spmv_set_input`, so it always ran without starting block IDs. The analysis now uses the value from the SpMV descriptor.
+* Fixed the default `GPU_TARGETS` when CMake is configured without `GPU_TARGETS`. The default list was read from a misspelled variable, so `GPU_TARGETS` was cached empty instead of holding the default list. Only `GPU_TARGETS=all`, which `install.sh` and `rmake.py` pass, used the default list. Build directories configured before this fix keep the empty cache entry until `GPU_TARGETS` is set or the cache is cleared.
 
 ### Upcoming changes
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.
