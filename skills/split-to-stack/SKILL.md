@@ -120,4 +120,4 @@ Wherever a phase text says "ask the user" or "stop and ask", a subagent writes i
 | `references/analyze-and-plan.md` | commit readers, Inventory, Planner, orchestrator (Phase 6) |
 | `references/build-and-test.md` | Builder, orchestrator (8.1) |
 | `references/publish-and-cleanup.md` | orchestrator (Phase 9) |
-| `scripts/` | `build_ledger.py`, `check_plan.py`, `build_stack.py`, `verify_stack.py`, `render_plan.py`, `extract_state.py`, `selftest.py`, and the shared module `splitlib.py` |
+| `scripts/` | `build_ledger.py`, `check_plan.py`, `build_stack.py`, `verify_stack.py`, `render_plan.py`, `extract_state.py`, `test_split_to_stack.py` (pytest), and the shared module `splitlib.py` |

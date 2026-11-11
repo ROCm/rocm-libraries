@@ -102,7 +102,7 @@ def die(msg):
 
 
 # Environment variables that would redirect git to another repository or index.
-# (GIT_OBJECT_DIRECTORY / GIT_ALTERNATE_OBJECT_DIRECTORIES are deliberately kept: selftest --stress
+# (GIT_OBJECT_DIRECTORY / GIT_ALTERNATE_OBJECT_DIRECTORIES are deliberately kept: test_split_to_stack.py --stress
 # uses them to keep new objects out of the real repository.)
 _STRIP_ENV = (
     "GIT_DIR",
