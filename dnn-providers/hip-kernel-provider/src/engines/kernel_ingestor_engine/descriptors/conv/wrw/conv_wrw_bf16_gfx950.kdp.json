@@ -603,6 +603,376 @@
     },
     {
       "version": "1.0",
+      "id": "b81c6ed5-3d51-5539-86ea-a120921e6e60",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr7s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 928
+    },
+    {
+      "version": "1.0",
+      "id": "ca7797f6-955c-5c46-a9d6-bd2f8816f691",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr7s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 927
+    },
+    {
+      "version": "1.0",
+      "id": "165fbc7a-9663-54b7-b181-2f2cf456abd9",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 926
+    },
+    {
+      "version": "1.0",
+      "id": "7ea8edd1-ca5a-5a54-a53b-6ccb05b9d548",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr7s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 925
+    },
+    {
+      "version": "1.0",
+      "id": "9c720b93-811b-5e38-9bf9-89f163024bf8",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 924
+    },
+    {
+      "version": "1.0",
+      "id": "60c81b8c-67e0-5c32-aaf3-4ba68d58b8fd",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr7s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 923
+    },
+    {
+      "version": "1.0",
+      "id": "ab4c1ff7-ad39-53ba-bfc4-d0f0277c2a6b",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr7s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 922
+    },
+    {
+      "version": "1.0",
+      "id": "ea1f9bdf-777e-55fa-a158-3cf07070e97b",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr7s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 921
+    },
+    {
+      "version": "1.0",
+      "id": "5ddcd90a-9033-5a5b-bf8d-29e23e28375e",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr7s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 920
+    },
+    {
+      "version": "1.0",
+      "id": "73ccc956-2267-5d82-b9f2-55f2d0953294",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr7s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 7,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 919
+    },
+    {
+      "version": "1.0",
       "id": "bc1b38de-e3db-5173-aabf-64b08783b707",
       "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nchw.64x4x64.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
       "kernel_source": {
@@ -636,7 +1006,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 928
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -673,7 +1043,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 927
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -710,7 +1080,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 926
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -747,7 +1117,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 925
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -784,7 +1154,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 924
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -821,7 +1191,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 923
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -858,7 +1228,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 922
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -895,7 +1265,525 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 921
+      "priority": 911
+    },
+    {
+      "version": "1.0",
+      "id": "f3bafe38-6769-5ec6-81b0-2a8d72de9768",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 910
+    },
+    {
+      "version": "1.0",
+      "id": "2df76813-4e54-54ac-a2ac-7716c7310491",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 909
+    },
+    {
+      "version": "1.0",
+      "id": "f273c1f0-b44d-50e1-a86c-f04b92ac7389",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 908
+    },
+    {
+      "version": "1.0",
+      "id": "73948f85-971d-51fb-99e1-4db7fdf38eee",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 907
+    },
+    {
+      "version": "1.0",
+      "id": "9646cf47-b9fa-59c6-bf35-0dfbdc1f9d34",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 906
+    },
+    {
+      "version": "1.0",
+      "id": "9c8f04c3-f612-56b9-bbaf-5b595b29ed23",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 905
+    },
+    {
+      "version": "1.0",
+      "id": "2afcf0c2-0de5-5a84-8db4-e4740ef4f01d",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 904
+    },
+    {
+      "version": "1.0",
+      "id": "9602ed09-eed4-5f7d-857d-ccca0c79d2cf",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 903
+    },
+    {
+      "version": "1.0",
+      "id": "3aa8115f-2e57-5a35-a961-d83402dcf26c",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 902
+    },
+    {
+      "version": "1.0",
+      "id": "56f66a11-836a-5e56-b37c-af5ebf296803",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 901
+    },
+    {
+      "version": "1.0",
+      "id": "c69d7164-5811-57da-85b7-48806fe0f1eb",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 900
+    },
+    {
+      "version": "1.0",
+      "id": "d51bbbc8-bde7-5c94-9c9d-4858715cf7f7",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 899
+    },
+    {
+      "version": "1.0",
+      "id": "e6ca5df8-ff46-5bdc-9269-5a8253f9911a",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr1s7sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 898
+    },
+    {
+      "version": "1.0",
+      "id": "4ee5fdc9-ed86-5f2c-9aa1-dcdb067cd7c0",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr1s7sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 1,
+        "s": 7,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -932,7 +1820,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 920
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -969,7 +1857,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 919
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -1006,7 +1894,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 918
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -1043,7 +1931,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 917
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -1080,7 +1968,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 916
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -1117,7 +2005,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 915
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -1154,7 +2042,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 914
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -1191,7 +2079,525 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 913
+      "priority": 889
+    },
+    {
+      "version": "1.0",
+      "id": "20ef4b86-aa4a-5be8-9ae9-b7d682534278",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 888
+    },
+    {
+      "version": "1.0",
+      "id": "3b58701b-5523-5a45-88a9-db23ceec1053",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 887
+    },
+    {
+      "version": "1.0",
+      "id": "da7c731b-59ca-5030-ac16-eef92c4acd97",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 886
+    },
+    {
+      "version": "1.0",
+      "id": "7095382f-0e23-569b-ac24-07578c5d3d2a",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 885
+    },
+    {
+      "version": "1.0",
+      "id": "b24402a8-c02c-50da-acbf-5d740895b2ff",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 884
+    },
+    {
+      "version": "1.0",
+      "id": "23e3ccaf-3cb8-58c4-8fcc-0847352740c6",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 883
+    },
+    {
+      "version": "1.0",
+      "id": "e8740e58-3421-5b8c-8734-a98be073e68e",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 882
+    },
+    {
+      "version": "1.0",
+      "id": "8affdafc-e0da-55d7-a365-de38af3e44bf",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 881
+    },
+    {
+      "version": "1.0",
+      "id": "fb1aa726-b98e-5b52-b227-3e07abaac3a6",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 880
+    },
+    {
+      "version": "1.0",
+      "id": "8c4d491c-c39b-55c5-a177-fd453c350632",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 879
+    },
+    {
+      "version": "1.0",
+      "id": "7d4d5f3a-e5b9-59da-a4b4-b5189b1205d4",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 878
+    },
+    {
+      "version": "1.0",
+      "id": "3c458def-da3f-51eb-963d-c09e57b24d98",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 877
+    },
+    {
+      "version": "1.0",
+      "id": "e8711934-cf4d-5340-a0db-850c3ea7cc81",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr3s3sw2dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 876
+    },
+    {
+      "version": "1.0",
+      "id": "83c45a0c-9877-5096-8c6b-4cfc3481796f",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr3s3sw2dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 3,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -1228,7 +2634,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 912
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -1265,7 +2671,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 911
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -1302,7 +2708,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 910
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -1339,7 +2745,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 909
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -1376,7 +2782,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 908
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -1413,7 +2819,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 907
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -1450,7 +2856,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 906
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -1487,7 +2893,525 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 905
+      "priority": 867
+    },
+    {
+      "version": "1.0",
+      "id": "93e73def-8c29-53b5-b52f-0cb0e910082a",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 866
+    },
+    {
+      "version": "1.0",
+      "id": "3bc38b4e-db34-54b1-acda-f052bd69d260",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x64.w4x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 865
+    },
+    {
+      "version": "1.0",
+      "id": "f48417e7-4b6d-5295-aa2d-a51820485c77",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 864
+    },
+    {
+      "version": "1.0",
+      "id": "03b46dcb-631f-5e71-97bb-3c1b5b14ecca",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x64.w2x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 64,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 863
+    },
+    {
+      "version": "1.0",
+      "id": "f8a552b2-fdbc-5630-85bb-51714a710ae2",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 862
+    },
+    {
+      "version": "1.0",
+      "id": "c98a10ba-4820-5d19-98ee-950f591e2f43",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x8x32.w4x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 8,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 861
+    },
+    {
+      "version": "1.0",
+      "id": "e60a7523-e2fc-58a0-b409-8bdb2fe888c8",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 860
+    },
+    {
+      "version": "1.0",
+      "id": "f52924fc-6cbb-5485-a0f2-c01360066533",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x16x32.w4x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 16,
+        "bq": 32,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 859
+    },
+    {
+      "version": "1.0",
+      "id": "04ba2a51-48d9-5169-aa25-e30867eb5654",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 858
+    },
+    {
+      "version": "1.0",
+      "id": "f75e2177-dbeb-551c-8089-015f57899d79",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.32x4x128.w2x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 32,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 2,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 857
+    },
+    {
+      "version": "1.0",
+      "id": "1d932464-7ff1-5af1-9d6d-be9019e0aaa2",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 856
+    },
+    {
+      "version": "1.0",
+      "id": "a726f0a8-6cdc-519a-aa06-2bac69d4a1b2",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x128.w4x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 128,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 855
+    },
+    {
+      "version": "1.0",
+      "id": "c495813f-0587-581c-b39e-28fa685836bb",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr3s3sw1dw1.v8.x1a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 854
+    },
+    {
+      "version": "1.0",
+      "id": "1939d457-08de-58ee-9595-6f14defa2f69",
+      "name": "conv_wrw.bf16.mfma16x32_bf16.l6.nhwc.64x4x256.w4x1.fr3s3sw1dw1.v8.x1a0n0b4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "loop": 6,
+        "layout": 1,
+        "bk": 64,
+        "bc": 4,
+        "bq": 256,
+        "fr": 3,
+        "s": 3,
+        "sw": 1,
+        "dw": 1,
+        "wk": 4,
+        "wc": 1,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 1,
+        "align": 0,
+        "ns": 0,
+        "bpu": 4,
+        "wq": 0,
+        "dws": 1
+      },
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -1524,7 +3448,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 808
+      "priority": 636
     },
     {
       "version": "1.0",
@@ -1561,7 +3485,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 807
+      "priority": 635
     },
     {
       "version": "1.0",
@@ -1598,7 +3522,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 806
+      "priority": 634
     },
     {
       "version": "1.0",
@@ -1635,7 +3559,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 805
+      "priority": 633
     },
     {
       "version": "1.0",
@@ -1672,7 +3596,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 804
+      "priority": 632
     },
     {
       "version": "1.0",
@@ -1709,7 +3633,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 803
+      "priority": 631
     },
     {
       "version": "1.0",
@@ -1746,7 +3670,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 802
+      "priority": 630
     },
     {
       "version": "1.0",
@@ -1783,7 +3707,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 801
+      "priority": 629
     },
     {
       "version": "1.0",
@@ -1820,7 +3744,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 800
+      "priority": 628
     },
     {
       "version": "1.0",
@@ -1857,7 +3781,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 799
+      "priority": 627
     },
     {
       "version": "1.0",
@@ -1894,7 +3818,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 798
+      "priority": 626
     },
     {
       "version": "1.0",
@@ -1931,7 +3855,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 797
+      "priority": 625
     },
     {
       "version": "1.0",
@@ -1968,7 +3892,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 796
+      "priority": 624
     },
     {
       "version": "1.0",
@@ -2005,7 +3929,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 795
+      "priority": 623
     },
     {
       "version": "1.0",
@@ -2042,7 +3966,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 794
+      "priority": 622
     },
     {
       "version": "1.0",
@@ -2079,7 +4003,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 793
+      "priority": 621
     },
     {
       "version": "1.0",
@@ -2116,7 +4040,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 792
+      "priority": 620
     },
     {
       "version": "1.0",
@@ -2153,7 +4077,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 791
+      "priority": 619
     },
     {
       "version": "1.0",
@@ -2190,7 +4114,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 790
+      "priority": 618
     },
     {
       "version": "1.0",
@@ -2227,7 +4151,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 789
+      "priority": 617
     },
     {
       "version": "1.0",
@@ -2264,7 +4188,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 788
+      "priority": 616
     },
     {
       "version": "1.0",
@@ -2301,7 +4225,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 787
+      "priority": 615
     },
     {
       "version": "1.0",
@@ -2338,7 +4262,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 786
+      "priority": 614
     },
     {
       "version": "1.0",
@@ -2375,7 +4299,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 785
+      "priority": 613
     },
     {
       "version": "1.0",
@@ -2412,7 +4336,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 784
+      "priority": 612
     },
     {
       "version": "1.0",
@@ -2449,7 +4373,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 783
+      "priority": 611
     },
     {
       "version": "1.0",
@@ -2486,7 +4410,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 782
+      "priority": 610
     },
     {
       "version": "1.0",
@@ -2523,7 +4447,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 781
+      "priority": 609
     },
     {
       "version": "1.0",
@@ -2560,7 +4484,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 780
+      "priority": 608
     },
     {
       "version": "1.0",
@@ -2597,7 +4521,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 779
+      "priority": 607
     },
     {
       "version": "1.0",
@@ -2634,7 +4558,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 778
+      "priority": 606
     },
     {
       "version": "1.0",
@@ -2671,7 +4595,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 777
+      "priority": 605
     },
     {
       "version": "1.0",
@@ -2708,7 +4632,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 776
+      "priority": 604
     },
     {
       "version": "1.0",
@@ -2745,7 +4669,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 775
+      "priority": 603
     },
     {
       "version": "1.0",
@@ -2782,7 +4706,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 774
+      "priority": 602
     },
     {
       "version": "1.0",
@@ -2819,7 +4743,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 773
+      "priority": 601
     },
     {
       "version": "1.0",
@@ -2856,7 +4780,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 772
+      "priority": 600
     },
     {
       "version": "1.0",
@@ -2893,7 +4817,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 771
+      "priority": 599
     },
     {
       "version": "1.0",
@@ -2930,7 +4854,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 770
+      "priority": 598
     },
     {
       "version": "1.0",
@@ -2967,7 +4891,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 769
+      "priority": 597
     },
     {
       "version": "1.0",
@@ -3004,7 +4928,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 768
+      "priority": 596
     },
     {
       "version": "1.0",
@@ -3041,7 +4965,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 767
+      "priority": 595
     },
     {
       "version": "1.0",
@@ -3078,7 +5002,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 766
+      "priority": 594
     },
     {
       "version": "1.0",
@@ -3115,7 +5039,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 765
+      "priority": 593
     },
     {
       "version": "1.0",
@@ -3152,7 +5076,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 764
+      "priority": 592
     },
     {
       "version": "1.0",
@@ -3189,7 +5113,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 763
+      "priority": 591
     },
     {
       "version": "1.0",
@@ -3226,7 +5150,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 762
+      "priority": 590
     },
     {
       "version": "1.0",
@@ -3263,7 +5187,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 761
+      "priority": 589
     },
     {
       "version": "1.0",
@@ -3300,7 +5224,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 760
+      "priority": 588
     },
     {
       "version": "1.0",
@@ -3337,7 +5261,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 759
+      "priority": 587
     },
     {
       "version": "1.0",
@@ -3374,7 +5298,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 758
+      "priority": 586
     },
     {
       "version": "1.0",
@@ -3411,7 +5335,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 757
+      "priority": 585
     },
     {
       "version": "1.0",
@@ -3448,7 +5372,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 756
+      "priority": 584
     },
     {
       "version": "1.0",
@@ -3485,7 +5409,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 755
+      "priority": 583
     },
     {
       "version": "1.0",
@@ -3522,7 +5446,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 754
+      "priority": 582
     },
     {
       "version": "1.0",
@@ -3559,7 +5483,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 753
+      "priority": 581
     },
     {
       "version": "1.0",
@@ -3596,7 +5520,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 752
+      "priority": 580
     },
     {
       "version": "1.0",
@@ -3633,7 +5557,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 751
+      "priority": 579
     },
     {
       "version": "1.0",
@@ -3670,7 +5594,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 750
+      "priority": 578
     },
     {
       "version": "1.0",
@@ -3707,7 +5631,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 749
+      "priority": 577
     },
     {
       "version": "1.0",
@@ -3744,7 +5668,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 748
+      "priority": 576
     },
     {
       "version": "1.0",
@@ -3781,7 +5705,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 747
+      "priority": 575
     },
     {
       "version": "1.0",
@@ -3818,7 +5742,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 746
+      "priority": 574
     },
     {
       "version": "1.0",
@@ -3855,7 +5779,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 745
+      "priority": 573
     },
     {
       "version": "1.0",
@@ -3892,7 +5816,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 744
+      "priority": 572
     },
     {
       "version": "1.0",
@@ -3929,7 +5853,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 743
+      "priority": 571
     },
     {
       "version": "1.0",
@@ -3966,7 +5890,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 742
+      "priority": 570
     },
     {
       "version": "1.0",
@@ -4003,7 +5927,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 741
+      "priority": 569
     },
     {
       "version": "1.0",
@@ -4040,7 +5964,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 740
+      "priority": 568
     },
     {
       "version": "1.0",
@@ -4077,7 +6001,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 739
+      "priority": 567
     },
     {
       "version": "1.0",
@@ -4114,7 +6038,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 738
+      "priority": 566
     },
     {
       "version": "1.0",
@@ -4151,7 +6075,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 737
+      "priority": 565
     },
     {
       "version": "1.0",
@@ -4188,7 +6112,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 736
+      "priority": 564
     },
     {
       "version": "1.0",
@@ -4225,7 +6149,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 735
+      "priority": 563
     },
     {
       "version": "1.0",
@@ -4262,7 +6186,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 734
+      "priority": 562
     },
     {
       "version": "1.0",
@@ -4299,7 +6223,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 733
+      "priority": 561
     },
     {
       "version": "1.0",
@@ -4336,7 +6260,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 732
+      "priority": 560
     },
     {
       "version": "1.0",
@@ -4373,7 +6297,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 731
+      "priority": 559
     },
     {
       "version": "1.0",
@@ -4410,7 +6334,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 730
+      "priority": 558
     },
     {
       "version": "1.0",
@@ -4447,7 +6371,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 729
+      "priority": 557
     },
     {
       "version": "1.0",
@@ -4484,7 +6408,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 728
+      "priority": 556
     },
     {
       "version": "1.0",
@@ -4521,7 +6445,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 727
+      "priority": 555
     },
     {
       "version": "1.0",
@@ -4558,7 +6482,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 726
+      "priority": 554
     },
     {
       "version": "1.0",
@@ -4595,7 +6519,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 725
+      "priority": 553
     },
     {
       "version": "1.0",
@@ -4632,7 +6556,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 724
+      "priority": 552
     },
     {
       "version": "1.0",
@@ -4669,7 +6593,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 723
+      "priority": 551
     },
     {
       "version": "1.0",
@@ -4706,7 +6630,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 722
+      "priority": 550
     },
     {
       "version": "1.0",
@@ -4743,7 +6667,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 721
+      "priority": 549
     },
     {
       "version": "1.0",
@@ -4780,7 +6704,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 720
+      "priority": 548
     },
     {
       "version": "1.0",
@@ -4817,7 +6741,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 719
+      "priority": 547
     },
     {
       "version": "1.0",
@@ -4854,7 +6778,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 718
+      "priority": 546
     },
     {
       "version": "1.0",
@@ -4891,7 +6815,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 717
+      "priority": 545
     },
     {
       "version": "1.0",
@@ -4928,7 +6852,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 716
+      "priority": 544
     },
     {
       "version": "1.0",
@@ -4965,7 +6889,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 715
+      "priority": 543
     },
     {
       "version": "1.0",
@@ -5002,7 +6926,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 714
+      "priority": 542
     },
     {
       "version": "1.0",
@@ -5039,7 +6963,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 713
+      "priority": 541
     },
     {
       "version": "1.0",
@@ -5076,7 +7000,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 712
+      "priority": 540
     },
     {
       "version": "1.0",
@@ -5113,7 +7037,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 711
+      "priority": 539
     },
     {
       "version": "1.0",
@@ -5150,7 +7074,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 710
+      "priority": 538
     },
     {
       "version": "1.0",
@@ -5187,7 +7111,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 709
+      "priority": 537
     },
     {
       "version": "1.0",
@@ -5224,7 +7148,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 708
+      "priority": 536
     },
     {
       "version": "1.0",
@@ -5261,7 +7185,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 707
+      "priority": 535
     },
     {
       "version": "1.0",
@@ -5298,7 +7222,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 706
+      "priority": 534
     },
     {
       "version": "1.0",
@@ -5335,7 +7259,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 705
+      "priority": 533
     },
     {
       "version": "1.0",
@@ -5372,7 +7296,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 704
+      "priority": 532
     },
     {
       "version": "1.0",
@@ -5409,7 +7333,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 703
+      "priority": 531
     },
     {
       "version": "1.0",
@@ -5446,7 +7370,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 702
+      "priority": 530
     },
     {
       "version": "1.0",
@@ -5483,7 +7407,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 701
+      "priority": 529
     },
     {
       "version": "1.0",
@@ -5520,7 +7444,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 700
+      "priority": 528
     },
     {
       "version": "1.0",
@@ -5557,7 +7481,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 699
+      "priority": 527
     },
     {
       "version": "1.0",
@@ -5594,7 +7518,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 698
+      "priority": 526
     },
     {
       "version": "1.0",
@@ -5631,7 +7555,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 697
+      "priority": 525
     },
     {
       "version": "1.0",
@@ -5668,7 +7592,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 696
+      "priority": 524
     },
     {
       "version": "1.0",
@@ -5705,7 +7629,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 695
+      "priority": 523
     },
     {
       "version": "1.0",
@@ -5742,7 +7666,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 694
+      "priority": 522
     },
     {
       "version": "1.0",
@@ -5779,7 +7703,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 693
+      "priority": 521
     },
     {
       "version": "1.0",
@@ -5816,7 +7740,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 692
+      "priority": 520
     },
     {
       "version": "1.0",
@@ -5853,7 +7777,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 691
+      "priority": 519
     },
     {
       "version": "1.0",
@@ -5890,7 +7814,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 690
+      "priority": 518
     },
     {
       "version": "1.0",
@@ -5927,7 +7851,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 689
+      "priority": 517
     },
     {
       "version": "1.0",
@@ -5964,7 +7888,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 688
+      "priority": 516
     },
     {
       "version": "1.0",
@@ -6001,7 +7925,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 687
+      "priority": 515
     },
     {
       "version": "1.0",
@@ -6038,7 +7962,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 686
+      "priority": 514
     },
     {
       "version": "1.0",
@@ -6075,7 +7999,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 685
+      "priority": 513
     },
     {
       "version": "1.0",
@@ -6112,7 +8036,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 684
+      "priority": 512
     },
     {
       "version": "1.0",
@@ -6149,7 +8073,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 683
+      "priority": 511
     },
     {
       "version": "1.0",
@@ -6186,7 +8110,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 682
+      "priority": 510
     },
     {
       "version": "1.0",
@@ -6223,7 +8147,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 681
+      "priority": 509
     },
     {
       "version": "1.0",
@@ -6260,7 +8184,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 680
+      "priority": 508
     },
     {
       "version": "1.0",
@@ -6297,7 +8221,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 679
+      "priority": 507
     },
     {
       "version": "1.0",
@@ -6334,7 +8258,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 678
+      "priority": 506
     },
     {
       "version": "1.0",
@@ -6371,7 +8295,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 677
+      "priority": 505
     },
     {
       "version": "1.0",
@@ -6408,7 +8332,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 676
+      "priority": 504
     },
     {
       "version": "1.0",
@@ -6445,7 +8369,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 675
+      "priority": 503
     },
     {
       "version": "1.0",
@@ -6482,7 +8406,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 674
+      "priority": 502
     },
     {
       "version": "1.0",
@@ -6519,7 +8443,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 673
+      "priority": 501
     },
     {
       "version": "1.0",
@@ -6556,7 +8480,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 672
+      "priority": 500
     },
     {
       "version": "1.0",
@@ -6593,7 +8517,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 671
+      "priority": 499
     },
     {
       "version": "1.0",
@@ -6630,7 +8554,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 670
+      "priority": 498
     },
     {
       "version": "1.0",
@@ -6667,7 +8591,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 669
+      "priority": 497
     },
     {
       "version": "1.0",
@@ -6704,7 +8628,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 668
+      "priority": 496
     },
     {
       "version": "1.0",
@@ -6741,7 +8665,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 667
+      "priority": 495
     },
     {
       "version": "1.0",
@@ -6778,7 +8702,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 666
+      "priority": 494
     },
     {
       "version": "1.0",
@@ -6815,7 +8739,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 665
+      "priority": 493
     },
     {
       "version": "1.0",
@@ -6852,7 +8776,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 664
+      "priority": 492
     },
     {
       "version": "1.0",
@@ -6889,7 +8813,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 663
+      "priority": 491
     },
     {
       "version": "1.0",
@@ -6926,7 +8850,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 662
+      "priority": 490
     },
     {
       "version": "1.0",
@@ -6963,7 +8887,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 661
+      "priority": 489
     },
     {
       "version": "1.0",
@@ -7000,7 +8924,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 660
+      "priority": 488
     },
     {
       "version": "1.0",
@@ -7037,7 +8961,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 659
+      "priority": 487
     },
     {
       "version": "1.0",
@@ -7074,7 +8998,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 658
+      "priority": 486
     },
     {
       "version": "1.0",
@@ -7111,7 +9035,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 657
+      "priority": 485
     },
     {
       "version": "1.0",
@@ -7148,7 +9072,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 656
+      "priority": 484
     },
     {
       "version": "1.0",
@@ -7185,7 +9109,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 655
+      "priority": 483
     },
     {
       "version": "1.0",
@@ -7222,7 +9146,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 654
+      "priority": 482
     },
     {
       "version": "1.0",
@@ -7259,7 +9183,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 653
+      "priority": 481
     },
     {
       "version": "1.0",
@@ -7296,7 +9220,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 652
+      "priority": 480
     },
     {
       "version": "1.0",
@@ -7333,7 +9257,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 651
+      "priority": 479
     },
     {
       "version": "1.0",
@@ -7370,7 +9294,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 650
+      "priority": 478
     },
     {
       "version": "1.0",
@@ -7407,7 +9331,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 649
+      "priority": 477
     },
     {
       "version": "1.0",
@@ -7444,7 +9368,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 648
+      "priority": 476
     },
     {
       "version": "1.0",
@@ -7481,7 +9405,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 647
+      "priority": 475
     },
     {
       "version": "1.0",
@@ -7518,7 +9442,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 646
+      "priority": 474
     },
     {
       "version": "1.0",
@@ -7555,7 +9479,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 645
+      "priority": 473
     },
     {
       "version": "1.0",
@@ -7592,7 +9516,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 644
+      "priority": 472
     },
     {
       "version": "1.0",
@@ -7629,7 +9553,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 643
+      "priority": 471
     },
     {
       "version": "1.0",
@@ -7666,7 +9590,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 642
+      "priority": 470
     },
     {
       "version": "1.0",
@@ -7703,7 +9627,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 641
+      "priority": 469
     },
     {
       "version": "1.0",
@@ -7740,7 +9664,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 640
+      "priority": 468
     },
     {
       "version": "1.0",
@@ -7777,7 +9701,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 639
+      "priority": 467
     },
     {
       "version": "1.0",
@@ -7814,7 +9738,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 638
+      "priority": 466
     },
     {
       "version": "1.0",
@@ -7851,7 +9775,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 637
+      "priority": 465
     },
     {
       "version": "1.0",
@@ -7888,7 +9812,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 636
+      "priority": 464
     },
     {
       "version": "1.0",
@@ -7925,7 +9849,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 635
+      "priority": 463
     },
     {
       "version": "1.0",
@@ -7962,7 +9886,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 634
+      "priority": 462
     },
     {
       "version": "1.0",
@@ -7999,7 +9923,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 633
+      "priority": 461
     },
     {
       "version": "1.0",
@@ -8036,7 +9960,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 632
+      "priority": 460
     },
     {
       "version": "1.0",
@@ -8073,7 +9997,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 631
+      "priority": 459
     },
     {
       "version": "1.0",
@@ -8110,7 +10034,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 630
+      "priority": 458
     },
     {
       "version": "1.0",
@@ -8147,7 +10071,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 629
+      "priority": 457
     },
     {
       "version": "1.0",
@@ -8184,7 +10108,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 628
+      "priority": 456
     },
     {
       "version": "1.0",
@@ -8221,7 +10145,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 627
+      "priority": 455
     },
     {
       "version": "1.0",
@@ -8258,7 +10182,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 626
+      "priority": 454
     },
     {
       "version": "1.0",
@@ -8295,7 +10219,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 625
+      "priority": 453
     },
     {
       "version": "1.0",
@@ -8332,7 +10256,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 624
+      "priority": 452
     },
     {
       "version": "1.0",
@@ -8369,7 +10293,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 623
+      "priority": 451
     },
     {
       "version": "1.0",
@@ -8406,7 +10330,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 622
+      "priority": 450
     },
     {
       "version": "1.0",
@@ -8443,7 +10367,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 621
+      "priority": 449
     },
     {
       "version": "1.0",
@@ -8480,7 +10404,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 620
+      "priority": 448
     },
     {
       "version": "1.0",
@@ -8517,7 +10441,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 619
+      "priority": 447
     },
     {
       "version": "1.0",
@@ -8554,7 +10478,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 618
+      "priority": 446
     },
     {
       "version": "1.0",
@@ -8591,7 +10515,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 617
+      "priority": 445
     },
     {
       "version": "1.0",
@@ -8628,7 +10552,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 616
+      "priority": 444
     },
     {
       "version": "1.0",
@@ -8665,7 +10589,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 615
+      "priority": 443
     },
     {
       "version": "1.0",
@@ -8702,7 +10626,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 614
+      "priority": 442
     },
     {
       "version": "1.0",
@@ -8739,7 +10663,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 613
+      "priority": 441
     },
     {
       "version": "1.0",
@@ -8776,7 +10700,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 612
+      "priority": 440
     },
     {
       "version": "1.0",
@@ -8813,7 +10737,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 611
+      "priority": 439
     },
     {
       "version": "1.0",
@@ -8850,7 +10774,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 610
+      "priority": 438
     },
     {
       "version": "1.0",
@@ -8887,7 +10811,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 609
+      "priority": 437
     },
     {
       "version": "1.0",
@@ -8924,7 +10848,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 608
+      "priority": 436
     },
     {
       "version": "1.0",
@@ -8961,7 +10885,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 607
+      "priority": 435
     },
     {
       "version": "1.0",
@@ -8998,7 +10922,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 606
+      "priority": 434
     },
     {
       "version": "1.0",
@@ -9035,7 +10959,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 605
+      "priority": 433
     },
     {
       "version": "1.0",
@@ -9072,7 +10996,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 604
+      "priority": 432
     },
     {
       "version": "1.0",
@@ -9109,7 +11033,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 603
+      "priority": 431
     },
     {
       "version": "1.0",
@@ -9146,7 +11070,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 602
+      "priority": 430
     },
     {
       "version": "1.0",
@@ -9183,7 +11107,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 601
+      "priority": 429
     },
     {
       "version": "1.0",
@@ -9220,7 +11144,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 600
+      "priority": 428
     },
     {
       "version": "1.0",
@@ -9257,7 +11181,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 599
+      "priority": 427
     },
     {
       "version": "1.0",
@@ -9294,7 +11218,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 598
+      "priority": 426
     },
     {
       "version": "1.0",
@@ -9331,7 +11255,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 597
+      "priority": 425
     },
     {
       "version": "1.0",
@@ -9368,7 +11292,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 596
+      "priority": 424
     },
     {
       "version": "1.0",
@@ -9405,7 +11329,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 595
+      "priority": 423
     },
     {
       "version": "1.0",
@@ -9442,7 +11366,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 594
+      "priority": 422
     },
     {
       "version": "1.0",
@@ -9479,7 +11403,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 593
+      "priority": 421
     },
     {
       "version": "1.0",
@@ -9516,7 +11440,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 592
+      "priority": 420
     },
     {
       "version": "1.0",
@@ -9553,7 +11477,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 591
+      "priority": 419
     },
     {
       "version": "1.0",
@@ -9590,7 +11514,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 590
+      "priority": 418
     },
     {
       "version": "1.0",
@@ -9627,7 +11551,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 589
+      "priority": 417
     },
     {
       "version": "1.0",
@@ -9664,7 +11588,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 588
+      "priority": 416
     },
     {
       "version": "1.0",
@@ -9701,7 +11625,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 587
+      "priority": 415
     },
     {
       "version": "1.0",
@@ -9738,7 +11662,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 586
+      "priority": 414
     },
     {
       "version": "1.0",
@@ -9775,7 +11699,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 585
+      "priority": 413
     },
     {
       "version": "1.0",
@@ -9812,7 +11736,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 584
+      "priority": 412
     },
     {
       "version": "1.0",
@@ -9849,7 +11773,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 583
+      "priority": 411
     },
     {
       "version": "1.0",
@@ -9886,7 +11810,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 582
+      "priority": 410
     },
     {
       "version": "1.0",
@@ -9923,7 +11847,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 581
+      "priority": 409
     },
     {
       "version": "1.0",
@@ -9960,7 +11884,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 580
+      "priority": 408
     },
     {
       "version": "1.0",
@@ -9997,7 +11921,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 579
+      "priority": 407
     },
     {
       "version": "1.0",
@@ -10034,7 +11958,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 578
+      "priority": 406
     },
     {
       "version": "1.0",
@@ -10071,7 +11995,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 577
+      "priority": 405
     },
     {
       "version": "1.0",
@@ -10108,7 +12032,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 576
+      "priority": 404
     },
     {
       "version": "1.0",
@@ -10145,7 +12069,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 575
+      "priority": 403
     },
     {
       "version": "1.0",
@@ -10182,7 +12106,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 574
+      "priority": 402
     },
     {
       "version": "1.0",
@@ -10219,7 +12143,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 573
+      "priority": 401
     },
     {
       "version": "1.0",
@@ -10256,7 +12180,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 572
+      "priority": 400
     },
     {
       "version": "1.0",
@@ -10293,7 +12217,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 571
+      "priority": 399
     },
     {
       "version": "1.0",
@@ -10330,7 +12254,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 570
+      "priority": 398
     },
     {
       "version": "1.0",
@@ -10367,7 +12291,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 569
+      "priority": 397
     },
     {
       "version": "1.0",
@@ -10404,7 +12328,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 568
+      "priority": 396
     },
     {
       "version": "1.0",
@@ -10441,7 +12365,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 567
+      "priority": 395
     },
     {
       "version": "1.0",
@@ -10478,7 +12402,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 566
+      "priority": 394
     },
     {
       "version": "1.0",
@@ -10515,7 +12439,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 565
+      "priority": 393
     },
     {
       "version": "1.0",
@@ -10552,7 +12476,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 564
+      "priority": 392
     },
     {
       "version": "1.0",
@@ -10589,7 +12513,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 563
+      "priority": 391
     },
     {
       "version": "1.0",
@@ -10626,7 +12550,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 562
+      "priority": 390
     },
     {
       "version": "1.0",
@@ -10663,7 +12587,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 561
+      "priority": 389
     },
     {
       "version": "1.0",
@@ -10700,7 +12624,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 560
+      "priority": 388
     },
     {
       "version": "1.0",
@@ -10737,7 +12661,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 559
+      "priority": 387
     },
     {
       "version": "1.0",
@@ -10774,7 +12698,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 558
+      "priority": 386
     },
     {
       "version": "1.0",
@@ -10811,7 +12735,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 557
+      "priority": 385
     },
     {
       "version": "1.0",
@@ -10848,7 +12772,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 556
+      "priority": 384
     },
     {
       "version": "1.0",
@@ -10885,7 +12809,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 555
+      "priority": 383
     },
     {
       "version": "1.0",
@@ -10922,7 +12846,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 554
+      "priority": 382
     },
     {
       "version": "1.0",
@@ -10959,7 +12883,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 553
+      "priority": 381
     },
     {
       "version": "1.0",
@@ -10996,7 +12920,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 552
+      "priority": 380
     },
     {
       "version": "1.0",
@@ -11033,7 +12957,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 551
+      "priority": 379
     },
     {
       "version": "1.0",
@@ -11070,7 +12994,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 550
+      "priority": 378
     },
     {
       "version": "1.0",
@@ -11107,7 +13031,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 549
+      "priority": 377
     },
     {
       "version": "1.0",
@@ -11144,7 +13068,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 548
+      "priority": 376
     },
     {
       "version": "1.0",
@@ -11181,7 +13105,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 547
+      "priority": 375
     },
     {
       "version": "1.0",
@@ -11218,7 +13142,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 546
+      "priority": 374
     },
     {
       "version": "1.0",
@@ -11255,7 +13179,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 545
+      "priority": 373
     },
     {
       "version": "1.0",
@@ -11292,7 +13216,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 544
+      "priority": 372
     },
     {
       "version": "1.0",
@@ -11329,7 +13253,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 543
+      "priority": 371
     },
     {
       "version": "1.0",
@@ -11366,7 +13290,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 542
+      "priority": 370
     },
     {
       "version": "1.0",
@@ -11403,7 +13327,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 541
+      "priority": 369
     },
     {
       "version": "1.0",
@@ -11440,7 +13364,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 540
+      "priority": 368
     },
     {
       "version": "1.0",
@@ -11477,7 +13401,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 539
+      "priority": 367
     },
     {
       "version": "1.0",
@@ -11514,7 +13438,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 538
+      "priority": 366
     },
     {
       "version": "1.0",
@@ -11551,7 +13475,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 537
+      "priority": 365
     },
     {
       "version": "1.0",
@@ -11588,7 +13512,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 536
+      "priority": 364
     },
     {
       "version": "1.0",
@@ -11625,7 +13549,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 535
+      "priority": 363
     },
     {
       "version": "1.0",
@@ -11662,7 +13586,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 534
+      "priority": 362
     },
     {
       "version": "1.0",
@@ -11699,7 +13623,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 533
+      "priority": 361
     },
     {
       "version": "1.0",
@@ -11736,7 +13660,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 532
+      "priority": 360
     },
     {
       "version": "1.0",
@@ -11773,7 +13697,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 531
+      "priority": 359
     },
     {
       "version": "1.0",
@@ -11810,7 +13734,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 530
+      "priority": 358
     },
     {
       "version": "1.0",
@@ -11847,7 +13771,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 529
+      "priority": 357
     },
     {
       "version": "1.0",
@@ -11884,7 +13808,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 528
+      "priority": 356
     },
     {
       "version": "1.0",
@@ -11921,7 +13845,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 527
+      "priority": 355
     },
     {
       "version": "1.0",
@@ -11958,7 +13882,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 526
+      "priority": 354
     },
     {
       "version": "1.0",
@@ -11995,7 +13919,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 525
+      "priority": 353
     },
     {
       "version": "1.0",
@@ -12032,7 +13956,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 524
+      "priority": 352
     },
     {
       "version": "1.0",
@@ -12069,7 +13993,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 523
+      "priority": 351
     },
     {
       "version": "1.0",
@@ -12106,7 +14030,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 522
+      "priority": 350
     },
     {
       "version": "1.0",
@@ -12143,7 +14067,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 521
+      "priority": 349
     },
     {
       "version": "1.0",
@@ -12180,7 +14104,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 520
+      "priority": 348
     },
     {
       "version": "1.0",
@@ -12217,7 +14141,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 519
+      "priority": 347
     },
     {
       "version": "1.0",
@@ -12254,7 +14178,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 518
+      "priority": 346
     },
     {
       "version": "1.0",
@@ -12291,7 +14215,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 517
+      "priority": 345
     },
     {
       "version": "1.0",
@@ -12328,7 +14252,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 516
+      "priority": 344
     },
     {
       "version": "1.0",
@@ -12365,7 +14289,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 515
+      "priority": 343
     },
     {
       "version": "1.0",
@@ -12402,7 +14326,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 514
+      "priority": 342
     },
     {
       "version": "1.0",
@@ -12439,7 +14363,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 513
+      "priority": 341
     },
     {
       "version": "1.0",
@@ -12476,7 +14400,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 512
+      "priority": 340
     },
     {
       "version": "1.0",
@@ -12513,7 +14437,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 511
+      "priority": 339
     },
     {
       "version": "1.0",
@@ -12550,7 +14474,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 510
+      "priority": 338
     },
     {
       "version": "1.0",
@@ -12587,7 +14511,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 509
+      "priority": 337
     },
     {
       "version": "1.0",
@@ -12624,7 +14548,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 508
+      "priority": 336
     },
     {
       "version": "1.0",
@@ -12661,7 +14585,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 507
+      "priority": 335
     },
     {
       "version": "1.0",
@@ -12698,7 +14622,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 506
+      "priority": 334
     },
     {
       "version": "1.0",
@@ -12735,7 +14659,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 505
+      "priority": 333
     },
     {
       "version": "1.0",
@@ -12772,7 +14696,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 504
+      "priority": 332
     },
     {
       "version": "1.0",
@@ -12809,7 +14733,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 503
+      "priority": 331
     },
     {
       "version": "1.0",
@@ -12846,7 +14770,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 502
+      "priority": 330
     },
     {
       "version": "1.0",
@@ -12883,7 +14807,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 501
+      "priority": 329
     },
     {
       "version": "1.0",
@@ -12920,7 +14844,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 500
+      "priority": 328
     },
     {
       "version": "1.0",
@@ -12957,7 +14881,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 499
+      "priority": 327
     },
     {
       "version": "1.0",
@@ -12994,7 +14918,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 498
+      "priority": 326
     },
     {
       "version": "1.0",
@@ -13031,7 +14955,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 497
+      "priority": 325
     },
     {
       "version": "1.0",
@@ -13068,7 +14992,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 496
+      "priority": 324
     },
     {
       "version": "1.0",
@@ -13105,7 +15029,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 495
+      "priority": 323
     },
     {
       "version": "1.0",
@@ -13142,7 +15066,7 @@
         "wq": 0,
         "dws": 1
       },
-      "priority": 494
+      "priority": 322
     }
   ]
 }

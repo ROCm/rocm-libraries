@@ -224,6 +224,9 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
             * e
         )
     rows = fr if loop in (0, 6) else 1
+    layout = (
+        CF if loop == 6 else layout
+    )  # small-C rows stage channels-last into the CF tiles
     tr = layout == TR
     kv = 4 // e if layout == CL else 1
     win = (bq - 1) * sw + (s - 1) * dw + 1
@@ -275,6 +278,13 @@ def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
             )
         return max(du(ag, waves), du(bg, waves))
     threads = waves * wave(c["atom"])
+    if c["loop"] == 6 and c["layout"] == CL:  # K3SmallClTiles: x one element a unit
+        kv = 4 // e
+        win = (c["bq"] - 1) * c["sw"] + (c["s"] - 1) * c["dw"] + 1
+        ph = du(win, vec) * vec // c["sw"]
+        au = (c["bq"] // kv) * (c["bk"] // vec)
+        bu = c["fr"] * c["sw"] * ph * c["bc"]
+        return max(du(au, threads), du(bu, threads))
     cf = c["layout"] == CF
     kv = 4 // e if c["layout"] == CL else 1
     rows = c["fr"] if c["loop"] in (0, 6) else 1
@@ -337,7 +347,9 @@ def valid(c, dtype, fma16=False):
                 and c["bc"] <= 16
                 and c["bq"] % ka == 0
             )
-            ok = ok and c["layout"] == CF
+            ok = ok and c["layout"] in (CF, CL)
+            # The CF tiles' geometry.
+            ok = ok and c["bq"] % c["vec"] == 0 and c["vec"] % c["sw"] == 0
         else:
             ok = (
                 ok
@@ -734,6 +746,9 @@ SMALLC_ATOMS = [
     ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0),
 ]
 SMALLC_TILES = [(64, 4, 4, 64), (32, 4, 2, 64), (64, 8, 4, 32), (64, 16, 4, 32)]
+# Channels-last stems also take longer position steps: EfficientNet-v2 stems (c3 k24 3x3 s2,
+# 480^2 and 384^2) ran 13-22% faster at 128 or 256 positions a step on gfx942 / gfx950.
+SMALLC_TILES_CL = [(32, 4, 2, 128), (64, 4, 4, 128), (64, 4, 4, 256)]
 SMALLC_FILTERS = [
     ("7x7s2", 7, 2, 7),
     ("7x7s2r1", 7, 2, 1),
@@ -748,14 +763,27 @@ def build_smallc():
         for dtype, atom in atoms.items():
             vec = 16 // eb(dtype)
             for tag, s, sw, fr in SMALLC_FILTERS:
-                for bk, bc, wk, bq in SMALLC_TILES:
-                    c = C(
-                        atom, 6, CF, (bk, bc, wk, 1, bq), s, sw, 1, fr, vec, xcd, 0, 0
-                    )
-                    if valid(c, dtype):
-                        CATALOG[dtype].extend(with_bpu(c))
-                    else:
-                        dropped += 1
+                for lay in (CF, CL):
+                    tiles = SMALLC_TILES + (SMALLC_TILES_CL if lay == CL else [])
+                    for bk, bc, wk, bq in tiles:
+                        c = C(
+                            atom,
+                            6,
+                            lay,
+                            (bk, bc, wk, 1, bq),
+                            s,
+                            sw,
+                            1,
+                            fr,
+                            vec,
+                            xcd,
+                            0,
+                            0,
+                        )
+                        if valid(c, dtype):
+                            CATALOG[dtype].extend(with_bpu(c))
+                        else:
+                            dropped += 1
     return dropped
 
 
@@ -808,6 +836,10 @@ def build_fma906():
             # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
             tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
             tiles = tiles + (FMA906_SMALLC if tag in SMALLC906 else [])
+            # Channels-last 7x7 stride-2 stems too: elsewhere the small-C rows serve them, on
+            # gfx906 only these FMA rows can.
+            if tag == "7x7s2r1" and CL not in lays:
+                lays = lays + [CL]
             cands = fma_cands(tiles, [CF, CL], lays, s, sw, dw, fr, loop, vec)
             if tag in ROWS906:
                 cands += fma_cands(FMA906_ROWS, [CF, CL], lays, s, sw, dw, fr, 0, vec)
