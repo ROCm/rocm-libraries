@@ -617,7 +617,10 @@ if(ROCKE_INSTALL_TESTS)
     # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
     # only entries whose compiler checks must run append the requirement list.
     # Contract: tests/test_engine_linkage.py::
-    # test_installed_ctest_entries_get_scoped_environment_contracts.
+    # test_installed_ctest_entries_get_scoped_environment_contracts, and from
+    # inside the installed MLA entry,
+    # library/tests/test_installed_ctest_environment.py. The skip-or-fail rule
+    # the requirement switches on lives in library/tests/_compiler_tools.py.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set(_rocke_compiler_tool_environment)\n"
            "set(_rocke_compiler_requirement_environment)\n"
@@ -1034,8 +1037,11 @@ if(ROCKE_INSTALL_TESTS)
     # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
     # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
     # through comgr and read the code object with llvm-objdump, so the entry also
-    # takes the compiler environment; with it they fail rather than skip. Same
-    # PYTHONPATH contract as the conv entry above; the staged library tree carries
+    # takes the compiler tool and requirement environments; with them a missing
+    # tool fails rather than skips (a too-old comgr or a rejected IR flavor
+    # still skips). The entry also runs the check that only it carries the
+    # requirement list. Same PYTHONPATH contract as the conv entry above; the
+    # staged library tree carries
     # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
     # tests/golden/mla_prefill_gfx942_ir_sha256.json.
     set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
@@ -1044,7 +1050,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_mla_prefill_gfx942_golden.py"
         "tests/library/tests/test_mla_reference.py"
         "tests/library/tests/test_mla_benchmark_shapes.py"
-        "tests/library/tests/test_read_ahead.py")
+        "tests/library/tests/test_read_ahead.py"
+        "tests/library/tests/test_installed_ctest_environment.py")
     set(_ROCKE_LIBRARY_MLA_TESTS "")
     foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_MLA_TESTS

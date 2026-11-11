@@ -306,9 +306,10 @@ class TestNumSeqsCap(unittest.TestCase):
             supports_mla_prefill,
         )
 
-        default = MlaPrefillSpec(num_heads=128)
+        layout = dict(heads_per_wg=2, q_tiles_per_wg=2, num_warps=4, block_q=32)
+        default = MlaPrefillSpec(num_heads=128, **layout)
         longer = MlaPrefillSpec(
-            num_heads=128, binary_search_iters=MLA_BINARY_SEARCH_ITERS + 4
+            num_heads=128, binary_search_iters=MLA_BINARY_SEARCH_ITERS + 4, **layout
         )
         self.assertEqual(default.fwd_kernel_name(), longer.fwd_kernel_name())
         self.assertTrue(supports_mla_prefill(default, arch="gfx942")[0])
@@ -457,8 +458,7 @@ class TestDispatchResult(unittest.TestCase):
     def test_layout_selection(self):
         # Dispatch makes one layout choice: two heads x two 16-query tiles per
         # workgroup, one wave per (head, tile), when the head count is even,
-        # else the single-head spec defaults. Every other lever stays at its
-        # default.
+        # else one head x four tiles. Every other lever stays at its default.
         for heads in (128, 64, 6):
             with self.subTest(heads=heads):
                 spec = dispatch_mla(_req(num_heads=heads)).spec
@@ -468,10 +468,14 @@ class TestDispatchResult(unittest.TestCase):
                 self.assertEqual(spec.block_q, 32)
                 self.assertEqual(spec.block_k, 16)
                 self.assertEqual(spec.r_kv_tile, 32)
-        fallback = dispatch_mla(_req(num_heads=5)).spec
-        self.assertEqual(fallback.heads_per_wg, 1)
-        self.assertEqual(fallback.q_tiles_per_wg, 1)
-        self.assertEqual(fallback.num_xcds, 0)
+        odd = dispatch_mla(_req(num_heads=5)).spec
+        self.assertEqual(odd.heads_per_wg, 1)
+        self.assertEqual(odd.q_tiles_per_wg, 4)
+        self.assertEqual(odd.num_warps, 4)
+        self.assertEqual(odd.block_q, 64)
+        self.assertFalse(odd.agpr_acc)
+        # XCD-aware like the even layouts, from the CU count _req pins.
+        self.assertEqual(odd.num_xcds, 6)
 
     def test_admission_runs_once_per_support_query(self):
         from unittest import mock
@@ -889,16 +893,23 @@ class TestSweepCoverage(unittest.TestCase):
                     ).spec.agpr_acc
                 )
 
-    def test_odd_head_count_has_no_opt_ins(self):
+    def test_odd_head_count_pins_keep_one_head_per_workgroup(self):
+        # The rule never picks agpr_acc for an odd head count, so only the
+        # pinned agpr_acc layout reaches it; row16 repeats the production spec
+        # and the sweep skips it.
         with _flavor("llvm22"):
-            self.assertEqual(len(mla_sweep_space(_req(num_heads=5))), 1)
-            for name in (_AGPR_NAME, _ROW16_NAME):
+            specs = mla_sweep_space(_req(num_heads=5))
+            self.assertEqual(
+                sorted((s.heads_per_wg, s.q_tiles_per_wg, s.agpr_acc) for s in specs),
+                [(1, 4, False), (1, 4, True)],
+            )
+            for name, agpr in ((_AGPR_NAME, True), (_ROW16_NAME, False)):
                 with self.subTest(name=name):
-                    ok, why = MLA_REGISTRY.get(name).admits(
-                        self._pin(name, num_heads=5)
+                    spec = dispatch_mla(self._pin(name, num_heads=5)).spec
+                    self.assertEqual(
+                        (spec.heads_per_wg, spec.q_tiles_per_wg, spec.agpr_acc),
+                        (1, 4, agpr),
                     )
-                    self.assertFalse(ok)
-                    self.assertIn("single-head", why)
 
     def test_opt_ins_build(self):
         with _flavor("llvm22"):
@@ -1148,7 +1159,8 @@ class TestAbsorbedQueryRequest(unittest.TestCase):
         absorbed = dispatch_mla(_req(absorbed_query=True)).spec
         self.assertEqual(absorbed, dataclasses.replace(fused, absorbed_query=True))
 
-    def test_single_head_layout_is_refused(self):
+    def test_odd_head_count_is_refused(self):
+        # Not yet verified on device at one head x four tiles.
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_heads=5, absorbed_query=True))
         self.assertFalse(ok)
         self.assertIn("absorbed_query", why)

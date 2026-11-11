@@ -10,9 +10,9 @@ Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
 ``rocke.core.ir_golden`` comparator, so a newly added flavor fails here until
 the fixture is re-blessed.
 
-Covers both entry points in the family and both shipped head counts:
+Covers both entry points in the family, both shipped even head counts and one
+odd head count:
 
-  * ``fwd_*``      -- the chunked forward kernel (online softmax, LSE, mask).
   * ``probe_*``    -- the score-tile probe, which the on-device verify driver
     compares against the numpy oracle. It is a shipped entry point, so its IR
     is pinned too; drift there would silently weaken the parity harness.
@@ -24,6 +24,8 @@ Covers both entry points in the family and both shipped head counts:
   * ``fwd_h128_agpr`` -- the agpr_acc layout built directly. Admission refuses
     it on llvm20, which the golden records as an expected failure for that
     flavor rather than a case.
+  * ``guard_*`` -- unshipped packings pinned as a drift guard for the shared
+    emitters (see :func:`_cases`).
   * ``*_aq`` -- the unfused ``absorbed_query`` kernel, which a request reaches
     through ``MLARequest.absorbed_query``: the dispatched default layout and
     the agpr_acc layout (the latter refused on llvm20 like ``fwd_h128_agpr``).
@@ -65,20 +67,29 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """``cid -> zero-arg builder``.
 
-    Only ``num_heads`` varies. The codegen levers (``block_q``, ``block_k``,
-    ``r_kv_tile``, ``num_warps``) are deliberately left at their defaults: this
-    fixture pins the *shipped* IR, and sweeping levers here would bless
-    configurations nothing has measured or run on device.
+    The forward cases take the spec dispatch ships (``dispatched``) or, for
+    the agpr_acc layout, build it directly; the probe uses the spec defaults
+    at ``block_q=16``. Codegen levers are deliberately not swept: the fixture
+    pins the *shipped* IR. The ``guard_*`` cases are the one exception: three
+    packings dispatch does not ship (eight heads x one tile, two heads x one
+    tile, one head x two tiles), pinned only so an edit to the shared emitters
+    cannot change them unseen while the shipped cases are being re-blessed.
+    They are not a claim that those layouts are measured.
     """
     from kernels.mla.mla_prefill_gfx942 import (
         MlaPrefillSpec,
         build_mla_prefill_fwd,
         build_mla_prefill_score_probe,
+        fwd_layout,
     )
 
-    def fwd(num_heads):
+    def layout(num_heads, heads_per_wg, q_tiles_per_wg):
         return lambda: build_mla_prefill_fwd(
-            MlaPrefillSpec(num_heads=num_heads), arch=_ARCH
+            MlaPrefillSpec(
+                num_heads=num_heads,
+                **fwd_layout(heads_per_wg=heads_per_wg, q_tiles_per_wg=q_tiles_per_wg),
+            ),
+            arch=_ARCH,
         )
 
     def agpr(num_heads, absorbed_query=False):
@@ -128,16 +139,19 @@ def _cases():
 
     return {
         # 128 heads is the DeepSeek-V3 shape; 64 is the smaller supported count.
-        "mla_prefill_gfx942/fwd_h128": fwd(128),
-        "mla_prefill_gfx942/fwd_h64": fwd(64),
         "mla_prefill_gfx942/probe_h128": probe(128),
         "mla_prefill_gfx942/probe_h64": probe(64),
         "mla_prefill_gfx942/dispatch_fwd_h128": dispatched(128),
         "mla_prefill_gfx942/dispatch_fwd_h64": dispatched(64),
+        # An odd head count: one head x four query tiles per workgroup.
+        "mla_prefill_gfx942/dispatch_fwd_h5": dispatched(5),
         # 4096 query rows per sequence: the agpr_acc layout at llvm22 (llvm20
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
         "mla_prefill_gfx942/fwd_h128_agpr": agpr(128),
+        "mla_prefill_gfx942/guard_fwd_h128_hpw8": layout(128, 8, 1),
+        "mla_prefill_gfx942/guard_fwd_h64_hpw2_qpw1": layout(64, 2, 1),
+        "mla_prefill_gfx942/guard_fwd_h5_qpw2": layout(5, 1, 2),
         # The absorbed_query kernel: rule-picked default layout, and agpr_acc.
         "mla_prefill_gfx942/dispatch_fwd_h128_aq": dispatched(128, absorbed_query=True),
         "mla_prefill_gfx942/fwd_h128_agpr_aq": agpr(128, absorbed_query=True),
