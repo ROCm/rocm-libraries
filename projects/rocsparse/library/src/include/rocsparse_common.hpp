@@ -51,11 +51,24 @@
 // flat stores), so waiting for all counters to reach zero completes them. Newer architectures count
 // stores separately and must not be added here without changing the waits. See the GFX942 memory
 // model in the LLVM AMDGPUUsage documentation.
-// This has to stay a macro used directly as a condition: only there does clang drop the branch for
-// other processors even at -O0, and that branch contains s_waitcnt, which gfx12 cannot compile.
+//
+// Native targets use the preprocessor, so the macro is 0 or 1 and older compilers keep working.
+// SPIR-V is compiled once for all processors and defers the choice to finalization with
+// __builtin_amdgcn_processor_is. Use the macro only as an if condition: the finalizer then removes
+// the branch for other processors, and that branch may contain s_waitcnt, which gfx1250 and later
+// cannot compile.
+#if defined(__SPIRV__) && defined(__HIP_DEVICE_COMPILE__)
+#if !__has_builtin(__builtin_amdgcn_processor_is)
+#error "SPIR-V builds of rocSPARSE need a compiler with __builtin_amdgcn_processor_is"
+#endif
 #define ROCSPARSE_HAS_NONCOHERENT_XCD_L2                                                \
     (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
      || __builtin_amdgcn_processor_is("gfx9-4-generic"))
+#elif defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 1
+#else
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 0
+#endif
 
 // clang-format off
 // ELL indexing macros

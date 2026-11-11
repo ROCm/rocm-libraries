@@ -26,6 +26,15 @@
 
 #include "rocsparse_common.hpp"
 
+// gfx12 and gfx13 order the stores before releasing other workgroups with __threadfence; from
+// gfx1250 on there is no s_waitcnt. SPIR-V uses __threadfence on every processor, so it stays
+// correct on processors newer than this list.
+#if defined(__GFX12__) || defined(__GFX13__) || defined(__SPIRV__)
+#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 1
+#else
+#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 0
+#endif
+
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE,
@@ -592,21 +601,12 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-                if(__builtin_amdgcn_processor_is("gfx1200")
-                   || __builtin_amdgcn_processor_is("gfx1201")
-                   || __builtin_amdgcn_processor_is("gfx12-generic")
-                   || __builtin_amdgcn_processor_is("gfx1250")
-                   || __builtin_amdgcn_processor_is("gfx1250-strict")
-                   || __builtin_amdgcn_processor_is("gfx1251")
-                   || __builtin_amdgcn_processor_is("gfx12-5-generic"))
-                {
-                    __threadfence();
-                }
-                else
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                    __builtin_amdgcn_s_waitcnt(0);
-                }
+#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
+                __threadfence();
+#else
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                __builtin_amdgcn_s_waitcnt(0);
+#endif
 
                 // Release other workgroups
                 atomicXor(&wg_flags[first_wg_in_row], 1U);
@@ -1321,21 +1321,12 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-                if(__builtin_amdgcn_processor_is("gfx1200")
-                   || __builtin_amdgcn_processor_is("gfx1201")
-                   || __builtin_amdgcn_processor_is("gfx12-generic")
-                   || __builtin_amdgcn_processor_is("gfx1250")
-                   || __builtin_amdgcn_processor_is("gfx1250-strict")
-                   || __builtin_amdgcn_processor_is("gfx1251")
-                   || __builtin_amdgcn_processor_is("gfx12-5-generic"))
-                {
-                    __threadfence();
-                }
-                else
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                    __builtin_amdgcn_s_waitcnt(0);
-                }
+#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
+                __threadfence();
+#else
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                __builtin_amdgcn_s_waitcnt(0);
+#endif
 
                 // Release other workgroups
                 atomicXor(&wg_flags[first_wg_in_row], 1U);

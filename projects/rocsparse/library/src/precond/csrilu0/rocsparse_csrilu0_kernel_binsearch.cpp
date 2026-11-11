@@ -75,9 +75,15 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value. With non-coherent XCD L2s it is read after the spin loop.
-            T local_val = ROCSPARSE_HAS_NONCOHERENT_XCD_L2
-                              ? static_cast<T>(0)
-                              : rocsparse::load_done_row_data(&csr_val[j]);
+            T local_val;
+            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+            {
+                local_val = static_cast<T>(0);
+            }
+            else
+            {
+                local_val = rocsparse::load_done_row_data(&csr_val[j]);
+            }
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
