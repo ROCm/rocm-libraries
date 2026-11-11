@@ -57,9 +57,13 @@ Do all mutating work that needs a checkout in a dedicated scratch worktree so th
 
 The product is a restructure plan and a stack of branches, delivered quickly. It is not a code review.
 - Analysis agents (Survey, Commit readers, Inventory, Planner) decide *structure*: what belongs together, what depends on what, in what order. They do not judge correctness, hunt bugs, assess style, or list reviewer risks beyond what affects grouping, order, or whether a step will build.
-- **Analysis agents never execute repository code.** No tests, no builds, no repo scripts, no importing repo modules, no copying the tree elsewhere to run it. They use read-only git/gh commands, the bundled `scripts/`, and their own helpers that only parse git output. A claim that needs running code ("this test fails", "this builds") is marked *unverified* and left to Phase 8.
+- **Analysis agents never execute repository code.** No tests, no builds, no repo scripts, no importing repo modules, no copying the tree elsewhere to run it. They use read-only git/gh commands, reads of the files in `$WT` (Searching), the bundled `scripts/`, and their own helpers that only parse git output. A claim that needs running code ("this test fails", "this builds") is marked *unverified* and left to Phase 8.
 - The only agents that run repository-configured code are the Updater (the pre-commit hooks, 0e) and the Builder (builds, tests, hooks in Phase 8, only if the user chose tests). The Survey may run `pre-commit --version` and read-only git and gh commands, and may update remote-tracking refs by fetching; it changes nothing else.
 - In a partial clone (`blob:none`) read-only git commands may fetch blobs lazily and be slow (a `git patch-id` scan took minutes); that is expected, not a failure.
+- **Searching.** Never run `git grep <rev>` or `git log -S` without a range on a whole directory: inflating historical blobs costs minutes, and missing blobs are fetched one at a time. While nothing writes to `$WT` (Phases 2–5) and its tree equals L (`git -C "$WT" rev-parse HEAD^{tree}` equals `L^{tree}`, and `git -C "$WT" status --porcelain --untracked-files=no` is empty):
+  - Tip: `git -C "$WT" grep -n -E 'pat' -- <paths>`, or `git -C "$WT" ls-files -z -- <paths> | xargs -0 rg -n 'pat'`. Do not use plain `rg` on `$WT`: it searches untracked build output and skips hidden tracked files.
+  - Base B: tip results are valid at B except for paths in `git diff --name-only --no-renames B L`; read those with `git diff --no-renames B L -- <paths>` or `git show B:<path>`.
+  - Other revisions: `git grep <rev> -- <paths that commit changed>`; for history, `git log -S'x' B..L -- <paths>`.
 - Read hand-written diffs, but treat generated and bulk files by `--stat` or file lists only. Prefer commit messages, `--numstat` and `git blame` over reading every line.
 - An analysis agent that finds itself at ~15 minutes writes what it has and returns.
 
