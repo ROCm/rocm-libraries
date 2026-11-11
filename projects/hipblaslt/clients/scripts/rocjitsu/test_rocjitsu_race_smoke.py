@@ -69,9 +69,10 @@ class RunWithTimeoutTest(unittest.TestCase):
 
 
 def _status(proc_dir):
+    # The process can exit between the existence check and this read.
     try:
         return (proc_dir / "status").read_text()
-    except FileNotFoundError:
+    except OSError:
         return "State:\tZ"
 
 
