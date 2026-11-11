@@ -12,6 +12,16 @@
 #
 # A test that is in library/tests but in no list here does not run in CI.
 
+# Oracle-free uniform-probability launches of the shipped dense kernels. Only
+# the GPU module runs here; its CPU contracts run in the attention CPU lane.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_oracle_free_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 300)\n")
+
 # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
 # The test environment installs the platform wheel. PYTHONPATH puts the staged
 # library tree first so kernels.*, builders.*, dispatch.*, and benchmarks.* do
@@ -186,7 +196,8 @@ endif()
 # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
 # bound against the compiled code object, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
-# that pins the shared dense spec's C++ mirror to the Python, and the
+# that pins the shared dense spec's C++ mirror to the Python, the
+# oracle-free uniform-probability checker and subject contracts, and the
 # backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
@@ -218,7 +229,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_sdpa_padding_mask.py"
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
-    "tests/library/tests/test_bwd_memo_bound.py")
+    "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/oracle_free/test_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
