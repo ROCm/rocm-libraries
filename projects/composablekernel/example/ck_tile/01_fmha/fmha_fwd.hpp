@@ -621,6 +621,10 @@ struct fmha_batch_prefill_args
     //   kv_page_indices: block_table [batch, max_blocks_per_seq] (2D)
     //   batch_stride_block_table: row stride for block_table
     //   seqlen_k_ptr: per-batch seqlen_k [batch]
+    // Every entry for a page that holds an attended key must be a valid page id in
+    // [0, num_total_pages); the kernels do not check the table. The gfx125x page tile reads no
+    // other entry (pages past the sequence, outside a sliding window, between the sink tokens and
+    // the window).
     int32_t num_total_pages;          // total physical pages in KV cache (SGLang/vLLM)
     ck_tile::index_t page_block_size; // tokens per page (SGLang/vLLM)
     ck_tile::BlockAttentionKVCacheMemoryLayoutEnum
