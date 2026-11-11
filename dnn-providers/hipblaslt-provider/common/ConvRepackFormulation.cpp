@@ -957,13 +957,16 @@ struct ReductionAxis
 /// images and chunks are parallel work. Each call batches the longest of the three axes and the
 /// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
 /// not qualify or the partials do not fit @p maxWorkspaceBytes.
+/// The shortest chunk of a split reduction.
+constexpr int64_t SPLIT_MIN_CHUNK = 1024;
+
 /// The chunks a split reduction cuts a reduction of @p k into: enough that @p tiles output tiles
-/// per chunk reach SPLIT_TARGET_TILES, each chunk at least CHUNK_PIXELS long and the count
+/// per chunk reach SPLIT_TARGET_TILES, each chunk at least SPLIT_MIN_CHUNK long and the count
 /// dividing k; 1 when no such count above 1 exists.
 int64_t splitChunksFor(int64_t k, int64_t tiles)
 {
     const int64_t wanted = (SPLIT_TARGET_TILES + tiles - 1) / std::max<int64_t>(tiles, 1);
-    for(int64_t chunks = std::min({wanted, MAX_CHUNKS, k / CHUNK_PIXELS}); chunks > 1; --chunks)
+    for(int64_t chunks = std::min({wanted, MAX_CHUNKS, k / SPLIT_MIN_CHUNK}); chunks > 1; --chunks)
     {
         if(k % chunks == 0)
         {

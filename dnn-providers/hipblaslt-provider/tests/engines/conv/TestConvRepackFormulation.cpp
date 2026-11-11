@@ -294,8 +294,9 @@ TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
 TEST(TestConvRepackFormulation, SplitReductionFillsTheGpuWithFp32Partials)
 {
     // A 1x1 channels-last 320 -> 320 backward weights over 8 x 128 x 128 positions: one GEMM of
-    // 9 output tiles behind a 131072 reduction. Split, it is 32 chunks of 4096 (32 x 9 tiles
-    // toward SPLIT_TARGET_TILES), fp32 partials summed into w; by default, the one GEMM.
+    // 9 output tiles behind a 131072 reduction. Split, it is 32 chunks of 4096 (the largest count
+    // up to ceil(512 / 9) = 57 that divides k), fp32 partials summed into w; by default, the one
+    // GEMM.
     ConvGemmShape shape = channelsLast({});
     shape.n = 8;
     shape.c = shape.k = 320;
