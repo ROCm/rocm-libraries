@@ -62,4 +62,27 @@ Tests:
   initialization: hpl
   gpu_arch: '950'
 
+# rocRoller-off build only. The object (hipblaslt_ext) API selects block-scaled
+# GEMMs with the same walk as the C API, so this problem resolves to rocRoller's
+# pick among the checked-in RR_GEMM_* kernels, runs it, and gets the right
+# answer. Covers both the create-time and setProblem forms of the object API.
+- name: rocroller_ext_block_scaled
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [256]
+  N: [256]
+  K: [256]
+  transA: T
+  transB: N
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 ...
