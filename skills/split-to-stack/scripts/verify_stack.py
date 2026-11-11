@@ -40,25 +40,59 @@ from splitlib import (
 )
 
 
-def numstat(repo, base, sha):
+def diff_tree_all(repo, pairs, *opts):
+    """{sha: [output tokens]} of `git diff-tree <against> <sha>` for every (sha, against) pair, in one
+    `git diff-tree --stdin` process. Each commit's output starts with a `<sha>` token.
+    """
+    order = [s for s, _ in pairs]
+    res = {s: [] for s in order}
     out = git(
         repo,
-        "diff",
-        "--numstat",
-        "-z",
+        "diff-tree",
+        "--stdin",
+        "-r",
         "--no-renames",
-        "-l0",
-        "--no-relative",
-        base,
-        sha,
+        "-z",
+        *opts,
+        input="".join("%s %s\n" % p for p in pairs).encode(),
     )
-    res = {}
+    cur, j = None, 0
     for tok in out.split(b"\0"):
         if not tok:
             continue
-        x, y, p = tok.decode("utf-8", "surrogateescape").split("\t", 2)
-        if x != "-":
-            res[dec(p.encode("utf-8", "surrogateescape"))] = (int(x), int(y))
+        t = tok.decode("utf-8", "surrogateescape")
+        if t in order[j:]:
+            j = order.index(t, j) + 1
+            cur = res[t]
+        elif cur is not None:
+            cur.append(t)
+    return res
+
+
+def numstats(repo, base, shas):
+    """{sha: {path: (plus, minus)}} of base..sha for text files, for every sha."""
+    res = {}
+    for s, toks in diff_tree_all(
+        repo, [(s, base) for s in shas], "--numstat", "-l0"
+    ).items():
+        res[s] = {}
+        for t in toks:
+            x, y, p = t.split("\t", 2)
+            if x != "-":
+                res[s][dec(p.encode("utf-8", "surrogateescape"))] = (int(x), int(y))
+    return res
+
+
+def raw_entries(repo, base, shas):
+    """{sha: {path: (mode, sha) or None}} for every path that differs between base and sha."""
+    res = {}
+    for s, toks in diff_tree_all(repo, [(s, base) for s in shas], "--raw").items():
+        res[s] = {}
+        for meta, path in zip(toks[0::2], toks[1::2]):
+            _, mode, _, sha, _ = meta.split(" ", 4)
+            res[s][dec(path.encode("utf-8", "surrogateescape"))] = (
+                None if mode == "000000" else (mode, sha)
+            )
     return res
 
 
@@ -131,33 +165,29 @@ def main():
     cat.prefetch(base, list(wpaths))
     cat.prefetch(tip, list(wpaths))
 
+    shas = [s["sha"] for s in stack]
+    changed_by = diff_tree_all(repo, list(zip(shas, [base] + shas[:-1])), "--name-only")
+    content = not a.no_content_check
+    ns_by = numstats(repo, base, shas) if content else {}
+    raw_by = raw_entries(repo, base, shas) if content and wpaths else {}
     prev_sha = base
     for i, s in enumerate(stack):
-        parents = git_text(repo, "rev-list", "--parents", "-n", "1", s["sha"]).split()[
-            1:
-        ]
+        obj = (cat.blob(s["sha"]) or b"").split(b"\n\n", 1)[0].decode().split("\n")
+        parents = [x[7:] for x in obj if x.startswith("parent ")]
         if parents != [prev_sha]:
             errs.append(
                 "%s (%s): parents %s, expected [%s]"
                 % (s["NN"], s["sha"][:10], [p[:10] for p in parents], prev_sha[:10])
             )
-        tree = git_text(repo, "rev-parse", s["sha"] + "^{tree}")
+        tree = ([x[5:] for x in obj if x.startswith("tree ")] or [""])[0]
         if tree != s["tree"]:
             errs.append("%s: recorded tree does not match commit" % s["NN"])
         if not git_ok(repo, "check-ref-format", "--branch", s["branch"]):
             errs.append("%s: invalid branch name %s" % (s["NN"], s["branch"]))
         if i < len(expected):
-            out = git(
-                repo,
-                "diff-tree",
-                "-r",
-                "--no-renames",
-                "--name-only",
-                "-z",
-                prev_sha,
-                s["sha"],
-            )
-            changed = {dec(x) for x in out.split(b"\0") if x}
+            changed = {
+                dec(x.encode("utf-8", "surrogateescape")) for x in changed_by[s["sha"]]
+            }
             extra = changed - expected[i]
             if extra:
                 errs.append(
@@ -170,7 +200,7 @@ def main():
                     % s["NN"]
                 )
             if not a.no_content_check and i < len(groups):
-                ns = numstat(repo, base, s["sha"])
+                ns = ns_by[s["sha"]]
                 bad = []
                 for p, hs in hpaths.items():
                     exp = (
@@ -187,15 +217,16 @@ def main():
                         "%s: text content does not match the plan's hunks for: %s"
                         % (s["NN"], "; ".join(bad[:6]))
                     )
-                cat.prefetch(s["sha"], list(wpaths))
                 bad = []
+                diffs = raw_by.get(s["sha"], {})
                 for p, r in wpaths.items():
                     reached = steps[r["id"]][0][0] <= i
                     if reached:
                         exp = None if r["status"] == "D" else cat.entry(tip, p)
                     else:
                         exp = cat.entry(base, p)
-                    if cat.entry(s["sha"], p) != exp:
+                    have = diffs[p] if p in diffs else cat.entry(base, p)
+                    if have != exp:
                         bad.append(p)
                 if bad:
                     errs.append(
