@@ -124,6 +124,15 @@ filters = [
 atol = 2e-2
 rtol = 1e-4
 
+# X4 fp16 (2D, C 2048, 3x3: accumulation length 18,432). MIOpen's fp16 output varies
+# from run to run at this length, by up to 0.17 against the GPU reference (one element
+# of 12,544 above the default 0.1 in some runs). Interim class until the dynamic fp16
+# tolerance replaces the fixed one (ALMIOPEN-3187).
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd*.x4_*_fp16_*"]
+atol = 0.2
+rtol = 0.1
+
 # MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
 # magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
 # tighter than bf16 precision allows at this magnitude.
@@ -166,6 +175,17 @@ reason  = "conv with mixed x, w and y layouts is accepted; MIOpen output disagre
 [[test_skips]]
 filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25type_*"]
 reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4); tracked in ALMIOPEN-3011 (MIOpen) and ALMIOPEN-3016 (provider)"
+
+[[test_skips]]
+filters = [
+    "*_ConvolutionFwdPointwise_Variant2.*_f25full_*",
+    "*_ConvolutionFwdPointwise_Variant2.*_f25scalar_*",
+]
+reason  = "conv -> bias -> relu with a full-size or scalar bias tensor is accepted and the bias is read as per-channel, so the output is wrong (22-41% of elements); tracked in ALMIOPEN-3009 (MIOpen) and ALMIOPEN-3014 (provider)"
+
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25first_*"]
+reason  = "conv -> bias -> relu with the bias as the add's first operand: MIOpen executes it, but neither the GPU nor the CPU reference implements that operand order with a half bias node, so the case is unverifiable; reference gap tracked in ALMIOPEN-3227"
 
 [[test_skips]]
 filters = [
