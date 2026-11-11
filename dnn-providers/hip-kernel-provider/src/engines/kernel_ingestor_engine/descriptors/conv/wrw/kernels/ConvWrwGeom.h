@@ -163,7 +163,8 @@ constexpr long long k3LdsBytes(int loop,
         const int bPasses = k3DivUp(k3DivUp(bc * nbv, 64), waves);
         return static_cast<long long>(ns) * (aPasses + bPasses) * waves * 64 * v * eb;
     }
-    const int rows = loop == 0 || loop == 6 ? fr : 1; // 6: small-C rows, loop 0's tiles
+    // 6: small-C rows, 7: packed rows, both on loop 0's tiles.
+    const int rows = loop == 0 || loop == 6 || loop == 7 ? fr : 1;
     // Small-C rows stage channels-last operands into the channels-first tiles.
     layout = loop == 6 ? 0 : layout;
     const bool tr = layout == 2;

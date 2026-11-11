@@ -86,6 +86,7 @@ inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
 inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
 inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persistent grid)
 inline constexpr int64_t LOOP_ROWS_SMALLC = 6; ///< output rows, (channel, tap) N axis (stems)
+inline constexpr int64_t LOOP_ROWS_PACKED = 7; ///< output rows, several narrow rows a step
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -171,7 +172,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
 int64_t ldsBytesOf(const WrwConfig& config, int elementBytes);
 
 /// The most load passes (loads per thread and step, each tracked by a bit of a 32-bit mask) of
-/// a config's dy and x tiles; @p wave is the atom's wave width (ignored for loop 3).
+/// a config's dy and x tiles; @p wave is the atom's wave width (ignored for loop 3). Loop 7's
+/// element units (K3PackTiles), tracked by no mask.
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave);
 
 /// The LDS a workgroup may use on @p gcnArchName: 160 KiB on gfx950, else 64 KiB.
@@ -284,6 +286,12 @@ DirectPlan directPlanFor(int64_t tiles,
  * wave, bq whole atom steps; channels-first, or channels-last (layout 1: any input channel count,
  * output channels per group whole vectors, bq whole vectors and vec whole width-stride phases,
  * as the channels-first tiles it stages into).
+ *
+ * Loop 7 (packed rows): loop 0 on a matrix atom, channels-first, with a step's bq positions
+ * holding several output rows of one plane, each in a virtual row of wv = wo + (s - 1) dw / sw
+ * columns: only for narrow outputs, 2 wv at most bq; the filter width whole (s the filter
+ * width), bq dividing the block's threads, align 0. Its units are elements (no pass masks): at
+ * most 64 passes.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
