@@ -43,6 +43,39 @@ There are 2 template parameters for this kernel template.
 ## codegen
 To speed up compile time, we instantiate the kernels into separate file. In this way we can benefit from parallel building from CMake/Make system. This is achieved by `generate.py` script. Besides, you can look into this script to learn how to instantiate a kernel instance step by step, which is described in `FMHA_FWD_KERNEL_BODY` variable.
 
+### Ping-pong TDM forward pipeline
+
+`qr_tdm_pingpong` (gfx125, FP16/BF16 Q/K/V) is the default forward pipeline for
+head dims 32, 64, 96, 128, 160, 192/128, 256 and 512, at any query and key length.
+It stages a whole K tile per trip in two LDS buffers: trip i reads one buffer while
+the TDM fills the other with tile i + 1. On the 128-row tiles V has two buffers as well,
+issued a trip ahead. Two or more resident blocks per CU overlap one block's softmax
+with another's gemms on the same SIMD; `qr_tdm` and `qr_tdm_sched` instead prefetch
+and schedule within a block.
+
+It has 16-, 64- and 128-row query tiles (d256/d512 have no 128-row tile, and d32, whose V
+rows are narrower than 64 columns, no 16-row tile); the tile rules
+are `_gfx125_qr_tdm_pingpong_tiles` in `codegen/ops/fmha_fwd.py`. Q/K rows are staged at
+the head dim's own length (d32 is not padded to 64).
+
+The LDS read schedule is chosen per head dim (`QrTdmPingPongLdsReadSchedule`,
+`GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE` in `codegen/ops/fmha_fwd.py`): prefetching
+the next K/V slice while the current slice's WMMAs run, and reading V's first slice
+before the softmax, each from the tile size on where its VGPRs leave the occupancy
+unchanged. Instance names carry `_sp<rows>` / `_vbs<rows>` for the configured parts that
+take effect on their tile. Independently of that switch, the 128-row tiles that run
+without a per-tile row max (no window mask, no bias, no dropout) always prefetch the next
+slice; their names do not show it.
+
+It supports masks, LSE, logits soft cap, elementwise bias and ALiBi, dropout (not on
+the 16-row tile), sink tokens, column-major V, batch and group mode. The one query it
+leaves to `qr_tdm_sched` is d128 with at least 128 query rows and fewer than two
+128-row query blocks per CU (`batch * nhead_q * max_seqlen_q < 256 * num_cus`), where a
+single resident block cannot overlap softmax and gemms. `qr_tdm` sits on the tiles behind
+pingpong's on every head dim and takes what pingpong and `qr_tdm_sched` leave: group-mode
+skip, head dims that are not multiples of 8 (pingpong's dcheck/dvcheck), and on d128 the
+calls `qr_tdm_sched` refuses. The FP16/BF16 inventories hold no generic `qr`.
+
 ### Basic TDM forward feature coverage
 
 On gfx125, FP16/BF16 `qr_tdm` supports logits soft cap, dropout, group-mode
@@ -55,41 +88,31 @@ accept batch `skip_min_seqlen_q=true`; custom tune `filters.skip` applies only t
 group mode on this architecture.
 
 FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
-The existing D192/V128 bias/dropout and softcap-with-bias exclusions still apply.
+The existing D192/V128 bias/dropout exclusion still applies; the logits soft cap with a
+bias is generated for the TDM pipelines (`GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS`:
+scale_s, the soft cap, then the bias).
 FP8 and the split-KV/paged-KV APIs retain their separate inventories.
 
 ### Scheduled TDM forward pipeline
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
-Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
-or D192/V128, and row-major V. They use no bias, dropout, logits
-soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
-the existing pipeline candidates.
-Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
-logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
-of the compile-time sink-token flag.
+On gfx125 it is generated for FP16/BF16 D128/V128 with row-major V and serves the
+small-grid d128 queries `qr_tdm_pingpong` leaves to it (see above). It takes masks,
+LSE, logits soft cap, elementwise bias and ALiBi, dropout and sink tokens. Its
+variants without sink tokens require a null runtime `sink_ptr`; a sink logit without
+sink tokens uses the `qr_tdm` fallback. This runtime pointer is independent of the
+compile-time sink-token flag. The pipeline also implements D64/V64 and D192/V128
+geometries (described below), which are not generated on gfx125 since
+`qr_tdm_pingpong` serves those head dims.
 
-The generated API tries matching scheduled traits first. D64/V64 uses a
-128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
-compiler minimum-waves-per-EU hint of three. The launch API retains the
-historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
-residency. Aligned batch K lengths use unpadded
-sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
-softmax maximum chains and places each next-stage LDS read before the current
-WMMA, preserving read counts and stage-tail waits. Generated D64/D128/D192
-scheduled sources enable expert scheduling mode. D128 uses a
-128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
-is at least 512, the Q grid fits within the CU count, logical length pointers
-are absent, and the mask is dense or square causal. Otherwise it uses a
-128-by-64 tile. Group mode compares packed K length against 512 times the batch
-count; its square-causal check compares packed Q/K totals. When
-`max_seqlen_q` is below 128, the existing fallback candidates are used.
+D128 uses a 128-by-128 Q/K sequence tile with padded sequence traits only (group
+lengths live in device memory, so dispatch could not prove them tile aligned).
+Generated scheduled sources enable expert scheduling mode.
 
 WG indexing follows the existing shared kernel rules. For batch BHSD square
-causal attention with one V tile and no dropout, sched D64/D128 visit the longest
+causal attention with one V tile and no dropout, sched D128 visits the longest
 Q tile across heads within each batch first, subject to the grouped XCD path
-described below. Sched D192 keeps the existing
-head-major remap; group mode does not enter this batch-local branch. The XCC
+described below; group mode does not enter this batch-local branch. The XCC
 mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
 is explicitly defined to a nonzero value. Its eight-XCC mapping assumptions
 must be checked on the target hardware before enabling it.
@@ -110,13 +133,17 @@ and no bias, dropout, LSE, sink, softcap, or quantization scale. Groups contain
 Larger sequences and other cases retain the existing mapping. The opt-in paired-XCC experiment,
 including its fallback order, takes precedence over this grouping.
 
-The non-causal XCD path is unchanged. The BHSD and general-grid XCD fallbacks
+The non-causal XCD path takes group mode too when the caller sets
+`fmha_fwd_args::uniform_seqlens` (the batches' query and key lengths about equal;
+the Python varlen API and the example runner set it when the longest lengths are
+within 1/8 of the means); otherwise group mode keeps the round-robin. The BHSD and general-grid XCD fallbacks
 have the same logical head-major order. They retain separate batch-first and
 tile-first arithmetic forms because merging them measured slower in the early
 gfx1250 standalone experiment.
 Both share the corrected Q/V decoding: masking reverses the Q dimension only.
 Unit tests check the complete mapping; GPU tests exercise `GetTileIndex()`
-thresholds and fallbacks. The launch interface and Kargs are unchanged.
+thresholds and fallbacks. The launch interface is unchanged; `fmha_fwd_args` and the
+group-mode Kargs carry the `uniform_seqlens` hint.
 
 The mapper's coordinate coverage does not expand a pipeline's supported head
 dimensions. In particular, the QR TDM paths still assume a single V tile when
@@ -168,8 +195,7 @@ counts, and rescale modes.
 For a new placement, supply a policy's third template argument (the tile
 schedule) and implement its local callbacks. The executor executes those
 callbacks directly. TDM loads and hardware synchronization remain explicit
-pipeline phase boundaries. The pipeline and policy reject attention bias;
-other pipelines provide its existing dispatch fallback. Sink operations remain
+pipeline phase boundaries. Sink operations remain
 for the shared kernel entry. A runtime sink logit is independent of the
 compile-time sink-token flag.
 
@@ -264,6 +290,13 @@ Currently we support both `batch mode` and `group mode` (or `varlen`, in FA's te
 
 ### MQA/GQA
 By setting `-h`(nhead for q) and `-h_k`(nhead for k/v) with different number, you can achieve MQA/GQA. Please pay attention that `h % h_K == 0` when you set different numbers.
+
+`-pack_gqa=1` (the default) folds the `h / h_k` query heads that share a K/V head into the
+query length for non-causal batch-mode runs without bias or sink, so each K/V tile is
+loaded once per group. On gfx125 fp16/bf16 with `d_v >= 64` it is skipped (with a note)
+for 2..16 query rows that it would fold into more than 16 rows on a grid under two
+(batch, head) pairs per CU: the query would leave the 16-row decode tile for a tile with
+`h / h_k` times fewer blocks.
 
 ### input/output permute, and `b*s*3*h*d`
 If you look at the kernel argument inside `fmha_fwd_kernel.hpp`, we support providing arbitrary stride for seqlen(stride_q/k/v), nhead, batch of q/k/v matrix, hence it is very flexible to support `b*h*s*d` or `b*s*h*d` input/output permute. The `-iperm=0/1`, `-operm=0/1` is a convenient way to achieve this through the executable. We didn't provide a command-line arg to test `b*s*3*h*d` layout which is by default used by torch/FA, but it's trivial to achieve this if one set the proper `stride_q/k/v` value as `3*h*d`.

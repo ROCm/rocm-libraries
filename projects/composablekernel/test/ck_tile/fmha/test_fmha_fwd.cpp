@@ -481,14 +481,15 @@ TEST_P(BatchXCDRemap, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
-// d128 runs qr_tdm_pingpong below 640 rows with at least 2 (batch, head) pairs per
-// multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes its
-// grid to reach it on this device: the batch in batch mode; in group mode, where this
-// runner passes the packed total length as max_seqlen_q (kept below 640), the head
-// count for a given number of sequences (12 by default). The unpadded instance serves
-// any seqlen_k except with an elementwise bias; causal masks take its causal kernel
-// ("_mc_", without LSE, bias or sink). ALiBi without a mask makes every K tile raise the
-// row maxima of the steep heads past the rebase threshold, so those cases take the
+// d128 runs qr_tdm_pingpong on every query but a small grid of 128-row query blocks
+// (max_seqlen_q >= 128 and batch * nhead_q * max_seqlen_q < 256 * num_cus, which goes to
+// qr_tdm_sched; _gfx125_qr_tdm_pingpong_range in fmha_fwd.py). With at least 2 (batch,
+// head) pairs per multiprocessor, 128 or more rows always make the grid large enough, so
+// each case sizes its grid to that on this device: the batch in batch mode; in group mode
+// the head count for a given number of sequences (12 by default). The unpadded instance
+// serves any seqlen_k except with an elementwise bias; causal masks take its causal
+// kernel ("_mc_", without bias or sink; with or without LSE). ALiBi without a mask makes every K
+// tile raise the row maxima of the steep heads past the rebase threshold, so those cases take the
 // finite-to-finite rescale of o_acc and l on every trip, with and without LSE.
 std::pair<int, int> PingPongGrid(mode_enum mode, int nhead, int group_batch = 12)
 {

@@ -361,6 +361,12 @@ struct fmha_fwd_args
 
     ck_tile::index_t block_scale_size_q;
     ck_tile::index_t block_scale_size_kv;
+
+    // Group mode: a hint that the batches' query and key lengths are about equal. FmhaFwdKernel
+    // then keeps the m-tiles of a (batch, head), which stream the same K/V, on one XCD, as it
+    // does in batch mode; with uneven lengths whole-batch XCD segments would leave the XCDs
+    // unbalanced. Performance only: either value gives the same results.
+    bool uniform_seqlens = false;
 };
 
 struct fmha_fwd_pagedkv_args
@@ -884,7 +890,8 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 
     if constexpr(FmhaKernel::kIsGroupMode)
     {
-        dim3 grids = FmhaKernel::GridSize(
+        kargs.uniform_seqlens = args.uniform_seqlens;
+        dim3 grids            = FmhaKernel::GridSize(
             args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v, args.seqlen_k_ptr != nullptr);
         return ck_tile::make_tuple(kargs, grids);
     }

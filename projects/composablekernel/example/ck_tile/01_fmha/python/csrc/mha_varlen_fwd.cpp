@@ -674,6 +674,14 @@ std::vector<at::Tensor> mha_varlen_fwd(
                                                     drop_seed_offset);
 
             traits.qscale_type = qscale_type;
+            // the XCD-locality hint (fmha_fwd_args::uniform_seqlens): the longest query and key
+            // lengths within 1/8 of the means, taken from the rows of q and k (the packed totals
+            // their shapes promise)
+            const auto near_mean = [&](int64_t max_len, int64_t rows) {
+                return 8 * max_len * batch_size <= 9 * rows;
+            };
+            args.uniform_seqlens =
+                near_mean(max_seqlen_k, k.size(0)) && near_mean(max_seqlen_q, q.size(0));
             if(is_fp8 && qscale_type != quant_scale_enum::no_scale)
             {
                 args.q_descale_ptr = q_descale_.value().data_ptr();
