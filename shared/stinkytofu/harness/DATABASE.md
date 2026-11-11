@@ -89,10 +89,19 @@ pull request is the review.
 
 - **Read:** use the index and load entries on demand. Never load the whole database.
 - **Write:** agents never edit the main branch. When a task taught you something that may be worth
-  keeping, tell the developer and ask whether to note it down, not after every run. If they agree,
-  work on a branch and open a PR in the database repo with status `candidate`. A human reviews and
-  merges it. If the database is a plain directory, write the entry file with `status: candidate` and
-  add its line to `index.md`.
+  keeping, tell the developer and ask whether to note it down, not after every run. If they agree, work on
+  a branch and open a PR in the database repo with status `candidate`. A human reviews and merges it. If
+  the database is a plain directory, write the entry file with `status: candidate` and add its line to
+  `index.md`.
+  - If the developer tells you to remember or note something ("remember this", "note this down", "save
+    this", "add this to the database"), write the entry now, the same way, and tell them the file name.
+    They have already agreed, so do not ask again.
+  - If they tell you not to ("don't save this", "no need to remember"), write nothing, and do not ask
+    again this session.
+  - Put a fact about the code, a kernel, tuning, or the workflow in `entries/` (with the review card) or
+    `memories/`. A preference about how you should work with this developer belongs in your own memory,
+    not here. If you cannot tell which, ask.
+  - If `$HARNESS_DB` is not set, or is `none`, say so and write nothing here.
 - **Refine:** an entry whose `scope` matches the target can add to a public guideline on the same
   point, for example a fuller version of a procedure. Follow the entry where it adds detail, and tell
   the developer you are using it. Only a `confirmed` entry is followed. A `candidate` entry is

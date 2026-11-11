@@ -77,7 +77,8 @@ asm supports only "no performance change".
    read its `index.md`, then load the entries that matter for the task. Do not copy entries into
    tracked files, PRs, issues, or comments. If it is not set, say so once. If it is `none`, or the
    developer said not to use it, skip it without comment. The contract and entry format are in
-   `DATABASE.md`; read it only when the database is set. At the end of a task, if you learned
+   `DATABASE.md`; read it only when the database is set. If the developer says to
+   remember something, or not to, follow the "Write" rules there. At the end of a task, if you learned
    something that may be worth keeping (a measured result, an approach that failed, a setup quirk),
    tell the developer and ask whether to note it down. Write an entry only if they agree.
 8. **Mind the machine's memory.** Builds, Tensile generation, and test runs (Python especially) can
