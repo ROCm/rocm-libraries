@@ -15,7 +15,7 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_winograd.py` | `winograd` | `CONV_WINOGRAD_FWD`, `CONV_WINOGRAD_BWD` |
 | `gen_conv_wrw.py` | `wrw` | `CONV_WRW` |
 | `gen_conv_stem_bwd.py` | `stem_bwd` | `CONV_STEM_BWD` |
-| `gen_smallc.py` | `smallc` | `CONV_SMALLC_FWD` |
+| `gen_smallc.py` | `smallc` | `CONV_SMALLC_FWD`, `CONV_SMALLC_BWD` |
 | `gen_depthwise_valu.py` | `depthwise_valu` | `CONV_DEPTHWISE_VALU_FWD`, `CONV_DEPTHWISE_VALU_BWD` |
 | `gen_depthwise_valu_wrw.py` | `depthwise_valu_wrw` | `CONV_DEPTHWISE_VALU_WRW` |
 | `gen_depthwise_rows.py` | `depthwise_rows` | `CONV_DEPTHWISE_ROWS_FWD`, `CONV_DEPTHWISE_ROWS_BWD` |
