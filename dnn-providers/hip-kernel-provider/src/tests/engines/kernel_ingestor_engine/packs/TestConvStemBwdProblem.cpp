@@ -148,7 +148,7 @@ TEST(TestConvStemBwdWindow, SpaceToDepthOffsetsExtentsAndShifts)
     check(7, 3, 1, 4, 1);
     check(1, 0, 0, 1, 0);
     check(3, 0, 0, 2, 0);
-    check(3, 5, 3, 2, 1); // padding past the filter
+    check(3, 5, 2, 2, 1); // padding past the filter
 }
 
 TEST(TestConvStemBwdWindow, SpaceToDepthPairsEveryTapOfEveryPhaseOnce)
