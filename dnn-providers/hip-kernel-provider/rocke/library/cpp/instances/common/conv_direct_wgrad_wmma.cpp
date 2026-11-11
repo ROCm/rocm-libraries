@@ -36,6 +36,9 @@
 #define WGW_PAD_CH 8 /* default LDS row padding (channels) */
 #define WGW_DUMMY 8 /* elements past each buffer: the padding lanes' copy target */
 #define WGW_VGPR_BUDGET 480 /* accumulators + fragments a wave may hold */
+/* The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
+ * was tuned under. The arch's own capacity is checked as well. */
+#define WGW_LDS_BUDGET (300 * 1024)
 
 namespace
 {
@@ -248,12 +251,10 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
     const rocke_direct_conv_problem_t* p = &spec->problem;
     if(rocke_direct_dilation_reason(p, reason, reason_cap))
         return false;
-    if(strcmp(arch, "gfx1250") != 0)
-    {
-        rocke_spec_set_reason(
-            reason, reason_cap, "ds_load_tr16_b128 and wmma 16x16x32 need gfx1250");
+    const rocke_archtarget_t* target = rocke_dwg::wgrad_wmma_arch_target(
+        arch, rocke_dwg::problem_is_bf16(p), reason, reason_cap);
+    if(target == NULL)
         return false;
-    }
     if(p->groups != 1)
     {
         rocke_spec_set_reason(reason, reason_cap, "groups == 1 only");
@@ -340,12 +341,13 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(rocke_direct_wgrad_wmma_lds_bytes(spec) > 300 * 1024)
-    {
-        snprintf(msg, sizeof msg, "LDS %lld B > 300 KiB", rocke_direct_wgrad_wmma_lds_bytes(spec));
-        rocke_spec_set_reason(reason, reason_cap, msg);
+    if(rocke_dwg::wgrad_wmma_lds_over(rocke_direct_wgrad_wmma_lds_bytes(spec),
+                                      WGW_LDS_BUDGET,
+                                      target,
+                                      arch,
+                                      reason,
+                                      reason_cap))
         return false;
-    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

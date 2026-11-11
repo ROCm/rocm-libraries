@@ -96,8 +96,13 @@ class TestWgradWmmaSpec(unittest.TestCase):
             with self.subTest(pkw=pkw, knobs=knobs):
                 why = _reason(DirectWgradWmmaSpec(problem=_problem(**pkw), **knobs))
                 self.assertIn(needle, why)
-        why = _reason(DirectWgradWmmaSpec(problem=_problem()), "gfx950")
-        self.assertEqual(why, "ds_load_tr16_b128 and wmma 16x16x32 need gfx1250")
+        # The arch gate reads ArchTarget capabilities, not the arch name.
+        spec = DirectWgradWmmaSpec(problem=_problem())
+        self.assertEqual(_reason(spec, "gfx950"), "wave32 kernel (got gfx950, wave64)")
+        self.assertEqual(
+            _reason(spec, "gfx1201"), "missing wmma 16x16x32 bf16 on gfx1201"
+        )
+        self.assertIn("gfx0", _reason(spec, "gfx0"))
         # An explicit column padding equal to PAD is the same problem.
         self.assertEqual(_reason(DirectWgradWmmaSpec(problem=_problem(pad_w=1))), "ok")
 
@@ -242,7 +247,7 @@ class TestWgradWmmaEngines(unittest.TestCase):
         ):
             specs.append(DirectWgradWmmaSpec(problem=_problem(**pkw), **knobs))
         n_ok = 0
-        for arch in ("gfx1250", "gfx950"):
+        for arch in ("gfx1250", "gfx950", "gfx1201"):
             for spec in specs:
                 with self.subTest(arch=arch, spec=spec):
                     ok, why_c, name, grid, block, lds = (

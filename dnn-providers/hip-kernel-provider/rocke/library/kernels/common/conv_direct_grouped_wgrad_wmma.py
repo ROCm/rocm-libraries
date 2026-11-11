@@ -50,12 +50,20 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_direct_wgrad_wmma import (
+    wgrad_wmma_arch_reason,
+    wgrad_wmma_lds_reason,
+)
 
 _WAVE = 32
 _TILE = 16  # channels per wave (WMMA M = N)
 _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
+# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
+# was tuned under (stages x one staged dY and X row). The arch's own capacity
+# (ArchTarget.lds_capacity_bytes) is checked as well.
+_LDS_BUDGET = 160 * 1024
 
 
 @dataclass(frozen=True)
@@ -171,10 +179,11 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "target_blocks >= 1"
     if spec.stages not in (2, 3, 4):
         return False, "stages in 2..4"
-    if spec.lds_bytes() > 160 * 1024:
-        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
-    if arch != "gfx1250":
-        return False, "ds_load_tr16_b128 and wmma 16x16x32 need gfx1250"
+    why, target = wgrad_wmma_arch_reason(arch, p.dtype)
+    if why is None:
+        why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+    if why is not None:
+        return False, why
     return True, "ok"
 
 

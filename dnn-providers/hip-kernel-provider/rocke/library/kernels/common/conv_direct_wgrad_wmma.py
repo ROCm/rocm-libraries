@@ -62,6 +62,10 @@ _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
 _VGPR_BUDGET = 480  # accumulators + fragments a wave may hold (512-VGPR file)
+# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
+# was tuned under (stages x rows of staged dY and X rows). The arch's own
+# capacity (ArchTarget.lds_capacity_bytes) is checked as well.
+_LDS_BUDGET = 300 * 1024
 
 
 @dataclass(frozen=True)
@@ -170,13 +174,49 @@ class DirectWgradWmmaSpec:
         return self.stages * self.rows * (per_stage + 2 * _DUMMY) * 2
 
 
+def wgrad_wmma_arch_reason(arch: str, dtype: str):
+    """Why the dense and grouped WMMA wgrad kernels cannot run on ``arch``
+    (None when they can), from its ArchTarget capabilities: wave32, the WMMA
+    16x16x32 shape of ``dtype`` and TDM. ``ds_load_tr16_b128`` has no
+    capability bit of its own; TDM marks the gfx1250 class that has it, as in
+    direct_dgrad_wmma. Returns ``(why, target)``; the target is None only when
+    ``arch`` is unknown."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return str(e), None
+    if target.wave_size != _WAVE:
+        return f"wave32 kernel (got {arch}, wave{target.wave_size})", target
+    ab = "bf16" if dtype == "bf16" else "f16"
+    if not target.mma.has_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=_KSTEP
+    ):
+        return f"missing wmma 16x16x32 {ab} on {arch}", target
+    if not target.memory.has_tdm:
+        return f"no TDM (nor ds_load_tr16_b128) on {arch}", target
+    return None, target
+
+
+def wgrad_wmma_lds_reason(lds: int, budget: int, target, arch: str) -> str | None:
+    """Why ``lds`` bytes of staging do not fit: over the kernel's ``budget``
+    or over the arch's LDS capacity (None when they fit)."""
+    if lds > budget:
+        return f"LDS {lds} B > {budget // 1024} KiB"
+    if lds > target.lds_capacity_bytes:
+        return f"LDS {lds} B > {target.lds_capacity_bytes} on {arch}"
+    return None
+
+
 def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1250"):
     p = spec.problem
     why = dilation_reason(p)
     if why is not None:
         return False, why
-    if arch != "gfx1250":
-        return False, "ds_load_tr16_b128 and wmma 16x16x32 need gfx1250"
+    why, target = wgrad_wmma_arch_reason(arch, p.dtype)
+    if why is not None:
+        return False, why
     if p.groups != 1:
         return False, "groups == 1 only"
     if p.dtype not in ("fp16", "bf16"):
@@ -211,8 +251,9 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "target_blocks >= 1"
     if spec.vgprs() > _VGPR_BUDGET:
         return False, f"~{spec.vgprs()} VGPRs of accumulators and fragments"
-    if spec.lds_bytes() > 300 * 1024:
-        return False, f"LDS {spec.lds_bytes()} B > 300 KiB"
+    why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+    if why is not None:
+        return False, why
     return True, "ok"
 
 

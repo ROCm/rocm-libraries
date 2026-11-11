@@ -141,6 +141,28 @@ def test_rejects(pkw, knobs, reason):
         build_grouped_wgrad_wmma(spec, arch="gfx1250")
 
 
+def test_arch_gate_reads_capabilities():
+    """The arch gate reads ArchTarget capabilities (wave32, WMMA 16x16x32,
+    TDM), not the arch name; the LDS check takes the smaller of the kernel's
+    budget and the arch's capacity."""
+    from types import SimpleNamespace
+
+    from kernels.common.conv_direct_wgrad_wmma import wgrad_wmma_lds_reason
+
+    spec = GroupedWgradWmmaSpec(problem=_problem())
+    why = is_valid_grouped_wgrad_wmma_spec(spec, "gfx950")[1]
+    assert why == "wave32 kernel (got gfx950, wave64)"
+    why = is_valid_grouped_wgrad_wmma_spec(spec, "gfx1201")[1]
+    assert why == "missing wmma 16x16x32 bf16 on gfx1201"
+    assert "gfx0" in is_valid_grouped_wgrad_wmma_spec(spec, "gfx0")[1]
+    small = SimpleNamespace(lds_capacity_bytes=1024)
+    assert (
+        wgrad_wmma_lds_reason(2048, 4096, small, "gfxX") == "LDS 2048 B > 1024 on gfxX"
+    )
+    assert wgrad_wmma_lds_reason(8192, 4096, small, "gfxX") == "LDS 8192 B > 4 KiB"
+    assert wgrad_wmma_lds_reason(1024, 4096, small, "gfxX") is None
+
+
 def test_one_padding_accepts_a_matching_column_padding():
     """An explicit column padding equal to PAD is the same problem."""
     spec = GroupedWgradWmmaSpec(problem=_problem(pad_w=1))
@@ -159,12 +181,13 @@ def test_engines_agree_on_specs():
     """C++ describe == Python validity, reason, name, LDS bytes and, for a
     valid spec, grid and fold contract (partitions, workspace, taps,
     channels), over the AOT grid and every rejected spec, on gfx1250 and on
-    gfx950 (which refuses all of them)."""
+    gfx950 and gfx1201 (which refuse all of them: wave64, and no WMMA
+    16x16x32)."""
     eng = pytest.importorskip("rocke_library_engine")
     grid_specs = _grid_specs()
     assert len(grid_specs) == 2 * 4 * 72
     rejected = _rejected_specs()
-    for arch in ("gfx1250", "gfx950"):
+    for arch in ("gfx1250", "gfx950", "gfx1201"):
         for i, spec in enumerate(grid_specs + rejected):
             ok, why_c, name, grid, lds, parts, ws, taps, chans = _describe(
                 eng, spec, arch
