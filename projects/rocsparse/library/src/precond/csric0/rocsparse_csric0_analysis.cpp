@@ -91,20 +91,8 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
         p_csric0_info[0] = csric0_info;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(rocsparse_operation_none,
-                                                             rocsparse_fill_mode_lower,
-                                                             handle,
-                                                             rocsparse_operation_none,
-                                                             A->rows,
-                                                             A->nnz,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
-                                                             temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
+        handle, rocsparse_operation_none, rocsparse_fill_mode_lower, A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

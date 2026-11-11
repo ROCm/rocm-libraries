@@ -55,17 +55,17 @@ public:
         return this->m_singularity_numeric_exact;
     }
 
+    rocsparse::singular_info_t* get_singularity_numeric_near()
+    {
+        return this->m_singularity_numeric_near;
+    }
+
     void create_singularity_numeric_exact(int64_t             batch_count,
                                           rocsparse_indextype indextype,
                                           hipStream_t         stream)
     {
         THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact->create_singular_pivot_async(
             batch_count, indextype, stream));
-    }
-
-    rocsparse::singular_info_t* get_singularity_numeric_near()
-    {
-        return this->m_singularity_numeric_near;
     }
 
     void create_singularity_numeric_near(int64_t             batch_count,

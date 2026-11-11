@@ -29,6 +29,7 @@
 #include "../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
@@ -115,8 +116,28 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
-        handle, trans_A, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
+    _rocsparse_spmat_descr A(rocsparse_format_csr,
+                             1,
+                             m,
+                             m,
+                             nnz,
+                             rocsparse::get_datatype<T>(),
+                             csr_val,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<I>(),
+                             csr_row_ptr,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<J>(),
+                             csr_col_ind,
+                             nullptr,
+                             0,
+                             descr->base,
+                             descr,
+                             info);
+    RETURN_IF_ROCSPARSE_ERROR(
+        info->recreate_triangular_info(handle, trans_A, descr->fill_mode, &A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

@@ -26,6 +26,7 @@
 #include "rocsparse_bsrsv.hpp"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "../level2/rocsparse_csrsv.hpp"
@@ -139,8 +140,30 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     }
 
     info->get_bsrsv_info();
-    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
-        handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
+    _rocsparse_spmat_descr A(rocsparse_format_bsr,
+                             1,
+                             mb,
+                             mb,
+                             nnzb,
+                             dir,
+                             block_dim,
+                             rocsparse::get_datatype<T>(),
+                             bsr_val,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<rocsparse_int>(),
+                             bsr_row_ptr,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<rocsparse_int>(),
+                             bsr_col_ind,
+                             nullptr,
+                             0,
+                             descr->base,
+                             descr,
+                             info);
+    RETURN_IF_ROCSPARSE_ERROR(
+        info->recreate_triangular_info(handle, trans, descr->fill_mode, &A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

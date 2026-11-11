@@ -35,35 +35,23 @@
 
 namespace rocsparse
 {
-    template <typename I, typename J, typename T>
-    rocsparse_status trm_analysis(rocsparse_handle              handle,
-                                  rocsparse_operation           trans,
-                                  J                             m,
-                                  I                             nnz,
-                                  const rocsparse_mat_descr     descr,
-                                  const T*                      csr_val,
-                                  const I*                      csr_row_ptr,
-                                  const J*                      csr_col_ind,
-                                  rocsparse::triangular_info_t* info,
-                                  rocsparse::pivot_info_t*      pivot_info,
-                                  void*                         temp_buffer);
-
     rocsparse_status gtrm_analysis(rocsparse_handle                          handle,
-                                   rocsparse_operation                       trans,
-                                   int64_t                                   m,
-                                   int64_t                                   nnz,
-                                   const rocsparse_mat_descr                 descr,
-                                   rocsparse_datatype                        csr_val_datatype,
-                                   const void*                               csr_val,
-                                   rocsparse_indextype                       csr_row_ptr_indextype,
-                                   const void*                               csr_row_ptr,
-                                   rocsparse_indextype                       csr_col_ind_indextype,
-                                   const void*                               csr_col_ind,
+                                   rocsparse_operation                       operation,
+                                   rocsparse_const_spmat_descr               A,
                                    rocsparse::triangular_info_t*             info,
+                                   rocsparse::pivot_info_t*                  pivot_info,
                                    rocsparse::idnvec_descr_t*                diag_ind,
                                    rocsparse::transposed_sparsity_pattern_t* transposed,
-                                   rocsparse::pivot_info_t*                  pivot_info,
-                                   void*                                     temp_buffer);
+                                   size_t                                    buffer_size,
+                                   void*                                     buffer);
+
+    rocsparse_status gellsv_analysis(rocsparse_handle              handle,
+                                     rocsparse_operation           operation,
+                                     rocsparse_const_spmat_descr   A,
+                                     rocsparse::triangular_info_t* info,
+                                     rocsparse::pivot_info_t*      pivot_info,
+                                     size_t                        buffer_size,
+                                     void*                         buffer);
 }
 
 namespace rocsparse
@@ -100,7 +88,7 @@ namespace rocsparse
     public:
         triangular_data_t() = default;
         ~triangular_data_t();
-        triangular_data_t(const triangular_data_t&)            = delete;
+        triangular_data_t(const triangular_data_t&) = delete;
         triangular_data_t& operator=(const triangular_data_t&) = delete;
 
         void copy(const triangular_data_t* that, hipStream_t stream);
@@ -133,283 +121,23 @@ namespace rocsparse
         rocsparse_indextype get_indextype_J() const;
 
         rocsparse::triangular_info_t*
-            create(rocsparse::idnvec_descr_t*                diag_indices,
+            create(rocsparse_handle                          handle,
+                   rocsparse_operation                       operation,
+                   rocsparse_const_spmat_descr               A,
+                   rocsparse::idnvec_descr_t*                diag_indices,
                    rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                   rocsparse_handle                          handle,
-                   rocsparse_operation                       trans,
-                   int64_t                                   batch_count,
-                   int64_t                                   m,
-                   int64_t                                   nnz,
-                   const rocsparse_mat_descr                 descr,
-                   rocsparse_datatype                        csr_val_datatype,
-                   const void*                               csr_val,
-                   int64_t                                   csr_val_stride,
-                   rocsparse_indextype                       csr_row_ptr_indextype,
-                   const void*                               csr_row_ptr,
-                   int64_t                                   csr_row_ptr_stride,
-                   rocsparse_indextype                       csr_col_ind_indextype,
-                   const void*                               csr_col_ind,
-                   int64_t                                   csr_col_ind_stride,
-                   void*                                     temp_buffer)
-        {
-            rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
-            this->attach_storage(trm_info, diag_indices, transposed_sparsity_pattern);
-
-            THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
-                                                              trans,
-                                                              m,
-                                                              nnz,
-                                                              descr,
-                                                              csr_val_datatype,
-                                                              csr_val,
-                                                              csr_row_ptr_indextype,
-                                                              csr_row_ptr,
-                                                              csr_col_ind_indextype,
-                                                              csr_col_ind,
-                                                              trm_info,
-                                                              diag_indices,
-                                                              transposed_sparsity_pattern,
-                                                              this->m_pivot_info,
-                                                              temp_buffer));
-            return trm_info;
-        }
-
-        rocsparse::triangular_info_t*
-            create(rocsparse::idnvec_descr_t*                diag_indices,
-                   rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                   rocsparse_handle                          handle,
-                   rocsparse_operation                       trans,
-                   int64_t                                   m,
-                   int64_t                                   nnz,
-                   const rocsparse_mat_descr                 descr,
-                   rocsparse_datatype                        csr_val_datatype,
-                   const void*                               csr_val,
-                   rocsparse_indextype                       csr_row_ptr_indextype,
-                   const void*                               csr_row_ptr,
-                   rocsparse_indextype                       csr_col_ind_indextype,
-                   const void*                               csr_col_ind,
-                   void*                                     temp_buffer)
-        {
-            rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
-            this->attach_storage(trm_info, diag_indices, transposed_sparsity_pattern);
-
-            THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
-                                                              trans,
-                                                              m,
-                                                              nnz,
-                                                              descr,
-                                                              csr_val_datatype,
-                                                              csr_val,
-                                                              csr_row_ptr_indextype,
-                                                              csr_row_ptr,
-                                                              csr_col_ind_indextype,
-                                                              csr_col_ind,
-                                                              trm_info,
-                                                              diag_indices,
-                                                              transposed_sparsity_pattern,
-                                                              this->m_pivot_info,
-                                                              temp_buffer));
-            return trm_info;
-        }
-
-        template <typename I, typename J, typename T>
-        rocsparse::triangular_info_t*
-            create(rocsparse::idnvec_descr_t*                diag_indices,
-                   rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                   rocsparse_handle                          handle,
-                   rocsparse_operation                       trans,
-                   J                                         m,
-                   I                                         nnz,
-                   const rocsparse_mat_descr                 descr,
-                   const T*                                  csr_val,
-                   const I*                                  csr_row_ptr,
-                   const J*                                  csr_col_ind,
-                   void*                                     temp_buffer)
-        {
-            return create(diag_indices,
-                          transposed_sparsity_pattern,
-                          handle,
-                          trans,
-                          m,
-                          nnz,
-                          descr,
-                          rocsparse::get_datatype<T>(),
-                          csr_val,
-                          rocsparse::get_indextype<I>(),
-                          csr_row_ptr,
-                          rocsparse::get_indextype<J>(),
-                          csr_col_ind,
-                          temp_buffer);
-        }
-
-        rocsparse::triangular_info_t*
-            create(rocsparse::idnvec_descr_t*                diag_indices,
-                   rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                   rocsparse_handle                          handle,
-                   rocsparse_operation                       trans,
-                   int64_t                                   m,
-                   int64_t                                   n,
-                   const rocsparse_mat_descr                 descr,
-                   rocsparse_indextype                       ell_col_ind_indextype,
-                   const void*                               ell_col_ind,
-                   int64_t                                   ell_width,
-                   rocsparse_index_base                      idx_base,
                    size_t                                    buffer_size,
-                   void*                                     temp_buffer);
+                   void*                                     buffer);
 
-        template <typename I>
-        rocsparse::triangular_info_t*
-            create(rocsparse::idnvec_descr_t*                diag_indices,
-                   rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                   rocsparse_handle                          handle,
-                   rocsparse_operation                       trans,
-                   I                                         m,
-                   I                                         n,
-                   const rocsparse_mat_descr                 descr,
-                   const I*                                  ell_col_ind,
-                   int64_t                                   ell_width,
-                   rocsparse_index_base                      idx_base,
-                   size_t                                    buffer_size,
-                   void*                                     temp_buffer)
-        {
-            return create(diag_indices,
-                          transposed_sparsity_pattern,
-                          handle,
-                          trans,
-                          static_cast<int64_t>(m),
-                          static_cast<int64_t>(n),
-                          descr,
-                          rocsparse::get_indextype<I>(),
-                          ell_col_ind,
-                          ell_width,
-                          idx_base,
-                          buffer_size,
-                          temp_buffer);
-        }
-
-        template <typename... ARGS>
         rocsparse_status
-            recreate(rocsparse::idnvec_descr_t*                diag_indices,
-                     rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
+            recreate(rocsparse_handle                          handle,
                      rocsparse_operation                       operation,
                      rocsparse_fill_mode                       fill_mode,
-                     ARGS... arg)
-        {
-            const int index = this->storage_index(operation, fill_mode);
-            this->release(index);
-            this->m_data[index] = this->create(diag_indices, transposed_sparsity_pattern, arg...);
-            return rocsparse_status_success;
-        }
-
-        template <typename I, typename J, typename T>
-        rocsparse_status
-            recreate(rocsparse::idnvec_descr_t*                diag_indices,
+                     rocsparse_const_spmat_descr               A,
+                     rocsparse::idnvec_descr_t*                diag_indices,
                      rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                     rocsparse_handle                          handle,
-                     rocsparse_operation                       trans,
-                     J                                         m,
-                     I                                         nnz,
-                     const rocsparse_mat_descr                 descr,
-                     const T*                                  csr_val,
-                     const I*                                  csr_row_ptr,
-                     const J*                                  csr_col_ind,
-                     void*                                     temp_buffer)
-        {
-            return this->recreate(diag_indices,
-                                  transposed_sparsity_pattern,
-                                  trans,
-                                  descr->fill_mode,
-                                  handle,
-                                  trans,
-                                  m,
-                                  nnz,
-                                  descr,
-                                  csr_val,
-                                  csr_row_ptr,
-                                  csr_col_ind,
-                                  temp_buffer);
-        }
-
-        rocsparse_status
-            recreate(rocsparse::idnvec_descr_t*                diag_indices,
-                     rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                     rocsparse_handle                          handle,
-                     rocsparse_operation                       trans,
-                     int64_t                                   m,
-                     int64_t                                   nnz,
-                     const rocsparse_mat_descr                 descr,
-                     rocsparse_datatype                        csr_val_datatype,
-                     const void*                               csr_val,
-                     rocsparse_indextype                       csr_row_ptr_indextype,
-                     const void*                               csr_row_ptr,
-                     rocsparse_indextype                       csr_col_ind_indextype,
-                     const void*                               csr_col_ind,
-                     void*                                     temp_buffer)
-        {
-            return this->recreate(diag_indices,
-                                  transposed_sparsity_pattern,
-                                  trans,
-                                  descr->fill_mode,
-                                  handle,
-                                  trans,
-                                  m,
-                                  nnz,
-                                  descr,
-                                  csr_val_datatype,
-                                  csr_val,
-                                  csr_row_ptr_indextype,
-                                  csr_row_ptr,
-                                  csr_col_ind_indextype,
-                                  csr_col_ind,
-                                  temp_buffer);
-        }
-
-        rocsparse_status
-            recreate(rocsparse::idnvec_descr_t*                diag_indices,
-                     rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                     rocsparse_handle                          handle,
-                     rocsparse_operation                       trans,
-                     int64_t                                   m,
-                     int64_t                                   n,
-                     const rocsparse_mat_descr                 descr,
-                     rocsparse_indextype                       ell_col_ind_indextype,
-                     const void*                               ell_col_ind,
-                     int64_t                                   ell_width,
-                     rocsparse_index_base                      idx_base,
                      size_t                                    buffer_size,
-                     void*                                     temp_buffer);
-
-        template <typename I>
-        rocsparse_status
-            recreate(rocsparse::idnvec_descr_t*                diag_indices,
-                     rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
-                     rocsparse_handle                          handle,
-                     rocsparse_operation                       trans,
-                     I                                         m,
-                     I                                         n,
-                     const rocsparse_mat_descr                 descr,
-                     const I*                                  ell_col_ind,
-                     int64_t                                   ell_width,
-                     rocsparse_index_base                      idx_base,
-                     size_t                                    buffer_size,
-                     void*                                     temp_buffer)
-        {
-            return this->recreate(diag_indices,
-                                  transposed_sparsity_pattern,
-                                  trans,
-                                  descr->fill_mode,
-                                  handle,
-                                  trans,
-                                  static_cast<int64_t>(m),
-                                  static_cast<int64_t>(n),
-                                  descr,
-                                  rocsparse::get_indextype<I>(),
-                                  ell_col_ind,
-                                  ell_width,
-                                  idx_base,
-                                  buffer_size,
-                                  temp_buffer);
-        }
+                     void*                                     buffer);
     };
 
 }

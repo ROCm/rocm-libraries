@@ -94,10 +94,22 @@ protected:
 
 public:
     // Recreates a slot of the triangular data, handing it the storage owned by this mat_info.
-    template <typename... ARGS>
-    rocsparse_status recreate_triangular_info(ARGS... args)
+
+    rocsparse_status recreate_triangular_info(rocsparse_handle            handle,
+                                              rocsparse_operation         operation,
+                                              rocsparse_fill_mode         fill_mode,
+                                              rocsparse_const_spmat_descr A,
+                                              size_t                      buffer_size,
+                                              void*                       buffer)
     {
-        return this->m_triangular_data.recreate(this->m_diag_ind, this->m_transposed, args...);
+        return this->m_triangular_data.recreate(handle,
+                                                operation,
+                                                fill_mode,
+                                                A,
+                                                this->m_diag_ind,
+                                                this->m_transposed,
+                                                buffer_size,
+                                                buffer);
     }
 
     // Triangular infos only see the triangular data as const; mutable access goes through here.
