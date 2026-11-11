@@ -8,7 +8,7 @@ developer who must run the suite, read its output, or add to it.
 | Document | Read it to… |
 |---|---|
 | [File Formats](file-formats.md) | Understand every file in the bundle tree and the provider configs: graphs, template sweeps, metadata, golden data and DVC pointers, support-claim sidecars, per-engine TOML, tier YAML. Also learn how test names are derived. |
-| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), time the engine with `--benchmark`, learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
+| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), time the engine with `--benchmark`, check stream capture with `--graph-capture`, learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
 | [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, or add a C++ test when a bundle cannot express it. |
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
 | [GPU Reference Test Coverage Rules](gpu-ref-test-coverage.md) | Decide whether a new `hipdnn_gpu_ref_tests` case adds coverage: the cost of a case (HipRTC compiles), the datatype, layout and padding-mode rules that keep the matrix small, and the measured effect of the cut. |
@@ -53,6 +53,7 @@ other rows do not, so they are easy to miss.
 | `Error: zero tests ran.` | **yes** | A discovery or filter misconfiguration, or, with GTest sharding, an empty shard. | [Hard stops](running-tests.md#hard-stops) |
 | `FATAL: --enforce-support-claims is active and …` | **yes** | Enforcement verified nothing. | [Hard stops](running-tests.md#hard-stops) |
 | `benchmark failed: …` | **yes** (that test failed) | Under `--benchmark`, the verified graph failed when it ran again, or the timer returned too few measurements. | [Time the engine](running-tests.md#4-time-the-engine---benchmark) |
+| `graph capture failed: …` / `[ CAPTURE ] …: mismatch` | **yes** (that test failed) | Under `--graph-capture`, a HIP step failed while the verified graph was captured or replayed, or a replay output did not match the oracle. | [Check stream capture](running-tests.md#5-check-stream-capture---graph-capture) |
 | `unclaimed_support` in the `SUPPORT CLAIM SUMMARY` | no | The engine accepts graphs that no sidecar claims. Record them. | [Updating support claims](adding-tests.md#updating-support-claims) |
 | `[ VERIFIER ] rejected(<stage>): <bundle>` / `Verified by: … rejected R` | no | An expected-rejection bundle passed: the engine rejected a graph that is invalid on purpose. This is the intended pass, not a skip. | [Expected-rejection bundles](running-tests.md#expected-rejection-bundles) |
 | `Skipped:` equal to (or close to) the total | no | Green, but little or nothing was tested. Read the skip reasons. | [Test coverage summary](running-tests.md#test-coverage-summary) |
