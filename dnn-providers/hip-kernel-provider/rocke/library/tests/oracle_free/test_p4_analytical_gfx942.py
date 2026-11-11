@@ -25,12 +25,6 @@ import numpy as np
 import pytest
 from rocke.tests.gpu import current_device_arch_in
 
-from ._p4_shared_analytical import UniformObservation, encode_bits
-from ._p4_shared_subject import (
-    ResolvedDenseSubject,
-    resolve_dense_subject,
-    run_dense_case,
-)
 from ._p4_analytical import (
     P4_EXPOSURES,
     P4_QUICK_CASES,
@@ -49,6 +43,12 @@ from ._p4_analytical import (
     p4_inputs,
     p4_records,
     require_p4_calibration,
+)
+from ._p4_shared_analytical import UniformObservation, encode_bits
+from ._p4_shared_subject import (
+    ResolvedDenseSubject,
+    resolve_dense_subject,
+    run_dense_case,
 )
 
 pytestmark = pytest.mark.gpu
@@ -92,9 +92,7 @@ def _same_bits(first: UniformObservation, second: UniformObservation) -> bool:
     )
 
 
-def _not_rejected(
-    case: P4Case, what: str, mutated: P4Result, control: P4Result
-) -> str:
+def _not_rejected(case: P4Case, what: str, mutated: P4Result, control: P4Result) -> str:
     """Explain a mutation the checker did not reject, blaming the right side: a
     kernel whose output already fails Tier B can match a mutated prediction."""
     if control.violations:
