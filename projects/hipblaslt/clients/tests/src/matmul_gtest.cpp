@@ -1127,6 +1127,43 @@ namespace
         EXPECT_FATAL_FAILURE(rocroller_predicate_testing{}(GetParam()), "NO solution found!");
     }
     INSTANTIATE_TEST_CATEGORIES(rocroller_predicate_test);
+#else
+    // ----------------------------------------------------------------------------
+    // rocRoller-routed GEMMs on a build without rocRoller, served only by the
+    // checked-in rocRoller kernels
+    // ----------------------------------------------------------------------------
+
+    struct rocroller_off_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            testing_matmul(arg);
+        }
+    };
+
+    struct rocroller_off_test : RocBlasLt_Test<rocroller_off_test, rocroller_off_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "rocroller_off_matmul");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(rocroller_off_test, matmul)
+    {
+        RUN_TEST_ON_THREADS_STREAMS(rocroller_off_testing{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(rocroller_off_test);
 #endif
 
 } // namespace
