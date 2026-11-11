@@ -191,6 +191,12 @@ tox -e coverage-unit
 tox -e coverage
 ```
 
+`tox -e pip-sdk-smoke` is a CPU-only check of the Python SDK path: it installs
+the newest nightly `rocm-sdk-core` and TensileLite from the checkout into a
+fresh environment and checks that TensileLite selects the SDK and finds
+`clang-offload-bundler` in the interpreter's scripts directory. CI runs it for
+pull requests that touch the runtime selection and daily.
+
 Useful variables:
 
 - `TENSILELITE_TEST_ARCH`: architecture used for unit-test staging (default

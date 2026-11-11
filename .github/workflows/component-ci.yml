@@ -27,6 +27,7 @@ jobs:
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
       hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
+      tensilelite-pip-sdk-smoke: ${{ steps.configure.outputs.tensilelite_pip_sdk_smoke }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -105,6 +106,12 @@ jobs:
     if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
     uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
 
+  tensilelite-pip-sdk-smoke:
+    name: "TensileLite pip SDK smoke"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-pip-sdk-smoke == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-pip-sdk-smoke.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -116,6 +123,7 @@ jobs:
       - tensilelite-coverage
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
+      - tensilelite-pip-sdk-smoke
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
