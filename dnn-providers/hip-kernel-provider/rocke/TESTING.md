@@ -493,50 +493,37 @@ to protect them from future loss and update the runtime availability table. That
 table also controls lowering warnings/refusals, so a baseline update is a product
 policy change, not merely a way to make this test pass.
 
-The comparison-only contract metadata extends the v1 envelope without changing
-runtime `Cell` lookup or the generated C++ availability table. The legacy
-columns' contracts were reconstructed with `opt` built from their recorded LLVM
-source revisions, checking canonical names and old/new probe-rendering bytes.
-All original measurements and compiler provenance were preserved; this is not a
-new compiler qualification or a support refresh. Missing historical positive
-contracts fail comparison. Recover the original question with matching compiler
-or auditable source evidence; never infer it from a newer host or silently fill
-it with default witnesses.
+#### Historical positive-probe contract recovery
 
-**Recorded atomic-fadd reconstruction.** The 247-key metadata snapshot includes
-`raw.ptr.buffer.atomic.fadd.f32` contracts in all four columns. Each contract was
-reconstructed with `opt` built from that column's recorded LLVM source revision,
-not inferred from a newer compiler. A read-only replay verified the clean source
-revision and the executable's SHA-256 against the reconstruction receipt before
-checking the resolved canonical declaration, original explicit witnesses, and
-byte-identical old/new probe rendering.
+Comparison-only contracts extend the v1 envelope without changing runtime `Cell`
+lookup or the generated C++ availability table. Missing historical positive
+contracts fail comparison: recover the original question from the recorded
+compiler or auditable matching-source evidence, never infer it from a newer host
+or silently fill it with default witnesses.
 
-| Column | Recorded LLVM source revision | Other positive cells | Atomic-fadd positive cells | Total recorded positive cells |
-| --- | --- | ---: | ---: | ---: |
-| llvm20 | `27682a16360e33e37c4f3cc6adf9a620733f8fe1` | 1,593 | 15 | 1,608 |
-| llvm22 | `f58b06dce1f9c15707c5f808fd002e18c2accf7e` | 1,971 | 16 | 1,987 |
-| llvm23 | `8f497e0992fb7513f7f78a6f6b6f1056c375e961` | 2,123 | 16 | 2,139 |
-| llvm24 | `2792f8ceeb5aa6e188c1ce2b735923b2406a8e59` | 2,231 | 17 | 2,248 |
+For a metadata-only recovery:
 
-All four revisions resolve the canonical name
-`llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32`. Its effective contract returns
-`float` and takes a variable `float`, a `ptr addrspace(8)` poison witness, two
-variable `i32` operands, and an immediate `i32 0`. The default zero is present in
-`probe_contracts` even though these cells do not carry an explicit `probe_imm`.
-The replay reproduced the committed contracts without writing a column; every
-prior measurement, compiler identity, and other contract remained unchanged,
-and the generated C++ runtime availability table remained byte-identical.
+1. Verify the recorded compiler or matching LLVM source identity and executable
+   provenance. Resolve the canonical declaration with that compiler's `opt`.
+2. Recover the historical probe builder from version history. Render the resolved
+   declaration with both the historical and contract-aware builders, using the
+   column's datalayout and original explicit witnesses. Compare complete module
+   bytes and check that the derived contract describes that same question,
+   including default immediates absent from optional `probe_imm`.
+3. Preserve every measurement field, compiler identity and unrelated contract.
+   Independently check the recovered record, positive-cell inventory and generated
+   runtime-table bytes. Support updates require their own review; metadata
+   recovery must not re-bless a loss or invent a measurement.
+4. Record the exact source/generator revisions, executable receipts, counts,
+   validation results and limitations in the PR description. Attribute compiler
+   and CI results to their tested snapshots, not a later untested head.
 
-To audit this reconstruction, resolve the declaration with each matching-source
-`opt`, render it with both the pre-contract and contract-aware probe builders at
-the column's datalayout and original witnesses, and compare the complete module
-bytes. Compare the derived contract to the committed record, then independently
-check the positive-cell counts and preservation of all other fields. This
-establishes the historical probe question, not a replay of the original compiler
-installations, a new support measurement, or GPU numerical qualification. The
-247 keys and 18 targets describe 4,446 recorded cells per column, not a new
-compiler sweep. CI results must be attributed separately to their tested source
-or merge snapshot; a newer passing run does not erase an earlier failure.
+This establishes a historical probe question, not a replay of the original
+compiler installation, a new support measurement or GPU numerical qualification.
+Newly measured positives must record their effective contracts from the live
+probe plan; they do not authorize guessing missing historical contracts.
+
+#### Execution and test coverage
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,

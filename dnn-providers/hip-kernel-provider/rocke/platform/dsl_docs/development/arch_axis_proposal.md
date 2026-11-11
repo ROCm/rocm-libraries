@@ -304,15 +304,11 @@ method fields and is not itself an input to the generator's validator:
 
 `probe_contracts` is comparison-only metadata, not a runtime availability or
 numerical-correctness policy. It comes from the same operand plan that renders
-each probe, including default immediates and explicit integer literals. Legacy
-contracts were reconstructed with `opt` built from the recorded LLVM source
-revisions, checking canonical names and unchanged probe-rendering bytes while
-preserving every old measurement. Missing historical positive contracts fail;
-new-host inference would not establish the old question. This adds metadata to
-the v1 envelope without changing the Python/C++ runtime tables. The shared
-column serializer keeps each named contract on one line in both generation and
-pruning. Newly measured positive keys require the same historical evidence and
-must not be merged without their contract records.
+each probe, including default immediates and explicit integer literals, and
+extends the v1 envelope without changing the Python/C++ runtime tables. Storage,
+positive-key completeness and
+[historical contract recovery](../../../TESTING.md#historical-positive-probe-contract-recovery)
+follow the support-gate policy in `TESTING.md`.
 
 `canonical` records what LLVM resolved each surviving declare to. Mostly
 identical to the declared name; the interesting rows are the overloads that

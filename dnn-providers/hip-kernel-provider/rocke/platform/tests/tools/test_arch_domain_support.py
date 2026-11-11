@@ -9,6 +9,8 @@ losses, gains and invalid records without depending on a real LLVM installation.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -319,6 +321,21 @@ class SupportComparisonTest(unittest.TestCase):
         for text in (json.dumps(valid, indent=2), G._serialize_column(valid)):
             self.assertEqual(G._compare_support(text, text).failures, [])
 
+    def test_probe_contracts_cannot_extend_intrinsic_key_coverage(self):
+        valid = json.loads(self._doc())
+        invalid = json.loads(json.dumps(valid))
+        invalid["probe_contracts"]["orphan.key"] = valid["probe_contracts"]["a.b"]
+        diagnostic = "probe contract 'orphan.key' is outside intrinsic coverage"
+        self.assertEqual(
+            G._validate_column(invalid, "baseline"), [f"baseline {diagnostic}"]
+        )
+        self._assert_invalid_on_either_or_both_sides(valid, invalid, diagnostic)
+        valid["keys"]["orphan.key"] = valid["keys"]["a.b"]
+        valid["probe_contracts"] = invalid["probe_contracts"]
+        self.assertEqual(G._validate_column(valid, "baseline"), [])
+        text = json.dumps(valid)
+        self.assertEqual(G._compare_support(text, text).failures, [])
+
     def test_positive_probe_contract_changes_fail(self):
         for old, new in (
             (
@@ -416,6 +433,43 @@ class SupportComparisonTest(unittest.TestCase):
                 declarations.assert_not_called()
                 self.assertEqual(path.read_text(), text)
 
+    def test_prune_refuses_a_post_transform_validation_failure_without_writing(self):
+        """Fault injection covers the final write boundary, not a production defect."""
+        doc = json.loads(self._doc())
+        doc["keys"]["stale.key"] = doc["keys"]["a.b"]
+        doc["probe_contracts"]["stale.key"] = doc["probe_contracts"]["a.b"]
+        validate = G._validate_column
+        labels = []
+
+        def fail_after_pruning(column, label, **kwargs):
+            self.assertEqual(validate(column, label, **kwargs), [])
+            labels.append(label)
+            if label == "pruned":
+                self.assertNotIn("stale.key", column["keys"])
+                self.assertNotIn("stale.key", column["probe_contracts"])
+                return ["pruned injected validation failure"]
+            return []
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intrinsic_arch_domain.llvm22.json"
+            text = G._serialize_column(doc)
+            path.write_text(text)
+            output = io.StringIO()
+            with (
+                mock.patch.object(G, "DATA_DIR", Path(directory)),
+                mock.patch.object(G, "_decl_table", return_value={"a.b": ""}),
+                mock.patch.object(
+                    G, "_validate_column", side_effect=fail_after_pruning
+                ),
+                mock.patch.object(Path, "write_text") as write,
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(G._prune(), 1)
+            write.assert_not_called()
+            self.assertEqual(labels, ["baseline", "pruned"])
+            self.assertIn("pruned injected validation failure", output.getvalue())
+            self.assertEqual(path.read_text(), text)
+
     def test_prune_removes_contracts_with_keys_without_inventing_metadata(self):
         for legacy in (False, True):
             with (
@@ -467,6 +521,24 @@ class SupportComparisonTest(unittest.TestCase):
         self.assertEqual(
             G._compare_support(json.dumps(before), json.dumps(after)).failures, []
         )
+
+    def test_unparseable_declarations_have_named_contract_and_rendering_refusals(self):
+        for decl in ("", "not a declaration", "declare i32 @llvm.test("):
+            with self.subTest(decl=decl):
+                diagnostic = f"cannot parse declare: {decl!r}"
+                spec = G.ProbeSpec(decl, None, None)
+                with self.assertRaises(ValueError) as error:
+                    G._probe_contract(spec)
+                self.assertEqual(str(error.exception), diagnostic)
+                self.assertEqual(G._probe_plan(decl), (None, diagnostic))
+                self.assertEqual(G._probe_module(decl, ""), ("", diagnostic))
+        valid = G.ProbeSpec("declare i32 @llvm.test(i32)", None, None)
+        self.assertEqual(
+            G._probe_contract(valid), json.loads(self._doc())["probe_contracts"]["a.b"]
+        )
+        text, why = G._probe_module(valid.decl, "")
+        self.assertEqual(why, "")
+        self.assertIn("call i32 @llvm.test(i32 %a0)", text)
 
     def test_missing_historical_positive_contract_cannot_pass(self):
         valid = json.loads(self._doc())
@@ -718,6 +790,49 @@ class SupportComparisonTest(unittest.TestCase):
                     )
                     self.assertTrue(comparison.failures)
                     self.assertIn("a.b", "; ".join(comparison.failures))
+
+    def test_schema_is_validated_independently_of_other_record_fields(self):
+        valid = json.loads(self._doc())
+        diagnostic = f"schema must be {G.SCHEMA!r}"
+        for fields in ({}, *({"schema": value} for value in (None, "wrong", 22, []))):
+            with self.subTest(schema=fields):
+                invalid = json.loads(json.dumps(valid))
+                del invalid["schema"]
+                invalid.update(fields)
+                self.assertEqual(
+                    G._validate_column(invalid, "baseline"), [f"baseline {diagnostic}"]
+                )
+                self._assert_invalid_on_either_or_both_sides(valid, invalid, diagnostic)
+        self.assertEqual(G._validate_column(valid, "baseline"), [])
+        self.assertEqual(G._compare_support(self._doc(), self._doc()).failures, [])
+
+    def test_architecture_rows_must_be_mappings_before_comparison(self):
+        valid = json.loads(self._doc())
+        diagnostic = "architecture row is not a mapping"
+        for row in (None, [], "invalid row", 22):
+            with self.subTest(row=row):
+                invalid = json.loads(json.dumps(valid))
+                invalid["keys"]["a.b"] = row
+                self.assertEqual(
+                    G._validate_column(invalid, "baseline"),
+                    [f"a.b: baseline {diagnostic}"],
+                )
+                self._assert_invalid_on_either_or_both_sides(
+                    valid, invalid, "a.b", diagnostic
+                )
+        self.assertEqual(G._validate_column(valid, "baseline"), [])
+        self.assertEqual(G._compare_support(self._doc(), self._doc()).failures, [])
+
+    def test_probe_error_is_invalid_before_transition_classification(self):
+        valid = json.loads(self._doc(G.STATUS_ARCH_ABSENT))
+        invalid = json.loads(self._doc(G.STATUS_PROBE_ERROR))
+        diagnostic = f"invalid status {G.STATUS_PROBE_ERROR!r}"
+        self.assertEqual(
+            G._validate_column(invalid, "baseline"),
+            [f"a.b/{self.ARCH}: baseline {diagnostic}"],
+        )
+        self._assert_invalid_on_either_or_both_sides(valid, invalid, diagnostic)
+        self.assertEqual(G._validate_column(valid, "baseline"), [])
 
     def test_invalid_schema_and_structure_fail_not_crash(self):
         for text in ("{oops", "[]", '{"schema": "wrong"}'):

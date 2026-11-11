@@ -381,16 +381,11 @@ installation (§2.4), and validates the generated column before writing or
 comparing it.
 
 The comparison-only contracts extend the v1 envelope but leave runtime lookup
-and the generated C++ availability table unchanged. Legacy contracts were
-reconstructed using `opt` built from the recorded LLVM source revisions, with
-canonical-name and old/new probe-rendering checks. All old measurement fields
-and compiler identities remain unchanged. Missing historical positive contracts
-fail comparison; reconstruct them from matching evidence, never from a newer
-host's inferred constraints. This metadata migration does not re-bless support.
-The canonical column serializer keeps one named contract per line, and both
-generation and pruning use it. Every newly introduced positive key requires a
-contract backed by its recorded source evidence; adding measurement rows alone
-leaves an incomplete comparison column.
+and the generated C++ availability table unchanged. The support gate's
+[historical contract recovery policy](../../../TESTING.md#historical-positive-probe-contract-recovery)
+owns the evidence needed to compare older columns; changing compiler builds does
+not authorize inferring their missing metadata. Its column-storage and
+positive-key completeness rules apply to every toolchain column.
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

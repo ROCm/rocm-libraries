@@ -213,11 +213,10 @@ round-trips, ordering, legacy/empty records, and persistence through both writer
 Independent column assertions and appended-positive controls require contracts
 for newly introduced keys as well as the existing set.
 
-These comparison-only records do not change runtime v1 lookup. Legacy metadata
-was reconstructed using `opt` built from the recorded LLVM source revisions,
-with canonical-name and old/new probe-rendering checks, preserving all existing
-measurement fields. Missing historical positive contracts fail; they must not be
-inferred from the current compiler. This migration is not a support re-bless.
+These comparison-only records do not change runtime v1 lookup. The
+[historical positive-probe contract recovery policy](../../TESTING.md#historical-positive-probe-contract-recovery)
+owns the evidence requirements and the distinction between metadata recovery and
+support qualification.
 
 | Condition | CTest result |
 |---|---|
