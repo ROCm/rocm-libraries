@@ -1266,6 +1266,35 @@ class TestPopulateLogicalModule(AdaptorTestCase):
         self.assertLess(items.index(("inst", "store2")), end)
         self.assertLess(end, items.index(("inst", "post")))
 
+    def test_named_module_brackets_group_with_stable_textblocks(self):
+        root = Module()
+        group = Module("noLoadLoopBody")
+        group.add(_FakeLogicalInst("body"))
+        root.add(group)
+        root.add(_FakeLogicalInst("tail"))
+
+        items = self._payloads(root)
+        begin = items.index(("begin_group", "noLoadLoopBody"))
+        end = items.index(("end_group", "noLoadLoopBody"))
+        self.assertEqual(items[begin + 1], ("textblock", ""))
+        self.assertEqual(items[end - 1], ("textblock", ""))
+        self.assertLess(end, items.index(("inst", "tail")))
+
+    def test_synthetic_pgr_brackets_group_with_stable_textblocks(self):
+        root = Module()
+        root.add(_FakeLogicalInst("pre"))
+        root.add(_FakeLogicalInst("loop"))
+        root.add(_FakeLogicalInst("tail"))
+
+        mock = _MockLogicalModule()
+        root._populate_logical_module(mock, (1, 1), None)
+        items = mock.items
+        begin = items.index(("begin_group", "loopWithPrefetch"))
+        end = items.index(("end_group", "loopWithPrefetch"))
+        self.assertEqual(items[begin + 1], ("textblock", ""))
+        self.assertEqual(items[end - 1], ("textblock", ""))
+        self.assertLess(end, items.index(("inst", "tail")))
+
     def test_in_order_traversal_with_nested_modules(self):
         outer = Module()
         outer.add(_FakeLogicalInst("0"))

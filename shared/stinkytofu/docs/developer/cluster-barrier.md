@@ -164,6 +164,13 @@ switch `cluster_barrier::kRule3CrossLoop` in
 `InsertClusterBarrierPass.hpp` (default **false**). See
 [`kRule3CrossLoop`](#krule3crossloop) below.
 
+### GIR frame RAW points and the Rule 3 signal
+
+The Rule 3 backward signal search treats `s_wait_tensorcnt` as a hard stop and settles after that
+RAW point's workgroup fence. Therefore no tensor-counter wait may occur between a Rule 3
+`s_barrier_signal -3` and its matching `s_barrier_wait -3`. This is in-segment behavior and does
+not enable `kRule3CrossLoop`.
+
 ### SCC
 
 The signal block opens with `s_cmp_eq_u32 s[sgprWaveIdx], 0`, so wherever it
