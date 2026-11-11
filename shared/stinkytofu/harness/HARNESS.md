@@ -32,8 +32,8 @@ tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
 ```
 
 Final check (local CI): finish the change using the A/B above. Then, before you submit a PR, run
-what CI will run for the paths you changed (build, ctest, FileCheck; see `README.md` and
-`tests/README.md`). You may instead let CI run them on the PR and wait for the result.
+the StinkyTofu tests locally (build, ctest, FileCheck; see `README.md` and `tests/README.md`). They
+are fast, so run them locally and do not leave them to CI.
 
 **Tier 1 needs a fresh binding.** TensileLite loads the rocisa binding, not the `invoke build` output.
 After a StinkyTofu edit, rebuild it as described in `projects/hipblaslt/tensilelite/AGENTS.md`, or the
@@ -49,11 +49,16 @@ asm supports only "no performance change".
 
 ## Rules
 
-1. **Check for new commits first.** At task start, `git fetch` and list new commits on `develop` that
-   touch the files in scope. If there are any, tell the developer before starting. A fix may already
-   have landed. Rebasing during development is the developer's choice. Before merge, the base skill
-   `rocm-pr-quality` (pre-merge gate) does the matching overlap check. Neither the PR bot nor this
-   file replaces it.
+1. **Check for new commits first.** At task start, run `git fetch origin develop` and list the new
+   commits that touch the files in scope (`git log HEAD..FETCH_HEAD -- <path>`). If there are any,
+   tell the developer before starting. A fix may already have landed. Rebasing during development is
+   the developer's choice. Before merge, the base skill `rocm-pr-quality` (pre-merge gate) does the
+   matching overlap check. Neither the PR bot nor this file replaces it.
+   - If `git fetch` fails, tell the developer and continue. In a sparse or partial clone it can print
+     `bad tree object` or `failed to run repack`. That message comes from background garbage
+     collection, so check whether the fetch completed.
+   - In such a clone, do not run `git grep` over history or the whole tree. It downloads missing
+     objects one at a time and can hang. Search the working tree instead.
 2. **Record the baseline.** Every comparison run records the baseline commit hash.
 3. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
    only when the developer says so. The one exception is proposing a database entry (`DATABASE.md`).

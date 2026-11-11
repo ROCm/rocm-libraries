@@ -24,11 +24,15 @@ handle. Do not remove several components at once.
 ```text
 - compare file by file with diff or cmp. Every file must match. A combined hash does not count.
 - report how many files were compared and how many differ. Zero files compared is a failure.
-- generate each side in its own working directory (`Tensile <yaml> <working directory>`, with
-  KeepBuildTmp on so the asm is kept). The folder names inside look the same on both sides, so the
-  working directory is the only way to tell them apart. Print both paths and check they differ.
-- build the baseline and the candidate separately. Rebuild the candidate after the last edit (see
-  the "fresh binding" note in the StinkyTofu HARNESS.md).
+- generate each side in its own working directory:
+  `Tensile --cpu-only --gpu-targets <arch> <yaml> <working directory>`. `--cpu-only` requires
+  `--gpu-targets`, and its perf numbers are synthetic, so it is only for generating asm. The perf
+  YAMLs set `KeepBuildTmp: True`, which keeps the asm. The folder names inside look the same on both
+  sides, so the working directory is the only way to tell them apart. Print both paths and check
+  they differ.
+- build the baseline and the candidate in separate worktrees, each with its own venv, so the two
+  rocisa bindings do not shadow each other (see the `worktree-venv` skill in `skills/`). Rebuild the
+  candidate after the last edit (see the "fresh binding" note in the StinkyTofu HARNESS.md).
 - if anything is normalized before comparing (paths, timestamps), list exactly what, and show a
   diff proving nothing else was removed.
 - on any difference, show the diff. Do not call it "equivalent" unless the developer agrees.

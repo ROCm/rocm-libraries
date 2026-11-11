@@ -28,10 +28,10 @@ tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
              a difference of at least one SD (run-to-run noise) needs a human check
 ```
 
-Final check (local CI): finish the change using the A/B above. Then, before you submit a PR, run what
-CI will run for the paths you changed (the TensileLite tox lanes, the GTest suite, hipblaslt-bench as
-CI runs it, and the rest). Commands come from `../TESTING.md` and the `AGENTS.md` files. You may
-instead let CI run them on the PR and wait for the result.
+Final check (local CI): finish the change using the A/B above. Then, before you submit a PR, run the
+checks that CI will run for the paths you changed, as far as they are quick. The full test suites
+take hours, so you can leave them to CI on the PR and wait for the result. Commands come from
+`../TESTING.md` and the `AGENTS.md` files.
 
 **The pattern check** is a filter, not a score. The patterns to check for come from the
 database (`entries/`, see `DATABASE.md`), not from this repo. Each entry there has a source and a
@@ -44,11 +44,16 @@ Identical asm supports only "no performance change". Pull requests are not bench
 
 ## Rules
 
-1. **Check for new commits first.** At task start, `git fetch` and list new commits on `develop` that
-   touch the files in scope. If there are any, tell the developer before starting. A fix may already
-   have landed. Rebasing during development is the developer's choice. Before merge, the base skill
-   `rocm-pr-quality` (pre-merge gate) does the matching overlap check. Neither the PR bot nor this
-   file replaces it.
+1. **Check for new commits first.** At task start, run `git fetch origin develop` and list the new
+   commits that touch the files in scope (`git log HEAD..FETCH_HEAD -- <path>`). If there are any,
+   tell the developer before starting. A fix may already have landed. Rebasing during development is
+   the developer's choice. Before merge, the base skill `rocm-pr-quality` (pre-merge gate) does the
+   matching overlap check. Neither the PR bot nor this file replaces it.
+   - If `git fetch` fails, tell the developer and continue. In a sparse or partial clone it can print
+     `bad tree object` or `failed to run repack`. That message comes from background garbage
+     collection, so check whether the fetch completed.
+   - In such a clone, do not run `git grep` over history or the whole tree. It downloads missing
+     objects one at a time and can hang. Search the working tree instead.
 2. **Record the baseline.** Every comparison run records the baseline commit hash.
 3. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
    only when the developer says so. The one exception is proposing a database entry (`DATABASE.md`).
