@@ -234,7 +234,7 @@ def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelD
     """Build the one-hot WMMA depthwise wgrad kernel (see the module docstring)."""
     from rocke.core.arch import ArchTarget
 
-    spec.validate()
+    # One validation: is_valid_dw_wgrad_wmma_spec runs dw_wgrad_wmma_reason.
     ok, why = is_valid_dw_wgrad_wmma_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid DwWgradWmmaSpec for {arch}: {why}")

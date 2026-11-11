@@ -700,14 +700,8 @@ extern "C" rocke_kernel_def_t* rocke_build_direct_dw_wgrad_wmma_new(
             return NULL;
         if(arch == NULL)
             arch = "gfx1250";
-        /* spec.validate() then is_valid_dw_wgrad_wmma_spec, both before the
-         * Python builds its IRBuilder. */
-        if(rocke_direct_dw_wgrad_wmma_reason(spec, why, sizeof why))
-        {
-            rocke_ir_builder_init(b, "direct_dw_wgrad_wmma_invalid");
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "DwWgradWmmaSpec: %s", why);
-            return NULL;
-        }
+        /* is_valid_dw_wgrad_wmma_spec (which runs the arch-independent
+         * rules too), before the Python builds its IRBuilder. */
         if(!rocke_direct_dw_wgrad_wmma_is_valid_spec(spec, arch, why, sizeof why))
         {
             rocke_ir_builder_init(b, "direct_dw_wgrad_wmma_invalid");

@@ -231,7 +231,9 @@ class TestDwWgradWmmaEngines(unittest.TestCase):
             spec = DwWgradWmmaSpec(problem=_problem(**pkw), **knobs)
             with self.assertRaises(ValueError) as py_err:
                 build_dw_wgrad_wmma(spec, "gfx1250")
-            self.assertEqual(str(py_err.exception), f"DwWgradWmmaSpec: {why}")
+            self.assertEqual(
+                str(py_err.exception), f"invalid DwWgradWmmaSpec for gfx1250: {why}"
+            )
             with self.assertRaises(Exception) as cpp_err:
                 eng.conv_direct_dw_wgrad_wmma_serialize_ir(
                     conv_direct_dw_wgrad_wmma_spec_to_dict(spec), "gfx1250"
