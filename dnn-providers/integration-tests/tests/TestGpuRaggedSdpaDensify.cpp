@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLayoutTestSupport.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaDensifyTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -21,21 +23,34 @@
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 using namespace hipdnn_test_sdk::utilities::ragged_densify_test;
+using hipdnn_test_sdk::utilities::ragged_layout_test::stridedAuxBuffer;
 
 namespace
 {
 
 // Runs `graph` on the CPU executor (host buffers) and the GPU executor (device copies of the same
 // buffers) and compares every output buffer element by element. The token offsets are always
-// bound; intInputs adds INT32 inputs (seq_len tensors, page tables).
+// bound; intInputs adds INT32 inputs (seq_len tensors, page tables). With auxStride > 1 the token
+// offsets and seq_len values sit at that batch stride in both executors' buffers (the graph must
+// declare it, see withAuxStrides), the slots between them poisoned.
 void expectGpuMatchesCpu(std::vector<uint8_t> graph,
                          const std::unordered_map<int64_t, std::vector<float>>& inputs,
                          const std::unordered_map<int64_t, size_t>& outputSizes,
                          float tolerance,
-                         std::unordered_map<int64_t, std::vector<int32_t>> intInputs = {})
+                         std::unordered_map<int64_t, std::vector<int32_t>> intInputs = {},
+                         int64_t auxStride = 1)
 {
     intInputs.emplace(Q_OFFSETS, Q_TOKENS);
     intInputs.emplace(KV_OFFSETS, KV_TOKENS);
+    for(const int64_t uid : {Q_OFFSETS, KV_OFFSETS, SEQ_Q, SEQ_KV})
+    {
+        const auto it = intInputs.find(uid);
+        if(it == intInputs.end() || auxStride == 1)
+        {
+            continue;
+        }
+        it->second = stridedAuxBuffer(it->second, auxStride);
+    }
 
     // CPU: host buffers.
     std::unordered_map<int64_t, std::vector<float>> cpuData = inputs;
@@ -100,7 +115,81 @@ void expectGpuMatchesCpu(std::vector<uint8_t> graph,
     }
 }
 
+// The forward graph with seq_len_q/kv bound to the node (INT32 [B, 1, 1, 1], uids SEQ_Q/SEQ_KV).
+std::vector<uint8_t> withSeqLens(const std::vector<uint8_t>& graph)
+{
+    return editGraph(graph, [](GraphT& g) {
+        for(const int64_t uid : {SEQ_Q, SEQ_KV})
+        {
+            g.tensors.push_back(tensor(uid, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
+        }
+        auto* attrs = g.nodes.at(0)->attributes.AsSdpaAttributes();
+        attrs->seq_len_q_tensor_uid = SEQ_Q;
+        attrs->seq_len_kv_tensor_uid = SEQ_KV;
+        attrs->padding_mask = true;
+    });
+}
+
+// The graph with the token offsets and seq_len tensors (those it has) at batch stride `stride`.
+std::vector<uint8_t> withAuxStrides(const std::vector<uint8_t>& graph, int64_t stride)
+{
+    return editGraph(graph, [&](GraphT& g) {
+        for(auto& attrs : g.tensors)
+        {
+            if(attrs->uid == Q_OFFSETS || attrs->uid == KV_OFFSETS || attrs->uid == SEQ_Q
+               || attrs->uid == SEQ_KV)
+            {
+                attrs->strides = {stride, 1, 1, 1};
+            }
+        }
+    });
+}
+
 } // namespace
+
+// seq_len shorter than the offset block: the live K/V rows are seq_len_kv, not the block, so the
+// padding rows of each block must not reach the softmax. Bias keeps the graph on the densify
+// path.
+TEST(TestGpuRaggedSdpaDensify, SeqLenShorterThanBlockMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<float> bias(static_cast<size_t>(SQ * SKV));
+    for(size_t i = 0; i < bias.size(); ++i)
+    {
+        bias[i] = static_cast<float>(i % 5) * 0.25F - 0.5F;
+    }
+    expectGpuMatchesCpu(
+        withSeqLens(raggedGraph(false, true)),
+        {{Q, packedValues(10, H * D, 61)},
+         {K, packedValues(13, H * D, 62)},
+         {V, packedValues(13, H * D, 63)},
+         {BIAS, bias}},
+        {{O, static_cast<size_t>(10 * H * D)}, {STATS, static_cast<size_t>(10 * H)}},
+        1e-5F,
+        {{SEQ_Q, {4, 6}}, {SEQ_KV, {6, 3}}});
+}
+
+// The same, with the token offsets and seq_len tensors at batch stride 2 and the odd slots
+// poisoned: both executors' densify paths must read element b at b * 2.
+TEST(TestGpuRaggedSdpaDensify, StridedSeqLenMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<float> bias(static_cast<size_t>(SQ * SKV));
+    for(size_t i = 0; i < bias.size(); ++i)
+    {
+        bias[i] = static_cast<float>(i % 5) * 0.25F - 0.5F;
+    }
+    expectGpuMatchesCpu(
+        withAuxStrides(withSeqLens(raggedGraph(false, true)), 2),
+        {{Q, packedValues(10, H * D, 61)},
+         {K, packedValues(13, H * D, 62)},
+         {V, packedValues(13, H * D, 63)},
+         {BIAS, bias}},
+        {{O, static_cast<size_t>(10 * H * D)}, {STATS, static_cast<size_t>(10 * H)}},
+        1e-5F,
+        {{SEQ_Q, {4, 6}}, {SEQ_KV, {6, 3}}},
+        2);
+}
 
 TEST(TestGpuRaggedSdpaDensify, ForwardWithBiasMatchesCpu)
 {
@@ -118,6 +207,28 @@ TEST(TestGpuRaggedSdpaDensify, ForwardWithBiasMatchesCpu)
          {BIAS, bias}},
         {{O, static_cast<size_t>(10 * H * D)}, {STATS, static_cast<size_t>(10 * H)}},
         1e-5F);
+}
+
+// Philox dropout over packed operands, validated through the dense RNG dump (SEM-015): both
+// executors apply the dump through the dense rewrite.
+TEST(TestGpuRaggedSdpaDensify, PhiloxDropoutWithItsDumpMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<float> dump(static_cast<size_t>(B * H * SQ * SKV));
+    for(size_t i = 0; i < dump.size(); ++i)
+    {
+        dump[i] = (i * 7U + i / 5U) % 4U == 0U ? 0.0F : 1.0F;
+    }
+    // The INT64 seed and offset, each as two INT32 words (little-endian): bound, not read.
+    expectGpuMatchesCpu(
+        withPhiloxDropout(raggedGraph(false, false), 0.25F),
+        {{Q, packedValues(10, H * D, 51)},
+         {K, packedValues(13, H * D, 52)},
+         {V, packedValues(13, H * D, 53)},
+         {RNG_DUMP, dump}},
+        {{O, static_cast<size_t>(10 * H * D)}, {STATS, static_cast<size_t>(10 * H)}},
+        1e-5F,
+        {{SEED, {1234, 0}}, {OFFSET, {8, 0}}});
 }
 
 TEST(TestGpuRaggedSdpaDensify, BackwardMatchesCpu)
@@ -185,4 +296,24 @@ TEST(TestGpuRaggedSdpaDensify, RaggedQOverPagedKvMatchesCpu)
                              {PAGE_TABLE_K, PAGE_TABLE},
                              {PAGE_TABLE_V, PAGE_TABLE}});
     }
+}
+
+// A seq_len or offset table whose values lie off the batch axis would be copied from the device
+// past its buffer; the executor declines such a graph instead of reading it.
+TEST(TestGpuRaggedSdpaDensify, AuxOffTheBatchAxisIsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto reshape = [](const std::vector<uint8_t>& graph, int64_t uid, int64_t count) {
+        return editGraph(graph, [&](GraphT& g) {
+            tensorOf(g, uid).dims = {1, count, 1, 1};
+            tensorOf(g, uid).strides = {count, 1, 1, 1};
+        });
+    };
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpu;
+    auto applicable
+        = [&](std::vector<uint8_t> graph) { return gpu.isApplicable(graph.data(), graph.size()); };
+    const auto withLens = withSeqLens(raggedGraph(false, true));
+    EXPECT_TRUE(applicable(withLens));
+    EXPECT_FALSE(applicable(reshape(withLens, SEQ_Q, B)));
+    EXPECT_FALSE(applicable(reshape(raggedGraph(false, true), Q_OFFSETS, B + 1)));
 }

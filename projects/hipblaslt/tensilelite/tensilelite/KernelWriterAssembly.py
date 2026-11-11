@@ -75,7 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
-  mxLraFreeShift
+  mxLraFreeShift, mxSegmentSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
@@ -1039,6 +1039,23 @@ class KernelWriterAssembly(KernelWriter):
     print("warning: Number of SGPRS (%d with %d temporary for %s) overflowed max SGPRS (%d)."
           % (self.sgprPool.size(), num, tag, self.states.regCaps["MaxSgpr"]))
 
+  def _checkedOutRegs(self):
+    """{(pool, index): tag} of every sgpr/vgpr currently checked out."""
+    from rocisa.register import RegisterPool
+    regs = {}
+    for name, pool in (("s", self.sgprPool), ("v", self.vgprPool)):
+      for idx, reg in enumerate(pool.getPool()):
+        if reg.status == RegisterPool.Status.InUse:
+          regs[(name, idx)] = reg.tag
+    return regs
+
+  def _assertStillCheckedOut(self, regs, where):
+    """Assert every register of a _checkedOutRegs() snapshot is still
+    checked out under the same tag at ``where``."""
+    now = self._checkedOutRegs()
+    freed = sorted("%s%u(%s)" % (p, i, t) for (p, i), t in regs.items() if now.get((p, i)) != t)
+    assert not freed, "registers live across %s were checked in before it: %s" % (where, ", ".join(freed))
+
   def allocTmpSgpr(self, num: int, alignment=None, tag=None):
     def overflowListener(e):
       self._reportTmpSgprOverflow(num, tag)
@@ -1390,14 +1407,19 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
     if kernel["PrefetchGL2"]:
-      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpgo))
-      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpgo))
+      numGL2IncSgpr = GL2PrefetchLoad.numIncSgpr(kernel)
+      gl2Tensors = ["A", "B"]
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
+        gl2Tensors.append("MXSA")
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
+        gl2Tensors.append("MXSB")
       if kernel["enableTDMMetadata"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMetadata", self.states.rpgo))
+        gl2Tensors.append("Metadata")
+      for tc in gl2Tensors:
+        module.add(self.defineSgpr(f"GL2PrefetchInc{tc}", numGL2IncSgpr, numGL2IncSgpr))
+      if GL2PrefetchLoad.useSAddr(kernel):
+        for tc in gl2Tensors:
+          module.add(self.defineSgpr(f"GL2PrefetchBase{tc}", 2, 2))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -1608,23 +1630,24 @@ class KernelWriterAssembly(KernelWriter):
     """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
     if not kernel["PrefetchGL2"]:
       return
+    numAddrVgpr = GL2PrefetchLoad.numAddrVgpr(kernel)
     for label, tP, stateObj in [("A", tPA, self.states.a),
                                 ("B", tPB, self.states.b)]:
       for i in range(tP["gl2nl"]):
         module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}",
-            stateObj.startVgprGL2PrefetchAddr + i * self.states.rpga))
+            stateObj.startVgprGL2PrefetchAddr + i * numAddrVgpr))
     for mxKey, tP, label, stateObj in [("MXBlockA", tPA, "MXSA", self.states.mxsa),
                                        ("MXBlockB", tPB, "MXSB", self.states.mxsb)]:
       if kernel["ProblemType"][mxKey]:
         mx = tP["MX"]
         for i in range(mx["gl2nl"]):
           module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}",
-              stateObj.startVgprGL2PrefetchAddr + i * self.states.rpga))
+              stateObj.startVgprGL2PrefetchAddr + i * numAddrVgpr))
     if kernel["enableTDMMetadata"]:
       tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
       for i in range(tPM["gl2nl"]):
         module.add(RegSet("v", f"vgprGL2PrefetchAddrMetadata_{i}",
-            self.states.m.startVgprGL2PrefetchAddr + i * self.states.rpga))
+            self.states.m.startVgprGL2PrefetchAddr + i * numAddrVgpr))
 
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
@@ -1664,11 +1687,19 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
-          # RAP: one buffer set per resident k-tile, matching the grown allocation.
-          numBiFactor *= self.rapResidentKTiles(kernel)
+          # RAP: a buffer set per iteration of every resident k-tile, matching the
+          # grown allocation.
+          if kernel["ReuseAcrossPersistent"]:
+            numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+          # MXScaleVgprInterleave: the blocks and pieces sit in the region shared with MXSB, so the
+          # default per-buffer sets below are skipped (the BASE symbol and the packs stay).
+          numBiData = 0 if self.states.mxsInterleave else numBiFactor
+          if self.states.mxsInterleave:
+            for name, off in self.mxsInterleaveSets("A"):
+              moduleVgprMacroValuMXSA.add(RegSet("v", name, "vgprValuMXSA_X0_I0_BASE", off))
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
                 ri += self.states.mxsa.numVgprValuPerBlock
@@ -1684,7 +1715,7 @@ class KernelWriterAssembly(KernelWriter):
                     ri += ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthMXSA"]
           else:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
                 ri += self.states.mxsa.numVgprValuPerBlock
@@ -1706,9 +1737,15 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
+          # MXScaleVgprInterleave: the blocks and pieces sit in the region shared with MXSA, so the
+          # default per-buffer sets below are skipped (the BASE symbol and the packs stay).
+          numBiData = 0 if self.states.mxsInterleave else numBiFactor
+          if self.states.mxsInterleave:
+            for name, off in self.mxsInterleaveSets("B"):
+              moduleVgprMacroValuMXSB.add(RegSet("v", name, "vgprValuMXSB_X0_I0_BASE", off))
           if self.states.lrvwTileMXSB > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
                 ri += self.states.mxsb.numVgprValuPerBlock
@@ -1724,7 +1761,7 @@ class KernelWriterAssembly(KernelWriter):
                     ri += ceil(kernel["VectorWidthMXSB"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthMXSB"]
           else:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
                 ri += self.states.mxsb.numVgprValuPerBlock
@@ -1801,8 +1838,10 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
-        # RAP: one buffer set per resident k-tile, matching the grown allocation.
-        numBiFactor *= self.rapResidentKTiles(kernel)
+        # RAP: a buffer set per iteration of every resident k-tile, matching the
+        # grown allocation.
+        if kernel["ReuseAcrossPersistent"]:
+          numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         if self.states.lrvwTileA > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
@@ -15187,6 +15226,8 @@ class KernelWriterAssembly(KernelWriter):
               inc = scaleRows * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
               comment = " (bpeDS)"
               inc *= matrixInstK
+              if mxSegmentSplit(kernel, tc):
+                inc //= 2
             else:
               inc = mxUnit * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
               comment = " (mxUnit*bpeDS)"
@@ -15256,6 +15297,8 @@ class KernelWriterAssembly(KernelWriter):
                 swizzled=isMxSwizzled,
                 unrollMajor=kernel["UnrollMajorLDS%s" % tP["tensorChar"]],
                 ldsPad=LdsPad)
+            if mxSegmentSplit(kernel, tc):
+              offsetInc //= 2
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
@@ -19447,6 +19490,11 @@ class KernelWriterAssembly(KernelWriter):
       # (their deferred Fixup/Partials blocks are emitted only by the post-loop store,
       # so referencing them from the NLL would leave undefined symbols).
       fusedFullTileStore = self.states.subtileFusedFullTileStore
+      # Under the arrival fixup these registers are live across writePartials
+      # (see usesArrivalFixup); snapshot them to assert that.
+      arrivalFixup = processingComponent is not None and not fusedFullTileStore \
+        and processingComponent.usesArrivalFixup(self, kernel)
+      liveAcrossPartials = self._checkedOutRegs() if arrivalFixup else None
       if processingComponent is not None and not fusedFullTileStore:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
@@ -19656,11 +19704,19 @@ class KernelWriterAssembly(KernelWriter):
             self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
+        # Under the arrival fixup these are live across writePartials.
+        if not arrivalFixup:
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       if processingComponent is not None and not fusedFullTileStore:
+        if liveAcrossPartials is not None:
+          self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+
+      if activationLabelList and arrivalFixup:
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       # End label
       module.add(endLabel)
@@ -21675,9 +21731,10 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
     mod.add(SBranch(label_wave_empty.getLabelName()))
 
+    # Wave w stores to slot w and lower wave w reads slot w + Offset. A wave is an upper wave in exactly one
+    # iteration, so every slot is written once: no iteration can overwrite a slot an earlier one still reads (WAR).
     mod.add(label_wave_upper)
-    mod.add(VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
 
     # TODO- select inst
     ds = DSModifiers(offset=amax_lds_start)
@@ -21687,7 +21744,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_lower)
     mod.add(SBarrier())
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
+    mod.add(VAddU32(vgpr("Tmp"), sgpr("Offset"), vgpr("Widx")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
 
     # TODO- select inst
     mod.add(DSLoadB32(vgpr("AmaxOutB"), vgpr("Tmp"), ds))
@@ -23354,6 +23412,8 @@ class KernelWriterAssembly(KernelWriter):
     _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
     if _segWaveJump:
         dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+    if mxSegmentSplit(kernel, tc):
+        dataBytes = kernel["LDSSegInterleaveOffsets"]["mxsaStrideBytes"]
     # The interleaved layout has NumWaves // 2 components, so a tensor moved in more
     # pieces packs consecutive pieces into each component.
     piecesPerComp = numComp // (kernel["NumWaves"] // 2) if _segFootprint else 1
@@ -23368,7 +23428,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddU32(sgpr(offsetIdx), sgpr(offsetIdx), sgpr(tmpIdx), "woffset += pieceOffset"))
     # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
     # exactly, so the component jump must NOT be re-padded (tile-internal pad is set below).
-    if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint:
+    if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint and not mxSegmentSplit(kernel, tc):
       if ldsBlockSizePerPad & (ldsBlockSizePerPad - 1) == 0:
         mod.add(SLShiftRightB32(sgpr(tmpIdx), int(log2(ldsBlockSizePerPad)), sgpr(offsetIdx), \
               f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
@@ -23524,7 +23584,7 @@ class KernelWriterAssembly(KernelWriter):
         dim1 = sizeRefName(3)
         with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgpr2") as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
-          if numMxKGroups < numComp:
+          if numMxKGroups < numComp or mxSegmentSplit(kernel, tc):
             tileM = mxTdmTileM(mt, mxTile)
             if tileM >= numComp:
               # M/N-splitting: offset within same k_group along tile dimension
@@ -23605,14 +23665,14 @@ class KernelWriterAssembly(KernelWriter):
       sizeShifter = 1 if dtype.isFloat4() else 0
       numMxKGroups = sizeTile0 // mxUnit
       mxTile = mxFreeTile(kernel, tc)
-      kSplit = numMxKGroups >= numComp
+      kSplit = numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc)
       tile0 = mxTdmTile0(sizeTile1, mxUnit, mxTile, numComp, kSplit)
       if kSplit:
         # K-splitting: enough k_groups to divide among wave components
         mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // numComp // dim1Divisor, self))
       else:
-        # M/N-splitting: not enough k_groups, split tile dimension instead
+        # M/N-splitting: split the tile dimension and retain all K-groups.
         mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       if mxTile > 1:
@@ -24509,11 +24569,16 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDM increment")
     tdmGroup0 = f"tdm{tc}Group0"
     incSgprName = f"GlobalReadIncs{tc}"
+    maskLastIter = self.hplrMasksLoopIncrement(kernel, prefetchIndex)
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
       with self.allocTmpSgpr(2, tag="tdmIncrementAB_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
+        incSrc = sgpr(incSgprName)
+        if maskLastIter:
+          mod.add(self.hplrMaskedIncrement(kernel, tc, incTmpLo))
+          incSrc = sgpr(incTmpLo)
 
         if prefetchIndex:
           mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
@@ -24522,7 +24587,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=sgpr(incSgprName), \
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=incSrc, \
                 comment="select WrapU or normal inc (lo)"))
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"WrapU{tc}+1"), src1=0, \
                 comment="select WrapU or normal inc (hi)"))
@@ -24530,6 +24595,10 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
 
+    elif maskLastIter:
+      with self.allocTmpSgpr(1, tag="tdmIncrementAB_maskedInc") as tmpSgprInfo:
+        mod.add(self.hplrMaskedIncrement(kernel, tc, tmpSgprInfo.idx))
+        mod.add(comp.incrementGlobalAddr(self, tdmGroup0, tmpSgprInfo.idx))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
@@ -24969,7 +25038,7 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplitting = numMxKGroups >= numComp if isMXS else False
+    mxKSplitting = (numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc)) if isMXS else False
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
@@ -25049,7 +25118,7 @@ class KernelWriterAssembly(KernelWriter):
             subM = tcM[3]
             mxUnitM: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subM}"]
             mxDUM = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subM}"]
-            mxKSplittingM = (mxDUM // mxUnitM) >= numCompM
+            mxKSplittingM = (mxDUM // mxUnitM) >= numCompM and not mxSegmentSplit(kernel, tcM)
           else:
             mxKSplittingM = False
           if not unrolledMajorM or mxKSplittingM:
@@ -25087,7 +25156,7 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingA = numMxKGroups >= numCompA if isMXSA else False
+    mxKSplittingA = (numMxKGroups >= numCompA and not mxSegmentSplit(kernel, tcA)) if isMXSA else False
     if isMXSB:
         subTc = tcB[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
@@ -25133,11 +25202,40 @@ class KernelWriterAssembly(KernelWriter):
     comp = GL2PrefetchLoad.find(self)
     for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
       comp.init(self, kernel, tp)
+
+  def allocGL2PrefetchAddrVgprs(self, kernel, tPA, tPB, vgprIdx: int) -> int:
+    """Place the GL2PrefetchAddr vgprs of every prefetched tensor from vgprIdx; returns the next free index."""
+    numAddrVgpr = GL2PrefetchLoad.numAddrVgpr(kernel)
+    if numAddrVgpr == 2:
+      vgprIdx = int((vgprIdx + 1) / 2) * 2
+    tpList = [(self.states.a, tPA), (self.states.b, tPB)]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tpList.append((self.states.mxsa, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      tpList.append((self.states.mxsb, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      tpList.append((self.states.m, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for stateObj, tP in tpList:
+      stateObj.startVgprGL2PrefetchAddr = vgprIdx
+      vgprIdx += tP["gl2nl"] * numAddrVgpr
+    return vgprIdx
   
+  def gl2PrefetchTpList(self, kernel, tPA, tPB):
+    """The tensors the GL2 prefetch warms L2 for.
+
+    The RAP reuse copy loads neither A nor its scales -- they stay resident -- so
+    prefetching them only spends L2 requests, and HBM bandwidth when the lines
+    have been evicted, on data the tile never reads.
+    """
+    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
+    if self.states.rapDropAResidentLoads:
+      tpList = [tp for tp in tpList if tp["tensorChar"] not in ("A", "MXSA")]
+    return tpList
+
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
     comp = GL2PrefetchLoad.find(self)
-    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
+    tpList = self.gl2PrefetchTpList(kernel, tPA, tPB)
 
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:
@@ -25160,15 +25258,22 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
     comp = GL2PrefetchLoad.find(self)
-    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.issueLoad(self, kernel, tp))
     return mod
   
+  def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Clear Increment")
+    comp = GL2PrefetchLoad.find(self)
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
+      mod.add(comp.clearIncrement(self, kernel, tp))
+    return mod
+
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
     comp = GL2PrefetchLoad.find(self)
-    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.incrementAddr(self, kernel, tp))
     return mod
   
@@ -25176,9 +25281,11 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Skip PGR")
     mod.addComment("GL2 Prefetch Skip PGR")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.skipPGR(self, kernel, tPA))
+    prefetchA = not self.states.rapDropAResidentLoads
+    if prefetchA:
+      mod.add(comp.skipPGR(self, kernel, tPA))
     mod.add(comp.skipPGR(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
+    if kernel["ProblemType"]["MXBlockA"] and prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
     if kernel["ProblemType"]["MXBlockB"]:
       mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
@@ -25201,27 +25308,62 @@ class KernelWriterAssembly(KernelWriter):
     valuStr = "Valu%s_G%u+%u"%(tc, vgprGroups[gIdx], newOffset)
     return valuStr
 
+  def hplrMasksLoopIncrement(self, kernel, prefetchIndex) -> bool:
+    """True when tdmIncrementAB drops the last-iteration increment itself.
+
+    Single-wave TDM advances each descriptor straight from GlobalReadIncs*. The
+    tail loop, the stagger removal and the StreamK tile offset read those
+    increments after the unrolled loop, so the last-iteration increment is
+    masked in a temporary instead of being cleared in place.
+    """
+    return bool(kernel["HalfPLR"]) and prefetchIndex == 0 and kernel["NumWaves"] == 1 \
+      and not kernel.get("UseSubtileImpl")
+
+  def hplrLastIterCompare(self, kernel, tmpSgpr: Optional[int]) -> Module:
+    """Set SCC when the unrolled loop is on its last iteration.
+
+    tmpSgpr is only used (and only required) with PrefetchAcrossPersistent.
+    """
+    mod = Module("hplrLastIterCompare")
+    if kernel["PrefetchAcrossPersistent"]:
+      # The StreamK tail repositions the TDM descriptor with (iters-1)*increment after
+      # the loop, so the increments must survive once PAP has primed the next tile.
+      # Bias the counter instead of branching, to keep the loop body one basic block.
+      biasedCounter = sgpr(tmpSgpr)
+      mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
+      mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
+        src1=self.loopCounter(kernel, self.states.unrollIdx), \
+        comment="keep increments live for the StreamK tail once primed"))
+      mod.add(SCmpLeI32(src0=biasedCounter, src1=1, \
+        comment="is this the last iters (and not primed)"))
+    else:
+      mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
+        src1=1, \
+        comment="%s"%"is this the last iters"))
+    return mod
+
+  def hplrMaskedIncrement(self, kernel, tc, dstSgpr) -> Module:
+    """dstSgpr <- 0 on the last unrolled iteration, else tc's global-read increment."""
+    mod = Module("hplrMaskedIncrement")
+    mod.add(self.hplrLastIterCompare(kernel, dstSgpr))
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=0, \
+      src1=self.globalReadIncsOperand(tc, self.states.unrollIdx), \
+      comment="no increment on the last iters"))
+    return mod
+
   def graIncrementMask(self, kernel, tPA, tPB) -> Module:
     mod = Module("graIncrementMask")
     if not kernel["HalfPLR"]:
       return mod
     # Only support TDM
+    if self.hplrMasksLoopIncrement(kernel, 0):
+      # tdmIncrementAB masks each single-wave increment itself.
+      return mod
     if kernel["PrefetchAcrossPersistent"]:
-      # The StreamK tail repositions the TDM descriptor with (iters-1)*increment after
-      # the loop, so the increments must survive once PAP has primed the next tile.
-      # Bias the counter instead of branching, to keep the loop body one basic block.
       with self.allocTmpSgpr(1, tag="graIncrementMask_notPrimed") as tmpSgprRes:
-        biasedCounter = sgpr(tmpSgprRes.idx)
-        mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
-        mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
-          src1=self.loopCounter(kernel, self.states.unrollIdx), \
-          comment="keep increments live for the StreamK tail once primed"))
-        mod.add(SCmpLeI32(src0=biasedCounter, src1=1, \
-          comment="is this the last iters (and not primed)"))
+        mod.add(self.hplrLastIterCompare(kernel, tmpSgprRes.idx))
     else:
-      mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-        src1=1, \
-        comment="%s"%"is this the last iters"))
+      mod.add(self.hplrLastIterCompare(kernel, None))
     if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
       # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
       sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"

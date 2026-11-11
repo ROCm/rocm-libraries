@@ -189,6 +189,35 @@ set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
 
+# Test sources that define GPU kernels (they instantiate the kernel templates in
+# device/common.hpp or define their own). Every other test source is compiled host-only: its
+# per-GPU-target device pass emits no kernels and only costs build time.
+# A source that launches a kernel but is missing from this list builds fine and fails at run
+# time with an invalid-device-function error, so add new kernel-launching sources here.
+set(HIPTENSOR_TEST_DEVICE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/00_unit/elementwise_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/contraction_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/trinary_contraction_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_binary_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_resource.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_trinary_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/reduction_resource.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/reduction_test.cpp)
+
+# Mark the given test sources host-only, except those in HIPTENSOR_TEST_DEVICE_SOURCES. Source
+# properties are directory-scoped, so this must run in the directory that creates the target
+# (the add_hiptensor_*test functions below do so).
+function(hiptensor_test_set_host_only_sources)
+    foreach(SOURCE ${ARGN})
+        get_filename_component(SOURCE "${SOURCE}" ABSOLUTE)
+        if(SOURCE MATCHES "\\.cpp$" AND NOT SOURCE IN_LIST HIPTENSOR_TEST_DEVICE_SOURCES)
+            set_source_files_properties(${SOURCE} PROPERTIES
+                COMPILE_OPTIONS "--offload-host-only;-Wno-unused-command-line-argument")
+        endif()
+    endforeach()
+endfunction()
+
 
 # Create test executables and deploy
 function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
@@ -221,6 +250,9 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     add_executable(${BINARY_NAME} ${TEST_SOURCES})
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    # hiptensor only propagates hip::host; tests compile as HIP for their own kernels.
+    target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
+    hiptensor_test_set_host_only_sources(${TEST_SOURCES})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
@@ -307,6 +339,9 @@ function(add_hiptensor_unit_test)
 
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    # hiptensor only propagates hip::host; tests compile as HIP for their own kernels.
+    target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
+    hiptensor_test_set_host_only_sources(${ARGV})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.

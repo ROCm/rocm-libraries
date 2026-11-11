@@ -20,13 +20,14 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-// Ragged forward SDPA CPU reference (RFC-0014: packed BSHD + ragged_offset), the host
-// mirror of GpuFpReferenceSdpaRagged. It computes in plain fp32 with no provider P-storage
+// Ragged forward SDPA CPU reference (RFC-0014: ragged_offset origins + per-batch lengths), the
+// host mirror of GpuFpReferenceSdpaRagged. It computes in plain fp32 with no provider P-storage
 // rounding, so GPU-vs-CPU checks use gpuRefFwdTolerance.
 //
 // q/k/v/o are ragged tensors (ShallowRaggedTensor / RaggedTensor) with logical dims [B, H, S, D],
-// BSHD strides and the sequence at SDPA_SEQ_AXIS. The SDK does the packed addressing:
-// getHostValue({b, h, s, d}) starts at ragged_offset[b], and per-batch lengths come from
+// any layout the container accepts (packed BSHD, head-major, padded, shifted or non-monotonic
+// origins) and the sequence at SDPA_SEQ_AXIS. The SDK does the addressing:
+// getHostValue({b, h, s, d}) starts at the batch's origin, and per-batch lengths come from
 // raggedIterationInfo().
 //
 // Supports GQA/MQA, causal and sliding-window masks, fp8 descales, and an optional LSE that is
@@ -34,8 +35,8 @@ namespace hipdnn_test_sdk::utilities
 // Descales are scalar [1] or per KV head [B, H_kv, 1, 1]. Q and K descales are both indexed by
 // the KV head of the query head, as in CpuFpReferenceSdpa and AITER.
 //
-// Q/O (and a ragged LSE) must have the same per-batch lengths, and so must K/V. Their element
-// offsets can differ because their token widths differ.
+// Q/O (and a ragged LSE) must have the same per-batch lengths, and so must K/V. Their origins are
+// independent.
 class CpuFpReferenceSdpaRagged
 {
 public:
@@ -82,40 +83,31 @@ public:
         // An absent scale is 1.0 (no scaling), as in cuDNN and the dense reference.
         const auto scale = static_cast<ComputeDataType>(attnScaleValue.value_or(1.0F));
 
-        // Every ragged tensor must use the RFC-0014 layout, and tensors that share a packing must
-        // agree on every batch's length.
+        // Every ragged tensor must be ragged along the SDPA sequence axis, and tensors that share
+        // a packing must agree on every batch's length.
         const std::string who = "CpuFpReferenceSdpaRagged";
-        const auto tokens = [&](const hipdnn_data_sdk::utilities::RaggedIterationInfo& info,
-                                const std::vector<int64_t>& dims,
-                                const std::vector<int64_t>& strides,
-                                const char* name) {
+        const auto lengths = [&](const hipdnn_data_sdk::utilities::RaggedIterationInfo& info,
+                                 const char* name) -> const std::vector<int64_t>& {
             if(info.seqAxis != hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS)
             {
                 throw std::invalid_argument(who + ": " + name
                                             + " must be ragged along SDPA_SEQ_AXIS (2), got "
                                             + std::to_string(info.seqAxis));
             }
-            detail::requireTokenMajorRaggedLayout(dims, strides, who, name);
-            return detail::raggedTokenBoundaries(info.rowOffsets,
-                                                 info.seqStride,
-                                                 dims[hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS],
-                                                 who,
-                                                 name);
+            return info.lengths;
         };
-        const auto qTokens = tokens(*qInfo, q.dims(), q.strides(), "Q");
-        const auto kTokens = tokens(*kInfo, k.dims(), k.strides(), "K");
-        detail::requireMatchingTokenBoundaries(
-            qTokens, "Q", tokens(*oInfo, o.dims(), o.strides(), "O"), "O", who);
-        detail::requireMatchingTokenBoundaries(
-            kTokens, "K", tokens(*vInfo, v.dims(), v.strides(), "V"), "V", who);
+        const auto& qLengths = lengths(*qInfo, "Q");
+        const auto& kLengths = lengths(*kInfo, "K");
+        detail::requireMatchingRaggedLengths(qLengths, "Q", lengths(*oInfo, "O"), "O", who);
+        detail::requireMatchingRaggedLengths(kLengths, "K", lengths(*vInfo, "V"), "V", who);
 
         if(lse != nullptr)
         {
             validateLse(lse->dims(), q.dims());
             if(const auto lseInfo = lse->raggedIterationInfo())
             {
-                detail::requireMatchingTokenBoundaries(
-                    qTokens, "Q", tokens(*lseInfo, lse->dims(), lse->strides(), "LSE"), "LSE", who);
+                detail::requireMatchingRaggedLengths(
+                    qLengths, "Q", lengths(*lseInfo, "LSE"), "LSE", who);
             }
         }
 
@@ -129,8 +121,8 @@ public:
         for(int64_t b = 0; b < batch; ++b)
         {
             const auto bIdx = static_cast<size_t>(b);
-            const int64_t seqQ = qTokens[bIdx + 1] - qTokens[bIdx];
-            const int64_t seqKv = kTokens[bIdx + 1] - kTokens[bIdx];
+            const int64_t seqQ = qLengths[bIdx];
+            const int64_t seqKv = kLengths[bIdx];
             const int64_t windowOffset = topLeftAlignment ? 0 : (seqKv - seqQ);
 
             for(int64_t h = 0; h < numHeads; ++h)
@@ -208,6 +200,12 @@ public:
                         auto acc = static_cast<ComputeDataType>(0);
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
+                            // A key the band removes is never read: 0 * NaN would leak
+                            // whatever it holds (SdpaSemanticsRegister.md SEM-027).
+                            if(isMasked(sq, skv, leftBound, rightBound, windowOffset))
+                            {
+                                continue;
+                            }
                             const auto vv = static_cast<ComputeDataType>(
                                 v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dvIdx}));
                             acc += probs[static_cast<size_t>(skv)] * vv;

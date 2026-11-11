@@ -59,8 +59,10 @@ using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
+using sdpa_graph::problemFor;
 using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
+using sdpa_graph::UnifiedAttentionProblem;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as
 /// `[total_q, Hq, D]` rows and read K/V as a paged cache `[blocks, block_size, Hkv, D]`,
@@ -189,33 +191,6 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
 // ---------------------------------------------------------------------------
 // The shared graph match
 // ---------------------------------------------------------------------------
-
-/// The graph facts the matchers and prepare() need, derived once from the tensors.
-struct UnifiedAttentionProblem
-{
-    int64_t batch = 0;
-    int64_t seqLenQ = 0;
-    int64_t seqLenKv = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
-    int64_t headSize = 0;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
-};
-
-/// The graph's shape, read from Q and K. Callers must have validated both operands.
-inline UnifiedAttentionProblem problemFor(const data_objects::TensorAttributes& q,
-                                          const data_objects::TensorAttributes& k)
-{
-    UnifiedAttentionProblem problem;
-    problem.batch = q.dims()->Get(BATCH_AXIS);
-    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
-    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
-    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
-    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
-    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
-    problem.dataType = q.data_type();
-    return problem;
-}
 
 /// A graph's SDPA-forward node and its shape, once matchOperands() has accepted them.
 struct MatchedOperands
