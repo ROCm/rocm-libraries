@@ -32,11 +32,18 @@ _IGNORED_NAMES = {
 }
 
 
+# setup.py generates _build_info.py into each build. A stray copy in the
+# source tree would otherwise be copied into the staged source.
+_IGNORED_FILES = {"_build_info.py"}
+
+
 def _ignore(_directory: str, names: list[str]) -> set[str]:
     return {
         name
         for name in names
-        if name in _IGNORED_NAMES or name.endswith((".egg-info", ".pyc", ".pyo"))
+        if name in _IGNORED_NAMES
+        or name in _IGNORED_FILES
+        or name.endswith((".egg-info", ".pyc", ".pyo"))
     }
 
 

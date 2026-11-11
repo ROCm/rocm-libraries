@@ -8,3 +8,6 @@ pandas
 # Math CI installs this file before running invoke build-client.
 # This bootstrap tool is not a wheel runtime dependency (see setup.py).
 invoke
+
+# Optional runtime fallbacks are declared as extras in pyproject.toml:
+# profile (yappi), hip-query (hip-python), orjson, ujson, and simplejson.
