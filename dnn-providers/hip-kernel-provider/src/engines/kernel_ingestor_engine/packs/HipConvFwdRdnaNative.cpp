@@ -3,7 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,9 +29,11 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
  * @file HipConvFwdRdnaNative.cpp
@@ -60,6 +64,26 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.hip_conv_fwd_rdna.g
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.hip_conv_fwd_rdna.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.hip_conv_fwd_rdna.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.hip_conv_fwd_rdna.dispatch";
+
+// The saved form of a launch: a versioned contract name and the named values the launch is
+// computed from. Use a new version for a change to the values, to the kernel arguments, or
+// to how the grid is derived; keep the old handler registered while plans saved under it
+// must load.
+constexpr std::string_view DISPATCH_SYMBOL_V1 = "hipkernel.hip_conv_fwd_rdna.dispatch.v1";
+constexpr std::string_view X_UID_VALUE = "x.uid";
+constexpr std::string_view W_UID_VALUE = "w.uid";
+constexpr std::string_view Y_UID_VALUE = "y.uid";
+constexpr std::string_view N_VALUE = "n";
+constexpr std::string_view C_VALUE = "c";
+constexpr std::string_view K_VALUE = "k";
+constexpr std::string_view GROUPS_VALUE = "groups";
+// Per spatial axis (depth, height, width); a 2-D plan saves depth 1.
+constexpr std::array<std::string_view, 3> IN_VALUES{"in_d", "in_h", "in_w"};
+constexpr std::array<std::string_view, 3> FILTER_VALUES{"filter_d", "filter_h", "filter_w"};
+constexpr std::array<std::string_view, 3> OUT_VALUES{"out_d", "out_h", "out_w"};
+constexpr std::array<std::string_view, 3> PAD_VALUES{"pad_d", "pad_h", "pad_w"};
+constexpr std::array<std::string_view, 3> STRIDE_VALUES{"stride_d", "stride_h", "stride_w"};
+constexpr std::array<std::string_view, 3> DILATION_VALUES{"dilation_d", "dilation_h", "dilation_w"};
 
 constexpr std::string_view FAMILY_FIELD = "kernel_family";
 constexpr std::string_view DTYPE_FIELD = "dtype";
@@ -299,6 +323,101 @@ const std::vector<KernelArgument>& fmaKernelSignature()
     return s_signature;
 }
 
+/// Applies the launch geometry to @p code and builds the prepared dispatch. A plan built from
+/// a graph and a plan restored from a saved payload both come through here.
+std::unique_ptr<PreparedDispatch>
+    makePrepared(IngestorKernelCode code, const ConvBinding& binding, const ConvProblem& problem)
+{
+    // Both grid dimensions were bounded by fmaServes or by readLaunchInputs.
+    code.setBlockSize(FMA_BLOCK_SIZE, 1, 1);
+    code.setGridSize(static_cast<unsigned int>(fmaGridXBlocks(problem)),
+                     static_cast<unsigned int>(fmaGridY(problem)),
+                     1);
+    return std::make_unique<PreparedHipConvFwdRdna>(std::move(code), binding, problem);
+}
+
+/// The values of the `hipkernel.hip_conv_fwd_rdna.dispatch.v1` contract.
+MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& problem)
+{
+    MetadataValues values{{std::string(X_UID_VALUE), binding.x},
+                          {std::string(W_UID_VALUE), binding.w},
+                          {std::string(Y_UID_VALUE), binding.y},
+                          {std::string(N_VALUE), int64_t{problem.n}},
+                          {std::string(C_VALUE), int64_t{problem.c}},
+                          {std::string(K_VALUE), int64_t{problem.k}},
+                          {std::string(GROUPS_VALUE), int64_t{problem.groups}}};
+    for(size_t axis = 0; axis < 3; ++axis)
+    {
+        values[std::string(IN_VALUES[axis])] = int64_t{problem.in[axis]};
+        values[std::string(FILTER_VALUES[axis])] = int64_t{problem.filter[axis]};
+        values[std::string(OUT_VALUES[axis])] = int64_t{problem.out[axis]};
+        values[std::string(PAD_VALUES[axis])] = int64_t{problem.pad[axis]};
+        values[std::string(STRIDE_VALUES[axis])] = int64_t{problem.stride[axis]};
+        values[std::string(DILATION_VALUES[axis])] = int64_t{problem.dilation[axis]};
+    }
+    return values;
+}
+
+/// What a launch reads back from a saved plan.
+struct LaunchInputs
+{
+    ConvBinding binding;
+    ConvProblem problem;
+};
+
+/// Reads the values of the `hipkernel.hip_conv_fwd_rdna.dispatch.v1` contract. Every extent,
+/// stride and dilation must be in [1, INT_MAX], every padding in [0, INT_MAX], C and K must
+/// split into the groups, and the grid must fit the launch limits. Dtype and layout are not
+/// saved: they are compiled into the saved kernel, which the launch does not re-derive.
+LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    requireLaunchContract(inputs, DISPATCH_SYMBOL_V1);
+    std::vector<std::string_view> names{
+        X_UID_VALUE, W_UID_VALUE, Y_UID_VALUE, N_VALUE, C_VALUE, K_VALUE, GROUPS_VALUE};
+    for(const auto* axisNames :
+        {&IN_VALUES, &FILTER_VALUES, &OUT_VALUES, &PAD_VALUES, &STRIDE_VALUES, &DILATION_VALUES})
+    {
+        names.insert(names.end(), axisNames->begin(), axisNames->end());
+    }
+    requireOnlyLaunchValues(inputs, names);
+
+    constexpr int64_t intMax = std::numeric_limits<int>::max();
+    const auto positive = [&inputs](std::string_view name) {
+        return static_cast<int>(requireLaunchInt(inputs, name, 1, intMax));
+    };
+
+    LaunchInputs launch;
+    launch.binding.x = requireLaunchInt(inputs, X_UID_VALUE);
+    launch.binding.w = requireLaunchInt(inputs, W_UID_VALUE);
+    launch.binding.y = requireLaunchInt(inputs, Y_UID_VALUE);
+    auto& problem = launch.problem;
+    problem.n = positive(N_VALUE);
+    problem.c = positive(C_VALUE);
+    problem.k = positive(K_VALUE);
+    problem.groups = positive(GROUPS_VALUE);
+    for(size_t axis = 0; axis < 3; ++axis)
+    {
+        problem.in[axis] = positive(IN_VALUES[axis]);
+        problem.filter[axis] = positive(FILTER_VALUES[axis]);
+        problem.out[axis] = positive(OUT_VALUES[axis]);
+        problem.pad[axis] = static_cast<int>(requireLaunchInt(inputs, PAD_VALUES[axis], 0, intMax));
+        problem.stride[axis] = positive(STRIDE_VALUES[axis]);
+        problem.dilation[axis] = positive(DILATION_VALUES[axis]);
+    }
+    problem.spatialRank = problem.in[0] == 1 && problem.filter[0] == 1 ? 2 : 3;
+
+    if(problem.c % problem.groups != 0 || problem.k % problem.groups != 0
+       || fmaGridXBlocks(problem) > MAX_GRID_X_BLOCKS || fmaGridY(problem) > MAX_GRID_Y)
+    {
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "launch values of dispatch '" + inputs.dispatchSymbol
+                + "' give groups that do not divide 'c' and 'k', or a grid beyond the launch "
+                  "limits");
+    }
+    return launch;
+}
+
 class HipConvFwdRdnaDispatchHandler
     : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
@@ -343,14 +462,30 @@ public:
 
         auto code = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, fmaKernelSignature());
+        return makePrepared(std::move(code), binding, problem);
+    }
 
-        // fmaServes bounded both against the grid limits.
-        code.setBlockSize(FMA_BLOCK_SIZE, 1, 1);
-        code.setGridSize(static_cast<unsigned int>(fmaGridXBlocks(problem)),
-                         static_cast<unsigned int>(fmaGridY(problem)),
-                         1);
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        auto restored = restoreIngestorLaunch<LaunchInputs>(
+            inputs, std::move(code), fmaKernelSignature(), &readLaunchInputs, deviceOrdinal);
+        return makePrepared(
+            std::move(restored.code), restored.launch.binding, restored.launch.problem);
+    }
 
-        return std::make_unique<PreparedHipConvFwdRdna>(std::move(code), binding, problem);
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& conv = dynamic_cast<const PreparedHipConvFwdRdna&>(prepared);
+        return SavedLaunchInputs{std::string(DISPATCH_SYMBOL_V1),
+                                 launchValues(conv.binding(), conv.problem())};
+    }
+
+    bool supportsSaving() const override
+    {
+        return true;
     }
 
     void launch(const Handle& handle,
@@ -432,6 +567,7 @@ void registerHipConvFwdRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Hand
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &score);
     scope.add(std::string(DISPATCH_SYMBOL), &dispatchHandler());
+    scope.add(std::string(DISPATCH_SYMBOL_V1), &dispatchHandler());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
