@@ -59,6 +59,7 @@ The main session is the **orchestrator**; each phase's work is done by a **subag
 - Never names candidate groupings, categories or layer labels (for example "C++" and "Python") in a subagent task. Commit readers, the Inventory and the Planner derive them from the diff; the orchestrator only passes inputs, outputs and the files to read.
 - Passes the Planner any earlier review findings or notes about the branch that bear on grouping, marked "claims to check, not facts" (this is the only exception to the previous rule: facts and suspicions go in; groupings do not).
 - Starts subagents; in every task names the exact files the agent must read (always `references/common.md`, its phase file, and the shared files listed for its role) plus its input and output paths.
+- Starts every subagent with `fork_turns: "none"` and no `model`. Commit readers get `reasoning_effort: "medium"`; every other agent inherits the session's effort.
 - Checks each output file before the next phase and enforces the gates below.
 - Reads summaries, not raw diffs.
 
