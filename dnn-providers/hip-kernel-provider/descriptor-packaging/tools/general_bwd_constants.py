@@ -423,6 +423,7 @@ def _tuned_key_record(arch: str, kid: int, key: tuple, s: str) -> dict:
         ),
         "useWorklist": bool(entry.get("use_worklist", False)),
         "xcdChunk": entry.get("xcd_chunk", 0),
+        "dkvSink": entry.get("dkv_sink", "atomic"),
         "dqMode": entry.get("dq_mode", "atomic"),
         "narrowVecCap": int(narrow or 0),
         "headPackPin": -1 if pin is None else int(bool(pin)),
@@ -433,6 +434,11 @@ def _check_tuned_record(rec: dict, rows: list) -> None:
     mine = [r for r in rows if r.tuning_key_id == rec["id"]]
     if rec["xcdChunk"] not in (0, None):
         raise AssertionError(f"{rec['key']}: an XCD chunk needs num_xcds")
+    if rec["dkvSink"] != "atomic":
+        raise AssertionError(
+            f"{rec['key']}: dkv_sink {rec['dkvSink']!r} needs per-slice dK/dV workspace"
+            " the engine does not size or reduce"
+        )
     for r in mine:
         want = {
             "main_block_m": rec["blockM"],

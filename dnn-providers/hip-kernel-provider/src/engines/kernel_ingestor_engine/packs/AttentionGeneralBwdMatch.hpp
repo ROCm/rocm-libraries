@@ -1417,13 +1417,14 @@ inline std::optional<std::string> wideRange(const Request& req, const std::array
         {
             return name + ": batch / head stride does not fit the i64 kernarg";
         }
-        Wide far = add(mul(Wide(req.tensorHeads(operand)) - 1, sh), req.dQk);
+        Wide lastOffset = add(mul(Wide(req.tensorHeads(operand)) - 1, sh), req.dQk);
         if(!req.isThd())
         {
-            far = add(far,
+            lastOffset
+                = add(lastOffset,
                       add(mul(Wide(req.b) - 1, sb), mul(Wide(req.tensorSeq(operand)) - 1, st)));
         }
-        if(mul(far, 2) >= I63)
+        if(mul(lastOffset, 2) >= I63)
         {
             return name + ": largest byte offset >= 2^63";
         }
@@ -1433,12 +1434,12 @@ inline std::optional<std::string> wideRange(const Request& req, const std::array
     {
         return std::string("lse: batch / head stride does not fit the i64 kernarg");
     }
-    Wide far = mul(Wide(req.hQ) - 1, lh);
+    Wide lastOffset = mul(Wide(req.hQ) - 1, lh);
     if(!req.isThd())
     {
-        far = add(far, add(mul(Wide(req.b) - 1, lb), mul(req.sQ, lt)));
+        lastOffset = add(lastOffset, add(mul(Wide(req.b) - 1, lb), mul(req.sQ, lt)));
     }
-    if(mul(add(far, 1), 4) >= I63)
+    if(mul(add(lastOffset, 1), 4) >= I63)
     {
         return std::string("lse: largest byte offset >= 2^63");
     }

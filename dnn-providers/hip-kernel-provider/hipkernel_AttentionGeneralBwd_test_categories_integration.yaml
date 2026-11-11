@@ -21,7 +21,7 @@ test_categories:
   quick:
     description: "Quick general SDPA backward bundle coverage"
     test_patterns:
-      - "quick_SdpaBackward_*"
+      - "quick_SdpaBackward_*.*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -31,8 +31,8 @@ test_categories:
   standard:
     description: "Standard general SDPA backward bundle coverage"
     test_patterns:
-      - "quick_SdpaBackward_*"
-      - "standard_SdpaBackward_*"
+      - "quick_SdpaBackward_*.*"
+      - "standard_SdpaBackward_*.*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -42,9 +42,9 @@ test_categories:
   comprehensive:
     description: "Comprehensive general SDPA backward coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
-      - "quick_SdpaBackward_*"
-      - "standard_SdpaBackward_*"
-      - "comprehensive_SdpaBackward_*"
+      - "quick_SdpaBackward_*.*"
+      - "standard_SdpaBackward_*.*"
+      - "comprehensive_SdpaBackward_*.*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -54,7 +54,7 @@ test_categories:
   full:
     description: "Full general SDPA backward coverage"
     test_patterns:
-      - "*_SdpaBackward_*"
+      - "*_SdpaBackward_*.*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -63,7 +63,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback quick tier: SdpaBackward quick bundles"
     test_patterns:
-      - "quick_SdpaBackward_*"
+      - "quick_SdpaBackward_*.*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

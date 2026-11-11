@@ -130,6 +130,25 @@ def test_gpu_cases_header_is_current(rocke_sources):
     assert r.returncode == 0, r.stderr
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [("xcdChunk", 4), ("dkvSink", "slices")],
+    ids=["xcd_chunk", "dkv_sink"],
+)
+def test_tuned_record_refuses_a_knob_the_engine_cannot_honour(
+    rocke_sources, field, value
+):
+    sys.path.insert(0, str(TOOLS))
+    try:
+        from general_bwd_constants import _check_tuned_record
+    finally:
+        sys.path.remove(str(TOOLS))
+    record = {"key": "k", "id": 0, "xcdChunk": 0, "dkvSink": "atomic"}
+    _check_tuned_record(record, [])
+    with pytest.raises(AssertionError):
+        _check_tuned_record({**record, field: value}, [])
+
+
 @pytest.mark.parametrize("arch", ARCHES)
 def test_corpus_shape(arch):
     meta, entries = _corpus(arch)

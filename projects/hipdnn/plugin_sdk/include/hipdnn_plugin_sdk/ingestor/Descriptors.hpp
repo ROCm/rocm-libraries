@@ -199,7 +199,7 @@ inline bool operator!=(const MetadataField& lhs, const MetadataField& rhs)
 /// read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<MetadataField> fields;
     /// Authored semantics; independent of the JSON file-format version.

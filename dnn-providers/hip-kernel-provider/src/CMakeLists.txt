@@ -212,6 +212,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
     )
 
+    # The SdpaBackward bundles hipkernel:AttentionGeneralBwd's external integration entry
+    # serves, and the engines whose entry is written out by hand below rather than read from
+    # a table row: <bundle filter variable> <categories YAML variable> per engine.
+    # test_attention_bundle_filters.py reads these pairs as well as the table's.
+    string(JOIN ":" HKP_ATTENTION_GENERAL_BWD_GTEST_FILTER
+        "quick_SdpaBackward_*.*" "standard_SdpaBackward_*.*"
+        "comprehensive_SdpaBackward_*.*" "full_SdpaBackward_*.*")
+    set(HKP_HANDWRITTEN_ATTENTION_ENGINES
+        HKP_ATTENTION_GENERAL_BWD_GTEST_FILTER
+            HIPKERNELPROVIDER_ATTENTION_GENERAL_BWD_INTEGRATION_CATEGORIES_YAML
+    )
+
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
@@ -710,7 +722,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             set(_category_args "")
             if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
                 list(APPEND _category_args
-                    TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_AttentionGeneralBwd_test_categories_integration.yaml"
+                    TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ATTENTION_GENERAL_BWD_INTEGRATION_CATEGORIES_YAML}"
                     INSTALL_TEST_FILE "${_shard_ctest}"
                     TEST_NAME_PREFIX ${PROJECT_NAME}-attention-general-bwd-${_arch}-external-integration)
             endif()
@@ -722,7 +734,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 INSTALL_DESTINATION "${_shard_dest}"
                 INSTALL_STAGING_KEY hkp_census_${_arch}
                 TEST_CONFIG    "${_toml}"
-                GTEST_FILTER   "quick_SdpaBackward_*.*:standard_SdpaBackward_*.*:comprehensive_SdpaBackward_*.*:full_SdpaBackward_*.*:-*_fwd_pair*"
+                GTEST_FILTER   "${HKP_ATTENTION_GENERAL_BWD_GTEST_FILTER}:-*_fwd_pair*"
                 ENVIRONMENT    ${TEST_ENVIRONMENT}
                 ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                 ${_category_args}

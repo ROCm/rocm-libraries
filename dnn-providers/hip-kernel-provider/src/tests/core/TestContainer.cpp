@@ -223,12 +223,28 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
+    // The schema ids a set's state exposes, one per slot; an unslotted set has the one
+    // schema of its own, which a slotted set leaves unset.
+    const auto schemaIdsOf = [](const auto& set) {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+        if(set.slots.empty())
+        {
+            ids.push_back(set.schema.id);
+        }
+        for(const auto& slot : set.slots)
+        {
+            ids.push_back(slot.schema.id);
+        }
+        return ids;
+    };
+
     // The schema id is what a state exposes of the set it was built from, so a slot
     // serving another set's state shows up only between sets whose schemas differ.
     std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
     for(const auto& set : sets)
     {
-        schemaIds.insert(set.schema.id);
+        const auto ids = schemaIdsOf(set);
+        schemaIds.insert(ids.begin(), ids.end());
     }
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
@@ -238,8 +254,14 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
         const auto state = discoveredSharedState(set.engine.id);
         ASSERT_NE(state.get(), nullptr)
             << "no shared state for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
+        const auto expected = schemaIdsOf(set);
+        ASSERT_EQ(state->slots().size(), expected.size())
             << "the id of '" << set.engine.name << "' serves the state of another set";
+        for(std::size_t i = 0; i < expected.size(); ++i)
+        {
+            EXPECT_EQ(state->slots()[i].schema.id, expected[i])
+                << "the id of '" << set.engine.name << "' serves the state of another set";
+        }
         // Shared, not rebuilt or handed out once: a second lookup is the same object.
         EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
             << "'" << set.engine.name << "' built a second state";
