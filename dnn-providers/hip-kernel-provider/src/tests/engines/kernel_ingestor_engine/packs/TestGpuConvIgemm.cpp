@@ -1051,9 +1051,13 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
-                   || kernel.getIntMetadata("fuse") != 0)
+                   || kernel.getIntMetadata("fuse") != 0
+                   || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
+                                                    kernel.getIntMetadata("bn"),
+                                                    0,
+                                                    "gfx942:sramecc+:xnack-"))
                 {
-                    continue;
+                    continue; // (the plain-order 256 x 256 tile is for single-die devices)
                 }
                 SCOPED_TRACE(kernel.name + (channelsLast ? " channels-last" : " channels-first"));
                 const bool cf = kernel.getIntMetadata("cf") != 0;
