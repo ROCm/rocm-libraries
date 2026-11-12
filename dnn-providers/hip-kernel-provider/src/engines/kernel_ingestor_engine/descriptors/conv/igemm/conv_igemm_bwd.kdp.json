@@ -38,7 +38,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 1000
     },
@@ -71,7 +72,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 999
     },
@@ -104,7 +106,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 998
     },
@@ -137,7 +140,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 997
     },
@@ -170,7 +174,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 996
     },
@@ -203,7 +208,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 995
     },
@@ -236,7 +242,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 994
     },
@@ -269,7 +276,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 993
     },
@@ -302,7 +310,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 992
     },
@@ -335,7 +344,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 991
     },
@@ -368,7 +378,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 990
     },
@@ -401,7 +412,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 989
     },
@@ -434,7 +446,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 988
     },
@@ -467,7 +480,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 987
     },
@@ -500,7 +514,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 986
     },
@@ -533,7 +548,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 985
     },
@@ -566,7 +582,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 984
     },
@@ -599,7 +616,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 983
     },
@@ -632,7 +650,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 982
     },
@@ -665,7 +684,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 981
     },
@@ -698,7 +718,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 980
     },
@@ -731,7 +752,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 979
     },
@@ -764,7 +786,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 978
     },
@@ -797,7 +820,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 977
     },
@@ -830,7 +854,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 976
     },
@@ -863,7 +888,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 975
     },
@@ -896,7 +922,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 974
     },
@@ -929,7 +956,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 973
     },
@@ -962,7 +990,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 972
     },
@@ -995,7 +1024,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 971
     },
@@ -1028,7 +1058,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 970
     },
@@ -1061,7 +1092,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 969
     },
@@ -1094,7 +1126,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 968
     },
@@ -1127,7 +1160,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 967
     },
@@ -1160,7 +1194,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 966
     },
@@ -1193,7 +1228,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 965
     },
@@ -1226,7 +1262,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 964
     },
@@ -1259,7 +1296,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 963
     },
@@ -1292,7 +1330,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 962
     },
@@ -1325,7 +1364,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 961
     },
@@ -1358,7 +1398,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 960
     },
@@ -1391,7 +1432,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 959
     },
@@ -1424,7 +1466,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 958
     },
@@ -1457,7 +1500,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 957
     },
@@ -1490,7 +1534,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 956
     },
@@ -1523,7 +1568,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 955
     },
@@ -1556,7 +1602,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 954
     },
@@ -1589,7 +1636,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 953
     },
@@ -1622,7 +1670,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 952
     },
@@ -1655,7 +1704,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 951
     },
@@ -1688,7 +1738,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 950
     },
@@ -1721,7 +1772,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 949
     },
@@ -1754,7 +1806,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 948
     },
@@ -1787,7 +1840,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 947
     },
@@ -1820,7 +1874,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 946
     },
@@ -1853,7 +1908,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 945
     },
@@ -1886,7 +1942,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 944
     },
@@ -1919,7 +1976,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 943
     },
@@ -1952,7 +2010,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 942
     },
@@ -1985,7 +2044,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 941
     },
@@ -2018,7 +2078,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 940
     },
@@ -2051,7 +2112,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 939
     },
@@ -2084,7 +2146,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 938
     },
@@ -2117,7 +2180,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 937
     },
@@ -2150,7 +2214,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 936
     },
@@ -2183,7 +2248,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 935
     },
@@ -2216,7 +2282,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 934
     },
@@ -2249,7 +2316,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 933
     },
@@ -2282,7 +2350,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 932
     },
@@ -2315,7 +2384,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 931
     },
@@ -2348,7 +2418,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 930
     },
@@ -2381,7 +2452,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 929
     },
@@ -2414,7 +2486,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 928
     },
@@ -2447,7 +2520,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 927
     },
@@ -2480,7 +2554,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 926
     },
@@ -2513,7 +2588,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 925
     },
@@ -2546,7 +2622,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 924
     },
@@ -2579,7 +2656,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 923
     },
@@ -2612,7 +2690,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 922
     },
@@ -2645,7 +2724,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 921
     },
@@ -2678,7 +2758,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 920
     },
@@ -2711,7 +2792,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 919
     },
@@ -2744,7 +2826,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 918
     },
@@ -2777,7 +2860,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 917
     },
@@ -2810,7 +2894,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 916
     },
@@ -2843,7 +2928,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 915
     },
@@ -2876,7 +2962,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 914
     },
@@ -2909,7 +2996,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 913
     },
@@ -2942,7 +3030,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 912
     },
@@ -2975,7 +3064,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 911
     },
@@ -3008,7 +3098,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 910
     },
@@ -3041,7 +3132,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 909
     },
@@ -3074,7 +3166,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 908
     },
@@ -3107,7 +3200,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 907
     },
@@ -3140,7 +3234,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 906
     },
@@ -3173,7 +3268,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 905
     },
@@ -3206,7 +3302,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 904
     },
@@ -3239,7 +3336,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 903
     },
@@ -3272,7 +3370,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 902
     },
@@ -3305,7 +3404,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 901
     },
@@ -3338,7 +3438,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 900
     },
@@ -3371,7 +3472,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 899
     },
@@ -3404,7 +3506,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 898
     },
@@ -3437,7 +3540,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 897
     },
@@ -3470,7 +3574,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 896
     },
@@ -3503,7 +3608,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 895
     },
@@ -3536,7 +3642,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 894
     },
@@ -3569,7 +3676,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 893
     },
@@ -3602,7 +3710,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 892
     },
@@ -3635,7 +3744,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 891
     },
@@ -3668,7 +3778,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 890
     },
@@ -3701,7 +3812,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 889
     },
@@ -3734,7 +3846,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 888
     },
@@ -3767,7 +3880,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 887
     },
@@ -3800,7 +3914,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 886
     },
@@ -3833,7 +3948,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 885
     },
@@ -3866,7 +3982,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 884
     },
@@ -3899,7 +4016,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 883
     },
@@ -3932,7 +4050,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 882
     },
@@ -3965,7 +4084,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 881
     },
@@ -3998,7 +4118,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 880
     },
@@ -4031,7 +4152,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 879
     },
@@ -4064,7 +4186,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 878
     },
@@ -4097,7 +4220,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 877
     },
@@ -4130,7 +4254,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 876
     },
@@ -4163,7 +4288,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 875
     },
@@ -4196,7 +4322,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 874
     },
@@ -4229,7 +4356,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 873
     },
@@ -4262,7 +4390,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 872
     },
@@ -4295,7 +4424,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 871
     },
@@ -4328,7 +4458,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 870
     },
@@ -4361,7 +4492,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 869
     },
@@ -4394,7 +4526,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 868
     },
@@ -4427,7 +4560,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 867
     },
@@ -4460,7 +4594,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 866
     },
@@ -4493,7 +4628,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 865
     },
@@ -4526,7 +4662,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 864
     },
@@ -4559,7 +4696,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 863
     },
@@ -4592,7 +4730,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 862
     },
@@ -4625,7 +4764,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 861
     },
@@ -4658,7 +4798,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 860
     },
@@ -4691,7 +4832,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 859
     },
@@ -4724,7 +4866,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 858
     },
@@ -4757,7 +4900,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 857
     },
@@ -4790,7 +4934,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 856
     },
@@ -4823,7 +4968,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 855
     },
@@ -4856,7 +5002,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 854
     },
@@ -4889,7 +5036,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 853
     },
@@ -4922,7 +5070,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 852
     },
@@ -4955,7 +5104,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 851
     },
@@ -4988,7 +5138,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 850
     },
@@ -5021,7 +5172,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 849
     },
@@ -5054,7 +5206,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 848
     },
@@ -5087,7 +5240,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 847
     },
@@ -5120,7 +5274,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 846
     },
@@ -5153,7 +5308,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 845
     },
@@ -5186,7 +5342,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 844
     },
@@ -5219,7 +5376,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 843
     },
@@ -5252,7 +5410,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 842
     },
@@ -5285,7 +5444,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 841
     },
@@ -5318,7 +5478,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 840
     },
@@ -5351,7 +5512,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 839
     },
@@ -5384,7 +5546,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 838
     },
@@ -5417,7 +5580,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 837
     },
@@ -5450,7 +5614,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 836
     },
@@ -5483,7 +5648,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 835
     },
@@ -5516,7 +5682,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 834
     },
@@ -5549,7 +5716,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 833
     },
@@ -5582,7 +5750,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 832
     },
@@ -5615,7 +5784,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 831
     },
@@ -5648,7 +5818,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 830
     },
@@ -5681,7 +5852,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 829
     },
@@ -5714,7 +5886,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 828
     },
@@ -5747,7 +5920,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 827
     },
@@ -5780,7 +5954,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 826
     },
@@ -5813,7 +5988,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 825
     },
@@ -5846,7 +6022,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 824
     },
@@ -5879,7 +6056,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 823
     },
@@ -5912,7 +6090,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 822
     },
@@ -5945,7 +6124,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 821
     },
@@ -5978,7 +6158,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 820
     },
@@ -6011,7 +6192,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 819
     },
@@ -6044,7 +6226,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 818
     },
@@ -6077,7 +6260,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 817
     },
@@ -6110,7 +6294,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 816
     },
@@ -6143,7 +6328,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 815
     },
@@ -6176,7 +6362,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 814
     },
@@ -6209,7 +6396,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 813
     },
@@ -6242,7 +6430,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 812
     },
@@ -6275,7 +6464,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 811
     },
@@ -6308,7 +6498,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 810
     },
@@ -6341,7 +6532,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 809
     },
@@ -6374,7 +6566,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 808
     },
@@ -6407,7 +6600,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 807
     },
@@ -6440,7 +6634,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 806
     },
@@ -6473,7 +6668,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 805
     },
@@ -6506,7 +6702,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 804
     },
@@ -6539,7 +6736,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 803
     },
@@ -6572,7 +6770,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 802
     },
@@ -6605,7 +6804,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 801
     },
@@ -6638,7 +6838,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 800
     },
@@ -6671,7 +6872,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 799
     },
@@ -6704,7 +6906,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 798
     },
@@ -6737,7 +6940,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 797
     },
@@ -6770,7 +6974,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 796
     },
@@ -6803,7 +7008,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 795
     },
@@ -6836,7 +7042,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 794
     },
@@ -6869,7 +7076,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 793
     },
@@ -6902,7 +7110,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 792
     },
@@ -6935,7 +7144,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 791
     },
@@ -6968,7 +7178,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 790
     },
@@ -7001,7 +7212,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 789
     },
@@ -7034,7 +7246,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 788
     },
@@ -7067,7 +7280,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 787
     },
@@ -7100,7 +7314,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 786
     },
@@ -7133,7 +7348,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 785
     },
@@ -7166,7 +7382,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 784
     },
@@ -7199,7 +7416,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 783
     },
@@ -7232,7 +7450,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 782
     },
@@ -7265,7 +7484,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 781
     },
@@ -7298,7 +7518,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 780
     },
@@ -7331,7 +7552,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 779
     },
@@ -7364,7 +7586,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 778
     },
@@ -7397,7 +7620,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 777
     },
@@ -7430,7 +7654,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 776
     },
@@ -7463,7 +7688,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 775
     },
@@ -7496,7 +7722,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 774
     },
@@ -7529,7 +7756,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 773
     },
@@ -7562,7 +7790,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 772
     },
@@ -7595,7 +7824,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 771
     },
@@ -7628,7 +7858,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 770
     },
@@ -7661,7 +7892,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 769
     },
@@ -7694,7 +7926,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 768
     },
@@ -7727,7 +7960,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 767
     },
@@ -7760,7 +7994,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 766
     },
@@ -7793,7 +8028,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 765
     },
@@ -7826,7 +8062,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 764
     },
@@ -7859,7 +8096,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 763
     },
@@ -7892,7 +8130,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 762
     },
@@ -7925,7 +8164,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 761
     },
@@ -7958,7 +8198,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 760
     },
@@ -7991,7 +8232,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 759
     },
@@ -8024,7 +8266,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 758
     },
@@ -8057,7 +8300,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 757
     },
@@ -8090,7 +8334,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 756
     },
@@ -8123,7 +8368,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 755
     },
@@ -8156,7 +8402,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 754
     },
@@ -8189,7 +8436,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 753
     },
@@ -8222,7 +8470,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 752
     },
@@ -8255,7 +8504,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 751
     },
@@ -8288,7 +8538,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 750
     },
@@ -8321,7 +8572,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 749
     },
@@ -8354,7 +8606,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 748
     },
@@ -8387,7 +8640,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 747
     },
@@ -8420,7 +8674,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 746
     },
@@ -8453,7 +8708,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 745
     },
@@ -8486,7 +8742,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 744
     },
@@ -8519,7 +8776,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 743
     },
@@ -8552,7 +8810,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 742
     },
@@ -8585,7 +8844,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 741
     },
@@ -8618,7 +8878,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 740
     },
@@ -8651,7 +8912,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 739
     },
@@ -8684,7 +8946,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 738
     },
@@ -8717,7 +8980,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 737
     },
@@ -8750,7 +9014,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 736
     },
@@ -8783,7 +9048,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 735
     },
@@ -8816,7 +9082,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 734
     },
@@ -8849,7 +9116,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 733
     },
@@ -8882,7 +9150,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 732
     },
@@ -8915,7 +9184,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 731
     },
@@ -8948,7 +9218,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 730
     },
@@ -8981,7 +9252,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 729
     },
@@ -9014,7 +9286,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 728
     },
@@ -9047,7 +9320,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 727
     },
@@ -9080,7 +9354,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 726
     },
@@ -9113,7 +9388,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 725
     },
@@ -9146,7 +9422,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 724
     },
@@ -9179,7 +9456,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 723
     },
@@ -9212,7 +9490,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 722
     },
@@ -9245,7 +9524,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 721
     },
@@ -9278,7 +9558,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 720
     },
@@ -9311,7 +9592,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 719
     },
@@ -9344,7 +9626,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 718
     },
@@ -9377,7 +9660,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 717
     },
@@ -9410,7 +9694,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 716
     },
@@ -9443,7 +9728,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 715
     },
@@ -9476,7 +9762,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 714
     },
@@ -9509,7 +9796,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 713
     },
@@ -9542,7 +9830,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 712
     },
@@ -9575,7 +9864,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 711
     },
@@ -9608,7 +9898,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 710
     },
@@ -9641,7 +9932,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 709
     },
@@ -9674,7 +9966,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 708
     },
@@ -9707,7 +10000,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 707
     },
@@ -9740,7 +10034,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 706
     },
@@ -9773,7 +10068,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 705
     },
@@ -9806,7 +10102,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 704
     },
@@ -9839,7 +10136,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 703
     },
@@ -9872,7 +10170,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 702
     },
@@ -9905,7 +10204,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 701
     },
@@ -9938,7 +10238,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 700
     },
@@ -9971,7 +10272,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 699
     },
@@ -10004,7 +10306,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 698
     },
@@ -10037,7 +10340,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 697
     },
@@ -10070,7 +10374,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 696
     },
@@ -10103,7 +10408,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 695
     },
@@ -10136,7 +10442,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 694
     },
@@ -10169,7 +10476,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 693
     },
@@ -10202,7 +10510,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 692
     },
@@ -10235,7 +10544,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 691
     },
@@ -10268,7 +10578,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 690
     },
@@ -10301,7 +10612,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 689
     },
@@ -10334,7 +10646,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 688
     },
@@ -10367,7 +10680,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 687
     },
@@ -10400,7 +10714,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 686
     },
@@ -10433,7 +10748,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 685
     },
@@ -10466,7 +10782,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 684
     },
@@ -10499,7 +10816,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 683
     },
@@ -10532,7 +10850,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 682
     },
@@ -10565,7 +10884,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 681
     },
@@ -10598,7 +10918,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 680
     },
@@ -10631,7 +10952,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 679
     },
@@ -10664,7 +10986,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 678
     },
@@ -10697,7 +11020,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 677
     },
@@ -10730,7 +11054,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 676
     },
@@ -10763,7 +11088,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 675
     },
@@ -10796,7 +11122,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 674
     },
@@ -10829,7 +11156,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 673
     },
@@ -10862,7 +11190,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 672
     },
@@ -10895,7 +11224,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 671
     },
@@ -10928,7 +11258,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 670
     },
@@ -10961,7 +11292,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 669
     },
@@ -10994,7 +11326,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 668
     },
@@ -11027,7 +11360,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 667
     },
@@ -11060,7 +11394,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 666
     },
@@ -11093,7 +11428,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 665
     },
@@ -11126,7 +11462,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 664
     },
@@ -11159,7 +11496,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 663
     },
@@ -11192,7 +11530,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 662
     },
@@ -11225,9 +11564,418 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 661
+    },
+    {
+      "version": "1.0",
+      "id": "c0156130-0a16-5244-b90e-a375f2b76922",
+      "name": "conv_igemm.bwd.f16.mfma32_f16.native.128x128x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 660
+    },
+    {
+      "version": "1.0",
+      "id": "f10ba084-e570-51e2-b825-3669536310e6",
+      "name": "conv_igemm.bwd.f16.mfma32_f16.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 659
+    },
+    {
+      "version": "1.0",
+      "id": "550de9d0-c6f2-5991-a76d-ee69c74a5824",
+      "name": "conv_igemm.bwd.f16.mfma16_f16.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 658
+    },
+    {
+      "version": "1.0",
+      "id": "e34c1775-f0fc-5329-b893-97b3ccfc4922",
+      "name": "conv_igemm.bwd.f16.mfma16_f16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 657
+    },
+    {
+      "version": "1.0",
+      "id": "8d9634fd-3220-5a7e-b3fa-17e645d3dfa1",
+      "name": "conv_igemm.bwd.f16.wmma11_f16.native.128x128x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 656
+    },
+    {
+      "version": "1.0",
+      "id": "1a76af9e-848e-5dc0-b1d1-a2d98f549a66",
+      "name": "conv_igemm.bwd.f16.wmma11_f16.native.128x64x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 655
+    },
+    {
+      "version": "1.0",
+      "id": "e58113de-0458-5339-b0c5-10f92a38e6b4",
+      "name": "conv_igemm.bwd.f16.wmma11_f16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 654
+    },
+    {
+      "version": "1.0",
+      "id": "553700c6-9b78-5ebc-b362-7c05b7ce0bfd",
+      "name": "conv_igemm.bwd.f16.wmma12_f16.native.128x128x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 653
+    },
+    {
+      "version": "1.0",
+      "id": "609ac97a-9668-53ba-aeac-5f5960ff5227",
+      "name": "conv_igemm.bwd.f16.wmma12_f16.native.128x64x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 652
+    },
+    {
+      "version": "1.0",
+      "id": "e64dc139-1609-5d28-b806-0a9b680f399f",
+      "name": "conv_igemm.bwd.f16.wmma12_f16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 651
+    },
+    {
+      "version": "1.0",
+      "id": "95203c5a-be14-5025-b1b9-9d48e74e5e61",
+      "name": "conv_igemm.bwd.f16.fma.native.128x128x32.w0x0.t256.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "fma",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 650
+    },
+    {
+      "version": "1.0",
+      "id": "9d023ed8-d985-5594-b148-893d05ab1af7",
+      "name": "conv_igemm.bwd.f16.fma.native.64x64x16.w0x0.t256.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "fma",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 649
     },
     {
       "version": "1.0",
@@ -11258,7 +12006,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 1000
     },
@@ -11291,7 +12040,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 999
     },
@@ -11324,7 +12074,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 998
     },
@@ -11357,7 +12108,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 997
     },
@@ -11390,7 +12142,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 996
     },
@@ -11423,7 +12176,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 995
     },
@@ -11456,7 +12210,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 994
     },
@@ -11489,7 +12244,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 993
     },
@@ -11522,7 +12278,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 992
     },
@@ -11555,7 +12312,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 991
     },
@@ -11588,7 +12346,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 990
     },
@@ -11621,7 +12380,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 989
     },
@@ -11654,7 +12414,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 988
     },
@@ -11687,7 +12448,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 987
     },
@@ -11720,7 +12482,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 986
     },
@@ -11753,7 +12516,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 985
     },
@@ -11786,7 +12550,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 984
     },
@@ -11819,7 +12584,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 983
     },
@@ -11852,7 +12618,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 982
     },
@@ -11885,7 +12652,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 981
     },
@@ -11918,7 +12686,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 980
     },
@@ -11951,7 +12720,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 979
     },
@@ -11984,7 +12754,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 978
     },
@@ -12017,7 +12788,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 977
     },
@@ -12050,7 +12822,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 976
     },
@@ -12083,7 +12856,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 975
     },
@@ -12116,7 +12890,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 974
     },
@@ -12149,7 +12924,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 973
     },
@@ -12182,7 +12958,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 972
     },
@@ -12215,7 +12992,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 971
     },
@@ -12248,7 +13026,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 970
     },
@@ -12281,7 +13060,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 969
     },
@@ -12314,7 +13094,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 968
     },
@@ -12347,7 +13128,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 967
     },
@@ -12380,7 +13162,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 966
     },
@@ -12413,7 +13196,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 965
     },
@@ -12446,7 +13230,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 964
     },
@@ -12479,7 +13264,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 963
     },
@@ -12512,7 +13298,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 962
     },
@@ -12545,7 +13332,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 961
     },
@@ -12578,7 +13366,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 960
     },
@@ -12611,7 +13400,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 959
     },
@@ -12644,7 +13434,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 958
     },
@@ -12677,7 +13468,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 957
     },
@@ -12710,7 +13502,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 956
     },
@@ -12743,7 +13536,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 955
     },
@@ -12776,7 +13570,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 954
     },
@@ -12809,7 +13604,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 953
     },
@@ -12842,7 +13638,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 952
     },
@@ -12875,7 +13672,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 951
     },
@@ -12908,7 +13706,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 950
     },
@@ -12941,7 +13740,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 949
     },
@@ -12974,7 +13774,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 948
     },
@@ -13007,7 +13808,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 947
     },
@@ -13040,7 +13842,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 946
     },
@@ -13073,7 +13876,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 945
     },
@@ -13106,7 +13910,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 944
     },
@@ -13139,7 +13944,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 943
     },
@@ -13172,7 +13978,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 942
     },
@@ -13205,7 +14012,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 941
     },
@@ -13238,7 +14046,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 940
     },
@@ -13271,7 +14080,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 939
     },
@@ -13304,7 +14114,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 938
     },
@@ -13337,7 +14148,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 937
     },
@@ -13370,7 +14182,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 936
     },
@@ -13403,7 +14216,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 935
     },
@@ -13436,7 +14250,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 934
     },
@@ -13469,7 +14284,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 933
     },
@@ -13502,7 +14318,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 932
     },
@@ -13535,7 +14352,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 931
     },
@@ -13568,7 +14386,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 930
     },
@@ -13601,7 +14420,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 929
     },
@@ -13634,7 +14454,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 928
     },
@@ -13667,7 +14488,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 927
     },
@@ -13700,7 +14522,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 926
     },
@@ -13733,7 +14556,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 925
     },
@@ -13766,7 +14590,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 924
     },
@@ -13799,7 +14624,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 923
     },
@@ -13832,7 +14658,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 922
     },
@@ -13865,7 +14692,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 921
     },
@@ -13898,7 +14726,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 920
     },
@@ -13931,7 +14760,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 919
     },
@@ -13964,7 +14794,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 918
     },
@@ -13997,7 +14828,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 917
     },
@@ -14030,7 +14862,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 916
     },
@@ -14063,7 +14896,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 915
     },
@@ -14096,7 +14930,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 914
     },
@@ -14129,7 +14964,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 913
     },
@@ -14162,7 +14998,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 912
     },
@@ -14195,7 +15032,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 911
     },
@@ -14228,7 +15066,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 910
     },
@@ -14261,7 +15100,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 909
     },
@@ -14294,7 +15134,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 908
     },
@@ -14327,7 +15168,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 907
     },
@@ -14360,7 +15202,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 906
     },
@@ -14393,7 +15236,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 905
     },
@@ -14426,7 +15270,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 904
     },
@@ -14459,7 +15304,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 903
     },
@@ -14492,7 +15338,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 902
     },
@@ -14525,7 +15372,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 901
     },
@@ -14558,7 +15406,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 900
     },
@@ -14591,7 +15440,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 899
     },
@@ -14624,7 +15474,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 898
     },
@@ -14657,7 +15508,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 897
     },
@@ -14690,7 +15542,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 896
     },
@@ -14723,7 +15576,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 895
     },
@@ -14756,7 +15610,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 894
     },
@@ -14789,7 +15644,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 893
     },
@@ -14822,7 +15678,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 892
     },
@@ -14855,7 +15712,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 891
     },
@@ -14888,7 +15746,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 890
     },
@@ -14921,7 +15780,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 889
     },
@@ -14954,7 +15814,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 888
     },
@@ -14987,7 +15848,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 887
     },
@@ -15020,7 +15882,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 886
     },
@@ -15053,7 +15916,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 885
     },
@@ -15086,7 +15950,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 884
     },
@@ -15119,7 +15984,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 883
     },
@@ -15152,7 +16018,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 882
     },
@@ -15185,7 +16052,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 881
     },
@@ -15218,7 +16086,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 880
     },
@@ -15251,7 +16120,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 879
     },
@@ -15284,7 +16154,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 878
     },
@@ -15317,7 +16188,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 877
     },
@@ -15350,7 +16222,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 876
     },
@@ -15383,7 +16256,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 875
     },
@@ -15416,7 +16290,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 874
     },
@@ -15449,7 +16324,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 873
     },
@@ -15482,7 +16358,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 872
     },
@@ -15515,7 +16392,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 871
     },
@@ -15548,7 +16426,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 870
     },
@@ -15581,7 +16460,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 869
     },
@@ -15614,7 +16494,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 868
     },
@@ -15647,7 +16528,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 867
     },
@@ -15680,7 +16562,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 866
     },
@@ -15713,7 +16596,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 865
     },
@@ -15746,7 +16630,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 864
     },
@@ -15779,7 +16664,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 863
     },
@@ -15812,7 +16698,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 862
     },
@@ -15845,7 +16732,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 861
     },
@@ -15878,7 +16766,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 860
     },
@@ -15911,7 +16800,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 859
     },
@@ -15944,7 +16834,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 858
     },
@@ -15977,7 +16868,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 857
     },
@@ -16010,7 +16902,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 856
     },
@@ -16043,7 +16936,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 855
     },
@@ -16076,7 +16970,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 854
     },
@@ -16109,7 +17004,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 853
     },
@@ -16142,7 +17038,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 852
     },
@@ -16175,7 +17072,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 851
     },
@@ -16208,7 +17106,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 850
     },
@@ -16241,7 +17140,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 849
     },
@@ -16274,7 +17174,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 848
     },
@@ -16307,7 +17208,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 847
     },
@@ -16340,7 +17242,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 846
     },
@@ -16373,7 +17276,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 845
     },
@@ -16406,7 +17310,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 844
     },
@@ -16439,7 +17344,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 843
     },
@@ -16472,7 +17378,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 842
     },
@@ -16505,7 +17412,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 841
     },
@@ -16538,7 +17446,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 840
     },
@@ -16571,7 +17480,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 839
     },
@@ -16604,7 +17514,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 838
     },
@@ -16637,7 +17548,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 837
     },
@@ -16670,7 +17582,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 836
     },
@@ -16703,7 +17616,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 835
     },
@@ -16736,7 +17650,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 834
     },
@@ -16769,7 +17684,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 833
     },
@@ -16802,7 +17718,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 832
     },
@@ -16835,7 +17752,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 831
     },
@@ -16868,7 +17786,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 830
     },
@@ -16901,7 +17820,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 829
     },
@@ -16934,7 +17854,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 828
     },
@@ -16967,7 +17888,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 827
     },
@@ -17000,7 +17922,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 826
     },
@@ -17033,7 +17956,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 825
     },
@@ -17066,7 +17990,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 824
     },
@@ -17099,7 +18024,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 823
     },
@@ -17132,7 +18058,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 822
     },
@@ -17165,7 +18092,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 821
     },
@@ -17198,7 +18126,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 820
     },
@@ -17231,7 +18160,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 819
     },
@@ -17264,7 +18194,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 818
     },
@@ -17297,7 +18228,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 817
     },
@@ -17330,7 +18262,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 816
     },
@@ -17363,7 +18296,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 815
     },
@@ -17396,7 +18330,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 814
     },
@@ -17429,7 +18364,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 813
     },
@@ -17462,7 +18398,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 812
     },
@@ -17495,7 +18432,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 811
     },
@@ -17528,7 +18466,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 810
     },
@@ -17561,7 +18500,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 809
     },
@@ -17594,7 +18534,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 808
     },
@@ -17627,7 +18568,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 807
     },
@@ -17660,7 +18602,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 806
     },
@@ -17693,7 +18636,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 805
     },
@@ -17726,7 +18670,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 804
     },
@@ -17759,7 +18704,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 803
     },
@@ -17792,7 +18738,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 802
     },
@@ -17825,7 +18772,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 801
     },
@@ -17858,7 +18806,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 800
     },
@@ -17891,7 +18840,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 799
     },
@@ -17924,7 +18874,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 798
     },
@@ -17957,7 +18908,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 797
     },
@@ -17990,7 +18942,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 796
     },
@@ -18023,7 +18976,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 795
     },
@@ -18056,7 +19010,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 794
     },
@@ -18089,7 +19044,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 793
     },
@@ -18122,7 +19078,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 792
     },
@@ -18155,7 +19112,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 791
     },
@@ -18188,7 +19146,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 790
     },
@@ -18221,7 +19180,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 789
     },
@@ -18254,7 +19214,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 788
     },
@@ -18287,7 +19248,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 787
     },
@@ -18320,7 +19282,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 786
     },
@@ -18353,7 +19316,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 785
     },
@@ -18386,7 +19350,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 784
     },
@@ -18419,7 +19384,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 783
     },
@@ -18452,7 +19418,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 782
     },
@@ -18485,7 +19452,8 @@
         "cf": 0,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 781
     },
@@ -18518,7 +19486,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 780
     },
@@ -18551,7 +19520,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 779
     },
@@ -18584,7 +19554,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 778
     },
@@ -18617,7 +19588,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 777
     },
@@ -18650,7 +19622,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 776
     },
@@ -18683,7 +19656,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 775
     },
@@ -18716,7 +19690,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 774
     },
@@ -18749,7 +19724,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 773
     },
@@ -18782,7 +19758,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 772
     },
@@ -18815,7 +19792,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 771
     },
@@ -18848,7 +19826,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 770
     },
@@ -18881,7 +19860,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 769
     },
@@ -18914,7 +19894,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 768
     },
@@ -18947,7 +19928,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 767
     },
@@ -18980,7 +19962,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 766
     },
@@ -19013,7 +19996,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 765
     },
@@ -19046,7 +20030,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 764
     },
@@ -19079,7 +20064,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 763
     },
@@ -19112,7 +20098,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 762
     },
@@ -19145,7 +20132,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 761
     },
@@ -19178,7 +20166,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 760
     },
@@ -19211,7 +20200,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 759
     },
@@ -19244,7 +20234,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 758
     },
@@ -19277,7 +20268,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 757
     },
@@ -19310,7 +20302,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 756
     },
@@ -19343,7 +20336,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 755
     },
@@ -19376,7 +20370,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 754
     },
@@ -19409,7 +20404,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 753
     },
@@ -19442,7 +20438,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 3,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 752
     },
@@ -19475,7 +20472,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 751
     },
@@ -19508,7 +20506,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 2,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 750
     },
@@ -19541,7 +20540,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 749
     },
@@ -19574,7 +20574,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 748
     },
@@ -19607,7 +20608,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 747
     },
@@ -19640,7 +20642,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 746
     },
@@ -19673,7 +20676,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 745
     },
@@ -19706,7 +20710,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 744
     },
@@ -19739,7 +20744,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 743
     },
@@ -19772,7 +20778,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 742
     },
@@ -19805,7 +20812,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 741
     },
@@ -19838,7 +20846,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 740
     },
@@ -19871,7 +20880,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 739
     },
@@ -19904,7 +20914,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 738
     },
@@ -19937,7 +20948,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 737
     },
@@ -19970,7 +20982,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 736
     },
@@ -20003,7 +21016,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 735
     },
@@ -20036,7 +21050,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 734
     },
@@ -20069,7 +21084,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 733
     },
@@ -20102,7 +21118,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 732
     },
@@ -20135,7 +21152,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 731
     },
@@ -20168,7 +21186,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 730
     },
@@ -20201,7 +21220,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 729
     },
@@ -20234,7 +21254,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 728
     },
@@ -20267,7 +21288,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 727
     },
@@ -20300,7 +21322,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 726
     },
@@ -20333,7 +21356,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 725
     },
@@ -20366,7 +21390,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 724
     },
@@ -20399,7 +21424,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 723
     },
@@ -20432,7 +21458,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 722
     },
@@ -20465,7 +21492,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 721
     },
@@ -20498,7 +21526,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 720
     },
@@ -20531,7 +21560,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 719
     },
@@ -20564,7 +21594,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 718
     },
@@ -20597,7 +21628,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 717
     },
@@ -20630,7 +21662,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 716
     },
@@ -20663,7 +21696,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 715
     },
@@ -20696,7 +21730,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 714
     },
@@ -20729,7 +21764,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 713
     },
@@ -20762,7 +21798,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 712
     },
@@ -20795,7 +21832,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 711
     },
@@ -20828,7 +21866,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 710
     },
@@ -20861,7 +21900,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 709
     },
@@ -20894,7 +21934,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 708
     },
@@ -20927,7 +21968,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 707
     },
@@ -20960,7 +22002,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 706
     },
@@ -20993,7 +22036,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 705
     },
@@ -21026,7 +22070,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 704
     },
@@ -21059,7 +22104,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 703
     },
@@ -21092,7 +22138,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 702
     },
@@ -21125,7 +22172,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 701
     },
@@ -21158,7 +22206,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 700
     },
@@ -21191,7 +22240,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 699
     },
@@ -21224,7 +22274,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 698
     },
@@ -21257,7 +22308,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 697
     },
@@ -21290,7 +22342,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 696
     },
@@ -21323,7 +22376,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 695
     },
@@ -21356,7 +22410,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 694
     },
@@ -21389,7 +22444,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 693
     },
@@ -21422,7 +22478,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 692
     },
@@ -21455,7 +22512,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 691
     },
@@ -21488,7 +22546,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 690
     },
@@ -21521,7 +22580,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 689
     },
@@ -21554,7 +22614,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 688
     },
@@ -21587,7 +22648,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 687
     },
@@ -21620,7 +22682,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 686
     },
@@ -21653,7 +22716,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 685
     },
@@ -21686,7 +22750,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 684
     },
@@ -21719,7 +22784,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 683
     },
@@ -21752,7 +22818,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 682
     },
@@ -21785,7 +22852,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 681
     },
@@ -21818,7 +22886,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 680
     },
@@ -21851,7 +22920,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 679
     },
@@ -21884,7 +22954,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 678
     },
@@ -21917,7 +22988,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 677
     },
@@ -21950,7 +23022,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 676
     },
@@ -21983,7 +23056,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 675
     },
@@ -22016,7 +23090,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 674
     },
@@ -22049,7 +23124,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 673
     },
@@ -22082,7 +23158,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 672
     },
@@ -22115,7 +23192,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 671
     },
@@ -22148,7 +23226,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 670
     },
@@ -22181,7 +23260,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 669
     },
@@ -22214,7 +23294,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 668
     },
@@ -22247,7 +23328,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 667
     },
@@ -22280,7 +23362,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 666
     },
@@ -22313,7 +23396,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 2
+        "fuse": 2,
+        "large": 0
       },
       "priority": 665
     },
@@ -22346,7 +23430,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 4
+        "fuse": 4,
+        "large": 0
       },
       "priority": 664
     },
@@ -22379,7 +23464,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 8
+        "fuse": 8,
+        "large": 0
       },
       "priority": 663
     },
@@ -22412,7 +23498,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 16
+        "fuse": 16,
+        "large": 0
       },
       "priority": 662
     },
@@ -22445,7 +23532,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 661
     },
@@ -22478,7 +23566,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 660
     },
@@ -22511,7 +23600,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 659
     },
@@ -22544,7 +23634,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 658
     },
@@ -22577,7 +23668,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 657
     },
@@ -22610,7 +23702,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 656
     },
@@ -22643,7 +23736,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 655
     },
@@ -22676,7 +23770,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 654
     },
@@ -22709,7 +23804,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 653
     },
@@ -22742,7 +23838,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 652
     },
@@ -22775,7 +23872,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 651
     },
@@ -22808,7 +23906,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 650
     },
@@ -22841,7 +23940,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 649
     },
@@ -22874,7 +23974,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 648
     },
@@ -22907,7 +24008,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 647
     },
@@ -22940,7 +24042,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 646
     },
@@ -22973,7 +24076,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 645
     },
@@ -23006,7 +24110,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 644
     },
@@ -23039,7 +24144,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 643
     },
@@ -23072,7 +24178,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 642
     },
@@ -23105,7 +24212,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 641
     },
@@ -23138,7 +24246,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 640
     },
@@ -23171,7 +24280,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 639
     },
@@ -23204,7 +24314,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 638
     },
@@ -23237,7 +24348,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 637
     },
@@ -23270,7 +24382,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 636
     },
@@ -23303,7 +24416,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 635
     },
@@ -23336,7 +24450,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 634
     },
@@ -23369,7 +24484,8 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 633
     },
@@ -23402,9 +24518,554 @@
         "cf": 1,
         "swz": 1,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 632
+    },
+    {
+      "version": "1.0",
+      "id": "60a59a76-317c-54ec-a589-1181cfba108d",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16.native.128x128x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 631
+    },
+    {
+      "version": "1.0",
+      "id": "21f62aae-6f25-581d-b454-e7118f811463",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 630
+    },
+    {
+      "version": "1.0",
+      "id": "0f059cde-84f4-5207-af3f-056bb120c50d",
+      "name": "conv_igemm.bwd.bf16.mfma16_bf16.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 629
+    },
+    {
+      "version": "1.0",
+      "id": "031e5ada-3636-55f6-8c78-1887264dc54d",
+      "name": "conv_igemm.bwd.bf16.mfma16_bf16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 628
+    },
+    {
+      "version": "1.0",
+      "id": "3058f2a2-c450-5307-a99f-9ffb13a7ebd4",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16_908.native.128x128x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16_908",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 627
+    },
+    {
+      "version": "1.0",
+      "id": "45f4b6fd-04aa-528b-a49f-1f765cf64a05",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16_908.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16_908",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 626
+    },
+    {
+      "version": "1.0",
+      "id": "f4fa9cbb-af61-5ecc-ad24-492e50b6d78d",
+      "name": "conv_igemm.bwd.bf16.mfma16_bf16_908.native.128x64x32.w2x2.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 625
+    },
+    {
+      "version": "1.0",
+      "id": "3c8b8c17-1cd5-538b-b5f8-e69ec6188562",
+      "name": "conv_igemm.bwd.bf16.mfma16_bf16_908.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 624
+    },
+    {
+      "version": "1.0",
+      "id": "3db5bc83-1800-5f79-b2a2-6216248decc2",
+      "name": "conv_igemm.bwd.bf16.wmma11_bf16.native.128x128x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 623
+    },
+    {
+      "version": "1.0",
+      "id": "b110291b-3dd8-5b92-bb9f-37991e979c91",
+      "name": "conv_igemm.bwd.bf16.wmma11_bf16.native.128x64x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 622
+    },
+    {
+      "version": "1.0",
+      "id": "d19bfc00-b633-587a-b24d-0216a08f334f",
+      "name": "conv_igemm.bwd.bf16.wmma11_bf16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 621
+    },
+    {
+      "version": "1.0",
+      "id": "5c131432-a501-55d1-a68f-ae571ae41651",
+      "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.128x128x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 620
+    },
+    {
+      "version": "1.0",
+      "id": "30ecce69-a4ab-5015-9d95-777ffb0b5597",
+      "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.128x64x32.w2x4.t0.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 64,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 619
+    },
+    {
+      "version": "1.0",
+      "id": "00eb5b42-d6e7-5c69-b579-81680a8dfc00",
+      "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 618
+    },
+    {
+      "version": "1.0",
+      "id": "e5c6879f-457c-5714-b0b3-4f978394b5e5",
+      "name": "conv_igemm.bwd.bf16.fma.native.128x128x32.w0x0.t256.v8.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "fma",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 617
+    },
+    {
+      "version": "1.0",
+      "id": "b47af273-e733-50c5-91f3-f8ed2018460c",
+      "name": "conv_igemm.bwd.bf16.fma.native.64x64x16.w0x0.t256.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "fma",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 616
     },
     {
       "version": "1.0",
@@ -23435,7 +25096,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 1000
     },
@@ -23468,7 +25130,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 999
     },
@@ -23501,7 +25164,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 998
     },
@@ -23534,7 +25198,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 997
     },
@@ -23567,7 +25232,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 996
     },
@@ -23600,7 +25266,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 995
     },
@@ -23633,7 +25300,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 994
     },
@@ -23666,7 +25334,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 993
     },
@@ -23699,7 +25368,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 992
     },
@@ -23732,7 +25402,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 991
     },
@@ -23765,7 +25436,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 990
     },
@@ -23798,7 +25470,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 989
     },
@@ -23831,7 +25504,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 988
     },
@@ -23864,7 +25538,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 987
     },
@@ -23897,7 +25572,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 986
     },
@@ -23930,7 +25606,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 985
     },
@@ -23963,7 +25640,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 984
     },
@@ -23996,7 +25674,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 983
     },
@@ -24029,7 +25708,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 982
     },
@@ -24062,7 +25742,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 981
     },
@@ -24095,7 +25776,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 980
     },
@@ -24128,7 +25810,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 979
     },
@@ -24161,7 +25844,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 978
     },
@@ -24194,7 +25878,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 977
     },
@@ -24227,7 +25912,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 976
     },
@@ -24260,7 +25946,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 975
     },
@@ -24293,7 +25980,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 974
     },
@@ -24326,7 +26014,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 973
     },
@@ -24359,7 +26048,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 972
     },
@@ -24392,7 +26082,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 971
     },
@@ -24425,7 +26116,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 970
     },
@@ -24458,7 +26150,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 969
     },
@@ -24491,7 +26184,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 968
     },
@@ -24524,7 +26218,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 967
     },
@@ -24557,7 +26252,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 966
     },
@@ -24590,7 +26286,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 965
     },
@@ -24623,7 +26320,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 964
     },
@@ -24656,7 +26354,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 963
     },
@@ -24689,7 +26388,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 962
     },
@@ -24722,7 +26422,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 961
     },
@@ -24755,7 +26456,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 960
     },
@@ -24788,7 +26490,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 959
     },
@@ -24821,7 +26524,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 958
     },
@@ -24854,7 +26558,8 @@
         "cf": 0,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 957
     },
@@ -24887,7 +26592,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 956
     },
@@ -24920,7 +26626,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 955
     },
@@ -24953,7 +26660,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 954
     },
@@ -24986,7 +26694,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 953
     },
@@ -25019,7 +26728,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 952
     },
@@ -25052,7 +26762,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 951
     },
@@ -25085,7 +26796,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 950
     },
@@ -25118,7 +26830,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 949
     },
@@ -25151,7 +26864,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 948
     },
@@ -25184,7 +26898,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 947
     },
@@ -25217,7 +26932,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 946
     },
@@ -25250,7 +26966,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 945
     },
@@ -25283,7 +27000,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 944
     },
@@ -25316,7 +27034,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 943
     },
@@ -25349,7 +27068,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 942
     },
@@ -25382,7 +27102,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 941
     },
@@ -25415,7 +27136,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 940
     },
@@ -25448,7 +27170,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 939
     },
@@ -25481,7 +27204,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 938
     },
@@ -25514,7 +27238,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 937
     },
@@ -25547,7 +27272,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 936
     },
@@ -25580,7 +27306,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 935
     },
@@ -25613,7 +27340,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 934
     },
@@ -25646,7 +27374,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 933
     },
@@ -25679,7 +27408,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 932
     },
@@ -25712,7 +27442,8 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 931
     },
@@ -25745,9 +27476,316 @@
         "cf": 1,
         "swz": 0,
         "dma": 0,
-        "fuse": 0
+        "fuse": 0,
+        "large": 0
       },
       "priority": 930
+    },
+    {
+      "version": "1.0",
+      "id": "49250e7a-d4f1-5f8d-9750-10e71dd00875",
+      "name": "conv_igemm.bwd.f32.mfma32_f32.native.128x128x16.w2x2.t0.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma32_f32",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 929
+    },
+    {
+      "version": "1.0",
+      "id": "360d1aa1-3005-52f4-862c-b176b45123d6",
+      "name": "conv_igemm.bwd.f32.mfma16_f32.native.128x128x16.w2x2.t0.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 928
+    },
+    {
+      "version": "1.0",
+      "id": "e07e5e52-2b16-5945-bb90-5cb2ca73f74b",
+      "name": "conv_igemm.bwd.f32.mfma16_f32.native.64x64x16.w2x2.t0.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 927
+    },
+    {
+      "version": "1.0",
+      "id": "ffe18d67-afe0-5489-8ed6-2d4178a5dce9",
+      "name": "conv_igemm.bwd.f32.mfma16_f32.native.64x64x16.w2x2.t0.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 926
+    },
+    {
+      "version": "1.0",
+      "id": "cda2362e-2e05-5e06-9efc-5949cd2168d2",
+      "name": "conv_igemm.bwd.f32.fma.native.128x128x16.w0x0.t256.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 16,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 925
+    },
+    {
+      "version": "1.0",
+      "id": "5b3b9777-eb87-53e1-ae70-5bcfa32a3863",
+      "name": "conv_igemm.bwd.f32.fma.native.64x64x16.w0x0.t256.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 924
+    },
+    {
+      "version": "1.0",
+      "id": "616a939e-e562-5b83-9fe3-5a8b29e99bc0",
+      "name": "conv_igemm.bwd.f32.fma.native.64x64x16.w0x0.t256.v1.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "math": "native",
+        "bm": 64,
+        "bn": 64,
+        "bk": 16,
+        "wm": 0,
+        "wn": 0,
+        "threads": 256,
+        "vec": 1,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 923
+    },
+    {
+      "version": "1.0",
+      "id": "a6195cf8-aa4c-5a80-bd95-fb530a17b8d9",
+      "name": "conv_igemm.bwd.f32.mfma32_xf32.native.128x128x16.w2x2.t0.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma32_xf32",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 922
+    },
+    {
+      "version": "1.0",
+      "id": "2453bb8b-cb1f-56fd-b440-aa24ce0409ad",
+      "name": "conv_igemm.bwd.f32.mfma16_xf32.native.128x128x16.w2x2.t0.v4.s1.large",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_xf32",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 16,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 4,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 0,
+        "dma": 0,
+        "fuse": 0,
+        "large": 1
+      },
+      "priority": 921
     }
   ]
 }

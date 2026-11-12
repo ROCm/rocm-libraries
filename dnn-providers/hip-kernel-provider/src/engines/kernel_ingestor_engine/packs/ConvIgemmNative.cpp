@@ -518,14 +518,10 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     problem.wSrcTap = krsc ? cg : 1;
     layOutWorkspace(problem);
 
-    // The kernels index the positions of one image (input and output) in 32 bits: an image of
-    // more than 2^31 - 1 pixels (#14424 X3: 46341 x 46341) is declined until the generic tier
-    // has a 64-bit large-image variant.
-    if(a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2] > INT_LIMIT
-       || a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2] > INT_LIMIT)
-    {
-        return std::nullopt;
-    }
+    // The kernels index the positions of one image (input and output) in 32 bits; an image of
+    // more than 2^31 - 1 pixels (#14424 X3: 46341 x 46341) takes the large-image configs.
+    problem.largeImage = a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2] > INT_LIMIT
+                         || a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2] > INT_LIMIT;
 
     // Rows of the GEMM, and how far one block's rows reach in the gathered tensor.
     long long imageBytes = 0;
@@ -854,6 +850,7 @@ struct Tile
     int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
     int64_t dma = 0; ///< gfx950: buffer loads straight into this many swizzled LDS stages
     int64_t fuse = 0; ///< groups run as one block-diagonal group (group fusion), 0 none
+    int64_t large = 0; ///< 64-bit positions within an image (K1_LARGE): images past 2^31 - 1 px
 
     int64_t blockThreads() const
     {
@@ -899,7 +896,12 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.swz = kernel.getIntMetadata("swz");
     tile.dma = kernel.getIntMetadata("dma");
     tile.fuse = kernel.getIntMetadata("fuse");
-    if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
+    tile.large = kernel.getIntMetadata("large");
+    if((tile.large != 0
+        && (tile.large != 1 || tile.xcd != 0 || tile.halo != 0 || tile.wdirect != 0
+            || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0
+            || tile.split))
+       || tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
        || (tile.wdirect != 0 && tile.wdirect != 1) || tile.pack < 0 || tile.pack > 2
@@ -921,7 +923,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 }
 
 /// Kernel-scoped applicability: the config runs on this device and computes this problem
-/// correctly. Its atom must exist on the device and take the graph's element type (fp32 through
+/// correctly. A large-image config (64-bit positions within an image) serves exactly the images
+/// past 2^31 - 1 pixels, the other configs exactly the rest. Its atom must exist on the device and take the graph's element type (fp32 through
 /// rounded operands -- xf32, three-bf16 -- only with TF32 permission), and its channel vector
 /// must divide the reduction channels. An XCD-order config is served only where the device has
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
@@ -962,7 +965,9 @@ bool kernelMatches(const MatchContext& context,
     if(!problem.has_value() || device_units::dispatchUnits(context.deviceProperties) < 1
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->base.dataType)
-       || !conv_igemm::atomRunsOn(tile->atom, context.deviceProperties.gcnArchName))
+       || !conv_igemm::atomRunsOn(tile->atom, context.deviceProperties.gcnArchName)
+       // Large-image configs serve exactly the images past 2^31 - 1 pixels.
+       || (tile->large != 0) != problem->largeImage)
     {
         return false;
     }
@@ -1302,6 +1307,7 @@ public:
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         options.add("K1_BUFFER", std::string(bufferLoads(*problem) ? "1" : "0"));
+        options.add("K1_LARGE", std::to_string(tile->large));
 
         const auto plan = conv_igemm::splitPlanFor(
             *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);

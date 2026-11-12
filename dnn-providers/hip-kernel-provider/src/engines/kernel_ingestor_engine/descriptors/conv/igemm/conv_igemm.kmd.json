@@ -82,6 +82,10 @@
     {
       "name": "fuse",
       "type": "int"
+    },
+    {
+      "name": "large",
+      "type": "int"
     }
   ]
 }

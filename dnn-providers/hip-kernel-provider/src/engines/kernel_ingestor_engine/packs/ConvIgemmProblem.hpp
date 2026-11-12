@@ -58,6 +58,9 @@ struct IgemmProblem
     long long phases = 1;
     /// Bytes one block's rows can span, from its first image: decides the 32-bit buffer loads.
     long long blockSpanBytes = 0;
+    /// One image has more than 2^31 - 1 pixels (input or output): only the large-image configs
+    /// (64-bit positions within an image, K1_LARGE) serve it, and only it.
+    bool largeImage = false;
     /// The graph's filter is packed K T R S C/g and not reflected: backward data can read it
     /// directly (the direct-filter configs) instead of staging the transposed copy.
     bool filterKtrsc = false;

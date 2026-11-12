@@ -24,7 +24,8 @@
     "cf",
     "swz",
     "dma",
-    "fuse"
+    "fuse",
+    "large"
   ],
   "behavior_notes": [
     "runtime_compilation"

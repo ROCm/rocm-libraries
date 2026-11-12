@@ -18,6 +18,8 @@
 //   CONV_IGEMM_DMA      2 to 4: gfx950 buffer loads straight into a ring of that many swizzled
 //                       LDS stages (SWZ 1, K1_BUFFER 1)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
+//   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
+//                       2^31 - 1 pixels)
 
 #include "ConvIgemmCore.h"
 

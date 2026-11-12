@@ -1296,27 +1296,49 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
     }
 }
 
-TEST(TestConvIgemmProblem, ImagesPastTwoToTheThirtyOnePixelsAreDeclined)
+TEST(TestConvIgemmCatalog, LargeImageConfigsServeExactlyTheImagesPastTwoToTheThirtyOnePixels)
 {
-    // The kernels index one image's positions in 32 bits. #14424 X3 (46341 x 46341, 1x1, one
-    // channel) has 2^31 + 4633 pixels: declined. 46340 x 46340 (2^31 - 88733) is served, and so
-    // is the same pixel count spread over images (16 x 11586 x 11586).
+    // The kernels index one image's positions in 32 bits, the large-image configs (K1_LARGE) in
+    // 64. #14424 X3 (46341 x 46341, 1x1, one channel: 2^31 + 4633 pixels) takes only those;
+    // 46340 x 46340 (2^31 - 88733) and the same pixels over 16 images only the others.
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
+        const auto pack = packFor(direction);
+        const auto& kernels = catalog(direction);
+        const auto plain = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF" && k.getStringMetadata("atom") == "fma"
+                   && k.getIntMetadata("vec") == 1 && k.getIntMetadata("large") == 0;
+        });
+        const auto large = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF" && k.getStringMetadata("atom") == "fma"
+                   && k.getIntMetadata("vec") == 1 && k.getIntMetadata("large") == 1;
+        });
+        ASSERT_NE(plain, kernels.end());
+        ASSERT_NE(large, kernels.end());
+        const auto serves = [&](ConvShape shape, const auto& kernel) {
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto bound = matchesGraph(pack, fixture.context());
+            return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
         auto x3 = dense(1, 1, {46341, 46341}, {1, 1}, {0, 0}, true);
         x3.n = 1;
-        x3.dataType = DataType::HALF;
-        const GraphFixture big(buildGraph(specFor(x3, direction)));
-        EXPECT_FALSE(conv_igemm::parseIgemmProblem(big.context(), direction).has_value());
+        EXPECT_TRUE(serves(x3, *large));
+        EXPECT_FALSE(serves(x3, *plain));
         auto under = x3;
         under.input = {46340, 46340};
-        const GraphFixture fits(buildGraph(specFor(under, direction)));
-        EXPECT_TRUE(conv_igemm::parseIgemmProblem(fits.context(), direction).has_value());
+        EXPECT_FALSE(serves(under, *large));
+        EXPECT_TRUE(serves(under, *plain));
         auto batched = x3;
         batched.n = 16;
         batched.input = {11586, 11586};
-        const GraphFixture many(buildGraph(specFor(batched, direction)));
-        EXPECT_TRUE(conv_igemm::parseIgemmProblem(many.context(), direction).has_value());
+        EXPECT_FALSE(serves(batched, *large));
+        EXPECT_TRUE(serves(batched, *plain));
+        // A large-image knob on any other variant is not a config.
+        auto haloLarge = *large;
+        haloLarge.metadata["large"] = int64_t{2};
+        EXPECT_FALSE(serves(x3, haloLarge));
     }
 }
 
