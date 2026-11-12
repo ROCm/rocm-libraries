@@ -740,8 +740,11 @@ size_t DataBytes(const TensorInfo& info)
 }
 
 // Where the next scratch buffer starts after `bytes`, keeping each one aligned
-// as the handle's buffer is.
-size_t AlignScratch(size_t bytes) { return (bytes + 255) / 256 * 256; }
+// as the scratch start is.
+size_t AlignScratch(size_t bytes)
+{
+    return (bytes + kScratchAlignment - 1) / kScratchAlignment * kScratchAlignment;
+}
 
 // The training graph always produces the saved statistics. When the caller
 // wants none, they go to scratch instead and are dropped.

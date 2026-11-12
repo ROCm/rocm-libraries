@@ -120,10 +120,16 @@ using PopulateGraphFn = std::function<bool(hipdnn_frontend::graph::Graph&)>;
 using VariantPack     = std::unordered_map<int64_t, void*>;
 using BindScratchFn   = std::function<void(VariantPack&, void*)>;
 
+// The scratch start's alignment. Offsets within the scratch that should keep
+// it are multiples of this.
+constexpr size_t kScratchAlignment = 256;
+
 // Device scratch for graph outputs the caller has no buffer for. RunCachedGraph
-// carves `bytes` from the handle's buffer and passes their start to `bind`,
-// which adds the scratch pointers to the variant pack. The scratch is reused by
-// the next call on the handle, so its contents are lost.
+// carves `bytes` from the handle's buffer and passes their start, aligned to
+// kScratchAlignment, to `bind`, which adds the scratch pointers to the variant
+// pack. Non-empty scratch puts the graph's workspace in that buffer too, so the
+// caller's workspace is then not used. The scratch is reused by the next call on
+// the handle, so its contents are lost.
 struct GraphScratch
 {
     size_t bytes = 0;
@@ -132,7 +138,8 @@ struct GraphScratch
 
 // Runs the graph for `key` on `handle`'s stream. On a cache miss, `populate`
 // fills in a new graph, which is then built and cached. The caller's workspace
-// is used when it is big enough, and a buffer owned by the handle otherwise.
+// is used when it is big enough and `scratch` is empty, and a buffer owned by
+// the handle otherwise.
 // Failures are recorded with RecordFailure.
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PlanKey& key,
@@ -153,8 +160,8 @@ struct GraphStep
 
 // Runs `steps` in order on `handle`'s stream, as RunCachedGraph runs one graph,
 // in the handle's buffer. Every step sees the same `scratchBytes` of scratch at
-// the same address, so a step can read what an earlier one wrote there. No
-// step runs unless every graph can be built.
+// the same kScratchAlignment-aligned address, so a step can read what an
+// earlier one wrote there. No step runs unless every graph can be built.
 miopenStatus_t
 RunCachedGraphs(miopenHandle_t handle, std::vector<GraphStep>& steps, size_t scratchBytes);
 
