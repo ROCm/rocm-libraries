@@ -325,8 +325,9 @@ std::vector<DeviceCase> deviceCases()
     add("DepthwiseMult2", conv(2, 8, 16, 8, {23, 27}, {9, 9}, {4, 4}, {1, 1}, false));
     // An output smaller than any tile, no padding.
     add("ValidSmall", conv(3, 8, 8, 1, {9, 9}, {5, 5}, {0, 0}, {1, 1}, false));
-    // Several chunks: a 2 MB workspace cap leaves room for about a hundred 16x16 tiles.
-    add("Chunked5x5", conv(4, 8, 8, 1, {100, 100}, {5, 5}, {2, 2}, {1, 1}, false), 2 << 20);
+    // Several chunks: a 2 MB workspace cap leaves room for about a hundred 16x16 tiles; 405
+    // tiles in chunks of 102, so the last chunk is short (the grids stay sized for a full one).
+    add("Chunked5x5", conv(5, 8, 8, 1, {100, 100}, {5, 5}, {2, 2}, {1, 1}, false), 2 << 20);
     return cases;
 }
 

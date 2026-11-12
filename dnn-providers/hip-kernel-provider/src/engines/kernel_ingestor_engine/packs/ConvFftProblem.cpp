@@ -231,6 +231,7 @@ std::optional<Plan> depthwisePlan(Plan plan, bool wrw, int64_t computeUnits)
     plan.chunk = plan.tiles;
     a.p0 = 0;
     a.pc = plan.tiles;
+    a.pcGrid = plan.tiles;
     const auto spectra = pack_features::checkedProduct({groups, bins, 8});
     if(!spectra.has_value())
     {
@@ -375,6 +376,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
     }
     plan.chunks = static_cast<int>(divUp(plan.tiles, std::min<int64_t>(fit, plan.tiles)));
     plan.chunk = static_cast<int>(divUp(plan.tiles, plan.chunks));
+    a.pcGrid = plan.chunk;
 
     plan.fixedOffset = 0;
     plan.aOffset = alignUp(plan.fixedBytes);

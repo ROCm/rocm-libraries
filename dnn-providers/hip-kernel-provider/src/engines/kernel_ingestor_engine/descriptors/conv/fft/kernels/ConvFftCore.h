@@ -605,7 +605,7 @@ __device__ void fftDataTransform(const ConvFftArgs& a)
     constexpr int F = FftShape<TH, TW, PB>::F;
     __shared__ cfx spec[PB * F];
     __shared__ FftTile tiles[PB];
-    const int blocksP = (a.pc + PB - 1) / PB;
+    const int blocksP = (a.pcGrid + PB - 1) / PB; // the grid is sized for a full chunk
     const int gc = blockIdx.x / blocksP; // g * chans + channel
     const int pBlock = (blockIdx.x % blocksP) * PB;
     const int g = gc / a.chans;
@@ -658,7 +658,7 @@ __device__ void fftOutputInverse(const ConvFftArgs& a)
     constexpr int F = FftShape<TH, TW, PB>::F;
     __shared__ cfx spec[PB * F];
     __shared__ FftTile tiles[PB];
-    const int blocksP = (a.pc + PB - 1) / PB;
+    const int blocksP = (a.pcGrid + PB - 1) / PB; // the grid is sized for a full chunk
     const int gb = blockIdx.x / blocksP;
     const int pBlock = (blockIdx.x % blocksP) * PB;
     const int g = gb / a.cb;
@@ -716,7 +716,7 @@ __device__ void fftDepthwise(const ConvFftArgs& a)
     constexpr int F = FftShape<TH, TW, PB>::F;
     __shared__ cfx spec[PB * F];
     __shared__ FftTile tiles[PB];
-    const int blocksP = (a.pc + PB - 1) / PB;
+    const int blocksP = (a.pcGrid + PB - 1) / PB; // the grid is sized for a full chunk
     const int g = blockIdx.x / blocksP;
     const int pBlock = (blockIdx.x % blocksP) * PB;
     fftLoadTiles<PB>(tiles, a, pBlock);
@@ -819,7 +819,7 @@ __device__ void fftProduct(const ConvFftArgs& a)
     constexpr int LB = (BK * BN + 255) / 256;
     __shared__ cfx sa[BK][BM];
     __shared__ cfx sb[BK][BN];
-    const int tilesM = (a.pc + BM - 1) / BM;
+    const int tilesM = (a.pcGrid + BM - 1) / BM; // the grid is sized for a full chunk
     const int tilesN = (a.cb + BN - 1) / BN;
     int bid = blockIdx.x;
     const int tm = bid % tilesM;

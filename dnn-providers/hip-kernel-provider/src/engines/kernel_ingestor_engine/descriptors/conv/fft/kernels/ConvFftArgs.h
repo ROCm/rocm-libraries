@@ -67,6 +67,8 @@ struct ConvFftArgs
     int tilesW;
     int p0; ///< first tile of this chunk
     int pc; ///< tiles in this chunk (the spectra's tile extent)
+    int pcGrid; ///< tiles of a full chunk: the launch grids are sized for it (the last chunk may
+        ///< hold fewer, pc; blocks past pc do nothing)
     int accumulate; ///< wgrad: add this chunk's sums to wsY (0 for the first chunk)
     int parts; ///< depthwise wgrad: partitions of the tiles
     int tilesPerPart; ///< depthwise wgrad: tiles a partition (a multiple of the block's tiles)

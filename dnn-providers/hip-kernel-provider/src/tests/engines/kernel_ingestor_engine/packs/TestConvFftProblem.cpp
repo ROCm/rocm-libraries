@@ -374,6 +374,7 @@ TEST(TestConvFftPlan, ChunksKeepTheWorkspaceUnderTheCap)
     EXPECT_GT(plan->chunks, 1);
     EXPECT_LE(plan->workspaceBytes, conv_fft::WORKSPACE_CAP_BYTES);
     EXPECT_GE(static_cast<int64_t>(plan->chunk) * plan->chunks, plan->tiles);
+    EXPECT_EQ(plan->args.pcGrid, plan->chunk); // the grids' tile count, the last chunk included
 }
 
 TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
