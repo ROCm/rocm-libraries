@@ -245,6 +245,7 @@ public:
         options.add("CONV_FFT_PB", std::to_string(config.pb));
         options.add("CONV_FFT_TB", std::to_string(config.tb));
         options.add("CONV_FFT_GN", std::to_string(config.gn));
+        options.add("CONV_FFT_TM", std::to_string(config.tm));
 
         const bool wrw = resolved->direction == ConvDirection::BACKWARD_WEIGHTS;
         const auto& a = plan.args;

@@ -30,6 +30,10 @@
     {
       "name": "gn",
       "type": "int"
+    },
+    {
+      "name": "tm",
+      "type": "int"
     }
   ]
 }

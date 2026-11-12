@@ -806,15 +806,25 @@ __device__ void fftDepthwiseFold(const ConvFftArgs& a)
 }
 
 /// Forward / backward-data product: Y[g][f][b][p] = sum_a A[g][f][a][p] * B[g][f][a][b] (B
-/// already conjugated). Block tile BM tiles x BN output channels, 4 x 4 a thread, 256 threads;
-/// the next BK channels are fetched into registers while the current ones are multiplied.
-/// grid.x = (groups * F) * tilesN * tilesM.
-template <int BN>
+/// already conjugated). Block tile BM tiles x BN output channels, TM x 4 a thread (TM 4 or 8; BM
+/// = 256 / (BN / 4) x TM), 256 threads; the next BK channels are fetched into
+/// registers while the current ones are multiplied. grid.x = (groups * F) * tilesN * tilesM.
+template <int BN, int TMV>
+struct FftProductTile
+{
+    static constexpr int TM = TMV;
+    static constexpr int TN = 4;
+    static constexpr int TXM = 256 / (BN / TN);
+    static constexpr int BM = TXM * TM;
+};
+template <int BN, int TMV>
 __device__ void fftProduct(const ConvFftArgs& a)
 {
-    constexpr int BM = 4096 / BN;
+    constexpr int TM = FftProductTile<BN, TMV>::TM;
+    constexpr int TN = FftProductTile<BN, TMV>::TN;
+    constexpr int TXM = FftProductTile<BN, TMV>::TXM;
+    constexpr int BM = FftProductTile<BN, TMV>::BM;
     constexpr int BK = BN == 16 ? 8 : 16;
-    constexpr int TXM = BM / 4;
     constexpr int LA = BK * BM / 256;
     constexpr int LB = (BK * BN + 255) / 256;
     __shared__ cfx sa[BK][BM];
@@ -857,11 +867,11 @@ __device__ void fftProduct(const ConvFftArgs& a)
                         : cfxMake(0.0f, 0.0f);
         }
     };
-    cfx acc[4][4];
+    cfx acc[TM][TN];
 #pragma unroll
-    for(int i = 0; i < 4; ++i)
+    for(int i = 0; i < TM; ++i)
 #pragma unroll
-        for(int j = 0; j < 4; ++j)
+        for(int j = 0; j < TN; ++j)
             acc[i][j] = cfxMake(0.0f, 0.0f);
     fetch(0);
     for(int k0 = 0; k0 < a.ca; k0 += BK)
@@ -889,33 +899,37 @@ __device__ void fftProduct(const ConvFftArgs& a)
 #pragma unroll
         for(int kk = 0; kk < BK; ++kk)
         {
-            cfx va[4], vb[4];
+            cfx va[TM], vb[TN];
 #pragma unroll
-            for(int i = 0; i < 4; ++i)
+            for(int i = 0; i < TM; ++i)
             {
-                va[i] = sa[kk][tx * 4 + i];
-                vb[i] = sb[kk][ty * 4 + i];
+                va[i] = sa[kk][tx * TM + i];
             }
 #pragma unroll
-            for(int i = 0; i < 4; ++i)
+            for(int j = 0; j < TN; ++j)
+            {
+                vb[j] = sb[kk][ty * TN + j];
+            }
 #pragma unroll
-                for(int j = 0; j < 4; ++j)
+            for(int i = 0; i < TM; ++i)
+#pragma unroll
+                for(int j = 0; j < TN; ++j)
                     cfxMac(acc[i][j], va[i], vb[j]);
         }
         __syncthreads();
     }
 #pragma unroll
-    for(int j = 0; j < 4; ++j)
+    for(int j = 0; j < TN; ++j)
     {
-        const int nn = n0 + ty * 4 + j;
+        const int nn = n0 + ty * TN + j;
         if(nn >= a.cb)
         {
             continue;
         }
 #pragma unroll
-        for(int i = 0; i < 4; ++i)
+        for(int i = 0; i < TM; ++i)
         {
-            const int m = m0 + tx * 4 + i;
+            const int m = m0 + tx * TM + i;
             if(m < a.pc)
             {
                 Y[static_cast<long long>(nn) * a.pc + m] = acc[i][j];

@@ -19,7 +19,7 @@ def write(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-INTS = ["th", "tw", "pb", "tb", "gn"]
+INTS = ["th", "tw", "pb", "tb", "gn", "tm"]
 STRINGS = ["direction", "dtype"]
 
 # Transform sizes: 2-D square tiles for square filters up to 63 taps of span, 1-D rows for
@@ -33,8 +33,9 @@ TILES = {
     (1, 32): [64, 128],
     (1, 64): [32, 64],
 }
-# Product tiles: 64 x 64 for wide channel counts, 256 tiles x 16 channels for narrow ones.
-GNS = [64, 16]
+# Product tiles (gn output channels, tm tiles a thread): 64 x 64 and 128 x 64 for wide channel
+# counts, 256 tiles x 16 channels for narrow ones.
+GNS = [(64, 4), (64, 8), (16, 4)]
 
 
 def threads_of(th, tw, pb):
@@ -95,8 +96,14 @@ for direction in ("fwd", "bwd", "wrw"):
     for dtype in ("FLOAT", "HALF", "BFLOAT16"):
         for (th, tw), pbs in TILES.items():
             for pb, tb in [(pb, tb) for pb in pbs for tb in threads_of(th, tw, pb)]:
-                for gn in GNS:
-                    name = f"conv_fft.{direction}.{dt[dtype]}.t{th}x{tw}.pb{pb}.tb{tb}.g{gn}"
+                for gn, tm in GNS:
+                    # Backward weights' product has no tm (it contracts over tiles).
+                    if direction == "wrw" and tm != 4:
+                        continue
+                    name = (
+                        f"conv_fft.{direction}.{dt[dtype]}.t{th}x{tw}.pb{pb}.tb{tb}.g{gn}"
+                        + (f".m{tm}" if tm != 4 else "")
+                    )
                     kernels.append(
                         {
                             "version": "1.0",
@@ -115,6 +122,7 @@ for direction in ("fwd", "bwd", "wrw"):
                                 "pb": pb,
                                 "tb": tb,
                                 "gn": gn,
+                                "tm": tm,
                             },
                             "priority": 1000 - i,
                         }

@@ -433,7 +433,8 @@ void runCase(ConvShape shape, ConvDirection direction, long long workspaceCap)
         // 16-bit tensors change only the loads and stores: run them on every transform size and
         // block (the 256-thread, 64-channel product configs), fp32 on every config.
         if(!std::is_same_v<T, float>
-           && (kernel.getIntMetadata("tb") != 256 || kernel.getIntMetadata("gn") != 64))
+           && (kernel.getIntMetadata("tb") != 256 || kernel.getIntMetadata("gn") != 64
+               || kernel.getIntMetadata("tm") != 4))
         {
             continue;
         }

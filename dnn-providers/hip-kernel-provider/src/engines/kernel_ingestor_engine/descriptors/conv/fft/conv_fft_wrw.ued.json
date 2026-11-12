@@ -11,7 +11,8 @@
     "tw",
     "pb",
     "tb",
-    "gn"
+    "gn",
+    "tm"
   ],
   "behavior_notes": [
     "runtime_compilation"

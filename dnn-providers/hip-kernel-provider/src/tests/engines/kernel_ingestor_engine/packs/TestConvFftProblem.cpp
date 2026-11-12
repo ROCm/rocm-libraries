@@ -69,7 +69,7 @@ struct Fields
 {
     std::string direction = "FWD";
     std::string dtype = "FLOAT";
-    int64_t th = 32, tw = 32, pb = 2, tb = 64, gn = 64;
+    int64_t th = 32, tw = 32, pb = 2, tb = 64, gn = 64, tm = 4;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
@@ -82,7 +82,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
                        {"tw", f.tw},
                        {"pb", f.pb},
                        {"tb", f.tb},
-                       {"gn", f.gn}};
+                       {"gn", f.gn},
+                       {"tm", f.tm}};
     return kernel;
 }
 
@@ -348,6 +349,12 @@ TEST(TestConvFftKernel, OneDeclinePerMalformedConfigField)
     EXPECT_TRUE(declines([](Fields& f) { f.tb = 96; }));
     EXPECT_TRUE(declines([](Fields& f) { f.tb = 512; }));
     EXPECT_TRUE(declines([](Fields& f) { f.gn = 8; }));
+    EXPECT_TRUE(declines([](Fields& f) { f.tm = 2; }));
+    EXPECT_TRUE(declines([](Fields& f) {
+        f.gn = 16;
+        f.tm = 8; // 8 tiles a thread only with the 64-channel tile
+    }));
+    EXPECT_FALSE(declines([](Fields& f) { f.tm = 8; }));
 }
 
 // ---------------------------------------------------------------------------

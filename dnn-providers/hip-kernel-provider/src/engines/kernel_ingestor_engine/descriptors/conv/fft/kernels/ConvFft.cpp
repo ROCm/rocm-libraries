@@ -19,11 +19,15 @@
 //   CONV_FFT_PB   tiles (or filters) a transform block
 //   CONV_FFT_TB   threads of a transform block (at least one a row pair: PB TH / 2, or PB / 2)
 //   CONV_FFT_GN   output channels of a product block tile (16, 32 or 64; 256 threads)
+//   CONV_FFT_TM   tiles a product thread (4, or 8 with 64 output channels; default 4)
 
 #include "ConvFftCore.h"
 
 #ifndef CONV_FFT_T
 #error "CONV_FFT_T must name the element type"
+#endif
+#ifndef CONV_FFT_TM
+#define CONV_FFT_TM 4
 #endif
 
 extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftData(ConvFftArgs a)
@@ -38,7 +42,7 @@ extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftFilter(ConvFftA
 
 extern "C" __global__ void __launch_bounds__(256) ConvFftProduct(ConvFftArgs a)
 {
-    fftProduct<CONV_FFT_GN>(a);
+    fftProduct<CONV_FFT_GN, CONV_FFT_TM>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftOutput(ConvFftArgs a)

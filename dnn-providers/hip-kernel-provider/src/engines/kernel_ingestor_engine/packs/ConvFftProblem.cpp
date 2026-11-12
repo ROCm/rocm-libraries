@@ -146,6 +146,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     config.pb = static_cast<int>(kernel.getIntMetadata("pb"));
     config.tb = static_cast<int>(kernel.getIntMetadata("tb"));
     config.gn = static_cast<int>(kernel.getIntMetadata("gn"));
+    config.tm = static_cast<int>(kernel.getIntMetadata("tm"));
     const bool thOk = config.th == 1 || (isPow2(config.th) && config.th >= 8 && config.th <= 64);
     const bool twOk = isPow2(config.tw) && config.tw >= 8 && config.tw <= 64;
     if(!thOk || !twOk || config.pb < 1 || (config.th == 1 && config.pb % 2 != 0))
@@ -163,6 +164,10 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         return std::nullopt;
     }
     if(config.gn != 16 && config.gn != 32 && config.gn != 64)
+    {
+        return std::nullopt;
+    }
+    if(config.tm != 4 && !(config.tm == 8 && config.gn == 64))
     {
         return std::nullopt;
     }
@@ -290,7 +295,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
 {
     const bool depthwise = isDepthwise(problem);
     // One product tile for the depthwise path (it has no product): the gn twins are not offered.
-    if(depthwise && config.gn != 64)
+    if(depthwise && (config.gn != 64 || config.tm != 4))
     {
         return std::nullopt;
     }
@@ -386,14 +391,18 @@ std::optional<Plan> planFor(const FftProblem& problem,
     plan.workspaceBytes = plan.bOffset + plan.bBytes;
     plan.transformThreads = config.tb;
 
-    const int64_t bm = 4096 / config.gn;
     if(wrw)
     {
+        // ConvFftCore.h fftWgradProduct: 4096 / gn x channels by gn dy channels a block.
         plan.filterGrid = groups * a.cb * divUp(a.ca, config.pb);
-        plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(a.ca, bm);
+        plan.productGridPerChunk
+            = groups * bins * divUp(a.cb, config.gn) * divUp(a.ca, 4096 / config.gn);
     }
     else
     {
+        // ConvFftCore.h FftProductTile: tm tiles a thread, 256 / (gn / 4) threads along the tiles
+        // (64 x 64 or 128 x 64, 128 x 32, 256 x 16).
+        const int64_t bm = (256 / (config.gn / 4)) * config.tm;
         plan.filterGrid = groups * a.ca * divUp(a.cb, config.pb);
         plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(plan.chunk, bm);
     }
