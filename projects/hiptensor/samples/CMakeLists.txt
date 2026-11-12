@@ -40,6 +40,11 @@ if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
             target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
             target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
             set_target_properties(${BINARY_NAME} PROPERTIES LINKER_LANGUAGE CXX)
+            # The samples launch no kernels, but the shared test utilities they include hold
+            # kernel templates, so they compile as HIP with the device pass skipped.
+            target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
+            target_compile_options(${BINARY_NAME} PRIVATE
+                --offload-host-only -Wno-unused-command-line-argument)
         elseif(FILE_EXT STREQUAL ".c")
             set_target_properties(${BINARY_NAME} PROPERTIES LINKER_LANGUAGE C)
         endif()

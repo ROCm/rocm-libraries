@@ -77,7 +77,14 @@ def _problem(**kw) -> DirectConvProblem:
 # The column-streamed depthwise kernel bounds its output rows against p_Ho
 # instead of streaming them by input row, so it is the one padding-generic
 # forward kernel.
-_PADDING_GENERIC_FWD = {"direct_depthwise_col"}
+# The small-channel MFMA forward kernels (gfx950) bound their windows by the
+# runtime extents and take the stems' / layers' own padding ("valid" stems,
+# 1x7 with column padding).
+_PADDING_GENERIC_FWD = {
+    "direct_depthwise_col",
+    "direct_fwd_smallc_mfma",
+    "direct_fwd_smallk_mfma",
+}
 
 
 def test_forward_entries_only_use_same_padding(jobs):

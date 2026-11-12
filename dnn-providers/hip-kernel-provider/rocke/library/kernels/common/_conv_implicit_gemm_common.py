@@ -27,6 +27,7 @@ What lives here
 
 from __future__ import annotations
 
+import numbers
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -311,6 +312,26 @@ class ConvAccumulatorEpilogue:
     relu: bool = False
     clamp_min: Optional[float] = None
     clamp_max: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        # Reject malformed fields here rather than coerce them downstream: a
+        # truthy non-bool ``relu`` (``1``, ``"no"``) or a non-numeric bound
+        # would otherwise be read differently by the two engines' bridges.
+        if not isinstance(self.relu, bool):
+            raise TypeError(
+                f"ConvAccumulatorEpilogue.relu must be a bool, got "
+                f"{type(self.relu).__name__} {self.relu!r}"
+            )
+        for name in ("bias", "scale", "clamp_min", "clamp_max"):
+            v = getattr(self, name)
+            if v is None and name in ("clamp_min", "clamp_max"):
+                continue
+            if isinstance(v, bool) or not isinstance(v, numbers.Real):
+                raise TypeError(
+                    f"ConvAccumulatorEpilogue.{name} must be a real number"
+                    f"{' or None' if name.startswith('clamp') else ''}, got "
+                    f"{type(v).__name__} {v!r}"
+                )
 
     def is_identity(self) -> bool:
         return (
