@@ -7307,6 +7307,37 @@ class TestResolveStream(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"torch": fake}):
             self.assertEqual(resolve_stream(0), 99)
 
+    def test_never_imports_an_installed_but_unimported_torch(self):
+        """A torch-free caller in a torch-installed environment gets the null
+        stream without torch being imported: TheRock torch preloads its bundled
+        ROCm libraries at import, which aborts a process that already loaded a
+        HIP runtime."""
+        import importlib.abc
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import resolve_stream
+
+        attempts: list = []
+
+        class RecordTorchImports(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split(".")[0] == "torch":
+                    attempts.append(fullname)
+                return None
+
+        finder = RecordTorchImports()
+        with mock.patch.dict(sys.modules):
+            for name in [n for n in sys.modules if n.split(".")[0] == "torch"]:
+                del sys.modules[name]
+            sys.meta_path.insert(0, finder)
+            try:
+                self.assertEqual(resolve_stream(0), 0)
+                self.assertEqual(resolve_stream(None), 0)
+            finally:
+                sys.meta_path.remove(finder)
+        self.assertEqual(attempts, [])
+
 
 class TestTorchDtypeAndDeviceTensor(unittest.TestCase):
     """``torch_interop.torch_dtype`` / ``device_tensor``: the torch glue a
