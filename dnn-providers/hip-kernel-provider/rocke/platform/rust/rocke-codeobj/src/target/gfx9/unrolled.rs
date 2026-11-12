@@ -26,8 +26,11 @@ use crate::rir::unroll::Auto;
 use crate::rir::CompileStats;
 
 /// The automatic unrolling of gfx950: `Auto::DEFAULT`, with empty register
-/// pins not counted as waits on a carried value.
-pub const AUTO: Auto = Auto { pins_wait: false, ..Auto::DEFAULT };
+/// pins not counted as waits on a carried value, and loops of up to 64 trips
+/// (2048 ops of copies) in a kernel without MFMAs: the split-KV attention
+/// reduce kernel sums 64 partial results per lane, which COMGR issues as 64
+/// loads at once and a rolled loop issues one trip at a time.
+pub const AUTO: Auto = Auto { pins_wait: false, scalar: Some((64, 2048)), ..Auto::DEFAULT };
 
 /// The automatic unrolling a gfx950 compile tries.
 pub fn auto() -> Auto {
