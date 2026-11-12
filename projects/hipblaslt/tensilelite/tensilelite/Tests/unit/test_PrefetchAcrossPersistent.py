@@ -1842,8 +1842,9 @@ class _PapSetRefreshWriter:
     def papTdmRecomputeWaveIdx(self, kernel, wave_idx_sgpr):
         return Module("recompute WaveIdx")
 
-    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
-        return self._record("init", tpa, tpb)
+    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx",
+                                       *, updateOnly=False, preparedGlobalAddr=None):
+        return self._record("update" if updateOnly else "init", tpa, tpb)
 
     def tdmGlobalOffsetWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
         return self._record("offset", tpa, tpb)
@@ -1910,12 +1911,12 @@ def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse,
     kernel = _pap_set_kernel(fuse, num_waves, mx)
     assert _PapSetRefreshWriter().papTdmDescriptorSetOwners(kernel) == owners
     out = _pap_set_calls(kernel, kwa_module.KernelWriterAssembly.papTdmUpdateDescriptor, monkeypatch)
-    expected = _expected_pap_calls(fuse, mx, ("init", "offset", "k offset"), lambda pair: [])
+    expected = _expected_pap_calls(fuse, mx, ("update" if fuse == 0 else "init", "offset", "k offset"), lambda pair: [])
     assert [calls for calls, _ in out] == expected
     restored = [re.findall(r"s_add_u32 s\[sgprtdm(\w+)Group0\+1\][^\n]*restore PAP LDS bank", text)
                 for _, text in out]
     if fuse == 0:
-        assert restored == [["A"]] + ([["MXSA"]] if mx else [])
+        assert restored == [[]] + ([[]] if mx else [])
     else:
         assert restored == [owners] + ([[]] if mx else [])
 
@@ -2015,6 +2016,12 @@ def test_pap_moves_each_descriptor_set_once(_gp_gfx1250, gfx1250_iim, assembler,
         if once and not sol.get("LdsOffsetA_Blk"):
             # LdsOffsetA_Blk == 0 folds the bank helpers out: no set has a bank to move to.
             assert not [line for line in asm.splitlines() if any(c in line for c in comments)], comments
+            continue
+        if (comments == _NON_IDEMPOTENT_BANK_SITES["papTdmUpdateDescriptor"]
+                and kwa_module.KernelWriterAssembly.papTdmSupportsIncrementalUpdate(sol)):
+            # Incremental refresh preserves each bank in place.
+            assert not hits
+            assert "PAP: re-enable TDM for the next tile" in asm
             continue
         counts = {reg: hits.count(reg) for reg in hits}
         assert set(counts) == allocated, (comments, sorted(counts), sorted(allocated))

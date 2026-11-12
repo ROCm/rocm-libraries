@@ -22894,7 +22894,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setIterations(group2, sIter))
 
   def _emitTdmIterateInit(self, mod, kernel, tc, dtype, du, mt, perIssueLoadRowDivisor,
-                          descSgprName, strideRefName, remainRowsSgpr):
+                          descSgprName, strideRefName, remainRowsSgpr, updateOnly=False):
     comp = TensorDataMoverLoad.find(self)
     bpe = dtype.numBytes()
     dss = TensorDataMoverLoad.dataSizeShift(dtype)
@@ -22914,18 +22914,21 @@ class KernelWriterAssembly(KernelWriter):
       raise RuntimeError(
           f"TDM iterate {tc}: iter_count({iter_count}) outside HW range 1~256 (field encodes n-1).")
 
-    # global_inc field = tile_dim1 * strideN * bpe >> dss.
-    with self.allocTmpSgpr(2) as tmp:
+    # Only the count depends on the output tile. PAP retains the already
+    # initialized iterate flag and LDS/global strides on each wave's descriptor.
+    with self.allocTmpSgpr(1 if updateOnly else 2) as tmp:
       sIter, sGInc = tmp.idx, tmp.idx + 1
-      strRef = strideRefName()
-      srcArg = strRef if isinstance(strRef, RegisterContainer) else sgpr(strRef)
-      mod.add(SMulI32(sgpr(sGInc), srcArg, tile_dim1,
-                      f"TDM iter global_inc = strideN * tile_dim1({tile_dim1})"))
-      if dtype.isFloat4():
-        mod.add(SLShiftRightB32(sgpr(sGInc), 1, sgpr(sGInc),
-                                "fp4 sub-byte: bytes = elements / 2"))
-      mod.add(comp.setIterationEnabled(descSgprName(1), True))
-      mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, sGInc))
+      if not updateOnly:
+        # global_inc field = tile_dim1 * strideN * bpe >> dss.
+        strRef = strideRefName()
+        srcArg = strRef if isinstance(strRef, RegisterContainer) else sgpr(strRef)
+        mod.add(SMulI32(sgpr(sGInc), srcArg, tile_dim1,
+                        f"TDM iter global_inc = strideN * tile_dim1({tile_dim1})"))
+        if dtype.isFloat4():
+          mod.add(SLShiftRightB32(sgpr(sGInc), 1, sgpr(sGInc),
+                                  "fp4 sub-byte: bytes = elements / 2"))
+        mod.add(comp.setIterationEnabled(descSgprName(1), True))
+        mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, sGInc))
       self._emitTdmIterCount(mod, sIter, remainRowsSgpr, rows_per_il, tile_dim1)
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
@@ -23448,14 +23451,21 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SAddU32(sgpr(offsetIdx), sgpr(offsetIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
     return mod
 
-  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx") -> Module:
+  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False) -> Module:
+    """Initialize a wave's descriptor, or refresh its tile-dependent fields.
+
+    updateOnly is used by the audited DataParallel PAP path before the current
+    tail. Descriptor ownership, layout, strides and multicast masks are unchanged
+    between tiles; the LDS address already names PAP's destination bank. Enable,
+    global address, tensor dimensions and iterate count must be refreshed.
+    """
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     tlu: int = tP["tlu"]
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    mod = Module(f"Init TDM Descriptor {tc}")
+    mod = Module(f"{'Update' if updateOnly else 'Init'} TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
       assert idx < 4
@@ -23507,53 +23517,60 @@ class KernelWriterAssembly(KernelWriter):
                                             for m in (tdmSetGroup(kernel, tc) or ()))))
     group2Name = descSgprName(2) if needGroup23 else None
     stashed = tc in tdmStashedMembers(kernel)
-    if stashed:
-      # Group0 only: the stash's Group1 fields are rewritten into its resident's set at each issue.
-      for i in range(comp.GROUP0_NUM_SGPR):
-        mod.add(SMovB32(sgpr(f"{descSgprName(0)}+{i}"), 1 if i == 0 else 0))
+    if updateOnly:
+      # HalfPLR/RAP can null this word during the final current-tile loads.
+      mod.add(SMovB32(sgpr(f"{descSgprName(0)}+0"), 1, "PAP: re-enable TDM for the next tile"))
+      with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
+                             tag="papTdmGlobalAddr") as tmpSgprRes:
+        mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
     else:
-      # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
-      mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
-      mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
-      clusterComp = ClusterLoadTDM.find(self)
-      if clusterComp:
-        mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc, waveSeparated=True))
-
-    with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
-                           tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
-      waveOffsetSgprIdx: int = tmpSgprRes.idx
-      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
-      mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
-      if compShift is None:
-        compIdComment = f"componentId=0 ({tc})"
-      elif compOffset:
-        compIdComment = f"componentId=WaveIdx - {compOffset} ({numComp} components)"
-      elif compShift == 1:
-        compIdComment = "componentId=WaveIdx >> 1"
+      if stashed:
+        # Group0 only: the stash's Group1 fields are rewritten into its resident's set at each issue.
+        for i in range(comp.GROUP0_NUM_SGPR):
+          mod.add(SMovB32(sgpr(f"{descSgprName(0)}+{i}"), 1 if i == 0 else 0))
       else:
-        compIdComment = f"componentId=WaveIdx ({numComp} components)"
-      mod.add(self.tdmEmitWaveCompId(waveOffsetSgprIdx, compShift, waveIdxSgpr,
-                                     compIdComment, compOffset))
-      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
-      if ("MXS" in tc):
-        mxTileLds = mxFreeTile(kernel, tc)
-        if mxTileLds > 1:
-          # K-split LDS dest is (MT/MXBlockFree) * (mxDU/numComp). Do not do
-          # (MT/MXBlockFree)//numComp first: MT/128 can be 1, which floors to 0
-          # and both components write the same LDS byte. 0 is still correct
-          # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
-          dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
-      mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
-                                  ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
-                                  waveOffsetSgprIdx, tmpPadSgprIdx))
-      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
-      if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
-        # Each descriptor set has one per-wave mask; scales own a separate set.
-        swapMask = "PairedTDMScaleSwap" if isMX else "PairedTDMSwap"
-        mod.add(SAddU32(sgpr(swapMask), sgpr(waveOffsetSgprIdx),
-                         kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc], "Paired TDM buffer base"))
-        mod.add(SXorB32(sgpr(swapMask), sgpr(swapMask), sgpr(waveOffsetSgprIdx),
-                         "Per-wave paired TDM buffer swap mask"))
+        # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
+        mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
+        mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
+        clusterComp = ClusterLoadTDM.find(self)
+        if clusterComp:
+          mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc, waveSeparated=True))
+
+      with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
+                             tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
+        waveOffsetSgprIdx: int = tmpSgprRes.idx
+        tmpPadSgprIdx: int = tmpSgprRes.idx + 1
+        mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
+        if compShift is None:
+          compIdComment = f"componentId=0 ({tc})"
+        elif compOffset:
+          compIdComment = f"componentId=WaveIdx - {compOffset} ({numComp} components)"
+        elif compShift == 1:
+          compIdComment = "componentId=WaveIdx >> 1"
+        else:
+          compIdComment = f"componentId=WaveIdx ({numComp} components)"
+        mod.add(self.tdmEmitWaveCompId(waveOffsetSgprIdx, compShift, waveIdxSgpr,
+                                       compIdComment, compOffset))
+        dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+        if ("MXS" in tc):
+          mxTileLds = mxFreeTile(kernel, tc)
+          if mxTileLds > 1:
+            # K-split LDS dest is (MT/MXBlockFree) * (mxDU/numComp). Do not do
+            # (MT/MXBlockFree)//numComp first: MT/128 can be 1, which floors to 0
+            # and both components write the same LDS byte. 0 is still correct
+            # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
+            dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
+        mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
+                                    ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
+                                    waveOffsetSgprIdx, tmpPadSgprIdx))
+        mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+        if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+          # Each descriptor set has one per-wave mask; scales own a separate set.
+          swapMask = "PairedTDMScaleSwap" if isMX else "PairedTDMSwap"
+          mod.add(SAddU32(sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                           kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc], "Paired TDM buffer base"))
+          mod.add(SXorB32(sgpr(swapMask), sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                           "Per-wave paired TDM buffer swap mask"))
     if stashed:
       return mod
 
@@ -23569,12 +23586,13 @@ class KernelWriterAssembly(KernelWriter):
       remainRowsSgpr: Optional[int] = None
       mod.add(SMulI32(sgpr(tmpSgprIdx), mt, sgpr(wgIdx)))
       mod.add(SSubI32(sgpr(tmpSgprIdx), sgpr(size), sgpr(tmpSgprIdx)))
-      mod.add(comp.setIterationEnabled(descSgprName(1), False))
-      if isTdmIter:
-        # Iterate-mode supplies the pad via the LDS write stride; disable pad_interval.
-        mod.add(comp.setPadding(descSgprName(1), 0, 0))
-      else:
-        mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+      if not updateOnly:
+        mod.add(comp.setIterationEnabled(descSgprName(1), False))
+        if isTdmIter:
+          # Iterate-mode supplies the pad via the LDS write stride; disable pad_interval.
+          mod.add(comp.setPadding(descSgprName(1), 0, 0))
+        else:
+          mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
 
       if ("MXS" in tc):
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
@@ -23658,7 +23676,10 @@ class KernelWriterAssembly(KernelWriter):
                                  perIssueLoadRowDivisor=numComp * dim1Divisor,
                                  descSgprName=descSgprName,
                                  strideRefName=strideRefName,
-                                 remainRowsSgpr=remainRowsSgpr)
+                                 remainRowsSgpr=remainRowsSgpr, updateOnly=updateOnly)
+
+    if updateOnly:
+      return mod
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
@@ -23927,25 +23948,26 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(emitFor(tP))
     return mod
 
-  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
+  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False) -> Module:
     #TODO: TDM implement
-    mod = Module("TDM Init Wave Separated")
+    mod = Module("TDM Update Wave Separated" if updateOnly else "TDM Init Wave Separated")
     if tPA is None or tPB is None:
       mod.add(self._tdmLoneScaleSetup(kernel, tPA or tPB, waveIdxSgpr,
-                                      lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr),
+                                      lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr, updateOnly=updateOnly),
                                       "Init"))
       return mod
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     # Shared-scale descriptors are initialized on their full assigned wave sets.
     if tdmSharedScaleSetActive(kernel):
+      assert not updateOnly, "incremental PAP requires separate scale descriptors"
       mod.add(self._tdmSharedScaleDispatch(kernel, tPA, tPB, waveIdxSgpr,
-                                       lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr),
+                                       lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr, updateOnly=updateOnly),
                                        "Init"))
       return mod
     if self.tdmPairOnEveryWave(kernel, tPA, tPB):
-      mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA, waveIdxSgpr))
-      mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB, waveIdxSgpr))
+      mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA, waveIdxSgpr, updateOnly=updateOnly))
+      mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB, waveIdxSgpr, updateOnly=updateOnly))
       return mod
 
     tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tPA, tPB)
@@ -23958,10 +23980,10 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
 
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr, updateOnly=updateOnly))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
     mod.add(tdmInitLblB)
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr, updateOnly=updateOnly))
     mod.add(tdmInitLblEnd)
     return mod
 
@@ -24268,6 +24290,21 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(done)
     return mod
 
+  @staticmethod
+  def papTdmSupportsIncrementalUpdate(kernel: Mapping) -> bool:
+    """Whether tile completion preserves the layout fields reused by PAP.
+
+    StreamK changes the local K range, but not the descriptor layout. The
+    refresh rebuilds the global address before applying the next K offset.
+    """
+    return (isPersistent(kernel) and tdmWaveSeparated(kernel)
+            and kernel.get("TDMFuse", 0) == 0
+            and not kernel.get("UseSubtileImpl")
+            and not kernel.get("TDMSplit")
+            and not kernel.get("TDMPlusLdsBuf", 0)
+            and not kernel.get("StaggerU", 0)
+            and not kernel.get("ProblemType", {}).get("Sparse", 0))
+
   def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
@@ -24291,7 +24328,13 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(1) as waveIdxSgprRes:
       waveIdxSgpr = waveIdxSgprRes.idx
       mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
-      if preservePapBank and blkOffset != 0:
+      # Refresh tile-dependent fields, including StreamK's local K offset below.
+      # Other descriptor groupings and current-tail restore keep the full path.
+      # TDMSplit can leave within-bank LDS offsets and modified iterate state.
+      incremental = preservePapBank and KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
+      if incremental:
+        mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr, updateOnly=True))
+      elif preservePapBank and blkOffset != 0:
         with self.allocTmpSgpr(1) as tmpSgprRes:
           papBankSgpr = tmpSgprRes.idx
           mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=blkOffset,
