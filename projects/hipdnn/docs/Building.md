@@ -750,7 +750,7 @@ Abbreviated quotation:
 >New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
 >```
 
-Every hipDNN executable embeds a `longPathAware` application manifest. The manifest takes effect only when the `LongPathsEnabled` setting above is `1`. An application that loads hipDNN needs its own long-path-aware manifest; hipDNN's manifest does not cover the host process. When building with the GNU-style `clang++` driver (`lld-link`), the Windows SDK `bin` directory that holds `mt.exe` must be on `PATH` at build time (see [step 8](#8-setup-environment-variables)); otherwise configuration fails.
+Every hipDNN executable embeds a `longPathAware` application manifest. The manifest takes effect only when the `LongPathsEnabled` setting above is `1`. An application that loads hipDNN needs its own long-path-aware manifest; hipDNN's manifest does not cover the host process. When building with the GNU-style `clang++` driver (`lld-link`), the Windows SDK `bin` directory that holds `mt.exe` must be on `PATH` at configure time (see [step 8](#8-setup-environment-variables)); otherwise configuration fails.
 
 #### 4. Enable Windows 10 Symlinks
 
@@ -846,7 +846,7 @@ On Windows the `bin` folder is typically added to `PATH` so the built executable
    set HIP_PLATFORM=amd
    ```
 
-* **Windows SDK `bin` on `PATH` (required).** hipDNN embeds a long-path-aware manifest in every executable, and the GNU-style `clang++` driver (`lld-link`) merges it with the Windows SDK's `mt.exe`. Configuration fails if `mt.exe` is not on `PATH`. The SDK `bin` directory also provides `rc.exe`, the fallback resource compiler described below. Add it to `PATH`, e.g.:
+* **Windows SDK `bin` on `PATH` (required with the GNU-style `clang++` driver).** hipDNN embeds a long-path-aware manifest in every executable, and `lld-link` merges it with the Windows SDK's `mt.exe`. Configuration fails if `mt.exe` is not on `PATH`. The SDK `bin` directory also provides `rc.exe`, the fallback resource compiler described below. Add it to `PATH`, e.g.:
    ```cmd
    set PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64;%PATH%
    ```
