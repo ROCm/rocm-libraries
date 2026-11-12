@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Additive attention bias for the gfx950 tiled 2D, 3D split-KV and dense kernels.
+"""Additive attention bias for the gfx950 tiled 2D and 3D split-KV kernels and the
+gfx950 and gfx942 dense kernels.
 
 The fp32 bias is read at element
 ``seq*batch_stride + q_head*head_stride + q_row*sq_stride + col`` (Sk stride 1;

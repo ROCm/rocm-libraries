@@ -1967,6 +1967,67 @@ def cases():
                 "block_m": 128,
             },
         ),
+        # --- additive bias: one bias add per tile ahead of the mask, on the default
+        # and the persistent grid (scalar loads; the policy picks the 4-wide ones for
+        # bf16 D64 only); the epilogue's live-row test with and without LSE (sinks
+        # with LSE keep m = sink for a row whose keys are all -inf); a sliding
+        # window on the persistent grid and under wave skip; the diagonal split, whose
+        # unmasked tiles still take the bias; D64 fp16 without a mask; bf16 D64 with
+        # the policy's loads and with scalar ones forced; and the 4-wide loads at D128.
+        # The rows above pin that none of this emits IR when the bias is off.
+        ("bias_causal_sq512", {"use_additive_bias": True}),
+        ("bias_persist_causal_sq512", {**_persist942, "use_additive_bias": True}),
+        (
+            "bias_lse_window_sq512",
+            {"use_additive_bias": True, "emit_lse": True, "sliding_window": 128},
+        ),
+        (
+            "bias_persist_window_lse_sq512",
+            {
+                **_persist942,
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "sliding_window": 128,
+            },
+        ),
+        (
+            "bias_window_wave_skip_sq512",
+            {
+                "use_additive_bias": True,
+                "sliding_window": 128,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "bias_bottom_right_dsplit_sq512",
+            {
+                "use_additive_bias": True,
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+            },
+        ),
+        (
+            "bias_d64_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "dtype": "fp16",
+                "causal": False,
+            },
+        ),
+        ("bias_d64_bf16_sq512", {"use_additive_bias": True, "head_size": 64}),
+        (
+            "bias_d64_bf16_scalar_sq512",
+            {"use_additive_bias": True, "head_size": 64, "use_bias_x4": False},
+        ),
+        (
+            "bias_sinks_lse_sq512",
+            {"use_additive_bias": True, "use_sinks": True, "emit_lse": True},
+        ),
+        ("bias_x4_sq512", {"use_additive_bias": True, "use_bias_x4": True}),
     ):
         add(
             "attention_dense",
