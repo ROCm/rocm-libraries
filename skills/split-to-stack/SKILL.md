@@ -9,9 +9,7 @@ description: Decompose an oversized branch, a "from this branch up" range, or a 
 
 ## Overview
 
-Decompose a branch, a range of stacked branches, or a whole stack into one linear stack of smaller branches, each with a single purpose. Dependencies decide which orders are valid; among valid orders, independent low-risk changes (fixes, cleanup) go at the bottom so they land first and features go last. The top of the stack has the same tree as the source after the pre-commit hooks have been applied to it, which proves nothing was lost.
-
-The product is a **restructure plan and a stack of branches**, delivered quickly. It is not a code review. It works on committed history only: at start, uncommitted changes in the checkout are either committed (and become part of the split) or stashed, as the user chooses. The default run stops after the plan for approval. The only repository-configured code a plan-only run executes is the pre-commit hooks (Phase 0e).
+Decompose a branch, a range of stacked branches, or a whole stack into one linear stack of single-purpose branches. Dependencies decide which orders are valid; among valid orders, fixes and cleanup go at the bottom and features last. The top of the stack has the same tree as the source after the pre-commit hooks, which proves nothing was lost. The product is a restructure plan and a stack of branches, delivered quickly, not a code review. It works on committed history only: uncommitted changes in the checkout are committed or stashed at start, as the user chooses. The default run stops after the plan for approval; the only repository code a plan-only run executes is the pre-commit hooks (Phase 0e).
 
     S  (source branch(es), never modified)
     │  Phase 0: scope, target, survey; copy S, run hooks, bring the copy up to date,
@@ -37,20 +35,13 @@ Flags: `--implement` (build and verify straight after the plan, no approval wait
 - Whenever the user says "stack", ask first: "Do you mean a `gh stack`, or plain stacked branches (PR base chains)?" Record the answer in `run.md`.
 - For `--from` and `--stack` the Survey finds the branches (`references/survey-and-update.md`, 0a). The orchestrator shows the list with each branch's PR, author and review state and **waits for confirmation before continuing**. `--from` on the top branch is a single-branch scope; `--stack` on a branch that is in no stack reports that and asks what the user meant.
 - Single branch: only that branch is re-cut. Branches stacked on top of it (dependents) are restacked onto the new top branch, with the user's permission, and stay members of the stack.
-- The new branches go under `users/<current user>/` (`references/common.md`, Naming).
+- The new branches go under `users/<you>/` (`references/orchestrator.md`).
 - No PRs at all (a local branch) is fine: there is nothing to retire and no thread mapping.
-
-**Tests.** Ask once: "Run the tests on every branch, or skip them (for example to inspect the branches first)?" With `--implement`, ask it in the order-at-start step below; in plan-only mode (the default), ask it when the user asks to implement. Record the answer in `run.md`. A user who skipped can ask later to test an existing stack: the orchestrator creates a fresh `$WT` and runs `references/build-and-test.md` 8.2 against the SHAs in `stack.tsv` (fixes then rebuild with `--refs update`; a published branch is moved only with the user's explicit permission, `build-and-test.md` Fixes).
-
-**Small-input path.** After the Survey, the Updater and the Linearizer (always run as usual) the orchestrator measures: `git diff --numstat B $L` (hand-written = excluding the default generated globs of `concepts.md`), `git rev-list --count B..$L`, and the merges in `B..S'`. If all hold: ≤ 800 hand-written changed lines, ≤ 15 commits, no merges from other branches, one component (the first two path components under `projects/`, `shared/` or `dnn-providers/`), then a single Planner does the Inventory and the plan (reading commits itself, no commit readers, no separate Inventory), and one Builder does Phases 7–8. It follows the same files, scripts, gates and table. The Planner never runs hooks or asks the user; if it finds an entangled entry or a broken threshold it stops with `## Blocked: needs-full-pipeline`; the orchestrator then keeps `ledger.tsv` and `inventory.md`, deletes the plan files, and runs the commit readers and a fresh Planner.
-
-## Symbols
-
-`S` source branch (top of the scope, never modified); `T` resolved target SHA; `P` topmost kept (external) parent, if any; `S'` the copy of S after hooks and update; `B` base of the split; `L` the linear chain on B with `tree(L) == tree(S')` (equal to `S'` when the Phase 1 no-op check applies); `$L` the SHA of L, recorded in `run.md`; `$SPLIT` helper-branch prefix; `$WT` scratch worktree; `$CO` the invoking checkout; `$BASE_REMOTE` and `$PUSH_REMOTE` the remotes of the base and head repositories; `$RUN` run directory; `$BR(NN)` the final branch of group NN. Full definitions: `references/common.md`.
+- Tests run only if the user chooses them, asked once (`references/orchestrator.md`, Tests).
 
 ## Orchestration
 
-The main session is the **orchestrator**; each phase's work is done by a **subagent** with a fresh context. Agents communicate only through files in the run directory.
+The main session is the **orchestrator**; each phase's work is done by a **subagent** with a fresh context. Agents communicate only through files in the run directory. Symbols (`S`, `T`, `P`, `S'`, `B`, `L`, `$L`, `$SPLIT`, `$WT`, `$CO`, `$BASE_REMOTE`, `$PUSH_REMOTE`, `$RUN`, `$BR(NN)`, `<you>`) are defined in `references/common.md`.
 
 **Invoking this skill is an explicit request for subagents.** The user asking for `/split-to-stack`, or naming this skill, authorizes the orchestrator to spawn the subagents below without asking again. The orchestrator does not do a named agent's phase work in its place.
 
@@ -73,26 +64,26 @@ The main session is the **orchestrator**; each phase's work is done by a **subag
 | Phase | Agent | Writes | Reads (besides common.md) | Output |
 |---|---|---|---|---|
 | 0a–0d | Survey | no | `survey-and-update.md` | `survey.md` (scope, target, merges, PRs, tools); `pr.md` when PRs are involved |
-| decisions | orchestrator | `run.md`, user refs and their remote copies (approved fast-forward of the local target; approved Setup sync) | `survey.md`, `survey-and-update.md` (Setup sync) | scope, T, P, kept/re-cut PRs and ownership, sync, update answer |
-| 0e | Updater | `$WT`, refs | `survey-and-update.md` | `update.md`: S', B, hook commits and findings, merge residue and duplicate scan, conflicts |
-| 1 | Linearizer | `$WT`, refs | `linearize.md`, `concepts.md` | `linear.md` (`$L`, or "no-op: L = S'") |
+| decisions | orchestrator | `run.md`, user refs and their remote copies (approved fast-forward of the local target; approved Setup sync) | `orchestrator.md`, `workspace.md`, `survey.md`, `survey-and-update.md` (Setup sync) | scope, T, P, kept/re-cut PRs and ownership, sync, update answer |
+| 0e | Updater | `$WT`, refs | `survey-and-update.md`, `workspace.md` | `update.md`: S', B, hook commits and findings, merge residue and duplicate scan, conflicts |
+| 1 | Linearizer | `$WT`, refs | `linearize.md`, `concepts.md`, `workspace.md` | `linear.md` (`$L`, or "no-op: L = S'") |
 | 2 | Commit readers (parallel batches) | no | `analyze-and-plan.md` | `commits/<sha>.md` |
 | 2 | Inventory | `ledger.tsv` | `analyze-and-plan.md`, `concepts.md`, `files.md` | `ledger.tsv`, `inventory.md` |
 | 3–5 | Planner (one agent) | plan files | `analyze-and-plan.md`, `concepts.md`, `files.md` | `groups.tsv`, `plan_assign.tsv`, `transitions.tsv`, `states/`, `plan.md` (incl. `## Grouping critique`) |
 | 6 | orchestrator | `run.md` | `analyze-and-plan.md` (Phase 6) | proposal; approval recorded in `run.md` |
-| 7–8 | Builder (one agent) | refs, `$WT`, plan files (8.2 fixes) | `build-and-test.md`, `concepts.md`, `files.md` | `stack.tsv`, `stack.md`, `tests.md` |
+| 7–8 | Builder (one agent) | refs, `$WT`, plan files (8.2 fixes) | `build-and-test.md`, `concepts.md`, `files.md`, `workspace.md` | `stack.tsv`, `stack.md`, `tests.md` |
 | 8.1 | orchestrator | — | `build-and-test.md` | independent `verify_stack.py` run |
 | 9 | orchestrator | gh stack state and checked-out branch in `$CO` (approved), `$WT`, helper refs, remote (only on request) | `publish-and-cleanup.md` | final report, cleanup, publishing on request |
 
 Wherever a phase text says "ask the user" or "stop and ask", a subagent writes it under `## Blocked`.
 
 **Order at start:**
-1. Resolve the argument to its head branch and compute `<key>`; check whether `$RUN` already exists: if so, handle **Resume** (below) before creating anything.
-2. Find `$CO` (`git rev-parse --show-toplevel` of the invoking directory), resolve `$BASE_REMOTE` and `$PUSH_REMOTE` (`common.md`, Remotes), then `<you>` (`common.md`, Naming), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO`). Settle the stack kind if the user said "stack".
-3. With `--implement`: ask the Tests question now.
+1. Resolve the argument to its head branch and compute `<key>`; check whether `$RUN` already exists: if so, follow `references/resume.md` before creating anything.
+2. Read `references/orchestrator.md`. Find `$CO` (`git rev-parse --show-toplevel` of the invoking directory), resolve `$BASE_REMOTE`, `$PUSH_REMOTE` and then `<you>` (`orchestrator.md`), and record them. Create `$RUN` and `run.md` (scope, flags, `<you>`, the remotes, `$CO`). Settle the stack kind if the user said "stack".
+3. With `--implement`: ask the Tests question now (`orchestrator.md`).
 4. Run the Survey (read-only; it may update remote-tracking refs by fetching). Confirm with the user the branch list, the target (the orchestrator performs an approved fast-forward of the local target itself and records `T`), kept PRs and their ownership, and (if the copy is behind the target) whether to bring it up to date. Then make `$CO` clean and run the Setup sync (`survey-and-update.md`, Clean checkout and Setup sync): every branch of the stack equals its remote copy before anything else happens.
-5. Now that S is confirmed, check `$SPLIT` and `$SPLIT/*`: if helper refs exist without a `run.md`, show them with their SHAs and let the user choose another name or delete them (the Restart procedure).
-6. Create an **empty** `$WT` directory (`mktemp -d`), record it in `run.md`, and start the Updater, which runs `git worktree add --detach` in it.
+5. Now that S is confirmed, check `$SPLIT` and `$SPLIT/*`: if helper refs exist without a `run.md`, show them with their SHAs and let the user choose another name or delete them (Restart, `resume.md`).
+6. Create an **empty** `$WT` directory (`mktemp -d`), record it in `run.md`, and start the Updater, which runs `git worktree add --detach` in it. After Phase 1, check the small-input path (`orchestrator.md`).
 
 **Gates** (the orchestrator enforces them; scripts are in `scripts/`):
 1. Phase 1: `tree(L) == tree(S')` (trivially true for the no-op). The Inventory starts only after this gate.
@@ -107,18 +98,4 @@ Wherever a phase text says "ask the user" or "stop and ask", a subagent writes i
 
 **Validation between phases:** every SHA in an output file exists, and the `$SPLIT/*` refs and `$BR(NN)` branches match `update.md`, `linear.md`, `stack.tsv` and `refs.tsv`.
 
-**Resume:** `run.md` records the last completed phase and the SHAs of S, T, P, B, S', L and the `$WT` path. If `$RUN` exists at start, show the last completed phase and ask: resume, restart, or abort. A run that stopped at "nothing to split" is recorded as such and restarts silently. When an agent stopped with `## Blocked` in the middle of an operation in `$WT` (a merge, a cherry-pick, a hook pass), its output file records the exact `$WT` state (HEAD SHA, the operation in progress, conflicted files, the hook commits made so far by SHA); the replacement agent starts by reading it and either continues with the user's answer or resets `$WT` to the recorded start SHA (`merge --abort` or `cherry-pick --abort`, then `switch --detach <start>`) and re-applies the recorded commits instead of re-running the hooks. Resume from the first phase without a valid output file, and only if the recorded SHAs still match the refs and the ledger's `base` and `tip` match `run.md` (`base` = B, `tip` = `$L`). A partially built stack is resumed with `build_stack.py --refs update` (missing branches are created; the script is all-or-nothing, so no half-moved stack exists). **Restart** has its own short procedure: print every `$SPLIT/*` ref, every branch recorded in the old `refs.tsv` and the `$WT` path, each with its SHA; ask per item; `git worktree remove` for `$WT`; `git branch -D` only for the helper refs and for names in the old `refs.tsv` whose SHA still matches (never any other `users/<you>/…` branch); say that deleting `$RUN` deletes `refs.tsv`, after which leftover `$BR(NN)` can no longer be updated by the new run, and that a deleted branch is recoverable only from the SHA printed.
-
-## Reference files
-
-| File | Read by |
-|---|---|
-| `references/common.md` | every agent |
-| `references/concepts.md` | Linearizer, Inventory, Planner, Builder |
-| `references/files.md` | Inventory, Planner, Builder |
-| `references/survey-and-update.md` | Survey, Updater |
-| `references/linearize.md` | Linearizer |
-| `references/analyze-and-plan.md` | commit readers, Inventory, Planner, orchestrator (Phase 6) |
-| `references/build-and-test.md` | Builder, orchestrator (8.1) |
-| `references/publish-and-cleanup.md` | orchestrator (Phase 9) |
-| `scripts/` | `build_ledger.py`, `check_plan.py`, `build_stack.py`, `verify_stack.py`, `render_plan.py`, `extract_state.py`, `test_split_to_stack.py` (pytest), and the shared module `splitlib.py` |
+Scripts are in `scripts/` (`references/files.md` lists them); `test_split_to_stack.py` is their pytest suite.
