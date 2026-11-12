@@ -35,6 +35,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #include <tensilelitehost/export.h>
 
@@ -165,6 +167,11 @@ namespace TensileLite
 
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
+
+            // Code objects read into memory because their path was too long for
+            // hipModuleLoad. HIP keeps using the buffer passed to
+            // hipModuleLoadData, so each one lives until its module is unloaded.
+            std::unordered_map<hipModule_t, std::vector<char>> m_moduleImages;
 
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds

@@ -52,11 +52,16 @@ namespace TensileLite
         {
             // hipModuleLoad opens the file by its narrow path, so it fails for a
             // path Windows will only open in verbatim form (see LongPath.hpp).
-            // Such a file is read here and loaded from memory instead.
+            // Such a file is read into `image` and loaded from memory instead.
+            // HIP keeps referring to that buffer, so on success the caller must
+            // keep `image` until the module is unloaded. It is left empty when
+            // the file was loaded by path.
             hipError_t loadModuleFile(SolutionAdapter::ModuleApi const& api,
                                       hipModule_t*                      module,
-                                      std::string const&                path)
+                                      std::string const&                path,
+                                      std::vector<char>&                image)
             {
+                image.clear();
                 auto const openPath = longPathSafe(path);
                 if(!isVerbatimPath(openPath))
                     return api.load(module, path.c_str());
@@ -67,12 +72,16 @@ namespace TensileLite
                 auto const size = file.tellg();
                 if(size <= 0)
                     return hipErrorInvalidImage;
-                std::vector<char> image(static_cast<size_t>(size));
+                std::vector<char> bytes(static_cast<size_t>(size));
                 file.seekg(0);
-                file.read(image.data(), static_cast<std::streamsize>(image.size()));
+                file.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
                 if(!file)
                     return hipErrorFileNotFound;
-                return api.loadData(module, image.data());
+
+                hipError_t error = api.loadData(module, bytes.data());
+                if(error == hipSuccess)
+                    image = std::move(bytes);
+                return error;
             }
         } // namespace
 
@@ -204,6 +213,11 @@ namespace TensileLite
 
             {
                 std::lock_guard<std::mutex> guard(m_access);
+                for(auto module : m_modules)
+                    m_moduleImages.erase(module);
+                for(auto const& copyModules : m_extraModuleCopies)
+                    for(auto module : copyModules)
+                        m_moduleImages.erase(module);
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
@@ -232,9 +246,10 @@ namespace TensileLite
         hipError_t SolutionAdapter::loadCodeObjectFileOnce(std::string const& path)
         {
             Debug::Instance().markerStart("loadCodeObjectFile", path);
-            hipModule_t module;
+            hipModule_t       module;
+            std::vector<char> image;
 
-            hipError_t error = loadModuleFile(m_moduleApi, &module, path);
+            hipError_t error = loadModuleFile(m_moduleApi, &module, path, image);
             if(error != hipSuccess)
             {
                 Debug::Instance().markerStop();
@@ -246,6 +261,8 @@ namespace TensileLite
 
             {
                 std::lock_guard<std::mutex> guard(m_access);
+                if(!image.empty())
+                    m_moduleImages.insert_or_assign(module, std::move(image));
                 m_modules.push_back(module);
                 m_loadedModuleNames.push_back(concatenate("File ", path));
 
@@ -499,11 +516,12 @@ namespace TensileLite
                 return hipErrorInvalidImage;
             }
 
-            hipModule_t module;
-            hipError_t  error;
+            hipModule_t       module;
+            hipError_t        error;
+            std::vector<char> image;
             try
             {
-                error = loadModuleFile(m_moduleApi, &module, path);
+                error = loadModuleFile(m_moduleApi, &module, path, image);
             }
             catch(std::exception const& e)
             {
@@ -526,6 +544,8 @@ namespace TensileLite
                 std::cout << "loaded local code object " << path << std::endl;
 
             std::lock_guard<std::mutex> guard(m_access);
+            if(!image.empty())
+                m_moduleImages.insert_or_assign(module, std::move(image));
             m_localModules.emplace(path, module);
             ownedModule.release();
             m_loadedModuleNames.push_back(concatenate("Local file ", path));
@@ -729,8 +749,9 @@ namespace TensileLite
             // I-cache cold misses on rotation.
             for(int i = 0; i < extraCopies; ++i)
             {
-                hipModule_t module;
-                hipError_t  error = loadModuleFile(m_moduleApi, &module, path);
+                hipModule_t       module;
+                std::vector<char> image;
+                hipError_t        error = loadModuleFile(m_moduleApi, &module, path, image);
                 if(error != hipSuccess)
                 {
                     std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
@@ -749,6 +770,8 @@ namespace TensileLite
                 // Record the module in the i-th rotation slot, plus a debug
                 // name (printed by operator<<).
                 std::lock_guard<std::mutex> guard(m_access);
+                if(!image.empty())
+                    m_moduleImages.insert_or_assign(module, std::move(image));
                 m_extraModuleCopies[i].push_back(module);
                 m_loadedModuleNames.push_back(
                     concatenate("File ", path, " (rotation copy ", i + 1, ")"));

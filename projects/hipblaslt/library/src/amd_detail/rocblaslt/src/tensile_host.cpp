@@ -62,8 +62,8 @@
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
-#include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/LongPath.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/Tensile.hpp>

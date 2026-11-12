@@ -159,14 +159,17 @@ namespace
     }
 #endif
 
-    // Stands in for the HIP runtime: hipModuleLoad opens the narrow path it is
-    // given, as the runtime does, and hipModuleLoadData records the image.
+    // Stands in for the HIP runtime. hipModuleLoad opens the narrow path it is
+    // given, as the runtime does. hipModuleLoadData keeps the caller's pointer
+    // rather than a copy, as the runtime does, and the image is checked again
+    // when the module is unloaded.
     struct FakeModules
     {
         std::map<hipModule_t, std::unique_ptr<int>> live;
-        std::vector<char>                           loadedImage;
-        unsigned                                    pathLoads = 0;
-        unsigned                                    dataLoads = 0;
+        std::map<hipModule_t, const char*>          images;
+        unsigned                                    pathLoads            = 0;
+        unsigned                                    dataLoads            = 0;
+        unsigned                                    imagesIntactAtUnload = 0;
     };
 
     FakeModules* fakeModules       = nullptr;
@@ -190,17 +193,30 @@ namespace
         return hipSuccess;
     }
 
+    bool holdsCodeObject(const char* image)
+    {
+        return std::memcmp(image, codeObjectBytes, sizeof(codeObjectBytes)) == 0;
+    }
+
     hipError_t fakeLoadData(hipModule_t* module, const void* image)
     {
         ++fakeModules->dataLoads;
         auto const* bytes = static_cast<const char*>(image);
-        fakeModules->loadedImage.assign(bytes, bytes + sizeof(codeObjectBytes));
-        *module = newModule();
+        EXPECT_TRUE(holdsCodeObject(bytes)) << "the image loaded is not the file's contents";
+        *module                      = newModule();
+        fakeModules->images[*module] = bytes;
         return hipSuccess;
     }
 
     hipError_t fakeUnload(hipModule_t module)
     {
+        auto image = fakeModules->images.find(module);
+        if(image != fakeModules->images.end())
+        {
+            if(holdsCodeObject(image->second))
+                ++fakeModules->imagesIntactAtUnload;
+            fakeModules->images.erase(image);
+        }
         EXPECT_EQ(fakeModules->live.erase(module), 1u) << "double or unowned module unload";
         return hipSuccess;
     }
@@ -219,23 +235,27 @@ namespace
 
         FakeModules modules;
         fakeModules = &modules;
+        // Same-sized allocations made while the module is loaded, so a freed
+        // image would most likely be reused and overwritten before the unload
+        // check reads it.
+        std::vector<std::vector<char>> scribbles;
         {
             TensileLite::hip::SolutionAdapter adapter(TensileLite::hip::SolutionAdapter::ModuleApi{
                 fakeLoad, fakeUnload, fakeGetLastError, fakeLoadData});
 
             EXPECT_EQ(adapter.loadCodeObjectFile(path), hipSuccess) << "could not load " << path;
             EXPECT_EQ(modules.live.size(), 1u);
-#ifdef _WIN32
-            EXPECT_EQ(modules.pathLoads, 0u)
-                << "the runtime was handed a path Windows will not open";
-            ASSERT_EQ(modules.dataLoads, 1u);
-            EXPECT_EQ(
-                std::memcmp(modules.loadedImage.data(), codeObjectBytes, sizeof(codeObjectBytes)),
-                0)
-                << "the image loaded is not the file's contents";
-#endif
+            for(int i = 0; i < 64; ++i)
+                scribbles.emplace_back(sizeof(codeObjectBytes), '#');
         }
         EXPECT_TRUE(modules.live.empty()) << "the adapter leaked module handles";
+#ifdef _WIN32
+        EXPECT_EQ(modules.pathLoads, 0u) << "the runtime was handed a path Windows will not open";
+        EXPECT_EQ(modules.dataLoads, 1u);
+        EXPECT_EQ(modules.imagesIntactAtUnload, 1u)
+            << "the adapter released the image passed to hipModuleLoadData before unloading "
+               "its module";
+#endif
         fakeModules = nullptr;
     }
 } // namespace
