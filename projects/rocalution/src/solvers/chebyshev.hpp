@@ -62,8 +62,8 @@ namespace rocalution
         * bound is replaced by the lower bound / 30. Bounds with a nonzero imaginary part are
         * used as they are. The program is terminated if a bound is not finite or if the
         * segment between the bounds then still contains 0. The number of iterations grows
-        * with the ratio of the upper to the lower bound, and the iteration can diverge if the
-        * upper bound is smaller than the largest eigenvalue.
+        * with the ratio of the bounds, and the iteration can diverge if the spectrum extends
+        * beyond the bound that is farther from 0.
         */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);

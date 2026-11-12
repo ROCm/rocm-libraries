@@ -34,7 +34,9 @@
 
 #include "../utils/log.hpp"
 #include "../utils/math_functions.hpp"
+#include "../utils/type_traits.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <math.h>
@@ -64,6 +66,14 @@ namespace rocalution
                                                              ValueType lambda_max)
     {
         log_debug(this, "Chebyshev::Set()", lambda_min, lambda_max);
+
+        if(!std::isfinite(std::real(lambda_min)) || !std::isfinite(std::imag(lambda_min))
+           || !std::isfinite(std::real(lambda_max)) || !std::isfinite(std::imag(lambda_max)))
+        {
+            LOG_INFO("Chebyshev::Set() the bounds " << lambda_min << " and " << lambda_max
+                                                    << " are not finite");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
         // The iteration depends on the bounds only through their sum and the square of their
         // difference, so their order does not matter. It does not converge if the segment
@@ -101,35 +111,31 @@ namespace rocalution
                 lambda_max = upper;
             }
 
-            // Also true for NaN
             contains_zero = !(std::real(lambda_min) > 0 || std::real(lambda_max) < 0);
         }
         else
         {
-            const ValueType zero = static_cast<ValueType>(0);
+            using RealType = numeric_traits_t<ValueType>;
 
-            contains_zero
-                = lambda_min == zero || lambda_max == zero || lambda_min + lambda_max == zero;
+            // Scaling by a power of 2 is exact and keeps the product from underflowing or
+            // overflowing
+            auto scaled = [](ValueType z) {
+                int exponent;
+                std::frexp(std::max(std::abs(std::real(z)), std::abs(std::imag(z))), &exponent);
+                return z * std::ldexp(static_cast<RealType>(1), -exponent);
+            };
 
-            if(!contains_zero)
-            {
-                // Of the bounds scaled to length 1, so that it cannot underflow or overflow
-                const auto product = std::conj(lambda_min / std::abs(lambda_min))
-                                     * (lambda_max / std::abs(lambda_max));
+            const auto product = std::conj(scaled(lambda_min)) * scaled(lambda_max);
 
-                contains_zero = std::imag(product) == 0 && std::real(product) <= 0;
-            }
+            // The sum catches bounds of opposite sign whose product is not exact with FMA
+            contains_zero = lambda_min + lambda_max == static_cast<ValueType>(0)
+                            || (std::imag(product) == 0 && std::real(product) <= 0);
         }
 
-        bool is_finite
-            = std::isfinite(std::real(lambda_min)) && std::isfinite(std::imag(lambda_min))
-              && std::isfinite(std::real(lambda_max)) && std::isfinite(std::imag(lambda_max));
-
-        if(contains_zero || !is_finite)
+        if(contains_zero)
         {
-            LOG_INFO("Chebyshev::Set() the bounds " << lambda_min << " and " << lambda_max
-                                                    << " are not finite or their segment "
-                                                       "contains 0");
+            LOG_INFO("Chebyshev::Set() the segment between the bounds "
+                     << lambda_min << " and " << lambda_max << " contains 0");
             FATAL_ERROR(__FILE__, __LINE__);
         }
 

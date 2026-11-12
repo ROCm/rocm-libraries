@@ -3805,13 +3805,11 @@ TYPED_TEST(solvers_complex, chebyshev_rejects_complex_bounds_whose_segment_conta
     using R = real_t<T>;
 
     // The segment from -1+i to 2-2i passes through 0, the one from 0 to 1+i ends there
-    for(const auto& [lambda_min, lambda_max] :
-        {std::make_pair(T(static_cast<R>(-1), static_cast<R>(1)),
-                        T(static_cast<R>(2), static_cast<R>(-2))),
-         std::make_pair(T(0), T(static_cast<R>(1), static_cast<R>(1)))})
-    {
-        Chebyshev<T> solver;
-        EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
-    }
+    const T      a(static_cast<R>(-1), static_cast<R>(1));
+    const T      b(static_cast<R>(2), static_cast<R>(-2));
+    const T      c(static_cast<R>(1), static_cast<R>(1));
+    Chebyshev<T> solver;
+    EXPECT_FATAL_ERROR(solver.Set(a, b), "chebyshev\\.cpp");
+    EXPECT_FATAL_ERROR(solver.Set(T(0), c), "chebyshev\\.cpp");
 }
 #endif
