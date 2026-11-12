@@ -62,7 +62,6 @@ OutputIt _CCCL_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
   // if the output type is trivially constructible from the input, it has no side effect, and we can skip placement new
-<<<<<<< HEAD
   // and calling a constructor. Furthermore, if assigning an input to an output element is also trivial, there is no
   // copy constructor which could have a side effect and we can delegate to copy_n.
   using input_ref_t  = thrust::detail::raw_reference_t<::cuda::std::iter_reference_t<InputIt>>;
@@ -70,12 +69,6 @@ uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size coun
   using output_t     = thrust::detail::it_value_t<OutputIt>;
   if constexpr (::cuda::std::is_trivially_constructible_v<output_t, input_ref_t>
                 && ::cuda::std::is_trivially_assignable_v<output_ref_t, input_ref_t>)
-=======
-  // and calling a constructor. So we can delegate to copy_n.
-  using ctor_arg_t = thrust::detail::raw_reference_t<::cuda::std::iter_reference_t<InputIt>>;
-  using output_t   = thrust::detail::it_value_t<OutputIt>;
-  if constexpr (::cuda::std::is_trivially_constructible_v<output_t, ctor_arg_t>)
->>>>>>> a91127f460ef (feat(rocthrust): port CCCL 4b2201184c4 - Use `thrust::copy` in `thrust::uninitialized_copy[_n]` in CUDA system when possible (NVIDIA/cccl#5181))
   {
     cuda_cub::copy_n(policy, first, count, result);
   }

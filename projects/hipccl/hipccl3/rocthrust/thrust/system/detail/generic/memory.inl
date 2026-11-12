@@ -19,8 +19,6 @@
 
 #include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
 
-#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
-
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {

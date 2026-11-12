@@ -40,12 +40,6 @@
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
-#if _CCCL_COMPILER(GCC, >=, 11)
-#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
-#else
-#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-#endif
-
 void TestCopyFromConstIterator()
 {
   using T = int;

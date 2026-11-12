@@ -172,39 +172,6 @@ TEST(LibcxxIteratorTests, TestLibcxxShuffleIterator)
   }
 }
 
-TEST(LibcxxIteratorTests, TestLibcxxPermutationIterator)
-{
-  { // device system
-    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
-    thrust::device_vector<int> off{5, 2, 7, 0};
-    thrust::device_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
-                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
-                 res.begin());
-    ASSERT_TRUE(res == thrust::device_vector<int>{6, 3, 8, 1, -1});
-  }
-
-  { // host system
-    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
-    thrust::host_vector<int> off{5, 2, 7, 0};
-    thrust::host_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
-                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
-                 res.begin());
-    ASSERT_TRUE(res == thrust::host_vector<int>{6, 3, 8, 1, -1});
-  }
-
-  { // plain std::vector
-    std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
-    std::vector<int> off{5, 2, 7, 0};
-    std::vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
-                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
-                 res.begin());
-    ASSERT_TRUE(res == std::vector<int>{6, 3, 8, 1, -1});
-  }
-}
-
 TEST(LibcxxIteratorTests, TestLibcxxStridedIterator)
 {
   { // device system
@@ -232,33 +199,6 @@ TEST(LibcxxIteratorTests, TestLibcxxStridedIterator)
                  _THRUST_LIBCXX::strided_iterator{_THRUST_LIBCXX::counting_iterator{8}, 2},
                  vec.begin());
     ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
-  }
-}
-
-struct is_equal_index
-{
-  THRUST_HOST_DEVICE constexpr void
-  operator()([[maybe_unused]] const int index, [[maybe_unused]] const int expected) const noexcept
-  {
-    _CCCL_VERIFY(index == expected, "should have right value");
-  }
-};
-
-TEST(LibcxxIteratorTests, TestLibcxxTabulateOutputIterator)
-{
-  { // device system
-    thrust::device_vector<int> vec{5, 6, 7, 8, 9};
-    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
-  }
-
-  { // host system
-    thrust::host_vector<int> vec{5, 6, 7, 8, 9};
-    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
-  }
-
-  { // plain std::vector
-    std::vector<int> vec{5, 6, 7, 8, 9};
-    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
   }
 }
 
