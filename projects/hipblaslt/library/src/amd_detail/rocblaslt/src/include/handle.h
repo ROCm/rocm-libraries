@@ -430,9 +430,9 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+    const struct hipblasLtFusionDescriptor* fused_epilogue = nullptr;
     // Attached via ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE; non-owning, as above.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_prologue = nullptr;
+    const struct hipblasLtFusionDescriptor* fused_prologue = nullptr;
 #endif
 
     std::shared_ptr<void> m_data; // Tensile data

@@ -675,8 +675,8 @@ struct RocblasltContractionProblem
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // The five below are set post-construction, not through the constructor.
     // fused_epilogue, fused_prologue and fused_a2a_peer_flag are non-owning.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
-    const struct hipblasLtFusedEpilogueDescriptor* fused_prologue      = nullptr;
+    const struct hipblasLtFusionDescriptor*        fused_epilogue      = nullptr;
+    const struct hipblasLtFusionDescriptor*        fused_prologue      = nullptr;
     uint32_t                                       fused_a2a_world     = 0;
     uint32_t                                       fused_a2a_rank      = 0;
     void* const*                                   fused_a2a_peer_flag = nullptr;
@@ -754,7 +754,7 @@ struct RocblasltContractionProblem
 };
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
+// Fields of hipblasLtFusionDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
     enum class Mode
@@ -779,9 +779,9 @@ struct RocblasltFusedEpilogueInfo
 };
 
 // Returns false when both descriptors are nullptr.
-bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* epilogue,
-                                      const struct hipblasLtFusedEpilogueDescriptor* prologue,
-                                      RocblasltFusedEpilogueInfo&                    out);
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusionDescriptor* epilogue,
+                                      const struct hipblasLtFusionDescriptor* prologue,
+                                      RocblasltFusedEpilogueInfo&             out);
 
 // Returns false unless prob requests a fused all-to-all.
 inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
