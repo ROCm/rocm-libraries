@@ -45,7 +45,7 @@
  *       row records) serve it here, on the architectures the row records;
  *   (c) every fwd/bwd graph some engine serves has a served wrw twin (same tensors), except
  *       twins the map records as known gaps for this architecture, or, on an architecture
- *       without a column, known gaps on every recorded architecture; and naive wrw serves
+ *       without a column, as known gaps on any architecture; and naive wrw serves
  *       every scaled pair whose fwd/bwd original naive serves (the naive engines are the
  *       structural floor);
  *   (d) each gated engine serves the graph just below its limit on the architectures the
@@ -536,7 +536,9 @@ std::optional<Tier>
 }
 
 /// Whether the twin row is a recorded known gap on this architecture: listed for it, or, on
-/// an architecture the row records no tier for, listed for every architecture it does.
+/// an architecture the row records no tier for, listed for any architecture. Whether a twin is
+/// served can depend on the device (the naive engines' budget scales with its compute units),
+/// so an architecture without a column cannot tell a known gap from a new one.
 bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
 {
     if(!row.contains("known_gap"))
@@ -552,16 +554,7 @@ bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::s
     {
         return false;
     }
-    const auto& archs = map.at("archs");
-    const auto& tiers = row.at("tier").get_ref<const std::string&>();
-    for(size_t slot = 0; slot < archs.size() && slot < tiers.size(); ++slot)
-    {
-        if(tiers[slot] != '-' && std::find(gaps.begin(), gaps.end(), archs[slot]) == gaps.end())
-        {
-            return false;
-        }
-    }
-    return true;
+    return !gaps.empty();
 }
 
 /// Whether the map records that some architecture serves the row with these providers'
