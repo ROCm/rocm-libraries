@@ -204,12 +204,15 @@ to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restri
    uses that order, tiled in that order, and both scales shuffled in tiles of 128 rows by 4 K blocks. The
    descriptions of both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
 *  ``opA`` must be equal to ``T``, and ``opB`` must be equal to ``N``.
+*  ``m`` must be a multiple of 256 and ``K`` a multiple of 128. ``n`` must be a multiple of 256 with ``B`` in
+   ``HIPBLASLT_ORDER_COL256_R128_EXT``, and a multiple of 128 with ``B`` in ``HIPBLASLT_ORDER_COL``.
+*  ``lda`` and ``ldb`` must be equal to ``K``.
 
 The solutions for this scale mode are rocKE GEMM kernels, which add these restrictions:
 
 *  Atype and Btype must be the same type.
 *  Ctype and Dtype must be ``HIP_R_16BF``, and the compute type must be ``HIPBLAS_COMPUTE_32F``.
-*  ``lda`` and ``ldb`` must be equal to ``K``, and ``ldd`` must be equal to ``m``.
+*  ``ldd`` must be equal to ``m``.
 *  ``B`` must be equal to ``1``.
 *  Epilogues are not supported.
 *  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.

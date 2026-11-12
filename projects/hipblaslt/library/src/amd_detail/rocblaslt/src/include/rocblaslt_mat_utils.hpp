@@ -217,13 +217,33 @@ inline rocblaslt_status
                              hipblasLtOrder_t                           orderA,
                              hipblasLtOrder_t                           orderB,
                              RocblasltContractionProblem::ScalingFormat scaleAType,
-                             RocblasltContractionProblem::ScalingFormat scaleBType)
+                             RocblasltContractionProblem::ScalingFormat scaleBType,
+                             int64_t                                    m,
+                             int64_t                                    n,
+                             int64_t                                    k,
+                             int64_t                                    lda,
+                             int64_t                                    ldb)
 {
     constexpr auto kScale = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
     const bool     tiledA = orderA == HIPBLASLT_ORDER_COL256_R128_EXT;
     const bool     tiledB = orderB == HIPBLASLT_ORDER_COL256_R128_EXT;
     const bool     scaleA = scaleAType == kScale;
     const bool     scaleB = scaleBType == kScale;
+    // isValidOrderForDatatype for FP6, which the ext and grouped paths do not call.
+    auto fp6OrderOk = [](hipDataType type, hipblasLtOrder_t order) {
+        return !isFp6Datatype(type) || order == HIPBLASLT_ORDER_COL
+               || order == HIPBLASLT_ORDER_ROW || order == HIPBLASLT_ORDER_COL256_R128_EXT;
+    };
+    if(!fp6OrderOk(typeA, orderA) || !fp6OrderOk(typeB, orderB))
+    {
+        log_error(__func__,
+                  "HIP_R_6F_E2M3 and HIP_R_6F_E3M2 support only HIPBLASLT_ORDER_COL, "
+                  "HIPBLASLT_ORDER_ROW and HIPBLASLT_ORDER_COL256_R128_EXT; got orderA=",
+                  static_cast<int>(orderA),
+                  " orderB=",
+                  static_cast<int>(orderB));
+        return rocblaslt_status_invalid_value;
+    }
     if(!tiledA && !tiledB && !scaleA && !scaleB)
         return rocblaslt_status_continue;
     if(!(tiledA && (tiledB || orderB == HIPBLASLT_ORDER_COL) && scaleA && scaleB))
@@ -256,6 +276,23 @@ inline rocblaslt_status
         log_error(__func__,
                   "HIPBLASLT_ORDER_COL256_R128_EXT requires opA = HIPBLAS_OP_T and opB = "
                   "HIPBLAS_OP_N");
+        return rocblaslt_status_invalid_value;
+    }
+    if(m % 256 != 0 || k % 128 != 0 || n % (tiledB ? 256 : 128) != 0 || lda != k || ldb != k)
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires m to be a multiple of 256, k a "
+                  "multiple of 128, n a multiple of 256 with B in that order and of 128 "
+                  "otherwise, and lda = ldb = k; got m=",
+                  m,
+                  " n=",
+                  n,
+                  " k=",
+                  k,
+                  " lda=",
+                  lda,
+                  " ldb=",
+                  ldb);
         return rocblaslt_status_invalid_value;
     }
     return rocblaslt_status_continue;
@@ -291,6 +328,7 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
         return rocblaslt_status_invalid_value;
     }
 
+    const bool transA = matmul_descr->op_A != HIPBLAS_OP_N;
     if(auto status = validateFp6Tile128x4Args(a_type,
                                               b_type,
                                               matmul_descr->op_A,
@@ -298,7 +336,13 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
                                               matA->order,
                                               matB->order,
                                               matmul_descr->scaleAType,
-                                              matmul_descr->scaleBType);
+                                              matmul_descr->scaleBType,
+                                              transA ? matA->n : matA->m,
+                                              matmul_descr->op_B == HIPBLAS_OP_N ? matB->n
+                                                                                 : matB->m,
+                                              transA ? matA->m : matA->n,
+                                              matA->ld,
+                                              matB->ld);
        status != rocblaslt_status_continue)
         return status;
 

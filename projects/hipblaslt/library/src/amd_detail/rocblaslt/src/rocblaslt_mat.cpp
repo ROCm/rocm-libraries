@@ -667,7 +667,12 @@ rocblaslt_status
                                                  matA[i]->order,
                                                  matB[i]->order,
                                                  matmul_descr[i]->scaleAType,
-                                                 matmul_descr[i]->scaleBType);
+                                                 matmul_descr[i]->scaleBType,
+                                                 m,
+                                                 n,
+                                                 k,
+                                                 lda,
+                                                 ldb);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 
@@ -1116,7 +1121,12 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
             problemtype.order_a,
             problemtype.order_b,
             static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_a_type),
-            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_b_type));
+            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_b_type),
+            m,
+            n,
+            k,
+            lda,
+            ldb);
 
     void *      bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
     int64_t     lde = 0, batch_stride_e = 0;
@@ -1488,7 +1498,12 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                            static_cast<RocblasltContractionProblem::ScalingFormat>(
                                                rocEpilogue[iIdx].scaling_a_type),
                                            static_cast<RocblasltContractionProblem::ScalingFormat>(
-                                               rocEpilogue[iIdx].scaling_b_type));
+                                               rocEpilogue[iIdx].scaling_b_type),
+                                           m[i],
+                                           n[i],
+                                           k[i],
+                                           lda[i],
+                                           ldb[i]);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 

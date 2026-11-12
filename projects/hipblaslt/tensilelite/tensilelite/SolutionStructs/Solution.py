@@ -1063,6 +1063,9 @@ class Solution(collections.abc.Mapping):
       self._name = self._state["CustomKernel"]["name"]
       validateHostPreSwizzle128x4(self._state, True, printSolutionRejectionReason)
     else:
+      # Pre-derived states skip assignDerivedParameters' own check.
+      if not validateHostPreSwizzle128x4(self._state, False, printSolutionRejectionReason):
+        return
       savedCustomKernel = self._state.pop("CustomKernel", None) if "CustomKernel" in self._state else None
       Solution.assignDerivedParameters(
         self._state,
