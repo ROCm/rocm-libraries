@@ -1385,3 +1385,31 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
           - [Enum: relu]
+  ########################################
+  # MacroTile1 not a multiple of the waves: each wave stores ceil(MacroTile1/waves) columns, and the TDM
+  # transfers end at the column bound min(SizeJ, (wg1+1)*MT1). The sizes have N-edge workgroups, whose
+  # bound is SizeJ, NonEdge ones, whose bound is the end of the tile, and a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 3, 8, 1]
+          - [16, 16, 32, 1, 1, 1, 5, 8, 1]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - WorkGroup: [[16, 16, 4]]
+        - DepthU: [128]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [383, 127, 1, 128]
+          - Exact: [384, 125, 2, 128, 400, 400, 128, 128]

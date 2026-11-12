@@ -159,7 +159,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"Gradient": True}, _SIDE_EFFECTS),
   ({"UseGateResidual": True}, _SIDE_EFFECTS),
   ({"OutputAmaxD": True}, _SIDE_EFFECTS),
-  ({"NumThreads": 96}, "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
@@ -258,8 +257,18 @@ def test_streamk_final_store_uses_the_tdm_block():
 @pytest.mark.parametrize("dest, bpe", [("h", 2), ("s", 4)])
 @pytest.mark.parametrize("level", [0] + _LEVELS)
 def test_lds_bytes_of_the_staged_tile(level, dest, bpe):
-  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "ProblemType": {"DestDataType": DataType(dest)}}
+  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "NumThreads": 128, "WavefrontSize": 32,
+           "ProblemType": {"DestDataType": DataType(dest)}}
   assert tdmStoreLdsBytes(state) == (256 * 128 * bpe if level else 0)
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_lds_bytes_cover_the_columns_of_every_wave(level):
+  """With MacroTile1 not a multiple of the waves, the staged tile holds MacroTile1 rounded up to a multiple of the
+  waves: 128 columns over three waves are 3 x 43."""
+  state = {"TDMStoreInst": level, "MacroTile0": 256, "MacroTile1": 128, "NumThreads": 96, "WavefrontSize": 32,
+           "ProblemType": {"DestDataType": DataType("h")}}
+  assert tdmStoreLdsBytes(state) == 256 * 129 * 2
 
 
 def test_store_modifiers_follow_the_hints_of_d():
@@ -679,6 +688,33 @@ def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, 
     elif factorDim is not None and "tensor_store_from_lds " in line:
       stored.add(factorDim)
   assert factorDims <= stored, stored
+
+
+_UNEVEN_MIS = [[16, 16, 32, 1, 1, 1, 3, 8, 1], [16, 16, 32, 1, 1, 1, 5, 8, 1]]
+
+
+@pytest.mark.parametrize("mi", _UNEVEN_MIS, ids=["mt1_48", "mt1_80"])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, capsys, level, mi):
+  """MacroTile1 48 and 80 over 32 waves (MIWaveGroup [8, 1] with LocalSplitU 4): each wave stores
+  ceil(MacroTile1/32) columns, so the columns of the last waves reach past the tile, and at 80 columns one wave's
+  columns straddle its end. Every TDM block ends tensor_dim1 at the column bound min(SizeJ, (wg1+1)*MT1),
+  against which each wave tests its skip, and the staged tile is reserved for the columns of every wave. With
+  MacroTile1 a multiple of the waves there is no column bound."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=mi, TDMStoreInst=level, WorkGroup=[16, 16, 4], DepthU=128)
+  assert sol.get("Valid"), capsys.readouterr().out
+  waves = sol["NumThreads"] // sol["WavefrontSize"]
+  assert sol["MacroTile1"] % waves
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * -(-sol["MacroTile1"] // waves) * waves * 2
+  assert sol["LdsNumBytes"] >= sol["_TDMStoreLdsOffset"] + tdmStoreLdsBytes(sol)
+  blocks = len(re.findall(r"^label_TDMStore(?:LoadC)?Skip\w*:", asm, re.M))
+  bounds = [line for line in asm.splitlines() if _code(line).startswith("s_min_u32") and "column bound" in line]
+  skips = [line for line in asm.splitlines() if "at or past the column bound" in line]
+  assert re.search(r"^\s*tensor_store_from_lds ", asm, re.M) and len(bounds) == len(skips) == blocks
+  assert "tensor_dim1 = SizeJ - first column" not in asm
+  if level == 3:
+    _, even = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level)
+    assert "column bound" not in even and "tensor_dim1 = SizeJ - first column" in even
 
 
 def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys):

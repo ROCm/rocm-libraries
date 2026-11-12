@@ -44,8 +44,8 @@ from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
 from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, SCmpLeU32, SLShiftLeftB64, \
-  SLShiftRightB32, SMovB32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, VMulLOU32, \
-  VReadfirstlaneB32, VSubU32
+  SLShiftRightB32, SMinU32, SMovB32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, \
+  VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
 from ..ExecutionPolicy import isPersistent, isStreamK
@@ -80,8 +80,7 @@ def tdmStoreRejectReason(state):
   tensor_store_from_lds per wave. That needs fp32 D, int32 D from int32 accumulators, or bf16 or fp16 D converted
   from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
   atomic StreamK, which
-  stores each tile it completes, no LDS data kept from one persistent tile to the next, and MacroTile1
-  split evenly across the waves.
+  stores each tile it completes, and no LDS data kept from one persistent tile to the next.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
   epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
@@ -121,20 +120,31 @@ def tdmStoreRejectReason(state):
   if hasEpilogueSideEffects(pt):
     return "TDMStoreInst does not support per-element epilogue side effects beyond C and D " \
       "(E, Gradient, gate residual, AmaxD)"
-  if state["MacroTile1"] % (state["NumThreads"] // state["WavefrontSize"]) != 0:
-    return "TDMStoreInst requires MacroTile1 to be a multiple of the number of waves"
   return None
+
+
+def _waveColumns(kernel):
+  """The columns of the tile each wave stores: MacroTile1 over the waves, rounded up."""
+  return -(-kernel["MacroTile1"] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
+
+
+def _unevenColumns(kernel):
+  """Whether MacroTile1 is not a multiple of the number of waves, so the columns of the last waves reach past
+  the tile."""
+  return kernel["MacroTile1"] % (kernel["NumThreads"] // kernel["WavefrontSize"]) != 0
 
 
 def tdmStoreLdsBytes(state):
   """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
 
-  The reservation follows the level, not the store blocks tdmStoreBlocks picks for the kernel.
+  The reservation follows the level, not the store blocks tdmStoreBlocks picks for the kernel, and covers
+  the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves.
   Reserving too much costs LDS only; reserving too little would stage over live LDS.
   """
   if not state["TDMStoreInst"]:
     return 0
-  return state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["DestDataType"].numBytes())
+  waves = state["NumThreads"] // state["WavefrontSize"]
+  return state["MacroTile0"] * _waveColumns(state) * waves * int(state["ProblemType"]["DestDataType"].numBytes())
 
 
 def storesFinalD(kernel, atomic):
@@ -268,10 +278,12 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
 def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   """Fill the descriptor of this wave's columns of the tile of tensor tc (C or D) and of the staged tile.
 
-  Each wave covers MacroTile1/numWaves consecutive columns: tile MT0 x those columns, M-contiguous from
-  the LDS address of its first column, global address Srd<tc> + (column*Stride<tc> + wg0*MT0)*bpe, and
-  tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left at
-  the first column of the wave. The 64-bit global offset is computed in group1 words 6 and 7 before
+  Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile MT0 x those columns, M-contiguous
+  from the LDS address of its first column, global address Srd<tc> + (column*Stride<tc> + wg0*MT0)*bpe,
+  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left
+  at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
+  of the last waves reach past the tile, so tensor_dim1, computed in group1 word 6, ends at the column bound
+  min(SizeJ, (wg1+1)*MT1), which the second tmp SGPR keeps. The 64-bit global offset is computed in group1 words 6 and 7 before
   setTensorStride0 sets word 6; word 7 goes back to 0. The block assumes one free index per operand, as every GEMM problem
   type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each.
   """
@@ -281,7 +293,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   bpe = kw.states.bpeCexternal
   mt0 = gwb.kernel["MacroTile0"]
   ws = gwb.kernel["WavefrontSize"]
-  colsPerWave = gwb.kernel["MacroTile1"] // (gwb.kernel["NumThreads"] // ws)
+  colsPerWave = _waveColumns(gwb.kernel)
   stride1 = "Stride%s%s" % (tc, kw.states.indexChars[gwb.kernel["PackedC1IndicesX"][0]])
   sizeI = kw.sizeRef(gwb.kernel["ProblemType"]["Index0"])
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
@@ -309,18 +321,32 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(tdm.setTensorDim0(g1, dim, kw))
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
   module.add(SAddU32(dst=sgpr(col), src0=sgpr(col), src1=sgpr(dim), comment="first %s column of this wave" % tc))
-  module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
-  module.add(tdm.setTensorDim1(g1, dim, kw))
+  if _unevenColumns(gwb.kernel):
+    module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=gwb.kernel["MacroTile1"], comment="end of the tile"))
+    module.add(SMinU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(dim), comment="column bound = min(SizeJ, end of the tile)"))
+    module.add(SSubU32(dst=sgpr(offLo), src0=sgpr(dim), src1=sgpr(col), comment="tensor_dim1 = column bound - first column"))
+    module.add(tdm.setTensorDim1(g1, offLo, kw))
+  else:
+    module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
+    module.add(tdm.setTensorDim1(g1, dim, kw))
   module.add(tdm.setTensorTile0(g1, mt0))
   module.add(tdm.setTensorTile1(g1, colsPerWave))
   module.add(tdm.setTensorStride0(g1, stride1))
+
+
+def _skipTest(gwb, sizeJ, tmp):
+  """The compare whose SCC skips this wave's transfer: none of its columns is before the column bound, SizeJ or,
+  when MacroTile1 is not a multiple of the number of waves, min(SizeJ, end of the tile)."""
+  if _unevenColumns(gwb.kernel):
+    return SCmpLeU32(src0=sgpr(tmp.idx + 1), src1=sgpr(tmp.idx), comment="all columns of this wave at or past the column bound?")
+  return SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?")
 
 
 def emitTDMStoreLoadC(gwb) -> Module:
   """Load the C tile into the staged tile with one tensor_load_to_lds per wave.
 
   Each wave loads the columns it stores. tensor_dim0/1 clip the load at the end of C, so no load
-  reads past it; a wave whose columns all lie at or past SizeJ skips its load. Each thread then
+  reads past it; a wave whose columns all lie at or past the column bound skips its load. Each thread then
   reads its C elements where it stages their D, so only the barrier after the loads is needed. The
   load carries C's cache hints, as the buffer loads of C would.
   """
@@ -336,7 +362,7 @@ def emitTDMStoreLoadC(gwb) -> Module:
       kw.allocTmpSgpr(4, alignment=4, tag="tdmLoadCDescGroup0") as group0:
     with kw.allocTmpSgpr(2, alignment=2, tag="tdmLoadCTmp") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "C")
-      module.add(SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?"))
+      module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
       module.add(tdm.issueLoad(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel, "C")))
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
@@ -349,12 +375,12 @@ def emitTDMStoreLoadC(gwb) -> Module:
 def emitTDMStoreFlush(gwb) -> Module:
   """Store the staged D tile with one tensor_store_from_lds per wave.
 
-  Each wave stores MacroTile1/numWaves consecutive columns of the tile. In a persistent kernel the next tile
+  Each wave stores ceil(MacroTile1/numWaves) consecutive columns of the tile. In a persistent kernel the next tile
   must not write LDS before every wave's store has read the staged tile: the barrier that ends the tile
   handoff orders that when the handoff has one (WorkAssignment.handoffFencesLds), and otherwise the flush
   ends with its own. tensor_dim0/1 bound
-  the store to the part of the tile inside D; a wave whose columns all lie at or past SizeJ
-  skips its store instead of relying on a zero tensor_dim.
+  the store to the part of the tile inside D; a wave whose columns all lie at or past the column
+  bound skips its store instead of relying on a zero tensor_dim.
   """
   from .TensorDataMover import TensorDataMoverStore
   module = Module("TDMStoreFlush")
@@ -369,7 +395,7 @@ def emitTDMStoreFlush(gwb) -> Module:
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
       module.add(SWaitCnt(dscnt=0, comment="staging stores done " + STINKY_KEEP))
       module.add(kw._syncThreads(gwb.kernel, "every wave has staged its part of the tile"))
-      module.add(SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?"))
+      module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
       module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
       # Nor this one: after the OptNLL store, nothing re-derives it before s_endpgm.
