@@ -107,7 +107,9 @@ inline std::size_t alignWorkspaceSection(std::size_t bytes)
 inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTraits& traits,
                                                  int64_t blockSize)
 {
-    return detail::isOneOf(traits.blockSizes, blockSize);
+    // `blockSizes` is fixed-size, so an architecture listing fewer sizes leaves zero slots.
+    // A slot is not a block size, and a caller must never divide by one.
+    return blockSize > 0 && detail::isOneOf(traits.blockSizes, blockSize);
 }
 
 /// The smallest `block_size` any candidate of the architecture is built with. `blockSizes` is

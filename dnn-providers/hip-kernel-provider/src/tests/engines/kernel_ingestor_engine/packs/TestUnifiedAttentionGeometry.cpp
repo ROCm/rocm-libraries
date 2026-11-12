@@ -77,6 +77,19 @@ TEST(TestUnifiedAttentionGeometry, SmallestBlockSizeIsTheMinimumOfTheTraits)
               GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL);
 }
 
+/// The unused slot of a two-size array is zero, and a zero is no block size: the predicate
+/// must not admit it, or a caller could reach `tileSize % blockSize` with 0.
+TEST(TestUnifiedAttentionGeometry, BlockSizePredicateRejectsTheUnusedZeroSlotAndNegatives)
+{
+    EXPECT_TRUE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 16));
+    EXPECT_TRUE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 32));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 64));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 0));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, -16));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(GFX942_UNIFIED_ATTENTION_TRAITS, 0));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS, 0));
+}
+
 /// Only gfx950 ships LSE-on kernels: gfx942's graph match declines a stats output.
 TEST(TestUnifiedAttentionGeometry, OnlyGfx950ServesAStatsOutput)
 {
