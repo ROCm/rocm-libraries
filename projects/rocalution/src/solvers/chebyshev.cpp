@@ -122,13 +122,17 @@ namespace rocalution
             auto scaled = [](ValueType z) {
                 int exponent;
                 std::frexp(std::max(std::abs(std::real(z)), std::abs(std::imag(z))), &exponent);
-                return z * std::ldexp(static_cast<RealType>(1), -exponent);
+                return std::complex<RealType>(std::ldexp(std::real(z), -exponent),
+                                              std::ldexp(std::imag(z), -exponent));
             };
 
-            const auto product = std::conj(scaled(lambda_min)) * scaled(lambda_max);
+            const std::complex<RealType> a       = scaled(lambda_min);
+            const std::complex<RealType> b       = scaled(lambda_max);
+            const std::complex<RealType> product = std::conj(a) * b;
 
-            // The sum catches bounds of opposite sign whose product is not exact with FMA
-            contains_zero = lambda_min + lambda_max == static_cast<ValueType>(0)
+            // The sum catches bounds that are opposite up to a power of 2, whose product is not
+            // exact with FMA
+            contains_zero = a + b == static_cast<RealType>(0)
                             || (std::imag(product) == 0 && std::real(product) <= 0);
         }
 
