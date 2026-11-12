@@ -38,6 +38,22 @@
 #include "ConvDirectArgs.h"
 #include "ConvIgemmCore.h"
 
+// Weight fragments by buffer load, the lane's column as the vector offset and the step's
+// wave-uniform offset as the scalar offset, where that measured faster than flat loads (spec
+// lead bench, 2026-11-12): the matrix-core kernel on gfx950 and RDNA, the FMA kernel also on
+// gfx90a. Elsewhere the flat loads stay (gfx90a's matrix-core kernel needs 20 more VGPRs in the
+// buffer form and loses a wave per SIMD; gfx906/908/942 are not measured).
+#if K1_HAS_WMMA11 || K1_HAS_WMMA12 || defined(__gfx950__)
+#define K2_MMA_WBUF 1
+#else
+#define K2_MMA_WBUF 0
+#endif
+#if K2_MMA_WBUF || defined(__gfx90a__)
+#define K2_FMA_WBUF 1
+#else
+#define K2_FMA_WBUF 0
+#endif
+
 /// Buffer load of 2, 4, 8 or 16 bytes at vector offset @p offset plus wave-uniform @p soffset.
 template <class Raw>
 __device__ inline Raw k2BufferLoadS(__amdgpu_buffer_rsrc_t r, unsigned offset, int soffset)
@@ -668,6 +684,7 @@ __device__ void k2ConvMma(const K2Args& a)
     const T* wf = static_cast<const T*>(a.w);
     const int rowStep = b.hw * LDC;
     const int tapStride = a.ca * a.kpad * KA; // elements per tap in wf
+#if K2_MMA_WBUF
     // Register-path weights (BL 0) through a buffer: the lane's column bytes are the vector
     // offset, fixed for the whole kernel; the step's (chunk, k-step, tap) offset is wave-uniform
     // and goes in the scalar offset, so a fragment load costs no VALU address arithmetic. The
@@ -678,6 +695,7 @@ __device__ void k2ConvMma(const K2Args& a)
 #pragma unroll
     for(int j = 0; j < FN; ++j)
         bByte[j] = static_cast<unsigned>(bCol[j]) * static_cast<unsigned>(sizeof(T));
+#endif
 
     typename Atom::acc acc[SETS][FM][FN];
 #pragma unroll
@@ -703,6 +721,7 @@ __device__ void k2ConvMma(const K2Args& a)
             dt[t] = tapOf(t);
         auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
             const int kk = q / (R * S), rs = q % (R * S);
+#if K2_MMA_WBUF
             const unsigned wq = static_cast<unsigned>(((cb + cc) * (BC / KA) + kk) * a.kpad * KA
                                                       + rs * tapStride);
 #pragma unroll
@@ -715,6 +734,17 @@ __device__ void k2ConvMma(const K2Args& a)
                 for(int j = 0; j < FN; ++j)
                     bf[t][j] = k2FragLoadS<Frag>(wRsrc, bByte[j], static_cast<int>(so));
             }
+#else
+            const T* wq = wf + ((cb + cc) * (BC / KA) + kk) * a.kpad * KA + rs * tapStride;
+#pragma unroll
+            for(int t = 0; t < NB; ++t)
+            {
+                const T* wt = wq + (dt[t] < 0 ? 0 : dt[t]) * R * S * tapStride;
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    bf[t][j] = *reinterpret_cast<const Frag*>(wt + bCol[j]);
+            }
+#endif
         };
         // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
         // a ~16-VGPR budget: deep for fp32 (one VGPR per fragment), one step for big fragments.
@@ -1032,18 +1062,28 @@ __device__ void k2ConvFma(const K2Args& a)
 
     Loader ld;
     ld.init(a, b, tid);
-    const int tapStride = a.ca * a.kpad;
+#if K2_FMA_WBUF
     // Weights through a buffer: the thread's TN columns are the vector offset, fixed for the
-    // whole kernel; a step's (tap, channel) element offset is wave-uniform and goes in the
-    // scalar offset (no per-load address arithmetic). Offsets below are elements of [tap][c][kpad].
+    // whole kernel; a step's (tap, channel) position is a wave-uniform element offset of
+    // [tap][c][kpad] and goes in the scalar offset (no per-load address arithmetic).
+    typedef int WPos;
+    const WPos wf = 0;
+    const int tapStride = a.ca * a.kpad;
     const __amdgpu_buffer_rsrc_t wRsrc = k1Rsrc(
         a.w, static_cast<long long>(KD) * R * S * tapStride * static_cast<long long>(sizeof(T)));
     const unsigned wLane = static_cast<unsigned>(n0 + tn * TN) * static_cast<unsigned>(sizeof(T));
-    auto wLoad = [&](int e, int q) {
+    auto wLoad = [&](WPos e, int q) {
         return k2BufferLoadS<Raw>(wRsrc,
                                   wLane + static_cast<unsigned>(q * SV * sizeof(T)),
                                   static_cast<int>(static_cast<unsigned>(e) * sizeof(T)));
     };
+#else
+    // Weights by flat loads: a step's position is a pointer to the thread's TN columns.
+    typedef const T* WPos;
+    WPos wf = static_cast<const T*>(a.w) + n0 + tn * TN;
+    const int tapStride = a.ca * a.kpad;
+    auto wLoad = [&](WPos p, int q) { return *reinterpret_cast<const Raw*>(p + q * SV); };
+#endif
 
     float acc[SETS][TM][TN];
 #pragma unroll
@@ -1061,7 +1101,7 @@ __device__ void k2ConvFma(const K2Args& a)
 #pragma unroll 2
         for(int c = 0; c < BC; ++c)
         {
-            const int wc = (cc * BC + c) * a.kpad;
+            const WPos wc = wf + (cc * BC + c) * a.kpad;
 #pragma unroll
             for(int r = 0; r < R; ++r)
             {
@@ -1075,7 +1115,7 @@ __device__ void k2ConvFma(const K2Args& a)
             }
         }
     };
-    auto fmaInto = [&](float(&ac)[TM][TN], const float(&av)[TM + S - 1], int s, int wt) {
+    auto fmaInto = [&](float(&ac)[TM][TN], const float(&av)[TM + S - 1], int s, WPos wt) {
         float bv[TN];
 #pragma unroll
         for(int q = 0; q < TN / SV; ++q)
@@ -1100,10 +1140,10 @@ __device__ void k2ConvFma(const K2Args& a)
         constexpr int CPI = R % 2 ? 2 : 1;
         static_assert(BC % CPI == 0, "BC");
         const float* halo = lds + stage * STAGE + aBase;
-        const int wt = t0 * R * S * tapStride + cc * BC * a.kpad;
+        const WPos wt = wf + t0 * R * S * tapStride + cc * BC * a.kpad;
         Raw wr[2][S][TN / SV];
         auto loadW = [&](int c, int r, Raw(&w)[S][TN / SV]) {
-            const int wc = wt + c * a.kpad + r * S * tapStride;
+            const WPos wc = wt + c * a.kpad + r * S * tapStride;
 #pragma unroll
             for(int s = 0; s < S; ++s)
 #pragma unroll
@@ -1159,7 +1199,7 @@ __device__ void k2ConvFma(const K2Args& a)
 #pragma unroll
         for(int t = 0; t < KD; ++t)
             act[t] = jj - t >= 0 && jj - t < b.dsEff;
-        chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, int w0) {
+        chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, WPos w0) {
 #pragma unroll
             for(int t = 0; t < KD; ++t)
                 if(act[t])
@@ -1175,7 +1215,7 @@ __device__ void k2ConvFma(const K2Args& a)
         {
             pf();
             const int off = t * R * S * tapStride;
-            chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, int w0) {
+            chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, WPos w0) {
                 fmaInto(acc[0], av, s, w0 + off);
             });
         }
