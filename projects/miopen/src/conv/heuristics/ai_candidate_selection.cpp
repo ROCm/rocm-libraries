@@ -691,7 +691,7 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
     const std::function<bool(const std::string&, int, bool)>& is_args_supported)
 {
     // MIOPEN_DEBUG_LGBM_ONLY turns the two-tower model off; the lazy path is that model, so bypass
-    // it here (mirrors ModelSelectBestCandidate) -> caller falls to the solver's non-AI default.
+    // it here -> caller falls to the solver's non-AI default.
     if(common::LgbmOnly())
     {
         MIOPEN_LOG_I2("Lazy-applicability selection bypassed via MIOPEN_DEBUG_LGBM_ONLY for "
@@ -778,8 +778,8 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
         };
 
         // First walk against the TF32 instance set (or, for non-TF32 problems, the only set); a
-        // TF32 request falls back to the FP32 set only if no TF32 kernel applies, mirroring the
-        // enumeration path (FillValidKernels TF32-first, FP32 on empty).
+        // TF32 request falls back to the FP32 set only if no TF32 kernel applies, matching
+        // FillValidKernels' order (TF32 set first, FP32 only on empty).
         if(auto hit = walk(/*fp32_pass=*/false))
             return hit;
         if(use_tf32)
