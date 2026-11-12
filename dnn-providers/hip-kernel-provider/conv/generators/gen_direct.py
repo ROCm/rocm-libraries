@@ -250,6 +250,17 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0),
         ],
     )
+    if dt == "BFLOAT16":
+        # 192-wide K blocks (2 x 4 waves of 64 x 48, 16-channel steps): K = 192 and 384 layers
+        # (wan VAE) stage each input halo once per 192 output channels at 4 waves per SIMD.
+        add(
+            dt,
+            ["gfx90a"],
+            [
+                M(f"mfma16_{e}", F333, 128, 192, 16, 2, 4, 8, ring=0),
+                M(f"mfma16_{e}", F33, 128, 192, 16, 2, 4, 8),
+            ],
+        )
     # gfx11 / gfx12
     for fam in ("11", "12"):
         a = f"wmma{fam}_{e}"

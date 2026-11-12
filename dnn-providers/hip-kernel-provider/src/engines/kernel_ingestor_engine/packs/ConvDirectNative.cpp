@@ -1033,7 +1033,12 @@ public:
 
         auto format = build(FORMAT_ENTRY_POINT, signatureOf<K2FormatArgs>());
         format.setBlockSize(AUX_BLOCK, 1, 1);
-        format.setGridSize(auxBlocks(plan.weightElems), 1, 1);
+        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the rows
+        // and three-bf16 formats one element per thread.
+        format.setGridSize(
+            auxBlocks(config.rows || config.math ? plan.weightElems : plan.weightElems / config.ka),
+            1,
+            1);
 
         std::optional<IngestorKernelCode> splitInput;
         if(config.math)
