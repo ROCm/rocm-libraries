@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "blas3/rocblas_trmm.hpp"
 #include "cblas_interface.hpp"
 #include "client_utility.hpp"
 #include "flops.hpp"
@@ -35,6 +36,7 @@
 #include "rocblas_random.hpp"
 #include "rocblas_test.hpp"
 #include "rocblas_vector.hpp"
+#include "src64/blas3/rocblas_trmm_64.hpp"
 #include "unit.hpp"
 
 template <typename T>
@@ -604,28 +606,85 @@ void testing_trmm_batched(const Arguments& arg)
         hC_gold.copy_from(hC);
     }
 
+    const bool internal_api = arg.api & c_API_INTERNAL;
+
+    auto rocblas_internal_trmm_fn = [&](const T* alpha) {
+        if(arg.api & c_API_64)
+            return rocblas_internal_trmm_batched_template_64<T>(handle,
+                                                                side,
+                                                                uplo,
+                                                                transA,
+                                                                diag,
+                                                                M,
+                                                                N,
+                                                                alpha,
+                                                                0,
+                                                                dA.ptr_on_device(),
+                                                                0,
+                                                                lda,
+                                                                0,
+                                                                dB.ptr_on_device(),
+                                                                0,
+                                                                ldb,
+                                                                0,
+                                                                (*dOut).ptr_on_device(),
+                                                                0,
+                                                                ldOut,
+                                                                0,
+                                                                batch_count);
+        return rocblas_internal_trmm_batched_template<T>(handle,
+                                                         side,
+                                                         uplo,
+                                                         transA,
+                                                         diag,
+                                                         M,
+                                                         N,
+                                                         alpha,
+                                                         0,
+                                                         dA.ptr_on_device(),
+                                                         0,
+                                                         lda,
+                                                         0,
+                                                         dB.ptr_on_device(),
+                                                         0,
+                                                         ldb,
+                                                         0,
+                                                         (*dOut).ptr_on_device(),
+                                                         0,
+                                                         ldOut,
+                                                         0,
+                                                         batch_count);
+    };
+
     if(arg.unit_check || arg.norm_check)
     {
         if(arg.pointer_mode_host)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
             handle.pre_test(arg);
-            DAPI_CHECK(rocblas_trmm_batched_fn,
-                       (handle,
-                        side,
-                        uplo,
-                        transA,
-                        diag,
-                        M,
-                        N,
-                        &h_alpha[0],
-                        dA.ptr_on_device(),
-                        lda,
-                        dB.ptr_on_device(),
-                        ldb,
-                        (*dOut).ptr_on_device(),
-                        ldOut,
-                        batch_count));
+            if(!internal_api)
+            {
+                DAPI_CHECK(rocblas_trmm_batched_fn,
+                           (handle,
+                            side,
+                            uplo,
+                            transA,
+                            diag,
+                            M,
+                            N,
+                            &h_alpha[0],
+                            dA.ptr_on_device(),
+                            lda,
+                            dB.ptr_on_device(),
+                            ldb,
+                            (*dOut).ptr_on_device(),
+                            ldOut,
+                            batch_count));
+            }
+            else
+            {
+                CHECK_ROCBLAS_ERROR(rocblas_internal_trmm_fn(&h_alpha[0]));
+            }
             handle.post_test(arg);
             CHECK_HIP_ERROR(hC.transfer_from(*dOut));
         }
@@ -636,22 +695,36 @@ void testing_trmm_batched(const Arguments& arg)
             CHECK_HIP_ERROR((*dOut).transfer_from(hC_gold));
             CHECK_HIP_ERROR(d_alpha.transfer_from(h_alpha));
 
-            DAPI_CHECK(rocblas_trmm_batched_fn,
-                       (handle,
-                        side,
-                        uplo,
-                        transA,
-                        diag,
-                        M,
-                        N,
-                        d_alpha,
-                        dA.ptr_on_device(),
-                        lda,
-                        dB.ptr_on_device(),
-                        ldb,
-                        (*dOut).ptr_on_device(),
-                        ldOut,
-                        batch_count));
+            if(!internal_api)
+            {
+                DAPI_CHECK(rocblas_trmm_batched_fn,
+                           (handle,
+                            side,
+                            uplo,
+                            transA,
+                            diag,
+                            M,
+                            N,
+                            d_alpha,
+                            dA.ptr_on_device(),
+                            lda,
+                            dB.ptr_on_device(),
+                            ldb,
+                            (*dOut).ptr_on_device(),
+                            ldOut,
+                            batch_count));
+            }
+            else
+            {
+                handle.pre_test(arg);
+                CHECK_ROCBLAS_ERROR(rocblas_internal_trmm_fn(d_alpha));
+                handle.post_test(arg);
+
+                // callers such as rocSOLVER rely on the handle staying in device pointer mode
+                rocblas_pointer_mode mode;
+                CHECK_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &mode));
+                EXPECT_EQ(mode, rocblas_pointer_mode_device);
+            }
 
             if(arg.repeatability_check)
             {

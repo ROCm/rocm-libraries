@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "blas3/rocblas_trmm.hpp"
 #include "cblas_interface.hpp"
 #include "client_utility.hpp"
 #include "flops.hpp"
@@ -35,7 +36,9 @@
 #include "rocblas_random.hpp"
 #include "rocblas_test.hpp"
 #include "rocblas_vector.hpp"
+#include "src64/blas3/rocblas_trmm_64.hpp"
 #include "unit.hpp"
+#include <rocblas/internal/rocblas_block_sizes.h>
 
 template <typename T>
 void testing_trmm_strided_batched_bad_arg(const Arguments& arg)
@@ -700,6 +703,56 @@ void testing_trmm_strided_batched(const Arguments& arg)
         hC_gold.copy_from(hC);
     }
 
+    const bool internal_api = arg.api & c_API_INTERNAL;
+
+    auto rocblas_internal_trmm_fn = [&](const T* alpha, rocblas_stride stride_alpha) {
+        if(arg.api & c_API_64)
+            return rocblas_internal_trmm_template_64<T>(handle,
+                                                        side,
+                                                        uplo,
+                                                        transA,
+                                                        diag,
+                                                        M,
+                                                        N,
+                                                        alpha,
+                                                        stride_alpha,
+                                                        dA,
+                                                        0,
+                                                        lda,
+                                                        stride_a,
+                                                        dB,
+                                                        0,
+                                                        ldb,
+                                                        stride_b,
+                                                        *dOut,
+                                                        0,
+                                                        ldOut,
+                                                        stride_c,
+                                                        batch_count);
+        return rocblas_internal_trmm_template<T>(handle,
+                                                 side,
+                                                 uplo,
+                                                 transA,
+                                                 diag,
+                                                 M,
+                                                 N,
+                                                 alpha,
+                                                 stride_alpha,
+                                                 dA,
+                                                 0,
+                                                 lda,
+                                                 stride_a,
+                                                 dB,
+                                                 0,
+                                                 ldb,
+                                                 stride_b,
+                                                 *dOut,
+                                                 0,
+                                                 ldOut,
+                                                 stride_c,
+                                                 batch_count);
+    };
+
     if(arg.unit_check || arg.norm_check)
     {
         if(arg.pointer_mode_host)
@@ -707,25 +760,32 @@ void testing_trmm_strided_batched(const Arguments& arg)
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
             handle.pre_test(arg);
-            DAPI_CHECK(rocblas_trmm_strided_batched_fn,
-                       (handle,
-                        side,
-                        uplo,
-                        transA,
-                        diag,
-                        M,
-                        N,
-                        &h_alpha[0],
-                        dA,
-                        lda,
-                        stride_a,
-                        dB,
-                        ldb,
-                        stride_b,
-                        *dOut,
-                        ldOut,
-                        stride_c,
-                        batch_count));
+            if(!internal_api)
+            {
+                DAPI_CHECK(rocblas_trmm_strided_batched_fn,
+                           (handle,
+                            side,
+                            uplo,
+                            transA,
+                            diag,
+                            M,
+                            N,
+                            &h_alpha[0],
+                            dA,
+                            lda,
+                            stride_a,
+                            dB,
+                            ldb,
+                            stride_b,
+                            *dOut,
+                            ldOut,
+                            stride_c,
+                            batch_count));
+            }
+            else
+            {
+                CHECK_ROCBLAS_ERROR(rocblas_internal_trmm_fn(&h_alpha[0], 0));
+            }
             handle.post_test(arg);
             CHECK_HIP_ERROR(hC.transfer_from(*dOut));
         }
@@ -735,25 +795,48 @@ void testing_trmm_strided_batched(const Arguments& arg)
 
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
 
-            DAPI_CHECK(rocblas_trmm_strided_batched_fn,
-                       (handle,
-                        side,
-                        uplo,
-                        transA,
-                        diag,
-                        M,
-                        N,
-                        d_alpha,
-                        dA,
-                        lda,
-                        stride_a,
-                        dB,
-                        ldb,
-                        stride_b,
-                        *dOut,
-                        ldOut,
-                        stride_c,
-                        batch_count));
+            if(!internal_api)
+            {
+                DAPI_CHECK(rocblas_trmm_strided_batched_fn,
+                           (handle,
+                            side,
+                            uplo,
+                            transA,
+                            diag,
+                            M,
+                            N,
+                            d_alpha,
+                            dA,
+                            lda,
+                            stride_a,
+                            dB,
+                            ldb,
+                            stride_b,
+                            *dOut,
+                            ldOut,
+                            stride_c,
+                            batch_count));
+            }
+            else
+            {
+                // gemm sub-calls take a single alpha, so per-batch device alpha is rejected
+                // once the recursive path would call gemm
+                const int64_t nb = rocblas_is_complex<T> ? ROCBLAS_CZTRMM_NB : ROCBLAS_SDTRMM_NB;
+                if(batch_count > 1 && K > nb)
+                {
+                    EXPECT_ROCBLAS_STATUS(rocblas_internal_trmm_fn(d_alpha, 1),
+                                          rocblas_status_not_implemented);
+                }
+
+                handle.pre_test(arg);
+                CHECK_ROCBLAS_ERROR(rocblas_internal_trmm_fn(d_alpha, 0));
+                handle.post_test(arg);
+
+                // callers such as rocSOLVER rely on the handle staying in device pointer mode
+                rocblas_pointer_mode mode;
+                CHECK_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &mode));
+                EXPECT_EQ(mode, rocblas_pointer_mode_device);
+            }
 
             if(arg.repeatability_check)
             {
