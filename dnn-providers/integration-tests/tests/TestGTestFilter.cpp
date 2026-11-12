@@ -9,7 +9,9 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <initializer_list>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -126,6 +128,16 @@ std::vector<std::string>
     return result;
 }
 
+std::string joined(std::initializer_list<std::string_view> parts)
+{
+    std::string result;
+    for(const auto part : parts)
+    {
+        result += part;
+    }
+    return result;
+}
+
 std::vector<std::string> enumeratedFilters()
 {
     const auto shortPatterns = allStrings("a_.*?", 0, 2);
@@ -142,8 +154,8 @@ std::vector<std::string> enumeratedFilters()
     {
         for(const auto& second : shortPatterns)
         {
-            filters.push_back(first + "-" + second);
-            filters.push_back(first + ":" + second);
+            filters.push_back(joined({first, "-", second}));
+            filters.push_back(joined({first, ":", second}));
         }
     }
     for(const auto& positive1 : tinyPatterns)
@@ -154,8 +166,8 @@ std::vector<std::string> enumeratedFilters()
             {
                 for(const auto& negative2 : tinyPatterns)
                 {
-                    filters.push_back(positive1 + ":" + positive2 + "-" + negative1 + ":"
-                                      + negative2);
+                    filters.push_back(
+                        joined({positive1, ":", positive2, "-", negative1, ":", negative2}));
                 }
             }
         }
@@ -166,7 +178,7 @@ std::vector<std::string> enumeratedFilters()
         {
             for(const auto& third : tinyPatterns)
             {
-                filters.push_back(first + "-" + second + "-" + third);
+                filters.push_back(joined({first, "-", second, "-", third}));
             }
         }
     }
@@ -190,7 +202,7 @@ TEST(TestGtestFilter, MaySelectSuiteHoldsForEverySuiteWithASelectedTest)
             bool anySelected = false;
             for(const auto& testName : testNames)
             {
-                if(gtestFilterSelects(filter, suite + "." + testName))
+                if(gtestFilterSelects(filter, joined({suite, ".", testName})))
                 {
                     anySelected = true;
                     EXPECT_TRUE(maySelect) << "filter '" << filter << "' selects '" << suite << "."
