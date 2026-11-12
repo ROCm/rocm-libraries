@@ -403,6 +403,17 @@
     "comp_tdm_v2": "comp_async",
     "comp_tdm_v3": "comp_async"
   },
+
+  "pipeline_extra_warp_configs": {
+    "_comment": [
+      "Pipeline-specific wave maps allowed in addition to an architecture's",
+      "shared warp_configs table. Keeps [4, 4, 1] scoped to comp_tdm_v3 on",
+      "gfx1250 without widening the shared gfx1250 wave table."
+    ],
+    "comp_tdm_v3": {
+      "gfx1250": [[4, 4, 1]]
+    }
+  },
   
   "double_smem_buffer_pipelines": [
     "compv4",

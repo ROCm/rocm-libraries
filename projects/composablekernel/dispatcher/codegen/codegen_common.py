@@ -1415,9 +1415,10 @@ def gemm_pipeline_skips_launch_checks(pipeline: str) -> bool:
     For these ``UniversalGemmKernel::IsSupportedArgument`` accepts every problem
     without checking tile divisibility or vector alignment: TDM clips each box to
     the tensor's real extent and moves A/B/C at width 1, so an unpadded kernel
-    serves any M, N, K. The exception is a non-TDM (CShuffle) epilogue, which
-    Stream-K allows: its C store does not clip, so the contiguous C extent must
-    be a tile multiple. Pairing and the dispatcher's own gate follow the kernel.
+    serves any M, N, K. The exception is a non-TDM (CShuffle) epilogue, used by
+    ``comp_tdm_v3`` and Stream-K: its C store does not clip, so an unpadded
+    contiguous C extent must be a tile multiple. Pairing and the dispatcher's own
+    gate follow the kernel.
     """
     return pipeline in TDM_PIPELINES
 
@@ -1481,7 +1482,10 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # gemm_universal build and the comp_tdm_v3 gtests do.
 COMP_TDM_V3 = "comp_tdm_v3"
 TDM_PIPELINE_EPILOGUE = {COMP_TDM_V3: "cshuffle"}
-PIPELINE_EXTRA_WARP_COMBINATIONS = {COMP_TDM_V3: {GFX1250_ARCH: [[4, 4, 1]]}}
+try:
+    from arch_specs_generated import PIPELINE_EXTRA_WARP_COMBINATIONS
+except ImportError:
+    PIPELINE_EXTRA_WARP_COMBINATIONS = {COMP_TDM_V3: {GFX1250_ARCH: [[4, 4, 1]]}}
 PIPELINE_EXTRA_COMPILE_FLAGS = {COMP_TDM_V3: ("-mllvm", "-enable-post-misched=1")}
 COMP_TDM_V3_WAVES = ((2, 2, 1), (4, 4, 1))
 COMP_TDM_V3_8BIT_DTYPES = ("fp8", "bf8")

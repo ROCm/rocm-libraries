@@ -5,7 +5,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-11-10T01:49:54.897101
+Generated at: 2026-11-12T00:43:55.847927
 
 To update this file:
 1. Edit arch_specs.json
@@ -45,6 +45,13 @@ WARP_SUPPORTED_COMBINATIONS: Dict[str, List[List[int]]] = {
     "gfx1200": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+}
+
+# Pipeline-specific extra warp configurations: pipeline -> arch -> [[warp_m, warp_n, warp_k], ...]
+PIPELINE_EXTRA_WARP_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
+    "comp_tdm_v3": {
+        "gfx1250": [[4, 4, 1]],
+    },
 }
 
 # Supported warp tile combinations: arch -> dtype_key -> [[warp_tile_m, n, k], ...]

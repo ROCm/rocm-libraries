@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-11-10T01:49:54.899289
+ * Generated at: 2026-11-12T00:43:55.850583
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -142,6 +142,21 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch)
                 {2, 2, 1}};
     default: return {};
     }
+}
+
+inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch,
+                                                          [[maybe_unused]] Pipeline pipeline)
+{
+    auto configs = get_supported_warp_configs(arch);
+    if(configs.empty())
+    {
+        return configs;
+    }
+    if(pipeline == Pipeline::CompTDMV3 && arch == GpuArch::GFX_1250)
+    {
+        configs.push_back({4, 4, 1});
+    }
+    return configs;
 }
 
 // =============================================================================

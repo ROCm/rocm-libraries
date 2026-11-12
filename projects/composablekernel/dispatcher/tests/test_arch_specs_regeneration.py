@@ -119,10 +119,29 @@ class TestArchSpecsRegeneration(unittest.TestCase):
                     f'CHECK(KernelConfig().pipeline(string_to_pipeline("{pipeline}"))'
                     f".build_key().algorithm.double_buffer == {expected});"
                 )
+            checks.extend(
+                [
+                    "const auto shared_1250 = arch_specs::get_supported_warp_configs(GpuArch::GFX_1250);",
+                    "CHECK(std::find(shared_1250.begin(), shared_1250.end(), WarpConfig{4, 4, 1}) == shared_1250.end());",
+                    "const auto v3_1250 = arch_specs::get_supported_warp_configs(GpuArch::GFX_1250, Pipeline::CompTDMV3);",
+                    "CHECK(std::find(v3_1250.begin(), v3_1250.end(), WarpConfig{4, 4, 1}) != v3_1250.end());",
+                    "const auto v1_1250 = arch_specs::get_supported_warp_configs(GpuArch::GFX_1250, Pipeline::CompTDMV1);",
+                    "CHECK(std::find(v1_1250.begin(), v1_1250.end(), WarpConfig{4, 4, 1}) == v1_1250.end());",
+                    "const auto v3_942 = arch_specs::get_supported_warp_configs(GpuArch::GFX_942, Pipeline::CompTDMV3);",
+                    "CHECK(std::find(v3_942.begin(), v3_942.end(), WarpConfig{4, 4, 1}) == v3_942.end());",
+                    'const ArchFilter filt_1250("gfx1250");',
+                    'auto v3_cfg = KernelConfig::bf16_rcr().arch("gfx1250").tile(256, 256, 64).wave(4, 4, 1).warp_tile(16, 16, 32).pipeline(Pipeline::CompTDMV3).epilogue(Epilogue::CShuffle).scheduler(Scheduler::Intrawave).block(512);',
+                    "CHECK(filt_1250.is_valid(v3_cfg.build_key()));",
+                    "CHECK(filt_1250.is_valid(v3_cfg.tile(256, 256, 128).build_key()));",
+                    "CHECK(!filt_1250.is_valid(v3_cfg.pipeline(Pipeline::CompTDMV1).epilogue(Epilogue::Tdm).build_key()));",
+                ]
+            )
             source = out / "probe.cpp"
             source.write_text(
                 '#include "ck_tile/dispatcher/arch_specs_generated.hpp"\n'
+                '#include "ck_tile/dispatcher/arch_filter.hpp"\n'
                 '#include "ck_tile/dispatcher/kernel_config.hpp"\n'
+                "#include <algorithm>\n"
                 "#include <cstdio>\n"
                 "using namespace ck_tile::dispatcher;\n"
                 "#define CHECK(c) if(!(c)) { std::puts(#c); return 1; }\n"
