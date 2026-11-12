@@ -599,6 +599,9 @@ class ToStinkyAsmPassImpl : public Pass {
                         // s_barrier_wait -1 exists as a distinct instruction for
                         // InsertClusterBarrierPass to anchor its Rule 3/4 handshakes on.
                         if (barrierData) {
+                            if (barrierData->tensorcnt >= 0)
+                                asmInst->addModifier<SWaitTensorCntData>(SWaitTensorCntData{
+                                    static_cast<int8_t>(barrierData->tensorcnt)});
                             const int barrierId = barrierData->clusterBarrier ? -3 : -1;
                             legalizeBarrier(asmInst, irBuilder, arch, barrierId,
                                             barrierData->separate, barrierData->wait);

@@ -1,0 +1,39 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyWaitCntInsertionPass --print-output
+#
+# A weaker explicit contract must not replace a stronger inferred drain.
+# Both pending producers contribute provenance to the full wait.
+# CHECK-LABEL: @stronger_inferred_completion
+# CHECK: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS1 = "st.tensor_load_to_lds"
+# CHECK-NEXT: "st.s_wait_tensorcnt"(0)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 0 }
+# CHECK-SAME: mod.memtoken = { tokens = [0,1] }
+# CHECK-NEXT: LDS1 = "st.s_barrier_signal"(-1, LDS1)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 2 }
+# CHECK-NEXT: LDS1 = "st.s_barrier_wait"(-1, LDS1)
+
+st.func @stronger_inferred_completion() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [1] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = 2 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+}
+
+# An unset contract leaves inference unchanged: this disjoint token-0 producer
+# does not require a tensor wait at the token-1 barrier.
+# CHECK-LABEL: @unset_barrier_contract
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS1 = "st.s_barrier_signal"(-1, LDS1)
+# CHECK-NEXT: LDS1 = "st.s_barrier_wait"(-1, LDS1)
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @unset_barrier_contract() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = -1 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+}
