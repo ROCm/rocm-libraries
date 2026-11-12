@@ -149,6 +149,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     if("smallc" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvSmallcProblem.cpp)
     endif()
+    if("fft" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFftProblem.cpp)
+    endif()
     # A family's engine suites load its catalogs and resolve its native symbols, so they
     # build only when the family is served -- its DVC-stored catalogs were pulled
     # (conv/ConvContent.cmake).
@@ -189,6 +192,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     endif()
     if("group" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroup.cpp)
+    endif()
+    if("fft" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvFft.cpp)
     endif()
     if(HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE

@@ -1,0 +1,318 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include "engines/kernel_ingestor_engine/packs/ConvFftProblem.hpp"
+
+#include <algorithm>
+#include <cstdlib>
+#include <limits>
+#include <string_view>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_fft
+{
+
+using namespace hipdnn_plugin_sdk::ingestor;
+namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using conv_naive::ConvDirection;
+
+namespace
+{
+
+constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
+/// Global work-items of one launch (grid x threads) stay below 2^32.
+constexpr int64_t WORK_ITEM_LIMIT = (int64_t{1} << 32) - 1;
+constexpr size_t ALIGN = 256;
+
+bool fitsInt(long long value)
+{
+    return value >= 0 && value <= INT_LIMIT;
+}
+
+int64_t divUp(int64_t value, int64_t divisor)
+{
+    return (value + divisor - 1) / divisor;
+}
+
+size_t alignUp(size_t value)
+{
+    return (value + ALIGN - 1) / ALIGN * ALIGN;
+}
+
+bool isPow2(int value)
+{
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
+} // namespace
+
+std::optional<FftProblem> parseFftProblem(const MatchContext& context, ConvDirection direction)
+{
+    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    if(!base.has_value())
+    {
+        return std::nullopt;
+    }
+    // The transforms and products are fp32: a compute type of fp32 (or none) only.
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT)
+    {
+        return std::nullopt;
+    }
+    // 1-D and 2-D: the transforms are 2-D (a 1-D problem runs with height 1).
+    if(base->spatialRank != 1 && base->spatialRank != 2)
+    {
+        return std::nullopt;
+    }
+    const auto& a = base->args;
+    // Unit stride: a strided convolution reads one point in s of every window, which the
+    // circular correlation of whole windows cannot skip.
+    if(a.stride[0] != 1 || a.stride[1] != 1 || a.stride[2] != 1)
+    {
+        return std::nullopt;
+    }
+    for(const long long value : {a.n, a.c, a.k, a.groups})
+    {
+        if(!fitsInt(value) || value < 1)
+        {
+            return std::nullopt;
+        }
+    }
+    for(int axis = 1; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+    {
+        for(const long long value :
+            {a.inSpatial[axis], a.outSpatial[axis], a.filter[axis], a.prePadding[axis]})
+        {
+            if(!fitsInt(value))
+            {
+                return std::nullopt;
+            }
+        }
+        // The dilated filter's span within an int as well.
+        const auto span = pack_features::checkedMultiply(a.filter[axis] - 1, a.dilation[axis]);
+        if(!span.has_value() || !fitsInt(*span + 1))
+        {
+            return std::nullopt;
+        }
+    }
+
+    FftProblem problem;
+    problem.n = static_cast<int>(a.n);
+    problem.groups = static_cast<int>(a.groups);
+    problem.cg = static_cast<int>(a.c / a.groups);
+    problem.kg = static_cast<int>(a.k / a.groups);
+    problem.h = static_cast<int>(a.inSpatial[1]);
+    problem.w = static_cast<int>(a.inSpatial[2]);
+    problem.ho = static_cast<int>(a.outSpatial[1]);
+    problem.wo = static_cast<int>(a.outSpatial[2]);
+    problem.r = static_cast<int>(a.filter[1]);
+    problem.s = static_cast<int>(a.filter[2]);
+    problem.padH = static_cast<int>(a.prePadding[1]);
+    problem.padW = static_cast<int>(a.prePadding[2]);
+    problem.dilH = static_cast<int>(a.dilation[1]);
+    problem.dilW = static_cast<int>(a.dilation[2]);
+    problem.flip = a.flipFilter != 0 ? 1 : 0;
+    // (n, c, d, h, w) -> (n, c, h, w); depth is 1.
+    const long long* strides[3] = {a.xStrides, a.wStrides, a.yStrides};
+    long long* out[3] = {problem.xStr, problem.wStr, problem.yStr};
+    for(int t = 0; t < 3; ++t)
+    {
+        out[t][0] = strides[t][0];
+        out[t][1] = strides[t][1];
+        out[t][2] = strides[t][3];
+        out[t][3] = strides[t][4];
+    }
+    problem.base = std::move(*base);
+    return problem;
+}
+
+std::optional<Config> configOf(const KernelDefinition& kernel)
+{
+    Config config;
+    config.th = static_cast<int>(kernel.getIntMetadata("th"));
+    config.tw = static_cast<int>(kernel.getIntMetadata("tw"));
+    config.pb = static_cast<int>(kernel.getIntMetadata("pb"));
+    config.tb = static_cast<int>(kernel.getIntMetadata("tb"));
+    config.gn = static_cast<int>(kernel.getIntMetadata("gn"));
+    const bool thOk = config.th == 1 || (isPow2(config.th) && config.th >= 8 && config.th <= 64);
+    const bool twOk = isPow2(config.tw) && config.tw >= 8 && config.tw <= 64;
+    if(!thOk || !twOk || config.pb < 1 || (config.th == 1 && config.pb % 2 != 0))
+    {
+        return std::nullopt;
+    }
+    if(static_cast<int64_t>(config.pb) * config.bins() * 8 > 32 * 1024)
+    {
+        return std::nullopt;
+    }
+    if(config.tb < 64 || config.tb > 256 || config.tb % 64 != 0)
+    {
+        return std::nullopt;
+    }
+    if(config.gn != 16 && config.gn != 32 && config.gn != 64)
+    {
+        return std::nullopt;
+    }
+    return config;
+}
+
+size_t workspaceCapBytes()
+{
+    const char* value = std::getenv("HIP_KERNEL_PROVIDER_CONV_FFT_WORKSPACE_CAP");
+    if(value != nullptr)
+    {
+        char* end = nullptr;
+        const unsigned long long bytes = std::strtoull(value, &end, 10);
+        if(end != value && *end == '\0' && bytes >= 4096)
+        {
+            return static_cast<size_t>(bytes);
+        }
+    }
+    return WORKSPACE_CAP_BYTES;
+}
+
+bool admissionFloorEnabled()
+{
+    const char* value = std::getenv("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR");
+    return value == nullptr || std::string_view(value) != "0";
+}
+
+double fftAdvantage(const FftProblem& problem, const Config& config)
+{
+    const int oh = config.th == 1 ? 1 : config.th - problem.spanH() + 1;
+    const int ow = config.tw - problem.spanW() + 1;
+    if(oh < 1 || ow < 1)
+    {
+        return 0.0;
+    }
+    // Per output point (and per contracted channel pair): direct r s, FFT 4 F / (oh ow) per
+    // tile, counting the partial edge tiles.
+    const double tiles = static_cast<double>(divUp(problem.ho, oh)) * divUp(problem.wo, ow);
+    const double direct = static_cast<double>(problem.ho) * problem.wo * problem.r * problem.s;
+    return direct / (4.0 * config.bins() * tiles);
+}
+
+long long Plan::dataGrid(int tilesInChunk, int channels) const
+{
+    return divUp(tilesInChunk, config.pb) * static_cast<long long>(args.groups) * channels;
+}
+
+std::optional<Plan>
+    planFor(const FftProblem& problem, ConvDirection direction, const Config& config)
+{
+    if(config.th == 1 && problem.spanH() != 1)
+    {
+        return std::nullopt;
+    }
+    const int oh = config.th == 1 ? 1 : config.th - problem.spanH() + 1;
+    const int ow = config.tw - problem.spanW() + 1;
+    if(oh < 1 || ow < 1)
+    {
+        return std::nullopt;
+    }
+    if(admissionFloorEnabled()
+       && (problem.base.multiplyAccumulates < ADMIT_MIN_MACS
+           || fftAdvantage(problem, config) < ADMIT_RATIO))
+    {
+        return std::nullopt;
+    }
+
+    Plan plan;
+    plan.direction = direction;
+    plan.config = config;
+    plan.bins = config.bins();
+    auto& a = plan.args;
+    a.n = problem.n;
+    a.groups = problem.groups;
+    a.r = problem.r;
+    a.s = problem.s;
+    a.dilH = problem.dilH;
+    a.dilW = problem.dilW;
+    a.oh = oh;
+    a.ow = ow;
+    for(int i = 0; i < 4; ++i)
+    {
+        a.filtStr[i] = problem.wStr[i];
+    }
+    const bool bwd = direction == ConvDirection::BACKWARD_DATA;
+    const bool wrw = direction == ConvDirection::BACKWARD_WEIGHTS;
+    a.dstH = bwd ? problem.h : problem.ho;
+    a.dstW = bwd ? problem.w : problem.wo;
+    a.ca = bwd ? problem.kg : problem.cg;
+    a.cb = bwd ? problem.cg : problem.kg;
+    a.filtMode = bwd ? 1 : 0;
+    // Backward data correlates dy with the reflected filter; convolution mode reflects again.
+    a.flip = bwd ? 1 - problem.flip : problem.flip;
+    a.tilesH = static_cast<int>(divUp(a.dstH, oh));
+    a.tilesW = static_cast<int>(divUp(a.dstW, ow));
+    const auto tiles = pack_features::checkedProduct({problem.n, a.tilesH, a.tilesW});
+    if(!tiles.has_value() || !fitsInt(*tiles))
+    {
+        return std::nullopt;
+    }
+    plan.tiles = static_cast<int>(*tiles);
+
+    const int64_t groups = problem.groups;
+    const int64_t bins = plan.bins;
+    const auto fixedElems = pack_features::checkedProduct({groups, bins, a.ca, a.cb});
+    const auto perTileElems = pack_features::checkedProduct({groups, bins, a.ca + a.cb});
+    if(!fixedElems.has_value() || !perTileElems.has_value())
+    {
+        return std::nullopt;
+    }
+    plan.fixedBytes = static_cast<size_t>(*fixedElems) * 8;
+    const size_t cap = workspaceCapBytes();
+    if(plan.fixedBytes > cap / 2)
+    {
+        return std::nullopt;
+    }
+    const size_t perTile = static_cast<size_t>(*perTileElems) * 8;
+    const size_t room = cap - alignUp(plan.fixedBytes) - 2 * ALIGN;
+    const int64_t fit = static_cast<int64_t>(room / perTile);
+    // Chunks of fewer than 64 tiles (or the whole problem) would launch too often to pay.
+    if(fit < std::min<int64_t>(plan.tiles, 64))
+    {
+        return std::nullopt;
+    }
+    plan.chunks = static_cast<int>(divUp(plan.tiles, std::min<int64_t>(fit, plan.tiles)));
+    plan.chunk = static_cast<int>(divUp(plan.tiles, plan.chunks));
+
+    plan.fixedOffset = 0;
+    plan.aOffset = alignUp(plan.fixedBytes);
+    plan.aBytes = static_cast<size_t>(groups * bins * a.ca) * plan.chunk * 8;
+    plan.bOffset = alignUp(plan.aOffset + plan.aBytes);
+    plan.bBytes = static_cast<size_t>(groups * bins * a.cb) * plan.chunk * 8;
+    plan.workspaceBytes = plan.bOffset + plan.bBytes;
+    plan.transformThreads = config.tb;
+
+    const int64_t bm = 4096 / config.gn;
+    if(wrw)
+    {
+        plan.filterGrid = groups * a.cb * divUp(a.ca, config.pb);
+        plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(a.ca, bm);
+    }
+    else
+    {
+        plan.filterGrid = groups * a.ca * divUp(a.cb, config.pb);
+        plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(plan.chunk, bm);
+    }
+    const int64_t maxChannels = std::max(a.ca, a.cb);
+    for(const int64_t grid : {plan.filterGrid,
+                              plan.productGridPerChunk,
+                              static_cast<int64_t>(plan.dataGrid(plan.chunk, maxChannels))})
+    {
+        if(grid < 1 || grid > INT_LIMIT || grid * 256 > WORK_ITEM_LIMIT)
+        {
+            return std::nullopt;
+        }
+    }
+    return plan;
+}
+
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_fft
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
