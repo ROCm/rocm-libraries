@@ -785,6 +785,24 @@ TEST(TestConvDirectPlan, TileFitsTheHaloAndTheWorkspaceHoldsTheWeights)
     EXPECT_GE(plan->workspaceBytes, plan->weightBytes);
 }
 
+TEST(TestConvDirectPlan, FormattedWeightsStayWithinTheBufferRange)
+{
+    // The kernels read the formatted weights through one buffer of 31-bit byte offsets: 9 taps
+    // x 10880 x 10880 fp16 is 2,130,739,200 bytes and plans; 11008 x 11008 is 2,181,169,152
+    // bytes (still under INT_MAX elements) and is declined.
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.c = 10880;
+    shape.k = 10880;
+    const auto fits = planOf(shape, ConfigFields{}, "HALF", 64);
+    ASSERT_TRUE(fits.has_value());
+    EXPECT_EQ(fits->weightBytes, size_t{9} * 10880 * 10880 * 2);
+    shape.c = 11008;
+    shape.k = 11008;
+    EXPECT_FALSE(planOf(shape, ConfigFields{}, "HALF", 64).has_value());
+}
+
 TEST(TestConvDirectPlan, SplitsOnlyAnUnderFilledGridAndSizesThePartials)
 {
     auto shape = baseShape();

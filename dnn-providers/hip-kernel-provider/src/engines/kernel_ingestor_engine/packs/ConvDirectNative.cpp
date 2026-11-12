@@ -616,8 +616,10 @@ std::optional<Plan>
     const long long taps = static_cast<long long>(config.kd) * config.r * config.s;
     plan.cpad = static_cast<int>(std::min(cpad, INT_LIMIT));
     plan.weightElems = taps * cpad * kpad;
+    // The kernels read the formatted weights through one buffer of 31-bit byte offsets.
+    const long long weightOperandBytes = config.math ? 2 : problem.elementBytes;
     if(reduction % config.vec != 0 || columnBlocks > MAX_GRID_YZ || cpad > INT_LIMIT
-       || plan.weightElems >= INT_LIMIT)
+       || plan.weightElems >= INT_LIMIT || plan.weightElems * weightOperandBytes >= BUFFER_LIMIT)
     {
         return std::nullopt;
     }
