@@ -829,7 +829,8 @@ def test_solution_rejects_a_plr_that_leaves_no_late_sub_iteration(
     [
         ({"ClusterDim": [2, 1]}, "ClusterDim != [1, 1] is incompatible with divergent"),
         ({"ProblemType": {"Sparse": 1}}, "Sparse is not supported"),
-        ({"1LDSBuffer": 1}, "1LDSBuffer=1 allows one LDS block per tensor"),
+        # TDM rejects 1LDSBuffer=1 before the decoupled-PGR checks run.
+        ({"1LDSBuffer": 1}, "1LDSBuffer must be 0 for TDM"),
         ({"PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 0, "PrefetchGlobalReadB": 1},
          "leave both tensors on one LDS block"),
         ({"PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 0},

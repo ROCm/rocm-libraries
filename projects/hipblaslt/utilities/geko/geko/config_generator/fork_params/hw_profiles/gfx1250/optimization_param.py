@@ -537,8 +537,7 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def one_lds_buffer(self, ctx: SizeContext) -> ForkParameter:
-        # Must be 0 here: wave-separated TDM rejects the (1LDSBuffer=1, PGR=2)
-        # pair with "TDM requires at least 2 LDS buffers for PGR2".
+        # Must be 0 here: TDM rejects 1LDSBuffer=1 ("1LDSBuffer must be 0 for TDM").
         return self._make_param("1LDSBuffer", [0])
 
     @param
