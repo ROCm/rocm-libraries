@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Contracts for deferred rocKE CTest category enrollment."""
+"""Contracts for comprehensive-only rocKE CTest enrollment."""
 
 import re
 import subprocess
@@ -10,11 +10,12 @@ from pathlib import Path
 import pytest
 
 _PROVIDER = Path(__file__).resolve().parents[2]
+_PROVIDER_CMAKE = _PROVIDER / "src" / "CMakeLists.txt"
 _ROCKE_CTEST_LISTS = _PROVIDER / "rocke" / "library" / "tests" / "ctest_lists.cmake"
 _ROCKE_CATEGORIES = _PROVIDER / "ROCKE_ENGINE_test_categories_external.yaml"
 _CATEGORY_PARSER = _PROVIDER.parents[1] / "shared/ctest/parse_ctest_categories.py"
 
-_DEFERRED_TESTS = {
+_NEW_TESTS = {
     "rocke_library_runner_contract_pytest",
     "rocke_library_worker_integration_pytest",
     "rocke_library_counted_structural_gate",
@@ -22,13 +23,27 @@ _DEFERRED_TESTS = {
 }
 
 
-def test_category_parser_leaves_deferred_tests_unenrolled(tmp_path):
+def _late_staging_block() -> str:
+    text = _PROVIDER_CMAKE.read_text(encoding="utf-8")
+    start = text.index("# Label what was just folded in")
+    end = text.index("# Install the ctest files", start)
+    return text[start:end]
+
+
+def test_late_staging_drain_applies_provider_and_rocke_categories():
+    block = _late_staging_block()
+    assert '"${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"' in block
+    assert '"${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"' in block
+    assert block.count("apply_ctest_category_labels(") == 2
+
+
+def test_category_parser_assigns_comprehensive_only(tmp_path):
     if not _CATEGORY_PARSER.is_file():
         pytest.skip("shared CTest category parser is unavailable")
     pytest.importorskip("yaml", reason="the shared category parser needs PyYAML")
     ctests = tmp_path / "CTestTestfile.cmake"
     ctests.write_text(
-        "".join(f"add_test({name} python)\n" for name in sorted(_DEFERRED_TESTS)),
+        "".join(f"add_test({name} python)\n" for name in sorted(_NEW_TESTS)),
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -37,42 +52,45 @@ def test_category_parser_leaves_deferred_tests_unenrolled(tmp_path):
         capture_output=True,
         text=True,
     )
-    labeled = {
-        name
-        for name, _value in re.findall(
+    labels = {
+        name: set(value.split(";"))
+        for name, value in re.findall(
             r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
             result.stdout,
         )
     }
-    assert not _DEFERRED_TESTS & labeled
+    assert set(labels) == _NEW_TESTS
+    for name in _NEW_TESTS:
+        assert {"comprehensive", "full"} <= labels[name]
+        assert not {"quick", "standard"} & labels[name]
 
 
-def test_deferred_tests_are_registered_without_ci_tier_owners():
+def test_new_tests_are_registered_outside_fast_ci_tiers():
     cmake = _ROCKE_CTEST_LISTS.read_text(encoding="utf-8")
     categories = _ROCKE_CATEGORIES.read_text(encoding="utf-8")
 
-    # Fast counted/resource contracts remain source-runner coverage until a
-    # provider CI tier has capacity for them.
+    # Fast counted/resource contracts remain source-runner coverage rather than
+    # increasing the existing quick attention CTest.
     assert "test_attention_bwd_counted_sync.py" not in cmake
     assert "test_attention_bwd_resources.py" not in cmake
     assert 'pytest -m \\"not compiler_integration\\"' not in cmake
 
-    for name in _DEFERRED_TESTS:
+    for name in _NEW_TESTS:
         assert f"add_test({name}" in cmake
-        assert f'"{name}"' not in categories
+        assert categories.count(f'"{name}"') == 1
 
-    # Keep exact-name/manual CTest execution useful, but deliberately omit the
-    # quick/standard/comprehensive/full labels selected by provider CI.
-    assert 'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\"' in cmake
-    assert 'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\\\;integration\\"' in cmake
+    # Fallback labels and YAML categories both keep the new entries away from
+    # quick/standard pre-merge and post-merge selection.
     assert (
-        'LABELS \\"ckc\\\\;python\\\\;attention\\\\;host\\\\;structural'
-        '\\\\;hip-kernel-provider\\"' in cmake
+        'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\\\;comprehensive'
+        '\\\\;full\\"' in cmake
     )
     assert (
-        'LABELS \\"ckc\\\\;python\\\\;attention\\\\;host\\\\;compiler'
-        '\\\\;hip-kernel-provider\\"' in cmake
+        'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\\\;integration'
+        '\\\\;comprehensive\\\\;full\\"' in cmake
     )
+    assert "structural\\\\;comprehensive\\\\;full" in cmake
+    assert "compiler\\\\;comprehensive\\\\;full" in cmake
 
     assert "ROCKE_ISA_INSPECT_PROBE=" in cmake
     assert "ROCKE_BWD_NO_COMGR_PIN=" in cmake

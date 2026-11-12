@@ -256,12 +256,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_runner_contract_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m \"not worker_integration\" -v -rs --timeout=30)\n"
        "set_tests_properties(rocke_library_runner_contract_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;runner\"\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;comprehensive\\;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT 180)\n"
        "add_test(rocke_library_worker_integration_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m worker_integration -v -rs --timeout=30)\n"
        "set_tests_properties(rocke_library_worker_integration_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\"\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\\;comprehensive\\;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT 180)\n")
 
@@ -292,7 +292,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;hip-kernel-provider\"\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH};PYTEST_ADDOPTS=;PYTEST_PLUGINS=;PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
@@ -313,7 +313,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "     \${_rocke_compiler_tool_environment})\n"
        "add_test(rocke_library_counted_compiler_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
        "set_tests_properties(rocke_library_counted_compiler_gate PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;hip-kernel-provider\"\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
        "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"

@@ -568,9 +568,10 @@ The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in source discovery; the
 exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
 subset are explicit source-runner stages and registered installed CTests. The
-new CTests and fast counted/resource files are deliberately not enrolled in a
-provider CI tier while the standard shards have no runtime headroom. Enrollment
-is follow-up work after capacity is available. The compiler gate preserves the
+new CTests start at comprehensive/full so nightly coverage owns them without
+adding work to quick/standard pre-merge and post-merge runs. Fast
+counted/resource files remain source-runner coverage rather than expanding the
+existing quick attention CTest. The compiler gate preserves the
 existing resource-table qualification:
 LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
 expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
@@ -584,8 +585,9 @@ CTest names and scopes live in the
 lane affordable by collecting once, selecting files that own non-GPU,
 non-`exhaustive`, non-`worker_integration`, non-`compiler_integration` items,
 and running each selected file
-in a fresh process. Real process-lifecycle contracts have their own registered,
-manual CTest (and remain available in explicit `--exhaustive` source runs). Host
+in a fresh process. Real process-lifecycle contracts have their own
+comprehensive/full CTest (and remain available in explicit `--exhaustive` source
+runs). Host
 runs use at most eight workers, further capped by process affinity and cgroup
 quota; GPU-inclusive runs default to one. Fresh-process exit releases
 module-local kernel/IR caches. The affordable lane has a five-minute default
@@ -609,8 +611,8 @@ exit status for local iteration, not plain `GREEN`.
 [`tools/run_checks.py`](tools/run_checks.py) coordinates its existing platform,
 parity, pytest, and numeric checks, but does not enroll these new explicit
 library gates. Run the library runner directly for their combined source verdict.
-The separately registered CTests support exact-name installed replay; provider
-tier enrollment is deferred until CI has runtime capacity.
+The separately registered CTests also support exact-name installed replay and
+are enrolled only in comprehensive/full nightly coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

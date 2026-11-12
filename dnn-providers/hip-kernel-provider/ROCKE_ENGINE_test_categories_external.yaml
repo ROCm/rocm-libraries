@@ -25,7 +25,9 @@
 # compiler-option reproducibility gate joins it: it re-measures which -mllvm
 # options the loaded compiler accepts. Both are registered in build-tree and
 # installed-artifact CTest, so developers and provider CI execute the same
-# logical gates against their respective package data.
+# logical gates against their respective package data. The pytest-scaling
+# runner and counted-sync entries start at comprehensive so nightly/full runs
+# own them without adding work to quick/standard pre-merge and post-merge runs.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -247,6 +249,61 @@ test_categories:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  runner-contract-comprehensive:
+    description: "rocKE affordable-runner policy contracts, comprehensive and full"
+    test_patterns:
+      - "rocke_library_runner_contract_pytest"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "runner"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  worker-integration-comprehensive:
+    description: "rocKE file-worker lifecycle contracts, comprehensive and full"
+    test_patterns:
+      - "rocke_library_worker_integration_pytest"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "runner"
+      - "integration"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  counted-structural-comprehensive:
+    description: "rocKE counted-sync exhaustive structural gate, comprehensive and full"
+    test_patterns:
+      - "rocke_library_counted_structural_gate"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "structural"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  counted-compiler-comprehensive:
+    description: "rocKE counted-sync compiler and resource gate, comprehensive and full"
+    test_patterns:
+      - "rocke_library_counted_compiler_gate"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "compiler"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
 
   comprehensive:
     description: "rocKE checks run by scheduled CI only"
