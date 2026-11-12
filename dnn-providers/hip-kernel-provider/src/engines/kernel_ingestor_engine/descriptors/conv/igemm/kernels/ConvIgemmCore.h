@@ -45,13 +45,12 @@ __device__ inline float k1BfToFloat(unsigned short b)
 }
 __device__ inline unsigned short k1FloatToBf(float v)
 {
-    unsigned u = __builtin_bit_cast(unsigned, v);
-    if((u & 0x7f800000u) == 0x7f800000u)
-    {
-        return static_cast<unsigned short>((u >> 16) | ((u & 0xffffu) != 0 ? 0x40u : 0u));
-    }
-    u += 0x7fffu + ((u >> 16) & 1u);
-    return static_cast<unsigned short>(u >> 16);
+    // Nearest-even; a NaN stays a (quiet) NaN, an infinity infinite. Both results and a select,
+    // not a branch: per-lane values, and a branch costs an exec-masked block per element.
+    const unsigned u = __builtin_bit_cast(unsigned, v);
+    const unsigned special = (u >> 16) | ((u & 0xffffu) != 0 ? 0x40u : 0u);
+    const unsigned rounded = (u + 0x7fffu + ((u >> 16) & 1u)) >> 16;
+    return static_cast<unsigned short>((u & 0x7f800000u) == 0x7f800000u ? special : rounded);
 }
 /// Three-bf16's low part of v, given its high part h = k1FloatToBf(v): zero where v - h is not a
 /// number (v infinite), so an infinite operand stays infinite rather than turning into NaN.
@@ -103,7 +102,13 @@ struct K1Elem<k1_bf16>
     }
     __device__ static k1_bf16 store(float v)
     {
+#if defined(__gfx950__)
+        // The hardware conversion (v_cvt_pk_bf16_f32: nearest-even; a NaN stays a NaN, its
+        // payload aside), what k1FloatToBf computes in software on the other targets.
+        return __builtin_bit_cast(k1_bf16, static_cast<__bf16>(v));
+#else
         return k1FloatToBf(v);
+#endif
     }
 };
 
@@ -160,11 +165,20 @@ struct K1Raw<2>
 #define K1_HALO_CAP 64
 #endif
 
+// Every caller passes wave-uniform values; readfirstlane says so. A base derived through a
+// 64-bit division otherwise stays in VGPRs and the compiler wraps every buffer access in a
+// waterfall loop (TheRock 10.3 HIPRTC; K1, K7 and stem-bwd). Already-scalar values fold away.
 __device__ inline __amdgpu_buffer_rsrc_t k1Rsrc(const void* base, long long bytes)
 {
     const int records = bytes < 0x7fffffffLL ? static_cast<int>(bytes) : 0x7fffffff;
+    const unsigned long long p = reinterpret_cast<unsigned long long>(base);
+    const unsigned lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p));
+    const unsigned hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p >> 32));
     return __builtin_amdgcn_make_buffer_rsrc(
-        const_cast<void*>(base), static_cast<short>(0), records, K1_RSRC_FLAGS);
+        reinterpret_cast<void*>((static_cast<unsigned long long>(hi) << 32) | lo),
+        static_cast<short>(0),
+        __builtin_amdgcn_readfirstlane(records),
+        K1_RSRC_FLAGS);
 }
 
 template <class Raw>
@@ -1017,6 +1031,25 @@ struct K1Tiles
     // sub-tap's, packTaps taps on per iteration; packChan is its channel within the tap.
     int curIt, endIt, curC, curQs, curQr, curQt;
     int packTaps, packSub, packChan;
+    // PACK 2: unsigned magic division by cgroup, taps[2] and taps[1] (uniform, set in init), so a
+    // k-step's carry through the taps is a few multiplies, not a per-thread subtract loop.
+    unsigned cgMul, cgSh, sMul, sSh, rMul, rSh;
+    __device__ static void magicOf(int d, unsigned& mul, unsigned& sh)
+    {
+        unsigned s = 0;
+        while((1u << s) < static_cast<unsigned>(d))
+            ++s;
+        sh = s;
+        mul = static_cast<unsigned>(((static_cast<unsigned long long>((1ull << s) - d)) << 32)
+                                        / static_cast<unsigned long long>(d)
+                                    + 1);
+    }
+    /// n / d for 0 <= n < 2^31 (mul, sh from magicOf(d)).
+    __device__ static int magicDiv(int n, unsigned mul, unsigned sh)
+    {
+        return static_cast<int>((__umulhi(static_cast<unsigned>(n), mul) + static_cast<unsigned>(n))
+                                >> sh);
+    }
     long long tapStride;
     long long aBase[A_PASSES];
     int aD[A_PASSES], aH[A_PASSES], aW[A_PASSES];
@@ -1139,6 +1172,9 @@ struct K1Tiles
         else if constexpr(PACK == 2)
         {
             cChunks = 1;
+            magicOf(gather.cgroup, cgMul, cgSh);
+            magicOf(gather.taps[2], sMul, sSh);
+            magicOf(gather.taps[1], rMul, rSh);
         }
 #if K1_BUFFER
         bRsrc = k1Rsrc(
@@ -1199,20 +1235,16 @@ struct K1Tiles
         if constexpr(PACK == 2)
         {
             // BK channels on, carried through the taps (several when cgroup < BK).
-            packChan += BK;
-            while(packChan >= gather.cgroup)
-            {
-                packChan -= gather.cgroup;
-                if(++curQs == gather.taps[2])
-                {
-                    curQs = 0;
-                    if(++curQr == gather.taps[1])
-                    {
-                        curQr = 0;
-                        ++curQt;
-                    }
-                }
-            }
+            const int t = packChan + BK;
+            const int adv = magicDiv(t, cgMul, cgSh);
+            packChan = t - adv * gather.cgroup;
+            const int s = curQs + adv;
+            const int sCarry = magicDiv(s, sMul, sSh);
+            curQs = s - sCarry * gather.taps[2];
+            const int r = curQr + sCarry;
+            const int rCarry = magicDiv(r, rMul, rSh);
+            curQr = r - rCarry * gather.taps[1];
+            curQt += rCarry;
         }
         else if constexpr(PACK != 0)
         {
@@ -1246,14 +1278,16 @@ struct K1Tiles
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
         // PACK: this thread's channel in its own tap, valid while the tap is.
         const int c = PACK != 0 ? chan : c0 + kv;
-        const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) && it < endIt;
+        // Bitwise (not short-circuit) predicates: on per-lane values && lets the compiler turn
+        // the offset select into exec-masked branches around the loads; & keeps a v_cndmask.
+        const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) & (it < endIt);
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
-            const bool ok = cOk && static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0])
-                            && static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1])
-                            && static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]);
+            const bool ok = cOk & (static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0]))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1]))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]));
 #if K1_BUFFER
             const unsigned offset
                 = ok ? static_cast<unsigned>(
@@ -1311,10 +1345,10 @@ struct K1Tiles
             const int r = row + p * ROWS_PER_PASS;
             const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
             const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
-            const bool ok = itOk && c < gather.cgroup
-                            && static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0])
-                            && static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1])
-                            && static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]);
+            const bool ok = itOk & (c < gather.cgroup)
+                            & (static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0]))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1]))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]));
             const unsigned offset
                 = ok ? static_cast<unsigned>(
                            aOff[p]
@@ -1339,7 +1373,7 @@ struct K1Tiles
         {
             const int r = row + p * ROWS_PER_PASS;
             const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
-            const bool ok = itOk && bOk[p] && c < gather.cgroup;
+            const bool ok = itOk & bOk[p] & (c < gather.cgroup);
             const unsigned offset
                 = ok ? static_cast<unsigned>(
                            bOff[p]
@@ -1376,7 +1410,7 @@ struct K1Tiles
 #pragma unroll
                 for(int j = 0; j < KV; ++j)
                 {
-                    const bool ok = itOk && bOk[p] && c0 + dK[p] + j < kgroup;
+                    const bool ok = itOk & bOk[p] & (c0 + dK[p] + j < kgroup);
                     const long long off = (c0 + j) * wRow + tap * tapStride;
 #if K1_BUFFER
                     const unsigned offset
@@ -1403,7 +1437,7 @@ struct K1Tiles
             {
 #if K1_BUFFER
                 const unsigned offset
-                    = cOk && bOk[p]
+                    = (cOk & bOk[p])
                           ? static_cast<unsigned>(
                                 bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
                           : K1_OUT_OF_RANGE;
@@ -1675,7 +1709,7 @@ struct K1Halo
         for(int p = 0; p < PASSES; ++p)
         {
             const long long pix = pix0 + row + p * RPP;
-            const bool ok = c < cgroup && pix >= base && pix < pixels;
+            const bool ok = (c < cgroup) & (pix >= base) & (pix < pixels);
             const unsigned offset
                 = ok ? static_cast<unsigned>(((pix - base) * chans + chanOffset + c)
                                              * static_cast<long long>(sizeof(T)))
@@ -1732,6 +1766,21 @@ template <int N>
 __device__ inline void k1DmaBarrier()
 {
     asm volatile("s_waitcnt vmcnt(%0) lgkmcnt(0)\n\ts_barrier" ::"n"(N) : "memory");
+}
+
+// LDS hand-off barrier of the matrix-core kernel: its waves exchange data through LDS only. On
+// gfx12, __syncthreads() fences every address space at workgroup scope and so adds a global_inv
+// (L0 invalidate) after each barrier, two per k-step; fences on the local address space suffice.
+// Other families keep __syncthreads() (its code there is what this would emit, or close to it).
+__device__ inline void k1LdsBarrier()
+{
+#if HKP_ARCH_GFX12
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+    __syncthreads();
+#endif
 }
 
 // Matrix-core kernel. Block: WM x WN waves, tile BM x BN, k-step BK, STAGES LDS buffers (2: the
@@ -2056,10 +2105,10 @@ __device__ void k1ConvMma(const K1Args& a)
         {
             const int qEnd = (end - ch * nT) < nT ? end - ch * nT : nT;
             const bool nextChunk = (ch + 1) * nT < end;
-            __syncthreads();
+            k1LdsBarrier();
             halo.template store<S, Tiles>(As, LD, APL);
             tiles.storeB(Bs, LD, BN * LD);
-            __syncthreads();
+            k1LdsBarrier();
             if(nextChunk)
             {
                 halo.load((ch + 1) * BK);
@@ -2103,9 +2152,9 @@ __device__ void k1ConvMma(const K1Args& a)
                 multiply(As, Bs);
                 if(q + 1 < qEnd)
                 {
-                    __syncthreads();
+                    k1LdsBarrier();
                     tiles.storeB(Bs, LD, BN * LD);
-                    __syncthreads();
+                    k1LdsBarrier();
                 }
                 qt = nt;
                 qr = nr;
@@ -2172,7 +2221,7 @@ __device__ void k1ConvMma(const K1Args& a)
             }
             for(int it = 0; it < iters; ++it)
             {
-                __syncthreads();
+                k1LdsBarrier();
                 tiles.load();
                 const S* cur = tile + (it & 1) * STAGE_S;
                 multiply(cur, cur + PLANES * BM * LD);
@@ -2186,9 +2235,9 @@ __device__ void k1ConvMma(const K1Args& a)
         {
             for(int it = 0; it < iters; ++it)
             {
-                __syncthreads();
+                k1LdsBarrier();
                 store(tile);
-                __syncthreads();
+                k1LdsBarrier();
                 tiles.load();
                 multiply(tile, tile + PLANES * BM * LD);
             }
@@ -2228,7 +2277,7 @@ __device__ void k1ConvMma(const K1Args& a)
         // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
         // channel) to global; single elements where a run is not contiguous in the output (an
         // image boundary, a stride phase) or past the last row.
-        __syncthreads();
+        k1LdsBarrier();
         T* strip = lds + wave * DIM * OLDC;
         constexpr int RUNS = CFR / VEC;
         K1CfWalk walk;
@@ -2289,7 +2338,7 @@ __device__ void k1ConvMma(const K1Args& a)
 
     // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of VEC columns
     // to global (single columns past the last full vector).
-    __syncthreads();
+    k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
     constexpr int ROW_VECS = WTN / VEC;
 #pragma unroll
