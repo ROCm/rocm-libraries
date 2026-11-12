@@ -231,6 +231,20 @@ std::vector<DeviceCase> deviceCases()
     strided.dilation = {2, 1};
     cases.push_back({"AsymmetricPaddingStrideDilation", strided});
 
+    // A long reduction (8 images of 1024, 8192 output positions a dw element): the backward
+    // weights' block shares it, past the 5184 a lane the per-thread kernel took.
+    ConvShape longReduction;
+    longReduction.n = 8;
+    longReduction.c = 16;
+    longReduction.k = 16;
+    longReduction.input = {1024};
+    longReduction.filter = {3};
+    longReduction.prePadding = {1};
+    longReduction.postPadding = {1};
+    longReduction.stride = {1};
+    longReduction.dilation = {1};
+    cases.push_back({"LongReduction", longReduction});
+
     ConvShape convolution;
     convolution.mode = ConvMode::CONVOLUTION;
     convolution.prePadding = {1, 1};

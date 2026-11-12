@@ -492,8 +492,13 @@ bool withinWorkloadBudget(const ConvNaiveProblem& problem,
     // Lanes are physical: count CUs, two per WGP where HIP reports WGPs (gfx10+).
     const int64_t reported = device_units::computeUnits(device);
     const int64_t computeUnits = reported > 0 ? reported : FALLBACK_COMPUTE_UNITS;
+    const int64_t elementLanes = problem.direction == ConvDirection::BACKWARD_WEIGHTS
+                                     ? NAIVE_WRW_LANES_PER_ELEMENT
+                                     : int64_t{1};
+    const auto outputLanes = pack_features::checkedMultiply(problem.args.total, elementLanes);
+    const int64_t deviceLanes = computeUnits * LANES_PER_COMPUTE_UNIT;
     const int64_t occupiedLanes = std::max<int64_t>(
-        1, std::min<int64_t>(computeUnits * LANES_PER_COMPUTE_UNIT, problem.args.total));
+        1, outputLanes.has_value() ? std::min<int64_t>(deviceLanes, *outputLanes) : deviceLanes);
     const int64_t perLane = problem.multiplyAccumulates / occupiedLanes
                             + (problem.multiplyAccumulates % occupiedLanes != 0 ? 1 : 0);
     return perLane <= NAIVE_MACS_PER_LANE_BUDGET;
