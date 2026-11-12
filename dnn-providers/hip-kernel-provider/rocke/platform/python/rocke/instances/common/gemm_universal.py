@@ -1919,12 +1919,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     lds = b.smem_ptr_add(lds, b.zext(b.mul(lds_parity, b.const_i32(buf_bytes)), _I64))
                 elif lds_parity:
                     lds = b.smem_ptr_add(lds, b.zext(b.const_i32(lds_parity * buf_bytes), _I64))
+                # ROCKE_EXP_MX_SCALE_NOCLIP=1: constant extents (the tile itself), which saves
+                # SGPRs; only valid when M, N and K are multiples of the block tile.
+                if _os_mx.environ.get("ROCKE_EXP_MX_SCALE_NOCLIP") == "1":
+                    sdim0, sdim1 = b.const_i32(rows * 4), b.const_i32(ksteps)
+                else:
+                    sdim0 = b.smax(b.sub(row_bytes, b.mul(row_off, c4)), zero)
+                    sdim1 = b.smax(b.sub(b.div(K, b.const_i32(128)), kstep0), zero)
                 groups = b.tdm_descriptor_2d(
                     b.global_addr_of(sptr, origin),
                     lds,
                     elem_bytes=1,
-                    tensor_dim0=b.smax(b.sub(row_bytes, b.mul(row_off, c4)), zero),
-                    tensor_dim1=b.smax(b.sub(b.div(K, b.const_i32(128)), kstep0), zero),
+                    tensor_dim0=sdim0,
+                    tensor_dim1=sdim1,
                     row_stride=row_bytes,
                     tile_dim0=rows * 4,
                     tile_dim1=ksteps,
@@ -2526,6 +2533,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     refill_done = True
             return new_accs
         for kk in range(k_atoms):
+            # EXPERIMENT: ROCKE_EXP_MX_KFENCE=1 -> a scheduling fence between k-atoms of the
+            # MX path, so the default scheduler cannot hoist k-atom kk's LDS reads above the
+            # WMMAs of kk-1 (register pressure). Emits no instruction.
+            if _mx and kk > 0 and _os_mx.environ.get("ROCKE_EXP_MX_KFENCE") == "1":
+                b.sched_barrier(0)
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
             a_rows = []
             for mi in range(mfmas_m):
