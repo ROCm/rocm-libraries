@@ -1069,6 +1069,7 @@ def build():
 # (atom, loop, layout, filter, align) its first two tiles, loops 0, 1, 5 (gfx950 direct) and 6
 # (small-C). Not gfx908 (its half-rate bf16 atom makes three products slower than fp32 MFMA).
 X3_ATOMS = {
+    "mfma16_bf16",  # the CDNA small-C rows (stems)
     "mfma32_bf16",
     "mfma32x16_bf16",
     "mfma16x32_bf16",
