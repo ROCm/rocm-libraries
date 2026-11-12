@@ -1,0 +1,97 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the rocsolver C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+# scalar-device:
+#   Single values in device memory, besides the info the solver_info_handles
+#   default covers (the last argument): most are written by the kernel, larf's
+#   alpha and larfg's are read too.
+# scalar-host:
+#   get_alg_mode's mode: the getter default skips it, the routine taking the
+#   function as a by-value enum.
+
+["rocsolver_{s,d}bdsvdx"]
+nsv = "scalar-device"
+
+["rocsolver_{s,d,c,z}cholqr"]
+sigma = "scalar-device"
+
+["rocsolver_{s,d,c,z}gecon"]
+anorm = "scalar-device"
+rcond = "scalar-device"
+
+["rocsolver_{s,d,c,z}gesvdj"]
+n_sweeps = "scalar-device"
+residual = "scalar-device"
+
+["rocsolver_{s,d,c,z}gesvdx"]
+nsv = "scalar-device"
+
+[rocsolver_get_alg_mode]
+mode = "scalar-host"
+
+["rocsolver_{c,z}heevdx"]
+nev = "scalar-device"
+
+["rocsolver_{c,z}heevj"]
+n_sweeps = "scalar-device"
+residual = "scalar-device"
+
+["rocsolver_{c,z}heevx"]
+nev = "scalar-device"
+
+["rocsolver_{c,z}hegvdx"]
+nev = "scalar-device"
+
+["rocsolver_{c,z}hegvj"]
+n_sweeps = "scalar-device"
+residual = "scalar-device"
+
+["rocsolver_{c,z}hegvx"]
+nev = "scalar-device"
+
+["rocsolver_{s,d,c,z}lange"]
+norm = "scalar-device"
+
+["rocsolver_{s,d,c,z}larf"]
+alpha = "scalar-device"
+
+["rocsolver_{s,d,c,z}larfg"]
+alpha = "scalar-device"
+tau = "scalar-device"
+
+["rocsolver_{s,d,c,z}lasyf"]
+kb = "scalar-device"
+
+["rocsolver_{s,d}stebz"]
+nev = "scalar-device"
+nsplit = "scalar-device"
+
+["rocsolver_{s,d,c,z}stein"]
+nev = "scalar-device"
+
+["rocsolver_{s,d}syevdx"]
+nev = "scalar-device"
+
+["rocsolver_{s,d}syevj"]
+n_sweeps = "scalar-device"
+residual = "scalar-device"
+
+["rocsolver_{s,d}syevx"]
+nev = "scalar-device"
+
+["rocsolver_{s,d}sygvdx"]
+nev = "scalar-device"
+
+["rocsolver_{s,d}sygvj"]
+n_sweeps = "scalar-device"
+residual = "scalar-device"
+
+["rocsolver_{s,d}sygvx"]
+nev = "scalar-device"

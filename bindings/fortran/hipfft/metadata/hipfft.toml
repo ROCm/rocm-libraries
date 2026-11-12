@@ -1,0 +1,83 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the hipfft C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+# scalar-host:
+#   workSize of the plan and size routines stays a scalar, which is right for a plan on
+#   one GPU. On a plan spread over several GPUs (hipfftXtSetGPUs), hipFFT writes one
+#   work size per GPU: such a caller passes c_loc of an array to the bind(C) form.
+
+[hipfftEstimate1d]
+workSize = "scalar-host"
+
+[hipfftEstimate2d]
+workSize = "scalar-host"
+
+[hipfftEstimate3d]
+workSize = "scalar-host"
+
+[hipfftEstimateMany]
+workSize = "scalar-host"
+
+[hipfftExecC2C]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftExecC2R]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftExecD2Z]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftExecR2C]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftExecZ2D]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftExecZ2Z]
+idata = "any-rank"
+odata = "any-rank"
+
+[hipfftGetProperty]
+value = "scalar-host"
+
+[hipfftGetSize1d]
+workSize = "scalar-host"
+
+[hipfftGetSize2d]
+workSize = "scalar-host"
+
+[hipfftGetSize3d]
+workSize = "scalar-host"
+
+[hipfftGetSizeMany]
+workSize = "scalar-host"
+
+[hipfftGetSizeMany64]
+workSize = "scalar-host"
+
+[hipfftMakePlan1d]
+workSize = "scalar-host"
+
+[hipfftMakePlan2d]
+workSize = "scalar-host"
+
+[hipfftMakePlan3d]
+workSize = "scalar-host"
+
+[hipfftMakePlanMany]
+workSize = "scalar-host"
+
+[hipfftMakePlanMany64]
+workSize = "scalar-host"
