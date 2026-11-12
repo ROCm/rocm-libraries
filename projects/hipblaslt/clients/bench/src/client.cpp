@@ -758,7 +758,7 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Legacy alias for hybrid_assignment_policy for both C and C++ APIs. "
+         "Legacy alias for hybrid_assignment_policy for API methods c, mix, and cpp. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
          "leaves the mode unset so the library default applies.")
 

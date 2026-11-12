@@ -103,8 +103,10 @@ cd hipBLASLt; cd build/release
 | `DynamicWorkQueue` | `on` or `1` | Force dynamic work-queue assignment. |
 | `Auto` | `auto` or `2` | Always use the Origami heuristic to select static or dynamic assignment. |
 
-SM-count and assignment-policy options apply to both C and C++ API methods, including
-single and grouped GEMMs selected by heuristic, explicit index, or all-algorithm search.
+SM-count and assignment-policy options apply to `--api_method c`, `mix`, and `cpp`,
+with heuristic, explicit-index, or all-algorithm selection. The `mix` and `cpp` methods
+also forward both options for grouped GEMMs. The separate `grouped_gemm_c` method currently
+forwards only the SM-count request.
 Omitting both policy options leaves the scheduling mode unset.
 Matching old and new options are accepted; conflicting values are rejected.
 These options do not select the kernel family or change the public C API names.

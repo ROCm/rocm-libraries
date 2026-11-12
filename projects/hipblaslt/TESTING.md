@@ -332,7 +332,7 @@ descriptor inheritance, preference precedence and
 initialization after replacing a problem. Their `smoke_` names include them in the
 quick shared CI lane.
 
-Each case validates against a CPU reference computation with tolerance checks, so a failure means a
+Each YAML case validates against a CPU reference computation with tolerance checks, so a failure means a
 real numerical disagreement rather than a crash only.
 
 **What requires GPU hardware:** effectively all of the above.
