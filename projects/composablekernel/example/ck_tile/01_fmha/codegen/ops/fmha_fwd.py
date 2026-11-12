@@ -1833,8 +1833,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     ) -> bool:
         # The name encodes every geometry field and occupancy, but not runtime
         # constraints. Equivalent custom-tune tiles therefore match as well.
+        # The split-KV cross-page flag is not in the name but changes the tile.
         return any(
             tile.name == candidate.name
+            and tile.F_page_shorter_than_tile == candidate.F_page_shorter_than_tile
             for candidate in cls._QR_TDM_SCHED_TILES.get((hdim, tile.F_bn1), ())
         )
 
