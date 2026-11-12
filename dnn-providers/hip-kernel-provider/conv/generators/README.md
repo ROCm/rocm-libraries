@@ -12,7 +12,7 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_igemm.py` | `igemm` | `CONV_IGEMM_FWD`, `CONV_IGEMM_BWD` |
 | `gen_igemm_nchw.py` | `igemm_nchw` | `CONV_IGEMM_NCHW_BWD` |
 | `gen_direct.py` | `direct` | `CONV_DIRECT_FWD`, `CONV_DIRECT_BWD` |
-| `gen_winograd.py` | `winograd` | `CONV_WINOGRAD_FWD`, `CONV_WINOGRAD_BWD` |
+| `gen_winograd.py` | `winograd` | `CONV_WINOGRAD_FWD`, `CONV_WINOGRAD_BWD`, `CONV_WINOGRAD_WRW` |
 | `gen_conv_wrw.py` | `wrw` | `CONV_WRW` |
 | `gen_conv_stem_bwd.py` | `stem_bwd` | `CONV_STEM_BWD` |
 | `gen_smallc.py` | `smallc` | `CONV_SMALLC_FWD`, `CONV_SMALLC_BWD` |
