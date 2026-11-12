@@ -224,6 +224,7 @@ public:
     std::size_t GetMaxComputeUnits() const override;
     std::size_t GetWavefrontWidth() const override;
     std::size_t GetMaxMemoryAllocSize() const override;
+    std::size_t GetAvailableMemory() const override;
 
     bool CooperativeLaunchSupported() const override;
 
