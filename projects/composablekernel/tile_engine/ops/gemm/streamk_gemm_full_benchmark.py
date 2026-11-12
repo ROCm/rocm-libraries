@@ -160,7 +160,13 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
         for _, cfg, lib in batch
     ]
     payload = json.dumps(
-        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+        {
+            "items": items,
+            "verify": args.verify,
+            "verify_tol": args.verify_tol,
+            "arch": args.arch,
+            "check_identity": True,
+        }
     )
 
     env = base_env.copy()
