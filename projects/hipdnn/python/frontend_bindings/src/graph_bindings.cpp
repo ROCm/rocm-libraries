@@ -374,17 +374,16 @@ void graphBindings(nb::module_& m)
                BuildPlanPolicy policy) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                auto rawHandle
-                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 return g.build(rawHandle, modes, policy);
             },
             nb::arg("handle"),
             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
             nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-            "One-shot graph build: validates, builds the operation graph, runs "
-            "check_support(), creates execution plans from the given heuristic modes, "
+            "One-shot graph build: validates, builds the operation graph, creates "
+            "execution plans from the given heuristic modes, runs check_support(), "
             "and finalizes with the given policy. Equivalent to calling validate(), "
-            "build_operation_graph(), check_support(), create_execution_plans(), and "
+            "build_operation_graph(), create_execution_plans(), check_support(), and "
             "build_plans() in sequence. Returns an Error after add_engine_*() specs "
             "have been added, since those require the plan-spec autotune path instead.")
         .def(
@@ -942,8 +941,7 @@ void graphBindings(nb::module_& m)
                const std::vector<std::vector<int64_t>>& overrideStrides) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                auto rawHandle
-                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
                 void* workspacePtr = workspace.is_none()
@@ -1127,8 +1125,7 @@ void graphBindings(nb::module_& m)
             [](graph::Graph& g, const nb::object& handle, const nb::bytes& data) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                auto rawHandle
-                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
                 const std::vector<uint8_t> vec(ptr, ptr + data.size());
                 return g.from_compiled_plan_binary(rawHandle, vec);

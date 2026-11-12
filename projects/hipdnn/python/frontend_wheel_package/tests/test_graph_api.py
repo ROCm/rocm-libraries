@@ -389,3 +389,74 @@ class TestOverrideExecution:
             override_strides=[[4, 4, 2, 1]],
         )
         assert result.is_bad() and "set_override_shape_enabled" in result.get_message()
+
+    def test_execute_override_with_enabled_flag_succeeds(self):
+        """Override execution succeeds on an SDPA graph built with overrides enabled."""
+        graph, q, k, v, o, stats = build_sdpa_graph()
+        graph.set_override_shape_enabled(True)
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        if result.is_bad():
+            pytest.skip(
+                f"No SDPA engine with override support: {result.get_message()}"
+            )
+
+        # Override with halved sequence lengths
+        q_dim = q.get_dim()  # [2, 8, 16, 64]
+        k_dim = k.get_dim()  # [2, 8, 32, 64]
+        v_dim = v.get_dim()  # [2, 8, 32, 64]
+        o_dim = [q_dim[0], q_dim[1], q_dim[2] // 2, q_dim[3]]
+        q_ovr = [q_dim[0], q_dim[1], q_dim[2] // 2, q_dim[3]]
+        k_ovr = [k_dim[0], k_dim[1], k_dim[2] // 2, k_dim[3]]
+        v_ovr = [v_dim[0], v_dim[1], v_dim[2] // 2, v_dim[3]]
+
+        def _row_major_strides(dims):
+            strides = [1] * len(dims)
+            for i in range(len(dims) - 2, -1, -1):
+                strides[i] = strides[i + 1] * dims[i + 1]
+            return strides
+
+        override_uids = [q.get_uid(), k.get_uid(), v.get_uid(), o.get_uid()]
+        override_shapes = [q_ovr, k_ovr, v_ovr, o_dim]
+        override_strides = [
+            _row_major_strides(s) for s in override_shapes
+        ]
+
+        # Allocate device buffers for the original (max) dimensions
+        q_buf = hipdnn.DeviceBuffer(
+            int(np.prod(q_dim)) * np.dtype(np.float32).itemsize
+        )
+        k_buf = hipdnn.DeviceBuffer(
+            int(np.prod(k_dim)) * np.dtype(np.float32).itemsize
+        )
+        v_buf = hipdnn.DeviceBuffer(
+            int(np.prod(v_dim)) * np.dtype(np.float32).itemsize
+        )
+        o_buf = hipdnn.DeviceBuffer(
+            int(np.prod(q_dim)) * np.dtype(np.float32).itemsize
+        )
+        stats_buf = hipdnn.DeviceBuffer(
+            int(np.prod(stats.get_dim())) * np.dtype(np.float32).itemsize
+        )
+
+        variant_pack = {
+            q.get_uid(): q_buf.ptr(),
+            k.get_uid(): k_buf.ptr(),
+            v.get_uid(): v_buf.ptr(),
+            o.get_uid(): o_buf.ptr(),
+            stats.get_uid(): stats_buf.ptr(),
+        }
+
+        ws_size = graph.get_workspace_size()
+        ws_buf = hipdnn.DeviceBuffer(ws_size) if ws_size > 0 else None
+        ws_ptr = ws_buf.ptr() if ws_buf else 0
+
+        result = graph.execute(
+            handle,
+            variant_pack,
+            ws_ptr,
+            override_uids=override_uids,
+            override_shapes=override_shapes,
+            override_strides=override_strides,
+        )
+        assert result.is_good(), f"Override execute failed: {result.get_message()}"
