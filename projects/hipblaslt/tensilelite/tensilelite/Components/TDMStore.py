@@ -43,7 +43,7 @@ from math import log2
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
-from rocisa.instruction import DSLoadD16HIU16, SAddCU32, SAddU32, SCBranchSCC1, SCmpLeU32, SLShiftLeftB64, \
+from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC1, SCmpLeU32, SLShiftLeftB64, \
   SLShiftRightB32, SMinU32, SMovB32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, \
   VMulLOU32, VReadfirstlaneB32, VSubU32
 
@@ -77,8 +77,8 @@ def tdmStoreRejectReason(state):
 
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
-  tensor_store_from_lds per wave. That needs fp32 D, int32 D from int32 accumulators, or bf16 or fp16 D converted
-  from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
+  tensor_store_from_lds per wave. That needs fp32 D, int32 or int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D
+  converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
   atomic StreamK, which
   stores each tile it completes, and no LDS data kept from one persistent tile to the next.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
@@ -100,11 +100,12 @@ def tdmStoreRejectReason(state):
 
   pt = state["ProblemType"]
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
-  int32 = pt["DestDataType"].isInt32() and pt["ComputeDataType"].isInt32()
-  if not int32 and (not pt["ComputeDataType"].isSingle()
-                    or not (pt["DestDataType"].isSingle() or (sixteenBit and pt["HighPrecisionAccumulate"]))):
-    return "TDMStoreInst supports fp32 D, int32 D from int32 accumulators, and bf16 and fp16 D converted from fp32 " \
-           "accumulators"
+  converted = sixteenBit or pt["DestDataType"].is8bitFloat()
+  integer = (pt["DestDataType"].isInt32() or pt["DestDataType"].isInt8()) and pt["ComputeDataType"].isInt32()
+  if not integer and (not pt["ComputeDataType"].isSingle()
+                      or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
+    return "TDMStoreInst supports fp32 D, int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D " \
+           "converted from fp32 accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
@@ -231,7 +232,8 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   """Read this element's C vector from the staged tile, where its D is staged later.
 
   An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
-  ds_load_u16_d16_hi. Only that half is read afterwards, so it does not matter that a d16 load writes
+  ds_load_u16_d16_hi. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
+  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards, so it does not matter that a d16 load writes
   all 32 bits of its VGPR on gfx1250, where ECC zero-fills the other half. A DS load reads at most
   16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
   """
@@ -243,6 +245,11 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   memToken = MemTokenData([_stagedTileToken(gwb)])
   if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and not kw.states.HHH_WMMA and vc0 % 2:
     inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
+    inst.setMemToken(memToken)
+    module.add(inst)
+    return module
+  if bpl == 1:
+    inst = DSLoadU8(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
     module.add(inst)
     return module

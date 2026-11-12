@@ -76,10 +76,15 @@ def _state(**overrides):
   return state
 
 
-@pytest.mark.parametrize("dest, hpa", [("b", True), ("h", True), ("s", True), ("s", False)])
+@pytest.mark.parametrize("dest, hpa", [("b", True), ("h", True), ("f8", True), ("b8", True), ("s", True), ("s", False)])
 def test_accepts_output_types(dest, hpa):
-  """fp32 D, with or without HighPrecisionAccumulate, and bf16 and fp16 D converted from fp32 accumulators."""
+  """fp32 D, with or without HighPrecisionAccumulate, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators."""
   assert tdmStoreRejectReason(_state(DestDataType=DataType(dest), HighPrecisionAccumulate=hpa)) is None
+
+
+def test_accepts_int8_d_from_int32_accumulators():
+  """int8 D from int32 accumulators, which the block stages as 1-byte elements."""
+  assert tdmStoreRejectReason(_state(DestDataType=DataType("i8"), ComputeDataType=DataType("i"))) is None
 
 
 def test_accepts_int32_d_from_int32_accumulators():
@@ -136,8 +141,8 @@ def test_disabled_is_not_validated():
   assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
-_OUTPUT = "TDMStoreInst supports fp32 D, int32 D from int32 accumulators, and bf16 and fp16 D converted from fp32 " \
-  "accumulators"
+_OUTPUT = "TDMStoreInst supports fp32 D, int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D " \
+  "converted from fp32 accumulators"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
@@ -149,6 +154,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"HighPrecisionAccumulate": False}, _OUTPUT),
   ({"ComputeDataType": DataType("h")}, _OUTPUT),
   ({"DestDataType": DataType("i")}, _OUTPUT),
+  ({"DestDataType": DataType("i8")}, _OUTPUT),
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
@@ -601,6 +607,22 @@ def test_int32_d_stages_4_byte_elements(gp_gfx1250, gfx1250_iim, assembler, caps
   assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 4
   assert "tensor_store_from_lds" in asm
   for tag, op in (("stage D element", "ds_store_b32"), ("load C element", "ds_load_b32")):
+    assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
+
+
+@pytest.mark.parametrize("dest, compute", [("F8", "S"), ("B8", "S"), ("I8", "I")])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_one_byte_d_stages_with_ds_store_b8_at_vw1(gp_gfx1250, gfx1250_iim, assembler, capsys, level, dest, compute):
+  """fp8 and bf8 D from fp32 accumulators and int8 D from int32 accumulators at store vector width 1: every D
+  element is one ds_store_b8 into a staged tile of 1 byte per element, and with beta != 0 every C element is read
+  back with one ds_load_u8, into the low byte of its VGPR, where readInput's byte load puts it."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 64, 1, 1, 2, 2, 2, 2], TDMStoreInst=level,
+                       StoreVectorWidth=1, ProblemType={"DataType": dest, "MacDataTypeA": dest, "MacDataTypeB": dest,
+                                                       "DestDataType": dest, "ComputeDataType": compute})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"]
+  assert "tensor_store_from_lds" in asm
+  for tag, op in (("stage D element", "ds_store_b8"), ("load C element", "ds_load_u8")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
 
 
