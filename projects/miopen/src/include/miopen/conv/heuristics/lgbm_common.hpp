@@ -65,6 +65,17 @@ inline std::string DataTypeName(miopenDataType_t t)
     return "";
 }
 
+// Architecture name the models were trained on. Handle::GetDeviceName() reports some parts
+// with a target-variant suffix (A0 MI455X silicon reports "gfx1250-strict"); the model vocab
+// and the perf-config bucket keys only know the base name ("gfx1250"). Same rule as
+// get_ck_common_compiler_flag (solver/legacy_ck_common.hpp): everything from the first '-'
+// is dropped, so "gfx1250-strict" -> "gfx1250" and any other "-suffix" also maps to its base
+// name. Names without '-' are returned unchanged, so an unknown arch stays unknown.
+inline std::string NormalizeArchName(const std::string& device_name)
+{
+    return device_name.substr(0, device_name.find('-'));
+}
+
 } // namespace lgbm
 } // namespace ai
 } // namespace miopen

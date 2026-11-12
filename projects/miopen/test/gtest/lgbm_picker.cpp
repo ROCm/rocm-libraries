@@ -16,6 +16,7 @@
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 #include <miopen/conv/heuristics/lgbm_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
@@ -26,16 +27,20 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <vector>
 
 namespace {
 
+using miopen::ai::lgbm::GfxVocabCode;
 using miopen::ai::lgbm::kNumFeatures;
 using miopen::ai::lgbm::LgbmForest;
 using miopen::ai::lgbm::LgbmMetadata;
+using miopen::ai::lgbm::NormalizeArchName;
 using miopen::ai::lgbm::ScoreCandidateMatrixForTest;
+using miopen::ai::lgbm::SetNumeric;
 
 // ---------------------------------------------------------------------------
 // Metadata loader
@@ -137,6 +142,76 @@ TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
     std::vector<std::vector<double>> bad(1, std::vector<double>(4, 0.0));
     EXPECT_EQ(ScoreCandidateMatrixForTest(bad), -1);
     EXPECT_EQ(ScoreCandidateMatrixForTest({}), -1);
+}
+
+// A0 gfx1250 parts report their device name as "gfx1250-strict". The model vocab only has the
+// base name, so the L1 lookup must treat both the same (and stay strict about anything else).
+TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
+{
+    // The suffix rule mirrors legacy_ck_common.hpp: everything from the first '-' is dropped.
+    EXPECT_EQ(NormalizeArchName("gfx1250-strict"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx1250"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx942-strict"), "gfx942");
+    EXPECT_EQ(NormalizeArchName("gfx1250-other"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx9999-strict"), "gfx9999");
+    EXPECT_EQ(NormalizeArchName("gfx9999"), "gfx9999");
+    EXPECT_EQ(NormalizeArchName(""), "");
+
+    // Same vocab code, and it is the code the vocab itself assigns to the base name.
+    const int code = GfxVocabCode("gfx1250");
+    ASSERT_GE(code, 0) << "gfx1250 is expected in the shipped rank vocab";
+    EXPECT_EQ(code, meta.CategoricalCode("gfx_id", "gfx1250"));
+    EXPECT_EQ(GfxVocabCode("gfx1250-strict"), code);
+    EXPECT_EQ(GfxVocabCode("gfx942-strict"), GfxVocabCode("gfx942"));
+    EXPECT_GE(GfxVocabCode("gfx942"), 0);
+    EXPECT_NE(GfxVocabCode("gfx942"), code);
+
+    // An arch outside the vocab still takes the unseen path (-1), with or without a suffix.
+    EXPECT_EQ(GfxVocabCode("gfx9999"), -1);
+    EXPECT_EQ(GfxVocabCode("gfx9999-strict"), -1);
+    EXPECT_EQ(GfxVocabCode("gfx1250x"), -1);
+    EXPECT_EQ(GfxVocabCode(""), -1);
+
+    const auto& forest = LgbmForest::GetRank();
+    if(!forest.IsReady())
+        GTEST_SKIP() << "rank model unavailable";
+
+    // Score every solver in the vocab on two fixed problem rows with the gfx_id column set from
+    // GfxVocabCode, the same way PickSolverRanked fills it. gfx1250 and gfx1250-strict must
+    // give bit-identical scores; the unseen arch (missing branch) must not, or the comparison
+    // would not be sensitive to the gfx_id column at all.
+    constexpr int kIdxGfxId      = 53; // lgbm_model_meta.json rank.feature_order
+    constexpr int kIdxSolverName = 54;
+    static_assert(kIdxSolverName == kNumFeatures - 1);
+
+    const auto score = [&](const std::string& device_name, int solver_code, int variant) {
+        std::array<LgbmEntry, kNumFeatures> row{};
+        for(int i = 0; i < kNumFeatures; ++i)
+            SetNumeric(row[i], 1.0 + static_cast<double>((i * (variant + 1)) % 7));
+        const int gfx               = GfxVocabCode(device_name);
+        row[kIdxGfxId].missing      = gfx < 0 ? -1 : 0;
+        row[kIdxGfxId].fvalue       = gfx < 0 ? 0.0 : static_cast<double>(gfx);
+        row[kIdxSolverName].missing = 0;
+        row[kIdxSolverName].fvalue  = static_cast<double>(solver_code);
+        return forest.Score(row.data(), row.size());
+    };
+
+    bool unseen_differs = false;
+    for(int variant = 0; variant < 2; ++variant)
+    {
+        for(const auto& solver : meta.Solvers())
+        {
+            const int sc          = meta.SolverCode(solver);
+            const double base     = score("gfx1250", sc, variant);
+            const double strict   = score("gfx1250-strict", sc, variant);
+            const double unseen   = score("gfx9999", sc, variant);
+            const double unseen_s = score("gfx9999-strict", sc, variant);
+            EXPECT_EQ(strict, base) << solver;
+            EXPECT_EQ(unseen_s, unseen) << solver;
+            unseen_differs = unseen_differs || unseen != base;
+        }
+    }
+    EXPECT_TRUE(unseen_differs) << "gfx_id column has no effect on any score; test is vacuous";
 }
 
 // ---------------------------------------------------------------------------
