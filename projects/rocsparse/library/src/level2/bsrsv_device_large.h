@@ -44,11 +44,10 @@ namespace rocsparse
 {
     // True when the narrow (rocsparse_int) kernels would be wrong: the grid
     // does not cover every virtual block, mb itself does not fit in
-    // rocsparse_int, or a vector offset row * block_dim does not fit.
-    __host__ __forceinline__ bool bsrsv_solve_needs_wide(int64_t mb,
-                                                         int64_t block_dim,
-                                                         int64_t num_blocks,
-                                                         int64_t grid_x)
+    // rocsparse_int, a vector offset row * block_dim does not fit, or the
+    // diagonal offset block_dim * block_dim * j (j < nnzb) does not fit.
+    __host__ __forceinline__ bool bsrsv_solve_needs_wide(
+        int64_t mb, int64_t block_dim, int64_t nnzb, int64_t num_blocks, int64_t grid_x)
     {
         if(mb <= 0 || block_dim <= 0 || num_blocks <= 0)
         {
@@ -66,22 +65,33 @@ namespace rocsparse
             return true;
         }
 
-        return block_dim > narrow_max / mb;
+        if(block_dim > narrow_max / mb)
+        {
+            return true;
+        }
+
+        // block_dim * block_dim <= narrow_max is tested without forming the product.
+        if(block_dim > narrow_max / block_dim)
+        {
+            return true;
+        }
+
+        return nnzb > narrow_max / (block_dim * block_dim);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
-    ROCSPARSE_DEVICE_ILF void bsrsv_lower_general_wide_device(int64_t             idx,
-                                                              J                   mb,
-                                                              T                   alpha,
+    ROCSPARSE_DEVICE_ILF void bsrsv_lower_general_wide_device(int64_t idx,
+                                                              J       mb,
+                                                              T       alpha,
                                                               const I* __restrict__ bsr_row_ptr,
                                                               const J* __restrict__ bsr_col_ind,
                                                               const T* __restrict__ bsr_val,
-                                                              rocsparse_int       block_dim,
+                                                              rocsparse_int block_dim,
                                                               const T* __restrict__ x,
-                                                              T*                  y,
+                                                              T* y,
                                                               int* __restrict__ done_array,
                                                               const J* __restrict__ map,
-                                                              J*                  zero_pivot,
+                                                              J*                   zero_pivot,
                                                               rocsparse_index_base idx_base,
                                                               rocsparse_diag_type  diag_type,
                                                               rocsparse_direction  dir)
@@ -138,9 +148,9 @@ namespace rocsparse
         {
             for(int bi = 0; bi < block_dim; ++bi)
             {
-                const int64_t diag_off = static_cast<int64_t>(block_dim) * block_dim
-                                             * static_cast<int64_t>(j)
-                                         + bi + static_cast<int64_t>(bi) * block_dim;
+                const int64_t diag_off
+                    = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(j) + bi
+                      + static_cast<int64_t>(bi) * block_dim;
                 const T diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
                                                                            : static_cast<T>(1);
 
@@ -163,8 +173,7 @@ namespace rocsparse
 
         if(lid == 0)
         {
-            rocsparse::atomic_store(
-                &done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {
@@ -174,18 +183,18 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
-    ROCSPARSE_DEVICE_ILF void bsrsv_upper_general_wide_device(int64_t             idx,
-                                                              J                   mb,
-                                                              T                   alpha,
+    ROCSPARSE_DEVICE_ILF void bsrsv_upper_general_wide_device(int64_t idx,
+                                                              J       mb,
+                                                              T       alpha,
                                                               const I* __restrict__ bsr_row_ptr,
                                                               const J* __restrict__ bsr_col_ind,
                                                               const T* __restrict__ bsr_val,
-                                                              rocsparse_int       block_dim,
+                                                              rocsparse_int block_dim,
                                                               const T* __restrict__ x,
-                                                              T*                  y,
+                                                              T* y,
                                                               int* __restrict__ done_array,
                                                               const J* __restrict__ map,
-                                                              J*                  zero_pivot,
+                                                              J*                   zero_pivot,
                                                               rocsparse_index_base idx_base,
                                                               rocsparse_diag_type  diag_type,
                                                               rocsparse_direction  dir)
@@ -242,9 +251,9 @@ namespace rocsparse
         {
             for(int bi = block_dim - 1; bi >= 0; --bi)
             {
-                const int64_t diag_off = static_cast<int64_t>(block_dim) * block_dim
-                                             * static_cast<int64_t>(j)
-                                         + bi + static_cast<int64_t>(bi) * block_dim;
+                const int64_t diag_off
+                    = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(j) + bi
+                      + static_cast<int64_t>(bi) * block_dim;
                 const T diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
                                                                            : static_cast<T>(1);
 
@@ -267,8 +276,7 @@ namespace rocsparse
 
         if(lid == 0)
         {
-            rocsparse::atomic_store(
-                &done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {
@@ -277,25 +285,25 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
+    template <uint32_t      BLOCKSIZE,
+              uint32_t      WFSIZE,
               rocsparse_int BSRDIM,
-              bool SLEEP,
+              bool          SLEEP,
               typename T,
               typename I,
               typename J>
-    ROCSPARSE_DEVICE_ILF void bsrsv_lower_shared_wide_device(int64_t             idx,
-                                                             J                   mb,
-                                                             T                   alpha,
+    ROCSPARSE_DEVICE_ILF void bsrsv_lower_shared_wide_device(int64_t idx,
+                                                             J       mb,
+                                                             T       alpha,
                                                              const I* __restrict__ bsr_row_ptr,
                                                              const J* __restrict__ bsr_col_ind,
                                                              const T* __restrict__ bsr_val,
-                                                             rocsparse_int       block_dim,
+                                                             rocsparse_int block_dim,
                                                              const T* __restrict__ x,
-                                                             T*                  y,
+                                                             T* y,
                                                              int* __restrict__ done_array,
                                                              const J* __restrict__ map,
-                                                             J*                  zero_pivot,
+                                                             J*                   zero_pivot,
                                                              rocsparse_index_base idx_base,
                                                              rocsparse_diag_type  diag_type,
                                                              rocsparse_direction  dir)
@@ -419,25 +427,25 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
+    template <uint32_t      BLOCKSIZE,
+              uint32_t      WFSIZE,
               rocsparse_int BSRDIM,
-              bool SLEEP,
+              bool          SLEEP,
               typename T,
               typename I,
               typename J>
-    ROCSPARSE_DEVICE_ILF void bsrsv_upper_shared_wide_device(int64_t             idx,
-                                                             J                   mb,
-                                                             T                   alpha,
+    ROCSPARSE_DEVICE_ILF void bsrsv_upper_shared_wide_device(int64_t idx,
+                                                             J       mb,
+                                                             T       alpha,
                                                              const I* __restrict__ bsr_row_ptr,
                                                              const J* __restrict__ bsr_col_ind,
                                                              const T* __restrict__ bsr_val,
-                                                             rocsparse_int       block_dim,
+                                                             rocsparse_int block_dim,
                                                              const T* __restrict__ x,
-                                                             T*                  y,
+                                                             T* y,
                                                              int* __restrict__ done_array,
                                                              const J* __restrict__ map,
-                                                             J*                  zero_pivot,
+                                                             J*                   zero_pivot,
                                                              rocsparse_index_base idx_base,
                                                              rocsparse_diag_type  diag_type,
                                                              rocsparse_direction  dir)
@@ -564,27 +572,25 @@ namespace rocsparse
     // One virtual block covers BLOCKSIZE / WFSIZE block rows. A clamped grid
     // walks its chunk; an exact grid runs a single virtual block, the same
     // slot the narrow kernel takes from hipBlockIdx_x.
-#define BSRSV_WIDE_FOR_EACH(BLOCKSIZE, WFSIZE, MB, BODY)                                      \
-    do                                                                                        \
-    {                                                                                         \
-        constexpr uint32_t bsrsv_nwarps = (BLOCKSIZE) / (WFSIZE);                             \
-        const int          bsrsv_wid    = hipThreadIdx_x / (WFSIZE);                          \
-        const int64_t      bsrsv_count                                                        \
-            = (static_cast<int64_t>(MB) - 1) / static_cast<int64_t>(bsrsv_nwarps) + 1;        \
-        int64_t bsrsv_first;                                                                  \
-        int64_t bsrsv_last;                                                                   \
-        rocsparse::grid_x_chunk(                                                              \
-            bsrsv_count, hipGridDim_x, hipBlockIdx_x, bsrsv_first, bsrsv_last);               \
-        for(int64_t bsrsv_block_id = bsrsv_first; bsrsv_block_id < bsrsv_last;                \
-            ++bsrsv_block_id)                                                                 \
-        {                                                                                     \
-            const int64_t idx = bsrsv_block_id * static_cast<int64_t>(bsrsv_nwarps)           \
-                                + bsrsv_wid;                                                  \
-            if(idx < static_cast<int64_t>(MB))                                                \
-            {                                                                                 \
-                BODY;                                                                         \
-            }                                                                                 \
-        }                                                                                     \
+#define BSRSV_WIDE_FOR_EACH(BLOCKSIZE, WFSIZE, MB, BODY)                                         \
+    do                                                                                           \
+    {                                                                                            \
+        constexpr uint32_t bsrsv_nwarps = (BLOCKSIZE) / (WFSIZE);                                \
+        const int          bsrsv_wid    = hipThreadIdx_x / (WFSIZE);                             \
+        const int64_t      bsrsv_count                                                           \
+            = (static_cast<int64_t>(MB) - 1) / static_cast<int64_t>(bsrsv_nwarps) + 1;           \
+        int64_t bsrsv_first;                                                                     \
+        int64_t bsrsv_last;                                                                      \
+        rocsparse::grid_x_chunk(                                                                 \
+            bsrsv_count, hipGridDim_x, hipBlockIdx_x, bsrsv_first, bsrsv_last);                  \
+        for(int64_t bsrsv_block_id = bsrsv_first; bsrsv_block_id < bsrsv_last; ++bsrsv_block_id) \
+        {                                                                                        \
+            const int64_t idx = bsrsv_block_id * static_cast<int64_t>(bsrsv_nwarps) + bsrsv_wid; \
+            if(idx < static_cast<int64_t>(MB))                                                   \
+            {                                                                                    \
+                BODY;                                                                            \
+            }                                                                                    \
+        }                                                                                        \
     } while(0)
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
@@ -669,10 +675,10 @@ namespace rocsparse
                 dir)));
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
+    template <uint32_t      BLOCKSIZE,
+              uint32_t      WFSIZE,
               rocsparse_int BSRDIM,
-              bool SLEEP,
+              bool          SLEEP,
               typename T,
               typename I,
               typename J>
@@ -716,10 +722,10 @@ namespace rocsparse
                 dir)));
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
+    template <uint32_t      BLOCKSIZE,
+              uint32_t      WFSIZE,
               rocsparse_int BSRDIM,
-              bool SLEEP,
+              bool          SLEEP,
               typename T,
               typename I,
               typename J>

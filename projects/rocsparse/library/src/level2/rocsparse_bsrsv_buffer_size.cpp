@@ -31,18 +31,18 @@
 namespace rocsparse
 {
     template <typename T, typename I, typename J>
-    static rocsparse_status bsrsv_buffer_size_impl(rocsparse_handle          handle,
-                                                   rocsparse_direction       dir,
-                                                   rocsparse_operation       trans,
-                                                   J                         mb,
-                                                   I                         nnzb,
-                                                   const rocsparse_mat_descr descr,
-                                                   const T*                  bsr_val,
-                                                   const I*                  bsr_row_ptr,
-                                                   const J*                  bsr_col_ind,
-                                                   rocsparse_int             block_dim,
-                                                   rocsparse_mat_info        info,
-                                                   size_t*                   buffer_size)
+    rocsparse_status bsrsv_buffer_size_template(rocsparse_handle          handle,
+                                                rocsparse_direction       dir,
+                                                rocsparse_operation       trans,
+                                                J                         mb,
+                                                I                         nnzb,
+                                                const rocsparse_mat_descr descr,
+                                                const T*                  bsr_val,
+                                                const I*                  bsr_row_ptr,
+                                                const J*                  bsr_col_ind,
+                                                rocsparse_int             block_dim,
+                                                rocsparse_mat_info        info,
+                                                size_t*                   buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -127,25 +127,24 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-#define ROCSPARSE_BSRSV_BUFFER_INST(T, I, J)                         \
-    template rocsparse_status bsrsv_buffer_size_impl<T, I, J>(       \
-        rocsparse_handle,                                           \
-        rocsparse_direction,                                        \
-        rocsparse_operation,                                        \
-        J,                                                          \
-        I,                                                          \
-        const rocsparse_mat_descr,                                  \
-        const T*,                                                   \
-        const I*,                                                   \
-        const J*,                                                   \
-        rocsparse_int,                                              \
-        rocsparse_mat_info,                                         \
-        size_t*)
+#define ROCSPARSE_BSRSV_BUFFER_INST(T, I, J)                                                 \
+    template rocsparse_status bsrsv_buffer_size_template<T, I, J>(rocsparse_handle,          \
+                                                                  rocsparse_direction,       \
+                                                                  rocsparse_operation,       \
+                                                                  J,                         \
+                                                                  I,                         \
+                                                                  const rocsparse_mat_descr, \
+                                                                  const T*,                  \
+                                                                  const I*,                  \
+                                                                  const J*,                  \
+                                                                  rocsparse_int,             \
+                                                                  rocsparse_mat_info,        \
+                                                                  size_t*)
 
-#define ROCSPARSE_BSRSV_BUFFER_INST_T(I, J)                         \
-    ROCSPARSE_BSRSV_BUFFER_INST(float, I, J);                       \
-    ROCSPARSE_BSRSV_BUFFER_INST(double, I, J);                      \
-    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_float_complex, I, J);     \
+#define ROCSPARSE_BSRSV_BUFFER_INST_T(I, J)                     \
+    ROCSPARSE_BSRSV_BUFFER_INST(float, I, J);                   \
+    ROCSPARSE_BSRSV_BUFFER_INST(double, I, J);                  \
+    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_float_complex, I, J); \
     ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_double_complex, I, J)
 
     ROCSPARSE_BSRSV_BUFFER_INST_T(int32_t, int32_t);
@@ -156,39 +155,39 @@ namespace rocsparse
 #undef ROCSPARSE_BSRSV_BUFFER_INST
 }
 
-#define C_IMPL(NAME, TYPE)                                                         \
-    extern "C" rocsparse_status NAME(rocsparse_handle          handle,             \
-                                     rocsparse_direction       dir,                \
-                                     rocsparse_operation       trans,              \
-                                     rocsparse_int             mb,                 \
-                                     rocsparse_int             nnzb,               \
-                                     const rocsparse_mat_descr descr,              \
-                                     const TYPE*               bsr_val,            \
-                                     const rocsparse_int*      bsr_row_ptr,        \
-                                     const rocsparse_int*      bsr_col_ind,        \
-                                     rocsparse_int             block_dim,          \
-                                     rocsparse_mat_info        info,               \
-                                     size_t*                   buffer_size)        \
-    try                                                                            \
-    {                                                                              \
-        ROCSPARSE_ROUTINE_TRACE;                                                   \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_buffer_size_impl(handle,        \
-                                                                    dir,           \
-                                                                    trans,         \
-                                                                    mb,            \
-                                                                    nnzb,          \
-                                                                    descr,         \
-                                                                    bsr_val,       \
-                                                                    bsr_row_ptr,   \
-                                                                    bsr_col_ind,   \
-                                                                    block_dim,     \
-                                                                    info,          \
-                                                                    buffer_size)); \
-        return rocsparse_status_success;                                           \
-    }                                                                              \
-    catch(...)                                                                     \
-    {                                                                              \
-        RETURN_ROCSPARSE_EXCEPTION();                                              \
+#define C_IMPL(NAME, TYPE)                                                             \
+    extern "C" rocsparse_status NAME(rocsparse_handle          handle,                 \
+                                     rocsparse_direction       dir,                    \
+                                     rocsparse_operation       trans,                  \
+                                     rocsparse_int             mb,                     \
+                                     rocsparse_int             nnzb,                   \
+                                     const rocsparse_mat_descr descr,                  \
+                                     const TYPE*               bsr_val,                \
+                                     const rocsparse_int*      bsr_row_ptr,            \
+                                     const rocsparse_int*      bsr_col_ind,            \
+                                     rocsparse_int             block_dim,              \
+                                     rocsparse_mat_info        info,                   \
+                                     size_t*                   buffer_size)            \
+    try                                                                                \
+    {                                                                                  \
+        ROCSPARSE_ROUTINE_TRACE;                                                       \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_buffer_size_template(handle,        \
+                                                                        dir,           \
+                                                                        trans,         \
+                                                                        mb,            \
+                                                                        nnzb,          \
+                                                                        descr,         \
+                                                                        bsr_val,       \
+                                                                        bsr_row_ptr,   \
+                                                                        bsr_col_ind,   \
+                                                                        block_dim,     \
+                                                                        info,          \
+                                                                        buffer_size)); \
+        return rocsparse_status_success;                                               \
+    }                                                                                  \
+    catch(...)                                                                         \
+    {                                                                                  \
+        RETURN_ROCSPARSE_EXCEPTION();                                                  \
     }
 
 C_IMPL(rocsparse_sbsrsv_buffer_size, float);

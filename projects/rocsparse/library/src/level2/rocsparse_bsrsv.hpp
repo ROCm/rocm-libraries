@@ -47,6 +47,20 @@ namespace rocsparse
                                              void*                     temp_buffer);
 
     template <typename T, typename I, typename J>
+    rocsparse_status bsrsv_buffer_size_template(rocsparse_handle          handle,
+                                                rocsparse_direction       dir,
+                                                rocsparse_operation       trans,
+                                                J                         mb,
+                                                I                         nnzb,
+                                                const rocsparse_mat_descr descr,
+                                                const T*                  bsr_val,
+                                                const I*                  bsr_row_ptr,
+                                                const J*                  bsr_col_ind,
+                                                rocsparse_int             block_dim,
+                                                rocsparse_mat_info        info,
+                                                size_t*                   buffer_size);
+
+    template <typename T, typename I, typename J>
     rocsparse_status bsrsv_solve_core(rocsparse_handle          handle,
                                       rocsparse_direction       dir,
                                       rocsparse_operation       trans,

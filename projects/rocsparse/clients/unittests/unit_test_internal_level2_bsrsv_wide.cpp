@@ -70,11 +70,13 @@ namespace
     }
 
     template <typename I, typename J>
-    void build_matrix(bool                lower,
-                      std::vector<I>&     row_ptr,
-                      std::vector<J>&     col_ind,
+    void build_matrix(bool                 lower,
+                      std::vector<I>&      row_ptr,
+                      std::vector<J>&      col_ind,
                       std::vector<test_T>& val,
-                      std::vector<J>&     map)
+                      std::vector<J>&      map,
+                      rocsparse_index_base base         = rocsparse_index_base_zero,
+                      int32_t              singular_row = -1)
     {
         row_ptr.assign(1, static_cast<I>(0));
         col_ind.clear();
@@ -91,13 +93,15 @@ namespace
                     append_block(val, static_cast<test_T>(-1));
                 }
                 col_ind.push_back(static_cast<J>(row));
-                append_block(val, static_cast<test_T>(1));
+                append_block(
+                    val, (row == singular_row) ? static_cast<test_T>(0) : static_cast<test_T>(1));
                 map[static_cast<size_t>(row)] = static_cast<J>(row);
             }
             else
             {
                 col_ind.push_back(static_cast<J>(row));
-                append_block(val, static_cast<test_T>(1));
+                append_block(
+                    val, (row == singular_row) ? static_cast<test_T>(0) : static_cast<test_T>(1));
                 if(row + 1 < kMb)
                 {
                     col_ind.push_back(static_cast<J>(row + 1));
@@ -107,23 +111,39 @@ namespace
             }
             row_ptr.push_back(static_cast<I>(col_ind.size()));
         }
+
+        if(base == rocsparse_index_base_one)
+        {
+            for(auto& r : row_ptr)
+            {
+                r = static_cast<I>(r + 1);
+            }
+            for(auto& c : col_ind)
+            {
+                c = static_cast<J>(c + 1);
+            }
+        }
     }
 
     test_T expected(bool lower, int32_t row)
     {
         const int32_t block_row = row / kBlockDim;
-        return lower ? static_cast<test_T>(block_row + 1)
-                     : static_cast<test_T>(kMb - block_row);
+        return lower ? static_cast<test_T>(block_row + 1) : static_cast<test_T>(kMb - block_row);
     }
 
     template <uint32_t WFSIZE, typename I, typename J>
-    void launch_wide(bool lower, uint32_t grid_x, std::vector<test_T>& y_out, J& pivot)
+    void launch_wide(bool                 lower,
+                     uint32_t             grid_x,
+                     std::vector<test_T>& y_out,
+                     J&                   pivot,
+                     rocsparse_index_base base         = rocsparse_index_base_zero,
+                     int32_t              singular_row = -1)
     {
         std::vector<I>      row_ptr;
         std::vector<J>      col_ind;
         std::vector<test_T> val;
         std::vector<J>      map;
-        build_matrix(lower, row_ptr, col_ind, val, map);
+        build_matrix(lower, row_ptr, col_ind, val, map, base, singular_row);
 
         const std::vector<test_T> x(static_cast<size_t>(kRows), static_cast<test_T>(1));
         const std::vector<test_T> y(static_cast<size_t>(kRows), static_cast<test_T>(-7));
@@ -135,8 +155,7 @@ namespace
         rocsparse_ut::device_vector<test_T> d_x(x);
         rocsparse_ut::device_vector<test_T> d_y(y);
         rocsparse_ut::device_vector<int>    d_done(std::vector<int>(static_cast<size_t>(kMb), 0));
-        rocsparse_ut::device_vector<J>      d_pivot(
-            std::vector<J>{std::numeric_limits<J>::max()});
+        rocsparse_ut::device_vector<J>      d_pivot(std::vector<J>{std::numeric_limits<J>::max()});
 
         ASSERT_NE(d_row_ptr.ptr, nullptr);
         ASSERT_NE(d_col_ind.ptr, nullptr);
@@ -147,59 +166,73 @@ namespace
         ASSERT_NE(d_done.ptr, nullptr);
         ASSERT_NE(d_pivot.ptr, nullptr);
 
-        const test_T alpha = static_cast<test_T>(1);
+        const test_T alpha       = static_cast<test_T>(1);
         const auto   alpha_union = rocsparse::const_host_device_scalar<test_T>(alpha);
 
         if(lower)
         {
-            hipLaunchKernelGGL((rocsparse::bsrsv_lower_general_wide<kBlock, WFSIZE, false, test_T, I, J>),
-                               dim3(grid_x),
-                               dim3(kBlock),
-                               0,
-                               0,
-                               static_cast<J>(kMb),
-                               alpha_union,
-                               d_row_ptr.ptr,
-                               d_col_ind.ptr,
-                               d_val.ptr,
-                               kBlockDim,
-                               d_x.ptr,
-                               d_y.ptr,
-                               d_done.ptr,
-                               d_map.ptr,
-                               d_pivot.ptr,
-                               rocsparse_index_base_zero,
-                               rocsparse_diag_type_non_unit,
-                               rocsparse_direction_row,
-                               true);
+            hipLaunchKernelGGL(
+                (rocsparse::bsrsv_lower_general_wide<kBlock, WFSIZE, false, test_T, I, J>),
+                dim3(grid_x),
+                dim3(kBlock),
+                0,
+                0,
+                static_cast<J>(kMb),
+                alpha_union,
+                d_row_ptr.ptr,
+                d_col_ind.ptr,
+                d_val.ptr,
+                kBlockDim,
+                d_x.ptr,
+                d_y.ptr,
+                d_done.ptr,
+                d_map.ptr,
+                d_pivot.ptr,
+                base,
+                rocsparse_diag_type_non_unit,
+                rocsparse_direction_row,
+                true);
         }
         else
         {
-            hipLaunchKernelGGL((rocsparse::bsrsv_upper_general_wide<kBlock, WFSIZE, false, test_T, I, J>),
-                               dim3(grid_x),
-                               dim3(kBlock),
-                               0,
-                               0,
-                               static_cast<J>(kMb),
-                               alpha_union,
-                               d_row_ptr.ptr,
-                               d_col_ind.ptr,
-                               d_val.ptr,
-                               kBlockDim,
-                               d_x.ptr,
-                               d_y.ptr,
-                               d_done.ptr,
-                               d_map.ptr,
-                               d_pivot.ptr,
-                               rocsparse_index_base_zero,
-                               rocsparse_diag_type_non_unit,
-                               rocsparse_direction_row,
-                               true);
+            hipLaunchKernelGGL(
+                (rocsparse::bsrsv_upper_general_wide<kBlock, WFSIZE, false, test_T, I, J>),
+                dim3(grid_x),
+                dim3(kBlock),
+                0,
+                0,
+                static_cast<J>(kMb),
+                alpha_union,
+                d_row_ptr.ptr,
+                d_col_ind.ptr,
+                d_val.ptr,
+                kBlockDim,
+                d_x.ptr,
+                d_y.ptr,
+                d_done.ptr,
+                d_map.ptr,
+                d_pivot.ptr,
+                base,
+                rocsparse_diag_type_non_unit,
+                rocsparse_direction_row,
+                true);
         }
 
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         y_out = rocsparse_ut::to_host(d_y);
         pivot = rocsparse_ut::to_host(d_pivot)[0];
+    }
+
+    // The wide kernels assume WFSIZE equals the device wavefront, so the tests
+    // run the size the device reports. A 32-lane launch on a wave64 device, or
+    // the reverse, can leave a warp spinning on a row another warp still owns.
+    uint32_t device_wavefront()
+    {
+        int device = 0;
+        int warp   = 0;
+        hipGetDevice(&device);
+        hipDeviceGetAttribute(&warp, hipDeviceAttributeWarpSize, device);
+        return (warp == 64) ? 64u : 32u;
     }
 
     template <uint32_t WFSIZE, typename I, typename J>
@@ -216,7 +249,53 @@ namespace
         }
     }
 
-    void solve_public(bool lower, rocsparse_operation trans, int max_grid_x, std::vector<test_T>& y_out)
+    template <uint32_t WFSIZE, typename I, typename J>
+    void expect_singular_pivot(bool                 lower,
+                               rocsparse_index_base base,
+                               int32_t              singular_row,
+                               uint32_t             grid_x)
+    {
+        std::vector<test_T> y;
+        J                   pivot{};
+        ASSERT_NO_FATAL_FAILURE(
+            (launch_wide<WFSIZE, I, J>(lower, grid_x, y, pivot, base, singular_row)));
+        // The kernel reports the block row in the caller's index base.
+        EXPECT_EQ(pivot, static_cast<J>(singular_row + static_cast<int32_t>(base)));
+    }
+
+    template <typename I, typename J>
+    void expect_singular_pivot_device(bool                 lower,
+                                      rocsparse_index_base base,
+                                      int32_t              singular_row,
+                                      uint32_t             grid_x)
+    {
+        if(device_wavefront() == 64)
+        {
+            expect_singular_pivot<64, I, J>(lower, base, singular_row, grid_x);
+        }
+        else
+        {
+            expect_singular_pivot<32, I, J>(lower, base, singular_row, grid_x);
+        }
+    }
+
+    template <typename I, typename J>
+    void expect_wide_device(bool lower, uint32_t grid_x)
+    {
+        if(device_wavefront() == 64)
+        {
+            expect_wide<64, I, J>(lower, grid_x);
+        }
+        else
+        {
+            expect_wide<32, I, J>(lower, grid_x);
+        }
+    }
+
+    void solve_public(bool                 lower,
+                      rocsparse_operation  trans,
+                      int                  max_grid_x,
+                      std::vector<test_T>& y_out)
     {
         std::vector<rocsparse_int> row_ptr;
         std::vector<rocsparse_int> col_ind;
@@ -224,9 +303,9 @@ namespace
         std::vector<rocsparse_int> map;
         build_matrix(lower, row_ptr, col_ind, val, map);
 
-        const rocsparse_int        nnzb = static_cast<rocsparse_int>(col_ind.size());
-        const std::vector<test_T>  x(static_cast<size_t>(kRows), static_cast<test_T>(1));
-        const std::vector<test_T>  y(static_cast<size_t>(kRows), static_cast<test_T>(-7));
+        const rocsparse_int       nnzb = static_cast<rocsparse_int>(col_ind.size());
+        const std::vector<test_T> x(static_cast<size_t>(kRows), static_cast<test_T>(1));
+        const std::vector<test_T> y(static_cast<size_t>(kRows), static_cast<test_T>(-7));
 
         rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
         rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
@@ -317,30 +396,67 @@ namespace
 
 TEST(internal_level2_bsrsv_wide, general_i32_chunk)
 {
-    expect_wide<32, int32_t, int32_t>(true, 1);
-    expect_wide<32, int32_t, int32_t>(false, 1);
+    expect_wide_device<int32_t, int32_t>(true, 1);
+    expect_wide_device<int32_t, int32_t>(false, 1);
 }
 
 TEST(internal_level2_bsrsv_wide, general_i32_full_grid)
 {
-    // wf 32, block 128: 4 warps per block, 8 block rows -> 2 virtual blocks.
-    expect_wide<32, int32_t, int32_t>(true, 2);
+    // Block 128 and 8 block rows: 2 virtual blocks on wave32, 4 on wave64.
+    // A grid of 2 is exact on wave32 and a two-chunk walk on wave64.
+    expect_wide_device<int32_t, int32_t>(true, 2);
 }
 
 TEST(internal_level2_bsrsv_wide, general_i64_i32_chunk)
 {
-    expect_wide<32, int64_t, int32_t>(true, 1);
-    expect_wide<32, int64_t, int32_t>(false, 1);
+    expect_wide_device<int64_t, int32_t>(true, 1);
+    expect_wide_device<int64_t, int32_t>(false, 1);
 }
 
 TEST(internal_level2_bsrsv_wide, general_i64_chunk)
 {
-    // WFSIZE has to match the device wavefront. The diagonal update is
-    // lockstep within one wavefront, same as the narrow kernel, so a
-    // 64-lane launch is wrong on gfx1201 (wave32). Index type i64/i64 is
-    // what this case covers; the host picks 64 only on wave64 devices.
-    expect_wide<32, int64_t, int64_t>(true, 1);
-    expect_wide<32, int64_t, int64_t>(false, 1);
+    expect_wide_device<int64_t, int64_t>(true, 1);
+    expect_wide_device<int64_t, int64_t>(false, 1);
+}
+
+TEST(internal_level2_bsrsv_wide, zero_pivot_reports_block_row)
+{
+    // Block row 3 has a zero diagonal block. The reported pivot is the block
+    // row plus the index base, so base one must report 4.
+    expect_singular_pivot_device<int32_t, int32_t>(true, rocsparse_index_base_zero, 3, 1);
+    expect_singular_pivot_device<int64_t, int32_t>(true, rocsparse_index_base_zero, 5, 1);
+    expect_singular_pivot_device<int64_t, int64_t>(true, rocsparse_index_base_one, 3, 1);
+    expect_singular_pivot_device<int64_t, int64_t>(true, rocsparse_index_base_one, 6, 2);
+}
+
+TEST(internal_level2_bsrsv_wide, needs_wide_predicate_boundaries)
+{
+    const int64_t i32max = std::numeric_limits<int32_t>::max();
+
+    // Exact grid and small sizes stay narrow.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4, 4));
+    // Grid one short of the virtual blocks is wide.
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4, 3));
+    // Empty problems never need the wide path.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(0, 2, 4, 0, 0));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 0, 4, 4));
+
+    // mb at and past INT32_MAX.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1, 1, i32max, i32max));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1, 1, i32max + 1, i32max + 1));
+
+    // mb * block_dim at and past INT32_MAX (1048576 * 2047 fits, 1048576 * 2048 does not).
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047, 1, 1048576, 1048576));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048, 1, 1048576, 1048576));
+
+    // Diagonal offset block_dim * block_dim * j, j < nnzb. 40 * 40 * 1342177 fits in
+    // INT32_MAX and one more block does not. This is the case the grid alone missed.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(10000, 40, 1342177, 10000, 10000));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(10000, 40, 1342178, 10000, 10000));
+
+    // block_dim * block_dim alone: 46340^2 fits, 46341^2 does not.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340, 1, 1, 1));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341, 1, 1, 1));
 }
 
 TEST(internal_level2_bsrsv_wide, public_lower_narrow_and_clamped)

@@ -131,7 +131,10 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
             trm = (trm != nullptr) ? trm : info->get_bsrsm_info(trans, descr->fill_mode);
         }
 
-        if(trm != nullptr)
+        // Reuse only an analysis built with the same index types. A mismatched one is
+        // rebuilt below, so the solve never reads a row map of another width.
+        if(trm != nullptr && trm->get_offset_indextype() == rocsparse::get_indextype<I>()
+           && trm->get_index_indextype() == rocsparse::get_indextype<J>())
         {
             info->set_bsrsv_info(trans, descr->fill_mode, trm);
             return rocsparse_status_success;
@@ -185,27 +188,27 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         RETURN_ROCSPARSE_EXCEPTION();                                               \
     }
 
-#define ROCSPARSE_BSRSV_ANALYSIS_INST(T, I, J)                                           \
-    template rocsparse_status rocsparse::bsrsv_analysis_template<T, I, J>(               \
-        rocsparse_handle,                                                                \
-        rocsparse_direction,                                                             \
-        rocsparse_operation,                                                             \
-        J,                                                                               \
-        I,                                                                               \
-        const rocsparse_mat_descr,                                                       \
-        const T*,                                                                        \
-        const I*,                                                                        \
-        const J*,                                                                        \
-        rocsparse_int,                                                                   \
-        rocsparse_mat_info,                                                              \
-        rocsparse_analysis_policy,                                                       \
-        rocsparse_solve_policy,                                                          \
+#define ROCSPARSE_BSRSV_ANALYSIS_INST(T, I, J)                             \
+    template rocsparse_status rocsparse::bsrsv_analysis_template<T, I, J>( \
+        rocsparse_handle,                                                  \
+        rocsparse_direction,                                               \
+        rocsparse_operation,                                               \
+        J,                                                                 \
+        I,                                                                 \
+        const rocsparse_mat_descr,                                         \
+        const T*,                                                          \
+        const I*,                                                          \
+        const J*,                                                          \
+        rocsparse_int,                                                     \
+        rocsparse_mat_info,                                                \
+        rocsparse_analysis_policy,                                         \
+        rocsparse_solve_policy,                                            \
         void*)
 
-#define ROCSPARSE_BSRSV_ANALYSIS_INST_T(I, J)                         \
-    ROCSPARSE_BSRSV_ANALYSIS_INST(float, I, J);                       \
-    ROCSPARSE_BSRSV_ANALYSIS_INST(double, I, J);                      \
-    ROCSPARSE_BSRSV_ANALYSIS_INST(rocsparse_float_complex, I, J);     \
+#define ROCSPARSE_BSRSV_ANALYSIS_INST_T(I, J)                     \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(float, I, J);                   \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(double, I, J);                  \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(rocsparse_float_complex, I, J); \
     ROCSPARSE_BSRSV_ANALYSIS_INST(rocsparse_double_complex, I, J)
 
 ROCSPARSE_BSRSV_ANALYSIS_INST_T(int32_t, int32_t);
