@@ -13,9 +13,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
   reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
   `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
-* [Reduce] Fixed an out-of-bounds shared-memory read in the warp-wise reductions with indices that
-  use no built-in shuffle (compute types other than FP32 and FP64, for example FP16). The results
-  were not affected.
+* [Reduce] Fixed an out-of-bounds shared-memory read in warp-wise reductions that return indices,
+  when the compute type has no built-in shuffle support (compute types other than FP32 and FP64, for
+  example FP16). The results were not affected.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
