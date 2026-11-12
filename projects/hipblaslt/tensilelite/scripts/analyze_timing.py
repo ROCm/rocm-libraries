@@ -193,8 +193,8 @@ TIMING_HIERARCHY = {
             # 1..N-1 with SyncsPerBenchmark: 0) at the end of the iteration.
             "warmup_first_sync": {},
             "run_iteration_sync": {},
-            # Per run iteration that launched (and in post_solution for launches an exception left
-            # unchecked): read the Synchronizer buffer back and scan it for residue. Only solutions
+            # Per run iteration that launched: read the Synchronizer buffer back and scan it for
+            # residue. Checks inside other phases have distinct timer families below. Only solutions
             # that may use the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) do the
             # readback and scan; the rest are "inactive".
             "synchronizer_check": {
@@ -217,7 +217,14 @@ TIMING_HIERARCHY = {
                         "benchmark_sleep": {},
                     },
                     "validate_enqueues_listener.ProgressListener": {},
-                    "validate_enqueues_listener.SynchronizerValidator": {},
+                    "validate_enqueues_listener.SynchronizerValidator": {
+                        "synchronizer_check_after_enqueues": {
+                            "synchronizer_readback_after_enqueues": {},
+                            "synchronizer_scan_after_enqueues": {},
+                            "synchronizer_inactive_after_enqueues": {},
+                            "synchronizer_no_buffer_after_enqueues": {},
+                        },
+                    },
                     "validate_enqueues_listener.ReferenceValidator": {},
                     "validate_enqueues_listener.MetaResultReporter": {},
                     "validate_enqueues_listener.HardwareMonitorListener": {},
@@ -228,6 +235,16 @@ TIMING_HIERARCHY = {
                 "benchmark_post_syncs": {},
             },
             "post_solution": {
+                "synchronizer_check_post_solution": {
+                    "synchronizer_readback_post_solution": {},
+                    "synchronizer_scan_post_solution": {},
+                    "synchronizer_inactive_post_solution": {},
+                    "synchronizer_no_buffer_post_solution": {},
+                },
+                "synchronizer_flag_check_post_solution": {
+                    "synchronizer_flag_readback_post_solution": {},
+                    "synchronizer_flag_scan_post_solution": {},
+                },
                 "post_solution_perf_calc": {},
                 "post_solution_reporting": {},
                 "post_solution_validation": {},
@@ -304,6 +321,9 @@ CPP_PHASE_GROUPS = {
     "Reference Computation": [
         "validate_warmups",
         "synchronizer_check",
+        "synchronizer_check_after_enqueues",
+        "synchronizer_check_post_solution",
+        "synchronizer_flag_check_post_solution",
     ],
     "Kernel Execution": [
         "solution_selection",
@@ -408,6 +428,9 @@ PURPOSE_OF = {
     # Checking the results
     "validate_warmups": G_VALIDATION,
     "synchronizer_check": G_VALIDATION,
+    "synchronizer_check_after_enqueues": G_VALIDATION,
+    "synchronizer_check_post_solution": G_VALIDATION,
+    "synchronizer_flag_check_post_solution": G_VALIDATION,
     # Running the kernels
     "kernel_solving": G_KERNEL,
     "warmup_events_setup": G_KERNEL,

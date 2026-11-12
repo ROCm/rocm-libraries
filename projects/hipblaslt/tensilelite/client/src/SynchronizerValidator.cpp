@@ -130,18 +130,22 @@ namespace TensileLite
                     m_failedInSolution = true;
                 }
             };
-            guarded([&] { checkLaunches("interrupted run iteration"); });
+            guarded([&] { checkLaunches("interrupted run iteration", postSolutionTimers); });
             // The fused-A2A flag blocks are not tied to a launch: checked here regardless.
             guarded([&] {
                 for(auto const& device : *m_devices)
-                    if(active() && device->commFlags != nullptr
-                       && !checkRegion(device->deviceId,
-                                       device->commFlags,
-                                       device->commFlagsBytes,
-                                       concatenate("fused-A2A flag block left dirty (device ",
-                                                   device->deviceId,
-                                                   ")")))
-                        m_failedInSolution = true;
+                    if(active() && device->commFlags != nullptr)
+                    {
+                        ScopedTimer timer(flagBlockTimers.check);
+                        if(!checkRegion(device->deviceId,
+                                        device->commFlags,
+                                        device->commFlagsBytes,
+                                        concatenate("fused-A2A flag block left dirty (device ",
+                                                    device->deviceId,
+                                                    ")"),
+                                        flagBlockTimers))
+                            m_failedInSolution = true;
+                    }
             });
 
             if(m_failedInSolution)
@@ -166,7 +170,7 @@ namespace TensileLite
 
         void SynchronizerValidator::checkRunIteration()
         {
-            checkLaunches("run iteration");
+            checkLaunches("run iteration", runIterationTimers);
         }
 
         void SynchronizerValidator::validateEnqueues(std::vector<size_t> const& slots,
@@ -178,31 +182,31 @@ namespace TensileLite
             if(!m_validateAfterEnqueues)
                 return;
             m_launchedSinceCheck = false;
-            checkAfterLaunch("enqueues");
+            checkAfterLaunch("enqueues", afterEnqueuesTimers);
         }
 
-        void SynchronizerValidator::checkLaunches(char const* stage)
+        void SynchronizerValidator::checkLaunches(char const* stage, CheckTimers const& timers)
         {
             // Guard 1: nothing launched, nothing to check (postSolution also
             // runs for rejected and never-run solutions).
             if(!m_launchedSinceCheck)
                 return;
             m_launchedSinceCheck = false;
-            checkAfterLaunch(stage);
+            checkAfterLaunch(stage, timers);
         }
 
-        void SynchronizerValidator::checkAfterLaunch(char const* stage)
+        void SynchronizerValidator::checkAfterLaunch(char const* stage, CheckTimers const& timers)
         {
             try
             {
-                ScopedTimer timer("synchronizer_check");
+                ScopedTimer timer(timers.check);
                 // A launch with no captured inputs means beginRunIteration() was not called.
                 // Skipping the check there would turn the protection off silently.
                 if(active() && m_problem != nullptr && m_iterationInputs.empty())
                     throw std::runtime_error(
                         "Synchronizer check: kernels launched but no run iteration inputs were "
                         "captured (beginRunIteration() was not called)");
-                checkInputs(stage);
+                checkInputs(stage, timers);
             }
             catch(...)
             {
@@ -212,12 +216,12 @@ namespace TensileLite
             }
         }
 
-        void SynchronizerValidator::checkInputs(char const* stage)
+        void SynchronizerValidator::checkInputs(char const* stage, CheckTimers const& timers)
         {
             if(!active() || m_problem == nullptr)
             {
                 // Solution cannot use the Synchronizer (or the check is off): nothing to read.
-                ScopedTimer timer("synchronizer_inactive");
+                ScopedTimer timer(timers.inactive);
                 return;
             }
 
@@ -233,7 +237,7 @@ namespace TensileLite
                 if(std::find(checked.begin(), checked.end(), buffer) != checked.end())
                     return;
                 checked.push_back(buffer);
-                if(!checkBuffer(deviceId, problem, buffer, stage, gemmIdx))
+                if(!checkBuffer(deviceId, problem, buffer, stage, gemmIdx, timers))
                     m_failedInSolution = true;
             };
 
@@ -306,11 +310,12 @@ namespace TensileLite
                                                 ContractionProblemGemm const& problem,
                                                 void*                         deviceSynchronizer,
                                                 char const*                   stage,
-                                                size_t                        gemmIdx)
+                                                size_t                        gemmIdx,
+                                                CheckTimers const&            timers)
         {
             if(deviceSynchronizer == nullptr)
             {
-                ScopedTimer timer("synchronizer_no_buffer");
+                ScopedTimer timer(timers.noBuffer);
                 return true;
             }
 
@@ -343,26 +348,28 @@ namespace TensileLite
                 deviceId,
                 deviceSynchronizer,
                 bytes,
-                concatenate("Synchronizer left dirty after ", stage, " (gemm ", gemmIdx, ")"));
+                concatenate("Synchronizer left dirty after ", stage, " (gemm ", gemmIdx, ")"),
+                timers);
         }
 
         bool SynchronizerValidator::checkRegion(int                deviceId,
                                                 void*              device,
                                                 size_t             bytes,
-                                                std::string const& what)
+                                                std::string const& what,
+                                                CheckTimers const& timers)
         {
             // Once per run iteration, so the copy is hot: pinned staging avoids
             // the pageable bounce buffer.
             uint8_t* host;
             {
-                ScopedTimer timer("synchronizer_readback");
+                ScopedTimer timer(timers.readback);
                 host = readBuffer(deviceId, device, bytes);
             }
 
             SynchronizerResidue residue;
             bool                dirty;
             {
-                ScopedTimer timer("synchronizer_scan");
+                ScopedTimer timer(timers.scan);
                 dirty = scanSynchronizerResidue(host, bytes, residue);
             }
             if(!dirty)

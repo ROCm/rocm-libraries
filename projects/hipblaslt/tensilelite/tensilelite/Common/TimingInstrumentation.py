@@ -77,6 +77,8 @@ def record_timing(category_name, duration_ms):
 
     Use this for time that cannot be wrapped in a single ``timing_context`` scope, such as the
     part of an outer call that is not spent inside a callback it makes.
+    Negative differences saturate at zero so they cannot subtract time from report totals;
+    callers must still verify that their nested measurements are subtracted correctly.
     """
     if globalParameters.get("TimingInstrumentation", False):
         _timing_buffer.append((category_name, max(0.0, duration_ms)))

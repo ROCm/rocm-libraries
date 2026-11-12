@@ -7,6 +7,7 @@
 #include "MetaRunListener.hpp"
 #include "ResultReporter.hpp"
 #include "SynchronizerValidator.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
 
@@ -482,7 +483,108 @@ namespace
 
     class SynchronizerValidatorLifecycle
         : public ::testing::TestWithParam<std::tuple<TransferFailure, bool>> {};
+
+    struct TimingCapture
+    {
+        bool                   savedEnabled = g_timingInstrumentationEnabled;
+        std::vector<TimingRec> savedBuffer  = std::move(g_timingBuffer);
+
+        explicit TimingCapture(bool enabled)
+        {
+            g_timingBuffer.clear();
+            g_timingInstrumentationEnabled = enabled;
+        }
+        ~TimingCapture()
+        {
+            g_timingInstrumentationEnabled = savedEnabled;
+            g_timingBuffer                 = std::move(savedBuffer);
+        }
+    };
+
+    enum class CheckContext
+    {
+        RunIteration,
+        AfterEnqueues,
+        PostSolution,
+        FlagBlock
+    };
+
+    class SynchronizerValidatorTiming
+        : public ::testing::TestWithParam<std::tuple<CheckContext, bool, TransferFailure>>
+    {
+    };
 }
+
+TEST_P(SynchronizerValidatorTiming, ContextNamesSurviveReadbackFailuresAndRespectDisabledTiming)
+{
+    auto [context, enabled, failure] = GetParam();
+    TimingCapture capture(enabled);
+    SolutionLoop  loop(context == CheckContext::AfterEnqueues);
+    loop.validator->failure = failure;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+
+    std::vector<std::string> expected;
+    if(context == CheckContext::FlagBlock)
+    {
+        // The fake validator treats this host allocation as the fused-A2A flag block.
+        // Release the borrowed pointer before DeviceContext's destructor calls hipFree.
+        loop.device->commFlags      = loop.buffer.data();
+        loop.device->commFlagsBytes = loop.buffer.size() * sizeof(uint32_t);
+        loop.listeners.postSolution();
+        loop.device->commFlags = nullptr;
+        expected               = {"synchronizer_flag_readback_post_solution",
+                                  "synchronizer_flag_scan_post_solution",
+                                  "synchronizer_flag_check_post_solution"};
+    }
+    else
+    {
+        loop.warmup();
+        auto check = [&] {
+            if(context == CheckContext::RunIteration)
+                loop.endIteration();
+            else if(context == CheckContext::AfterEnqueues)
+                loop.enqueues();
+            else
+                loop.listeners.postSolution();
+        };
+        if(failure == TransferFailure::Readback && context != CheckContext::PostSolution)
+            EXPECT_THROW(check(), std::runtime_error);
+        else
+            EXPECT_NO_THROW(check());
+
+        if(context == CheckContext::RunIteration)
+            expected = {"synchronizer_readback", "synchronizer_scan", "synchronizer_check"};
+        else if(context == CheckContext::AfterEnqueues)
+            expected = {"synchronizer_readback_after_enqueues",
+                        "synchronizer_scan_after_enqueues",
+                        "synchronizer_check_after_enqueues"};
+        else
+            expected = {"synchronizer_readback_post_solution",
+                        "synchronizer_scan_post_solution",
+                        "synchronizer_check_post_solution"};
+    }
+    if(failure == TransferFailure::Readback)
+        expected.erase(expected.begin() + 1); // No scan after a failed readback.
+    if(!enabled)
+        expected.clear();
+
+    std::vector<std::string> categories;
+    for(auto const& record : g_timingBuffer)
+        if(std::string(record.category).find("synchronizer_") == 0)
+            categories.emplace_back(record.category);
+    EXPECT_EQ(categories, expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllContexts,
+                         SynchronizerValidatorTiming,
+                         ::testing::Combine(::testing::Values(CheckContext::RunIteration,
+                                                              CheckContext::AfterEnqueues,
+                                                              CheckContext::PostSolution,
+                                                              CheckContext::FlagBlock),
+                                            ::testing::Bool(),
+                                            ::testing::Values(TransferFailure::None,
+                                                              TransferFailure::Readback)));
 
 // Also: a dirty buffer gives FAILED although the reference check passed.
 TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSolutionIsClean)
