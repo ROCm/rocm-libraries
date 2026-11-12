@@ -35,6 +35,7 @@
 #include <hipblaslt/hipblaslt-types.h>
 #include <iostream>
 #include <rocblaslt.h>
+#include <stdexcept>
 
 namespace
 {

@@ -32,7 +32,10 @@
 #pragma once
 #include "hipblaslt/hipblaslt.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
@@ -56,7 +59,7 @@ namespace hipblaslt_ext
     /*! \ingroup types_module
      *  \brief hipBLASLt extension for the preference for GEMM problems.
      *
-     * \details Currently only supports setting the maximum workspace size.
+     * \details Controls workspace limits and algorithm-selection preferences.
      */
     class GemmPreference
     {
@@ -84,10 +87,9 @@ namespace hipblaslt_ext
          *  tile scheduling for StreamK=5 kernels).
          *
          *  \details
-         *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
-         *  hipBLASLt-internal scheduler with no equivalent in the base
-         *  ``hipblasLt`` C API. The ``mode`` argument is one of
-         *  ``hipblasLtStreamKTileSchedulingMode_t``:
+         *  Controls the Hybrid kernel's static or dynamic tile assignment, like
+         *  ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT`` in the C API.
+         *  The ``mode`` argument is one of ``hipblasLtStreamKTileSchedulingMode_t``:
          *
          *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` (default) — SK3 static
          *      sub-path; when ``sm_count_target`` > 0 the library heuristic
@@ -108,7 +110,7 @@ namespace hipblaslt_ext
          *  cuBLAS-compatible hint on the number of compute units to target.
          *
          *  @param[in]
-         *  mode  Tri-state mode selector.
+         *  mode  Tri-state mode selector. Other values select OFF.
          */
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 

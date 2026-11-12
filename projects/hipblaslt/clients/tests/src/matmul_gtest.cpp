@@ -1282,15 +1282,16 @@ namespace
                          HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO,
                          HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF})
         {
+            SCOPED_TRACE(mode);
             gemm->setStreamKTileSchedulingMode(mode);
             problem.set(*gemm, true);
             // Support applies the request even when this candidate is refused.
             static_cast<void>(gemm->isAlgoSupported(algo, workspace));
             expectScheduling(*gemm, 7, mode);
-            for(int32_t invalid : {-1, 3})
-                EXPECT_THROW(gemm->setStreamKTileSchedulingMode(
-                                 static_cast<hipblasLtStreamKTileSchedulingMode_t>(invalid)),
-                             std::invalid_argument);
+            // 3 is representable by the enum but is not a supported mode.
+            EXPECT_THROW(gemm->setStreamKTileSchedulingMode(
+                             static_cast<hipblasLtStreamKTileSchedulingMode_t>(3)),
+                         std::invalid_argument);
             static_cast<void>(gemm->isAlgoSupported(algo, tuning, workspace));
             expectScheduling(*gemm, 7, mode);
         }
@@ -1325,8 +1326,11 @@ namespace
         gemm->setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
         hipblaslt_ext::GemmPreference pref;
         pref.setMaxWorkspaceBytes(32 * 1024 * 1024);
-        pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
         std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        ASSERT_EQ(gemm->algoGetHeuristic(1, pref, results), HIPBLAS_STATUS_SUCCESS);
+        expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+
+        pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
         ASSERT_EQ(gemm->algoGetHeuristic(1, pref, results), HIPBLAS_STATUS_SUCCESS);
         expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
     }
@@ -1348,6 +1352,7 @@ namespace
         hipblaslt_ext::GemmTuning tuning;
         for(bool tuned : {false, true})
         {
+            SCOPED_TRACE(tuned ? "tuned initialize" : "initialize");
             const auto mode = tuned ? HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
                                     : HIPBLASLT_STREAMK_TILE_SCHEDULING_ON;
             gemm->setStreamKTileSchedulingMode(mode);
