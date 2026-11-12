@@ -50,7 +50,8 @@ fams = pins["families"]
 if sys.argv[2] not in fams:
     sys.exit(f"unknown family {sys.argv[2]!r}; known: {', '.join(fams)}")
 print(";".join(fams[sys.argv[2]]))
-print("\n".join(pins["provider"]["cmake_flags"]))
+prov = pins["provider"]
+print("\n".join(prov["cmake_flags"] + prov.get("family_cmake_flags", {}).get(sys.argv[2], [])))
 EOF
 )
 test "${#PINNED[@]}" -ge 2 || { echo "could not read $TOOL_DIR/BUILD_PINS.toml for $FAMILY" >&2; exit 1; }
@@ -78,7 +79,10 @@ test -d "$ROCM_SDK_PATH/include" || { echo "rocm-sdk-devel not expanded at $ROCM
 COMGR_LIB=$(ls "$SITE/_rocm_sdk_core/lib/libamd_comgr.so".* | head -n1)
 export PATH="$TOOLS_VENV/bin:$ROCM_SDK_PATH/bin:$PATH"
 export ROCM_PATH=$ROCM_SDK_PATH ROCKE_COMGR_LIB=$COMGR_LIB HIPKERNELPROVIDER_ROCM_KPACK_DIR=$KPACK_PYTHON_DIR
-RTLIB="$SITE/_rocm_sdk_core/lib:$SITE/_rocm_sdk_libraries/lib"
+# rocm_sysdeps/lib: the pip install's bundled system libraries (librocm_sysdeps_elf and
+# others). Built against an expanded rocm-sdk-devel whose lib/ RUNPATH lacks it (the vLLM
+# ROCm image's site-packages), the backend's sysdeps NEEDED entries resolve only here.
+RTLIB="$SITE/_rocm_sdk_core/lib:$SITE/_rocm_sdk_core/lib/rocm_sysdeps/lib:$SITE/_rocm_sdk_libraries/lib"
 # Steps that write into the shared source tree run under this per-checkout lock,
 # so families built at once from one checkout do not race.
 LOCK=$(git -C "$SRC" rev-parse --absolute-git-dir)/hipdnn_vllm-build.lock
@@ -215,7 +219,8 @@ info = {
     "plugin_commit": plugin_commit,
     "plugin_tree_dirty_files": int(plugin_dirty),
     "backend_version": backend_version,
-    "provider_cmake_flags": pins["provider"]["cmake_flags"],
+    "provider_cmake_flags": pins["provider"]["cmake_flags"]
+    + pins["provider"].get("family_cmake_flags", {}).get(family, []),
     "pins": pins["pins"],
     "built_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
