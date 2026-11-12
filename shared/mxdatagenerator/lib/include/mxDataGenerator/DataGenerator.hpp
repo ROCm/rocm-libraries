@@ -2010,6 +2010,13 @@ namespace DGen
             if(!mode.indexStrides.empty() && mode.indexStrides.size() != n_size)
                 throw std::invalid_argument("DataGenerator::generate_data_maf1_0: indexStrides "
                                             "must be empty or have one entry per dimension");
+            // The scale blocks tile memory in runs of the contiguous dimension, so a buffer that
+            // is not a whole number of runs (e.g. sizes {6, 5}, strides {1, 7}) would leave its
+            // tail unwritten.
+            if(m_contiguousDim > 0 && m_dataDesc.array_size % m_contiguousDim != 0)
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf1_0: the buffer size must be a multiple of "
+                    "the contiguous dimension");
 
             // Index stride of each sorted dimension; the dense default runs over the
             // caller's dimension order.
@@ -2099,6 +2106,12 @@ namespace DGen
             if(mode.normalScale && !(mode.scaleStdDev > 0.0))
                 throw std::invalid_argument(
                     "DataGenerator::generate_data_maf2_0: scaleStdDev must be positive");
+            // As in generate_data_maf1_0: the scale blocks tile memory in runs of the contiguous
+            // dimension.
+            if(m_contiguousDim > 0 && m_dataDesc.array_size % m_contiguousDim != 0)
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf2_0: the buffer size must be a multiple of "
+                    "the contiguous dimension");
 
             const int  trials     = 2 * mode.n + 1;
             const auto scaleForK  = (mode.normalScale || mode.unitScaleNormalData)

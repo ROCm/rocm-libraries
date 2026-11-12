@@ -160,6 +160,14 @@ namespace
                      std::invalid_argument);
     }
 
+    // Leading dimension 7 is not a multiple of rows 6, so the 35-element buffer is not a whole
+    // number of scale-block runs; the tail would stay unwritten, so the layout is rejected.
+    TEST(Maf2_0Mode, PartialRowLayoutThrows)
+    {
+        EXPECT_THROW(DataGenerator<ocp_e4m3_mxfp8>().generate({6, 5}, {1, 7}, maf2_0Options(2)),
+                     std::invalid_argument);
+    }
+
     TYPED_TEST(Maf2_0Test, DeterministicPerSeed)
     {
         auto gen = [](uint32_t seed) {

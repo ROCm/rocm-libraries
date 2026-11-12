@@ -261,6 +261,14 @@ namespace
         });
     }
 
+    // Leading dimension 7 is not a multiple of rows 6: the 35-element buffer is not a whole
+    // number of scale-block runs, so the layout is rejected instead of leaving its tail unwritten.
+    TYPED_TEST(Maf1_0Test, PartialRowLayoutThrows)
+    {
+        EXPECT_THROW(DataGenerator<TypeParam>().generate({6, 5}, {1, 7}, maf1_0Options(2)),
+                     std::invalid_argument);
+    }
+
     // Size-1 dimensions sharing a stride with another dimension.
     TYPED_TEST(Maf1_0Test, SizeOneDimensions)
     {
