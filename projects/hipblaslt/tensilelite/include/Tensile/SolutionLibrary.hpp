@@ -50,8 +50,44 @@ namespace TensileLite
         DEFAULT        = 1,
         GEMM_TYPE_ONLY = 2,
         HARDWARE_ONLY  = 3,
-        COUNT          = 4
+        // Same filtering as GEMM_TYPE_ONLY, but ExactLogicLibrary::findAllSolutions
+        // additionally skips the ranking (GridBasedMatching / PredictionMatching)
+        // rows on a standard-CU device. The heuristic fallback uses it because it
+        // has already collected those candidates and does not want to re-rank them.
+        // Everywhere else this must behave exactly like GEMM_TYPE_ONLY, which is
+        // what isGemmTypeOnlySearch() below is for.
+        GEMM_TYPE_ONLY_NO_RANKING = 4,
+        COUNT                     = 5
     };
+
+    /**
+ * True for every search type whose software filter is "same GEMM type", i.e.
+ * GEMM_TYPE_ONLY and its no-ranking variant. Use this instead of comparing
+ * against GEMM_TYPE_ONLY directly.
+ */
+    inline bool isGemmTypeOnlySearch(SolutionLibrarySearchType searchType)
+    {
+        return searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY
+               || searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING;
+    }
+
+    /**
+ * True when the caller asked ExactLogicLibrary to skip the ranking matching
+ * libraries (GridBasedMatching / PredictionMatching).
+ */
+    inline bool skipsRankingLibraries(SolutionLibrarySearchType searchType)
+    {
+        return searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING;
+    }
+
+    /**
+ * The matching-library predicate types that rank solutions for a specific
+ * problem size. skipsRankingLibraries() excludes exactly these rows.
+ */
+    inline bool isRankingMatchingLibrary(std::string const& predicateType)
+    {
+        return predicateType == "GridBasedMatching" || predicateType == "PredictionMatching";
+    }
 
     template <typename MySolution, typename MyProblem>
     inline bool isGemmTypeSame(const MySolution& solutions, const MyProblem& problem)
@@ -95,9 +131,11 @@ namespace TensileLite
             // to the narrower problemPredicate && taskPredicate it subsumes.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
-                   && solutions.uniformSummationOrderSupported(problem, hardware);
+                   && solutions.uniformSummationOrderSupported(problem, hardware)
+                   && solutions.deviceScalarAlphaSupported(problem);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
+        case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
             return isGemmTypeSame(solutions, problem);
             break;
         case SolutionLibrarySearchType::HARDWARE_ONLY:
@@ -110,7 +148,8 @@ namespace TensileLite
     }
 
     // With USO off this applies only problemPredicate && taskPredicate &&
-    // hardwarePredicate. With USO on, softwarePredicate() adds
+    // hardwarePredicate, plus the independent device-scalar capability check.
+    // With USO on, softwarePredicate() adds
     // streamKDynamicQueueSupported() and uniformSummationOrderSupported(), both
     // live filters on that arm. hardwarePredicate keeps each arm's original
     // position -- last off, first on -- because taskPredicate can warn via
@@ -127,7 +166,8 @@ namespace TensileLite
                        SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);
 
         return (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task)
-               && (*solution.hardwarePredicate)(hardware);
+               && (*solution.hardwarePredicate)(hardware)
+               && solution.deviceScalarAlphaSupported(problem);
     }
 
     template <typename MySolution>
@@ -227,17 +267,16 @@ namespace TensileLite
    * particular `problem` on this particular piece of `hardware`.
    *
    * May return `nullptr` if no such object exists.
+   *
+   * Fewer than `numSolutions` solutions means the library has nothing more for
+   * this problem. A library may return more than `numSolutions`: CachingLibrary
+   * returns its whole cached list once it holds at least that many.
    */
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,
                                                             int              numSolutions) const
         {
             return SolutionVector<MySolution>();
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const
-        {
-            return true;
         }
 
         virtual SolutionVector<MySolution>
@@ -256,4 +295,3 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
-

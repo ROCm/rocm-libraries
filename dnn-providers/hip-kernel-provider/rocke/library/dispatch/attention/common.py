@@ -75,7 +75,9 @@ from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_match
 from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
 FAMILY = "attention_unified"
-ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
+# v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
+# window as kernargs.
+ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -753,26 +755,27 @@ def normalize_band(
     return AttentionBand(left_bound, right_bound, align)
 
 
-def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
-    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``.
+def attention_band(req: AttentionRequest) -> AttentionBand:
+    """The band the unified kernels compute for ``req``.
 
     Requests the unified family does not serve (other arches, and the explicit
     ``window_*`` fields, which carry their own bounds) get the default mask: the
     problem is then only a geometry carrier, e.g. for the gfx1151 launch grid.
+    The single home for this decision -- callers outside this package (e.g. the
+    SDPA gates) use the same function internal callers do.
     """
     explicit = req.window_left is not None or (
         req.window_right is not None and int(req.window_right) >= 0
     )
     if not _uses_band_dispatch(req, explicit):
-        return False, 0
-    band = normalize_band(req)
-    return band.top_left, band.kernel_right_bound
+        return AttentionBand(None, 0, Alignment.BOTTOM_RIGHT)
+    return normalize_band(req)
 
 
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
-    top_left, right_bound = _attention_band(req)
+    band = attention_band(req)
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -790,14 +793,18 @@ def _problem_with_num_cus(
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
-        causal_top_left=top_left,
-        right_bound=right_bound,
+        causal_top_left=band.top_left,
+        right_bound=band.kernel_right_bound,
         emit_lse=bool(req.emit_lse),
     )
 
 
-def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
-    """The production-routing problem, including the live-device CU policy."""
+def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """The production-routing problem, including the live-device CU policy.
+
+    The single home for this decision -- callers outside this package (e.g.
+    the SDPA gates) use the same function internal callers do.
+    """
     return _problem_with_num_cus(req, _resolve_num_cus(req))
 
 
@@ -811,13 +818,13 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     use). Only the split-rule segment count and the dispatcher's K/V layout
     knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
-    from rocke.helpers.split_k import _ARCH_NUM_CUS
+    from rocke.helpers.split_k import ARCH_NUM_CUS
 
     num_cus = int(req.num_cus)
     if num_cus <= 0:
-        if req.arch not in _ARCH_NUM_CUS:
+        if req.arch not in ARCH_NUM_CUS:
             raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
-        num_cus = _ARCH_NUM_CUS[req.arch]
+        num_cus = ARCH_NUM_CUS[req.arch]
     return _problem_with_num_cus(req, num_cus)
 
 
@@ -915,6 +922,20 @@ def _dense_kernel_module(arch: str):
     else:
         raise ValueError(f"no dense attention kernel for arch {arch!r}")
     return attention_dense
+
+
+def dense_scale_range(arch: str) -> Tuple[float, float]:
+    """``(low, high)`` the ``arch`` dense kernels accept for ``scale``.
+
+    Public, so a caller outside this package (e.g. the SDPA gate) names the
+    range instead of copying the bounds. Every dense arch shares
+    ``DENSE_MIN_SCALE`` / ``DENSE_MAX_SCALE``, the range each dense runner
+    enforces through ``check_dense_scale``.
+    """
+    from kernels.common.attention_dense_spec import DENSE_MAX_SCALE, DENSE_MIN_SCALE
+
+    _dense_kernel_module(arch)  # raise for an arch with no dense kernel
+    return DENSE_MIN_SCALE, DENSE_MAX_SCALE
 
 
 @dataclass(frozen=True)

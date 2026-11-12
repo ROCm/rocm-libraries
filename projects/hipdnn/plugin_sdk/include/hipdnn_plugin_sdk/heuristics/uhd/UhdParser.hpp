@@ -472,6 +472,7 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           "native",
           "tree_data",
           "table",
+          "linear_data",
           "onnx",
           "custom_library",
           "trained_against",
@@ -491,14 +492,15 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     result.adapterType = text(root, "adapter", where);
     size_t bodies = 0;
     for(const auto* adapter :
-        {"static_order", "native", "tree_data", "table", "onnx", "custom_library"})
+        {"static_order", "native", "tree_data", "table", "linear_data", "onnx", "custom_library"})
     {
         bodies += root.contains(adapter) ? size_t{1} : size_t{0};
     }
     if(bodies != 1 || !root.contains(result.adapterType)
        || (result.adapterType != "static_order" && result.adapterType != "native"
            && result.adapterType != "tree_data" && result.adapterType != "table"
-           && result.adapterType != "onnx" && result.adapterType != "custom_library"))
+           && result.adapterType != "linear_data" && result.adapterType != "onnx"
+           && result.adapterType != "custom_library"))
     {
         fail("UHD requires exactly one body matching its adapter in " + where);
     }
@@ -614,6 +616,16 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
             fail("UHD score.metric '" + result.scoreMetric + "' requires objective " + expected
                  + " in " + where);
         }
+    }
+    // A linear_data score is a log slowdown against the catalog's best candidate: lower is
+    // better, and it estimates no registered metric, so no other declaration can be true.
+    if(result.adapterType == "linear_data"
+       && (result.objective != "min" || !result.scoreMetric.empty() || result.scoreCalibrated
+           || (!result.scoreTransform.empty() && result.scoreTransform != "identity")))
+    {
+        fail("linear_data requires objective min and no score.metric, calibration or transform "
+             "in "
+             + where);
     }
     if(root.contains("trained_against"))
     {
