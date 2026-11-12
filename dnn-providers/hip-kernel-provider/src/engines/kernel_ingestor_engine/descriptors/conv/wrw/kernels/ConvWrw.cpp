@@ -57,8 +57,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
         {
             const float v = a.x[i];
             const unsigned short h = k1FloatToBf(v);
-            const float r = v - k1BfToFloat(h);
-            const unsigned short l = k1FloatToBf(r == r ? r : 0.0f);
+            const unsigned short l = k1BfLo(v, h);
             a.xs[i] = h;
             a.xs[a.xElems + i] = h;
             a.xs[2 * a.xElems + i] = l;
@@ -67,8 +66,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
         {
             const float v = a.dy[i];
             const unsigned short h = k1FloatToBf(v);
-            const float r = v - k1BfToFloat(h);
-            const unsigned short l = k1FloatToBf(r == r ? r : 0.0f);
+            const unsigned short l = k1BfLo(v, h);
             a.ys[i] = h;
             a.ys[a.yElems + i] = l;
             a.ys[2 * a.yElems + i] = h;

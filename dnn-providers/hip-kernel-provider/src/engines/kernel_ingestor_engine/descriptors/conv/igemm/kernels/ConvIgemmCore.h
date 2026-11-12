@@ -60,6 +60,13 @@ __device__ inline unsigned short k1FloatToBf(float v)
     u += 0x7fffu + ((u >> 16) & 1u);
     return static_cast<unsigned short>(u >> 16);
 }
+/// Three-bf16's low part of v, given its high part h = k1FloatToBf(v): zero where v - h is not a
+/// number (v infinite), so an infinite operand stays infinite rather than turning into NaN.
+__device__ inline unsigned short k1BfLo(float v, unsigned short h)
+{
+    const float r = v - k1BfToFloat(h);
+    return k1FloatToBf(r == r ? r : 0.0f);
+}
 
 template <class T>
 struct K1Elem;
@@ -1395,7 +1402,7 @@ struct K1Tiles
                 {
                     const unsigned short h = k1FloatToBf(v[e]);
                     d[e * ld] = h;
-                    d[e * ld + plane] = k1FloatToBf(v[e] - k1BfToFloat(h));
+                    d[e * ld + plane] = k1BfLo(v[e], h);
                 }
             }
             else if constexpr(KV == 2)
@@ -1460,7 +1467,7 @@ struct K1Tiles
         {
             const unsigned short he = k1FloatToBf(v[e]);
             h[e] = he;
-            l[e] = k1FloatToBf(v[e] - k1BfToFloat(he));
+            l[e] = k1BfLo(v[e], he);
         }
         *reinterpret_cast<Half*>(d) = h;
         *reinterpret_cast<Half*>(d + plane) = l;

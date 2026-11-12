@@ -522,8 +522,38 @@ enum class Math
     THREE_BF16,
 };
 
+/// +inf and -inf planted into @p input (the tensor the reduction reads, besides the filter).
 template <typename T>
-void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE)
+void plantInfinities(Tensor<T>& input)
+{
+    int64_t count = 1;
+    for(const auto extent : input.dims())
+    {
+        count *= extent;
+    }
+    auto* data = static_cast<T*>(input.rawHostData());
+    data[0] = static_cast<T>(INFINITY);
+    data[count / 2] = static_cast<T>(-INFINITY);
+    input.markHostModified();
+}
+
+/// A result matches its reference: within @p tolerance where the reference is finite, the same
+/// infinity, or NaN where the reference is NaN.
+bool matches(float got, float want, float tolerance)
+{
+    if(std::isnan(want))
+    {
+        return std::isnan(got);
+    }
+    if(std::isinf(want))
+    {
+        return got == want;
+    }
+    return std::fabs(got - want) <= tolerance;
+}
+
+template <typename T>
+void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infinities = false)
 {
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -543,6 +573,10 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE)
     constexpr unsigned int SEED = 4321;
     x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        plantInfinities(x);
+    }
 
     Tensor<T> reference(spec.w.dims, spec.w.strides);
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -645,7 +679,7 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
                               << got << ", want " << want << ", tolerance " << tolerance;
@@ -715,6 +749,23 @@ TEST_P(TestGpuConvWrwThreeBf16, Float)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
         "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(GetParam(), Math::THREE_BF16);
+}
+
+/// +inf and -inf in x: every dw element an infinity reaches is that infinity (NaN where both
+/// meet), as exact fp32 gives; the split must not turn them into NaN.
+TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto properties = currentDeviceProperties();
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch.rfind("gfx11", 0) != 0
+       && arch.rfind("gfx12", 0) != 0)
+    {
+        GTEST_SKIP() << "no three-bf16 configs on " << arch;
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(GetParam(), Math::THREE_BF16, true);
 }
 
 /// Layouts, 1-D to 3-D, stride, dilation, groups, stems (small-C rows), pointwise, true

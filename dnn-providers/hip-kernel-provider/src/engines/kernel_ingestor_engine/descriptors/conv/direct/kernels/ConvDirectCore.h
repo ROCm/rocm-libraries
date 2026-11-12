@@ -113,7 +113,7 @@ __device__ void k2SplitReduce(const K2ReduceArgs& a)
 __device__ inline void k2SplitBf16(float v, unsigned short& hi, unsigned short& lo)
 {
     hi = k1FloatToBf(v);
-    lo = k1FloatToBf(v - k1BfToFloat(hi));
+    lo = k1BfLo(v, hi);
 }
 
 /// x' from x: pixels x c fp32 -> pixels x 3c bf16.
