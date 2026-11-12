@@ -358,35 +358,33 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         /// Component `component` of A's or B's tile as a TDM load window: a sub-window of the
         /// operand's DRAM window at the component's first row, one box of
-        /// MakeDramTdmTileDistribution. A wide operand's view is rebased at that row in 64 bits,
-        /// as a tensor descriptor offset is 32-bit.
+        /// MakeDramTdmTileDistribution. The view is rebased at that row so the window's offset
+        /// is K only: a tensor descriptor offset is 32-bit and counts elements, which pass 2^31
+        /// at half the byte offset with packed types (a 65536 x 65536 FP4 A). The row's byte
+        /// offset is 32-bit as WideA / WideB say.
         template <bool IsA>
         CK_TILE_DEVICE auto DramComponentWindow(index_t component) const
         {
+            using DataType = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
             constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
             constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
+            constexpr index_t packed          = numeric_traits<DataType>::PackedSize;
             constexpr index_t box_rows        = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
             constexpr auto lengths            = make_tuple(number<box_rows>{}, number<kTileK>{});
             constexpr auto dstr = Policy::template MakeDramTdmTileDistribution<Problem, IsA>();
+            using RowOffset     = std::conditional_t<wide, long_index_t, index_t>;
             const auto& dram    = DramWindow<IsA>();
             const auto& view    = dram.get_bottom_tensor_view();
             const index_t row0  = dram.get_window_origin()[number<0>{}] + component * L.rows;
             const index_t k0    = dram.get_window_origin()[number<1>{}];
-            if constexpr(wide)
-            {
-                using DataType           = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
-                constexpr index_t packed = numeric_traits<DataType>::PackedSize;
-                const index_t row_stride =
-                    view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0));
-                const auto rebased = make_naive_tensor_view<address_space_enum::global>(
-                    view.get_buffer_view().p_data_ +
-                        static_cast<long_index_t>(row0) * (row_stride / packed),
-                    make_tuple(Lengths(dram)[number<0>{}] - row0, K),
-                    make_tuple(row_stride, 1));
-                return make_tile_window(rebased, lengths, {0, k0}, dstr);
-            }
-            else
-                return make_tile_window(view, lengths, {row0, k0}, dstr);
+            const index_t row_stride =
+                view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0));
+            const auto rebased = make_naive_tensor_view<address_space_enum::global>(
+                view.get_buffer_view().p_data_ +
+                    static_cast<RowOffset>(row0) * (row_stride / packed),
+                make_tuple(Lengths(dram)[number<0>{}] - row0, K),
+                make_tuple(row_stride, 1));
+            return make_tile_window(rebased, lengths, {0, k0}, dstr);
         }
 
         /// Where component `component` of A's or B's tile lands in buffer 0: an LDS window over
