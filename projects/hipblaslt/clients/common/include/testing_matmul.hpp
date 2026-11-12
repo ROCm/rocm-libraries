@@ -1283,6 +1283,8 @@ inline bool
     return skipped;
 }
 
+// Compares host copies of the outputs (hD_1, and hE, hAmaxD and hBias where they are outputs)
+// with the references. The caller copies them from the launch being checked.
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -1334,25 +1336,6 @@ void check(hipStream_t                   stream,
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
-        if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-        {
-            if(!arg.gradient && arg.use_e)
-            {
-                CHECK_HIP_ERROR(
-                    synchronize(hE[gemmIdx], dE[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-            }
-
-            if(arg.amaxD)
-            {
-                CHECK_HIP_ERROR(
-                    synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-            }
-            if(arg.gradient && arg.bias_vector)
-            {
-                CHECK_HIP_ERROR(
-                    synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-            }
-        }
         // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
         // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
         // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
@@ -6189,6 +6172,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             for(auto& amax : dAmaxD)
                 CHECK_HIP_ERROR(hipMemsetAsync(amax.buf(), 0xFF, amax.getNumBytes(), stream));
     };
+    // The checks compare the first launch of each solution. Copy its outputs to the host before a
+    // later launch can change them: under c_equal_d each launch reads the previous launch's D as
+    // C. dCount is the number of D buffers (batch_count in pointer-array mode).
+    auto copyOutputsToHost = [&](uint32_t dCount) {
+        copy_gemm_to_host(stream, dCount, hD_1, (*dDp));
+        if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            return;
+        for(int i = 0; i < gemm_count; i++)
+        {
+            if(arg.use_e && !arg.gradient)
+                CHECK_HIP_ERROR(synchronize(hE[i], dE[i], 0, 0, 0, 0, 1, false, stream));
+            if(arg.amaxD)
+                CHECK_HIP_ERROR(synchronize(hAmaxD[i], dAmaxD[i], 0, 0, 0, 0, 1, false, stream));
+            if(arg.gradient && arg.bias_vector)
+                CHECK_HIP_ERROR(synchronize(hBias[i], dBias[i], 0, 0, 0, 0, 1, false, stream));
+        }
+    };
     bool skippedSolutionChecked = false;
     // For the skip_launch_solution self-test: each output besides D that the case checks, and
     // whether check() read the NaN fill back from it.
@@ -6480,11 +6480,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
-                    copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    copyOutputsToHost(arg.batch_count);
                 }
                 else
                 {
-                    copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    copyOutputsToHost(gemm_count);
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
@@ -7303,7 +7303,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .cold([&](size_t, int32_t i) {
                             CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
@@ -7366,7 +7366,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .cold([&](size_t sol, int32_t i) {
                             EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                                copyOutputsToHost(arg.batch_count);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
@@ -7417,7 +7417,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .cold([&](size_t sol, int32_t i) {
                             EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
@@ -7463,7 +7463,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .cold([&](size_t sol, int32_t i) {
                             runBlock(sol, i % block_count);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             runBlock(sol, static_cast<int>(i % block_count));
@@ -7511,7 +7511,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
                                 d_userArgsVec[i % block_count], stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
@@ -7548,7 +7548,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .cold([&](size_t, int32_t i) {
                             CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
