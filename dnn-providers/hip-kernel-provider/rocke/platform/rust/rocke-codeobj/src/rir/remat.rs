@@ -66,13 +66,61 @@ thread_local! {
     static CHANGED: Cell<usize> = const { Cell::new(0) };
 }
 
-/// How many recomputations `run` has made on this thread since `reset`.
+/// How many recomputations (and dead instructions dropped) `run` made on this thread since `reset`, in a compile with the
+/// pass on or, in one with it off, that it would have made (`note`).
 pub(super) fn changed() -> usize {
     CHANGED.with(|c| c.get())
 }
 
+thread_local! {
+    /// What the pass would save at most (VGPRs of pressure) and the waves each register count gives, as noted by `hook`.
+    static NOTED: Cell<Option<(u32, [u8; 257])>> = const { Cell::new(None) };
+}
+
+/// Compile hook: with the pass on, `run`s it; with it off, notes (on a copy) how many VGPRs of pressure it would save,
+/// so that the caller knows whether a retry with the pass on can differ (`could_gain`).
+pub(super) fn hook(f: &mut MFunc, waves: impl Fn(u32) -> u32) {
+    if off() || super::debug_flag("noremat") {
+        return;
+    }
+    if enabled() {
+        let n = run(f);
+        CHANGED.with(|c| c.set(c.get() + n));
+        return;
+    }
+    let mut g = f.clone();
+    if run(&mut g) == 0 {
+        return;
+    }
+    let (Ok(p0), Ok(p1)) = (regalloc::pressure(f), regalloc::pressure(&g)) else { return };
+    if super::debug_flag("tracepressure") {
+        eprintln!("remat hook: pressure {} -> {} VGPRs", p0.vgprs, p1.vgprs);
+    }
+    let saved = p0.vgprs.saturating_sub(p1.vgprs);
+    let mut table = [0u8; 257];
+    for (v, w) in table.iter_mut().enumerate() {
+        *w = waves(v as u32) as u8;
+    }
+    NOTED.with(|c| {
+        let before = c.get().map_or(0, |n| n.0);
+        c.set(Some((saved.max(before), table)));
+    });
+}
+
+/// Whether a compile that took `vgprs` registers for `waves` waves (`hardware`: the most VGPRs there are) can gain by the
+/// pass: it saves registers, and those take it past a waves threshold, or it sits at (within 8 of) the hardware limit (spilling,
+/// or banking accumulators in AGPRs), or it spilled.
+pub(super) fn could_gain(vgprs: u32, waves: u32, hardware: u32, spilled: bool) -> bool {
+    let Some((saved, table)) = NOTED.with(|c| c.get()) else { return false };
+    // The saving counted before scheduling is a part of the real one (registers the schedule and the allocator's fragmentation
+    // add go too): 15 counted against 22 got, 59 against 70.
+    const SLACK: u32 = 16;
+    saved > 0 && (spilled || vgprs + 8 >= hardware || u32::from(table[vgprs.saturating_sub(saved + SLACK).min(256) as usize]) > waves)
+}
+
 pub(super) fn reset() {
     CHANGED.with(|c| c.set(0));
+    NOTED.with(|c| c.set(None));
 }
 
 /// Drops the VALU instructions whose results nothing reads, until none is left: the carry chain of a
@@ -122,7 +170,6 @@ pub fn run(f: &mut MFunc) -> usize {
     }
     let dead = drop_dead_valu(f);
     let made = recompute(f);
-    CHANGED.with(|c| c.set(c.get() + dead));
     made + dead
 }
 
@@ -369,7 +416,6 @@ fn recompute(f: &mut MFunc) -> usize {
     }
     let new_regs_len = new_regs.len();
     f.vregs.extend(new_regs);
-    CHANGED.with(|c| c.set(c.get() + new_regs_len));
     new_regs_len
 }
 

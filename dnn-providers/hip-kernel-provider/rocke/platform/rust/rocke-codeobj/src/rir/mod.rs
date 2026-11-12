@@ -1211,14 +1211,20 @@ pub(crate) fn compile_parsed_by_on(
     threads: usize,
     target: Target,
 ) -> Result<CompiledKernel, CompileError> {
-    let first = compile_unrolling(text, parse, threads, target);
     // gfx950: a kernel that spills, or runs fewer waves than it could, is compiled again with its
     // loop-invariant addresses and masks computed where they are used (`remat`), and keeps that
-    // compile when it spills less or, spilling no more, runs more waves.
-    if target != Target::Gfx950 || debug_flag("noremat") || remat::enabled() || remat::off() {
+    // compile when it spills less or, spilling no more, runs more waves. The first compile notes whether
+    // the pass finds anything (`remat::hook`); when it finds nothing there is no second compile.
+    let retry = target == Target::Gfx950 && !debug_flag("noremat") && !remat::enabled() && !remat::off();
+    if retry {
+        remat::reset();
+    }
+    let first = compile_unrolling(text, parse, threads, target);
+    if !retry {
         return first;
     }
-    if first.as_ref().is_ok_and(|u| spilled(&u.stats) == 0 && u.stats.waves >= target.info().max_waves) {
+    let hardware = target.info().max_vgprs;
+    if first.as_ref().is_ok_and(|u| !remat::could_gain(u.stats.vgprs, u.stats.waves, hardware, spilled(&u.stats) > 0)) {
         return first;
     }
     remat::reset();
@@ -1522,9 +1528,7 @@ fn compile_with(
         laps.lap("prepare");
         crate::target::gfx9::legalize::run(&mut sel.func);
         crate::target::gfx9::lits::share(&mut sel.func);
-        if remat::enabled() {
-            remat::run(&mut sel.func);
-        }
+        remat::hook(&mut sel.func, |vgprs| target.info().occupancy(vgprs.max(1), sel.lds_size, kernel.max_workgroup_size));
     } else {
         peephole::optimize(&mut sel.func);
         uniform_masks::reuse_masks(&mut sel.func);
