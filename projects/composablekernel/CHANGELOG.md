@@ -17,6 +17,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
 * Fixed memory faults of CK Tile TDM transfers on gfx1250. The TDM and prefetch paths of the tile window read the tensor descriptor through a dangling reference, which some compilers fold to `INT32_MAX` tensor dimensions and strides.
 * Fixed the CK Tile GEMM Stream-K dispatcher rejecting linear and tree reduction kernels whose C store is narrower than 4 bytes, so fp16 and bf16 problems with an odd N (for example N = 1) get a linear or tree reduction kernel.
+* Fixed GPU memory faults in CK Tile FMHA batch prefill on gfx950 when a paged KV cache uses pages smaller than the K/V tile (for example 16-token pages with kN0 = 128) and prefix-cache reuse makes the page ids non-contiguous. Such pages now always load with `GLOBAL_LOAD_LDS`, which is slower than `BUFFER_LOAD` on that path.
 
 ### Added
 

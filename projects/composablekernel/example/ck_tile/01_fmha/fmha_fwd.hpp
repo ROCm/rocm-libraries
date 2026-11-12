@@ -679,18 +679,13 @@ struct fmha_batch_prefill_args
 };
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
-//   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
-//     so per-page SRD is impossible, AND (b) the SRD voffset arithmetic would
-//     overflow for either K or V. The hardware computes
-//       addr = (base[63:32] << 32) | ((base[31:0] + voffset) & 0xFFFFFFFF)
-//     and the voffset chain in ck_tile is signed int32 (index_t), so it wraps
-//     once base[31:0] + max_voffset exceeds INT32_MAX (0x7FFFFFFF, ~2GB) - NOT
-//     0xFFFFFFFF - even when the KV pool itself is well under 2GB. K and V are
-//     independently allocated, so each is checked separately; either one
-//     crossing the bound forces GLOBAL_LOAD_LDS.
-//   BUFFER_LOAD: every other case - the SGPR-resident SRD path is fastest.
-// k_base_ptr/v_base_ptr are the VAs of the first elements of the K and V caches;
-// the low 32 bits of each determine whether the voffset addition wraps.
+//   BUFFER_LOAD: the page holds at least one K/V tile (page_block_size >= kN0),
+//     so each page gets its own rebased SRD - the fastest path.
+//   GLOBAL_LOAD_LDS: every smaller page. One SRD over the whole pool would
+//     address pages through a signed 32-bit voffset, and that gather VM-faults
+//     on gfx950 for scattered prefix-cache pages even when an address-range
+//     check passes (page sizes 1 and 16 both observed).
+// The remaining arguments are unused; they keep the signature callers share.
 inline ck_tile::BlockAttentionKVCacheLoadModeEnum
 fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
                                        ck_tile::index_t kN0,
@@ -704,40 +699,21 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
     if(page_block_size >= kN0)
         return ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
 
-    // Scattered 1D paged KV (page_size=1 LINEAR + SGLANG_PAGE_TABLE_1D): the page
-    // table holds arbitrary physical-page indices into the whole KV pool, so the
-    // per-page SRD voffset (physical_page * stride_page_block + within_page) is not
-    // bounded by this dispatch's num_total_pages and can wrap the signed int32 on
-    // its own, independent of base[31:0] + pool_bytes. The address-size check below
-    // cannot see this, so force the 64-bit-safe path for single-token pages.
-    if(page_block_size == 1)
-        return ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS;
-
-    // Maximum byte offsets that buffer_load will add to K/V base pointers.
-    // Each page is addressed as page_id * batch_stride * element_bytes.
-    const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
-                              static_cast<uint64_t>(batch_stride_k) *
-                              static_cast<uint64_t>(element_bytes);
-    const auto v_pool_bytes = static_cast<uint64_t>(num_total_pages) *
-                              static_cast<uint64_t>(batch_stride_v) *
-                              static_cast<uint64_t>(element_bytes);
-
-    // Low 32 bits of each base VA. K and V are independently allocated and may
-    // have different low-32 values, so both are checked. Compare against
-    // INT32_MAX (not UINT32_MAX): the low32 bits themselves are unsigned, but the
-    // voffset they are added to is signed int32, so the effective address is
-    // already wrong once base[31:0] + pool crosses 0x7FFFFFFF. A sum in the
-    // (2GB, 4GB] range still fits in 32 unsigned bits but has passed the signed
-    // wrap point - that is exactly the band this check must route to global load.
-    const auto k_lo32 =
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(k_base_ptr)) & 0xFFFFFFFFULL;
-    const auto v_lo32 =
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(v_base_ptr)) & 0xFFFFFFFFULL;
-    const bool srd_would_overflow =
-        (k_lo32 + k_pool_bytes) > INT32_MAX || (v_lo32 + v_pool_bytes) > INT32_MAX;
-
-    return srd_would_overflow ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
-                              : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+    // Case 3 BUFFER_LOAD (page_block_size < kN0) uses one SRD over the whole K/V
+    // pool and encodes page identity in a 32-bit voffset:
+    //   physical_page * stride_page_block + within_page
+    // #10180 already forced GLOBAL_LOAD_LDS for page_block_size == 1 because that
+    // gather faults on gfx950 even for in-bounds addresses. Muse Spark page_size=16
+    // with kN0=128 is the same Case 3 arm: prefix-cache scatter still VM-faults
+    // after #9214's lo32+pool check. Keep BUFFER_LOAD only for the per-page
+    // rebased path (page_block_size >= kN0).
+    (void)num_total_pages;
+    (void)batch_stride_k;
+    (void)batch_stride_v;
+    (void)element_bytes;
+    (void)k_base_ptr;
+    (void)v_base_ptr;
+    return ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS;
 }
 
 template <typename FmhaKernel>
