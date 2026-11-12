@@ -259,10 +259,9 @@ round-to-nearest-even sequence at every BF16 conversion. Any instruction
 outside the model fails with "re-derive the path model": Tier B is re-derived
 for the new path, never widened to absorb it.
 
-Tier B rests on six named assumptions. A-E, A-MFMA and A-F are versioned in
-the calibration entry today. A-QK, A-DIV and A-MODE name premises the same
-enclosure has always used; they add no value to any set and join the entry
-when it is re-ratified.
+Tier B rests on six named assumptions, each versioned in the calibration
+entry. A-QK, A-DIV and A-MODE name premises the enclosure has always used;
+they add no value to any set.
 
 | Assumption | Statement |
 |---|---|
