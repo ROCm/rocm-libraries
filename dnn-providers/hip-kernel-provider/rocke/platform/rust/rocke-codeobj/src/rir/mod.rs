@@ -20,6 +20,8 @@ mod loadorder;
 pub mod lds_swizzle;
 pub mod mir;
 mod mma_order;
+mod pressure_order;
+mod pressure_trace;
 pub mod opt;
 pub mod parse;
 mod parse_par;
@@ -152,6 +154,17 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   the instructions its address waits on, as soon as they are ready, ahead
 ///   of instructions that could start sooner (`rir::post`): the loads keep
 ///   the most in flight.
+/// - `cmpreassoc`: both sides of an i32 compare in a loop become (leaf sum) + constant before LICM, so a row of
+///   compares against distinct constants (a causal mask) shares one base per iteration (`rir::reassoc`).
+/// - `packtuple`: two f32 VALU instructions (`packfar`'s too) whose results are the two halves of one tuple pack
+///   into one `v_pk_*` that writes the tuple (a `vec<f32x2>` operation; `target::gfx9::pack`).
+/// - `pressorder`: when no scheduling window fits the registers, a schedule that prefetches as far as the registers
+///   allow (`rir::pressure_order`), taken before load sinking alone, packed tuples or program order (gfx950).
+/// - `rematv`: spilling also recomputes at their uses single-definition VGPR values computed from VGPRs defined once
+///   outside every loop (a row of address offsets), when at least three share a source (`rir::spill`).
+/// - `valcoal`: allocation also coalesces a copy of a dword defined once earlier in its block into the register of
+///   its source while the source is still live, when the copy's dword is defined only there and dies in the block
+///   (one tuple of two exps for a packed add: no `v_mov`; `rir::regalloc::coalesce`).
 /// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
 ///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
@@ -184,13 +197,13 @@ pub(crate) fn kernel_lever(name: &str) -> bool {
 /// Drivers reject any other name ([`unknown_levers`]): an unknown name would
 /// otherwise be ignored silently and build the lever-off code.
 pub const LEVERS: &[&str] = &[
-    "acqfence", "addrfold", "bitop3", "bufoffany", "devfn", "dmafree", "dmamanual", "dmamanualring",
+    "acqfence", "addrfold", "bitop3", "bufoffany", "cmpreassoc", "devfn", "dmafree", "dmamanual", "dmamanualring",
     "dmamanualringw", "dppcombine", "dppcombinef", "dppcombinei", "dppmirror", "ds128", "dsb96",
     "dsfold", "dshoist", "dsrebase", "fmac", "fmax3", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
-    "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
-    "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
-    "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "wpecap", "xorcmp",
+    "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar", "packtuple",
+    "pressorder", "rematv", "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
+    "u16zext", "valcoal", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "wpecap", "xorcmp",
 ];
 
 /// The names of lever list `text` (`,` / `+` separated; `-name` turns a
@@ -586,6 +599,15 @@ fn schedule_and_allocate(
     let waves = |vgprs: u32| t.occupancy(vgprs, lds_size, wg);
     let hw = regalloc::Limits::for_func(func);
     let base_pressure = known.pressure();
+    if debug_flag("trace") {
+        eprintln!("trace: entry sunk v{} s{} hw v{}", base_pressure.vgprs, base_pressure.sgprs, hw.vgprs);
+        pressure_trace::trace_peak(sunk, "sunk");
+        for w in [64, 32, 16] {
+            let (orders, p) = known.schedule(w);
+            eprintln!("trace: entry window {w} v{} s{}", p.vgprs, p.sgprs);
+            pressure_trace::trace_peak(&post::reordered(sunk, &orders), &format!("w{w}"));
+        }
+    }
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
@@ -665,6 +687,24 @@ fn schedule_and_allocate(
         scheduled.push((window, schedule));
         allocated.push(tried);
     }
+    // Lever `pressorder`: no window fit, so each is a schedule with a deeper prefetch than the registers hold; this
+    // walk holds the pressure under the cap while it prefetches what it can.
+    if !lowered && func.target == Target::Gfx950 && kernel_lever("pressorder") {
+        for (slack, reserve) in [(4, 24), (4, 40), (8, 24), (8, 40), (16, 24)] {
+            let limit = cap.vgprs.saturating_sub(slack);
+            if debug_flag("trace") {
+                let guarded = known.schedule_guarded(sunk, limit, reserve, regalloc::Limits { vgprs: u32::MAX / 4, sgprs: u32::MAX / 4 });
+                eprintln!("trace: pressure order at {limit} reserve {reserve}: {:?} (cap {}, target {target})", guarded.as_ref().map(|g| (g.1.vgprs, g.1.sgprs)), cap.vgprs);
+            }
+            if let Some((orders, p)) = known.schedule_guarded(sunk, limit, reserve, cap).filter(|(_, p)| fits_hw(p) && waves(p.vgprs) >= target) {
+                let mut g = post::reordered(sunk, &orders);
+                if let Some(a) = known.allocate(&mut g, budget(target)).ok().filter(|a| !a.tight && waves(a.num_vgprs) >= target) {
+                    *func = g;
+                    return Ok((regalloc::Allocation { pressure: p, ..a }, 16));
+                }
+            }
+        }
+    }
     if base.is_none() && fits_hw(&base_pressure) {
         base = base_alloc(target);
         if let Some((_, ba)) = &base {
@@ -723,8 +763,18 @@ fn schedule_and_allocate(
     }
     let scheduled = scheduled.into_iter().map(|(window, schedule)| {
         let (orders, p) = schedule.unwrap_or_else(|| known.schedule(window));
-        (window, post::reordered(sunk, &orders), p)
+        let g = post::reordered(sunk, &orders);
+        if debug_flag("trace") {
+            eprintln!("trace: window {window} pressure v{} s{}", p.vgprs, p.sgprs);
+            pressure_trace::trace_peak(&g, &format!("w{window}"));
+        }
+        (window, g, p)
     });
+    if debug_flag("trace") {
+        pressure_trace::trace_peak(sunk, "sunk");
+        pressure_trace::trace_peak(&program, "program");
+        eprintln!("trace: sunk v{} s{} program v{} s{} hw v{}", base_pressure.vgprs, base_pressure.sgprs, program_pressure.vgprs, program_pressure.sgprs, hw.vgprs);
+    }
     let candidates: Candidates = scheduled.chain([(0, sunk.clone(), base_pressure), (1, program, program_pressure)]).collect();
     let error = CompileError::new(
         "ROCKE_DIRECT_REGISTERS",
@@ -947,6 +997,9 @@ fn schedule_and_widen(
     post::sink_load_uses(&mut sunk, 32);
     let known = Schedules::new(&sunk)?;
     let chosen = schedule_and_allocate(func, &sunk, &known, lds_size, wg, spill, threads)?;
+    if debug_flag("trace") {
+        eprintln!("trace: chose window {} v{} spill {:?}", chosen.1, chosen.0.num_vgprs, chosen.0.spill.scratch_dwords);
+    }
     if spill || chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords > 0 {
         return Ok(chosen);
     }
@@ -990,6 +1043,16 @@ impl Schedules {
     /// `cap` in a class.
     fn schedule_capped(&self, window: usize, cap: regalloc::Limits) -> Option<(Vec<Vec<u32>>, regalloc::Pressure)> {
         self.live.pressure_capped(&self.units, cap, |b| self.dags.block_order(b, window))
+    }
+
+    /// Lever `pressorder`: `sunk` scheduled with `pressure_order::order` at `limit` VGPRs live (and its pressure), or
+    /// `None` when that is past `cap` after all.
+    fn schedule_guarded(&self, sunk: &mir::MFunc, limit: u32, reserve: u32, cap: regalloc::Limits) -> Option<(Vec<Vec<u32>>, regalloc::Pressure)> {
+        let order = |b: usize| {
+            let (live_in, live_out) = self.live.block_boundary(&self.units, b);
+            pressure_order::order(self.dags.dag(b), &sunk.blocks[b].insts, &self.units, self.live.first_inst(b), &live_in, &live_out, limit, reserve, 128)
+        };
+        self.live.pressure_capped(&self.units, cap, order)
     }
 
     /// `schedule_capped` with gfx950's SGPR relief of each block's order

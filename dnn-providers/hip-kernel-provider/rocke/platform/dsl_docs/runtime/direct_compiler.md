@@ -317,6 +317,20 @@ on the same inputs in these ways:
   names the cause: `scf.if` regions nested deeply enough that their saved EXEC
   masks use up the SGPRs, for example, end in `ROCKE_DIRECT_REGISTERS`.
 
+## Levers
+
+`ROCKE_DIRECT_LEVERS` (comma-separated) turns on code-generation choices that are off by default; the complete list is `rir::LEVERS` in
+[`rust/rocke-codeobj/src/rir/mod.rs`](../../rust/rocke-codeobj/src/rir/mod.rs), and the Python backend's default set is
+`DIRECT_DEFAULT_LEVERS` in `rocke/helpers/compile.py`. Levers for gfx950 attention loops:
+
+| Lever | Effect | Code |
+|---|---|---|
+| `cmpreassoc` | Both sides of an i32 compare in a loop become (leaf sum) + constant before loop-invariant code motion, so a row of compares against distinct constants (a causal mask's column index per accumulator element) shares one base per trip instead of hoisting a register per constant. | `rir/reassoc.rs` |
+| `rematv` | Spilling also recomputes at their uses single-definition VGPR values computed from VGPRs defined once outside every loop (at least three sharing a source) instead of storing them. | `rir/spill.rs` |
+| `valcoal` | Allocation coalesces a copy of a dword defined once earlier in its block into its source's register while the source is still live (both hold one value), when the copy dies in the block. | `rir/regalloc.rs` |
+| `packtuple` | Two adjacent f32 VALU instructions whose results are the two halves of one tuple pack into one `v_pk_*` that writes the tuple. | `target/gfx9/pack.rs` |
+| `pressorder` | When no scheduling window fits the registers, a list schedule that tracks the live VGPRs and prefetches as far as the cap allows (loads keep a reserve for the accumulators still to come) is tried before load sinking alone, packed tuples or program order. | `rir/pressure_order.rs`, `rir/mod.rs` |
+
 ## Debug controls
 
 These variables are read from the environment of the process that compiles.
@@ -381,6 +395,7 @@ gfx950 only:
 | `noliteralreuse` | Moves a literal into a register at each use. |
 | `nocopyreuse` | Copies an SGPR into a VGPR at each use that needs one. |
 | `noclauses` | Allocates registers without keeping loads apart from their memory clauses. |
+| `trace` | Prints, to stderr, the VGPR pressure of each scheduling candidate, where it peaks and what is live there, and the window taken. |
 | `norelief` | Never retries a window with its SGPR results sunk. |
 | `notight` | Takes load sinking alone, or program order, before a window that fits only by packing tuples first. |
 | `nobankspill` | Spills without putting the accumulators in AGPRs first, and tries no schedule that fits with them there. |
