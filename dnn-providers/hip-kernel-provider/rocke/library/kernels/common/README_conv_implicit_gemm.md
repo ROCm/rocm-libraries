@@ -239,8 +239,8 @@ The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that f
 - **C++ engine.** The C++ conv instance builds TF32 specs too
   (`mma_dtype="tf32"` in its spec), byte-identical to Python: the
   `conv_implicit_gemm` parity family carries TF32 configs, and
-  `backend.lower_conv_implicit_gemm` hands TF32 specs to the engine like any
-  other.
+  `kernels.conv.engine_bridge.lower_conv_implicit_gemm` hands TF32 specs to
+  the engine like any other.
 - See [Data types](#data-types).
 
 ### Python-level K-loop unroll (`unroll_k`)

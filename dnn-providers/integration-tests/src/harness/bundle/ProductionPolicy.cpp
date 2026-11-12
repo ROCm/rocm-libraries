@@ -34,6 +34,7 @@ HarnessPolicy productionPolicy(TensorPlacement placement, const TestConfig& conf
     policy.benchmark = config.benchmarkSettings();
     policy.testSettings = config.testSettings();
     policy.graphCapture = config.graphCaptureSettings();
+    policy.benchmarkReference = config.benchmarkReference();
     return policy;
 }
 

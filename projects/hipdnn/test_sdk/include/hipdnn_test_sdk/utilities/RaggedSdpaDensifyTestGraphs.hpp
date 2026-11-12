@@ -55,6 +55,9 @@ enum Uid : int64_t
     PAGE_TABLE_K,
     PAGE_TABLE_V,
     SINK,
+    SEED,
+    OFFSET,
+    RNG_DUMP,
 };
 
 // Paged K/V for raggedQPagedKvGraph: NUM_BLOCKS blocks of BLOCK keys, TABLE entries per batch
@@ -96,12 +99,14 @@ inline std::vector<int64_t> denseStrides(int64_t s)
 }
 
 // One-node ragged SDPA graph: forward (Q, K, V -> O, ragged LSE) or backward (Q, K, V, O, dO,
-// ragged LSE -> dQ, dK, dV), optionally with a FLOAT bias [1, 1, SQ, SKV].
-inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = true)
+// ragged LSE -> dQ, dK, dV), optionally with a FLOAT bias [1, 1, SQ, SKV]. dataType is the type
+// of the Q/K/V/O (and dO/dQ/dK/dV) tensors; the LSE and the bias stay FLOAT.
+inline std::vector<uint8_t>
+    raggedGraph(bool backward, bool bias, bool ragged = true, DataType dataType = DataType::FLOAT)
 {
     GraphT graph;
     graph.name = "ragged";
-    graph.io_data_type = DataType::FLOAT;
+    graph.io_data_type = dataType;
     graph.compute_data_type = DataType::FLOAT;
     graph.intermediate_data_type = DataType::FLOAT;
     const auto qOff = ragged ? std::optional<int64_t>(Q_OFFSETS) : std::nullopt;
@@ -111,10 +116,10 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
     const std::vector<int64_t> lseStrides
         = ragged ? std::vector<int64_t>{SQ * H, 1, H, 1} : std::vector<int64_t>{H * SQ, SQ, 1, 1};
     auto& t = graph.tensors;
-    t.push_back(tensor(Q, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-    t.push_back(tensor(K, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-    t.push_back(tensor(V, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-    t.push_back(tensor(O, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
+    t.push_back(tensor(Q, dataType, {B, H, SQ, D}, qs, qOff));
+    t.push_back(tensor(K, dataType, {B, H, SKV, D}, ks, kvOff));
+    t.push_back(tensor(V, dataType, {B, H, SKV, D}, ks, kvOff));
+    t.push_back(tensor(O, dataType, {B, H, SQ, D}, qs, qOff));
     t.push_back(tensor(STATS, DataType::FLOAT, {B, H, SQ, 1}, lseStrides, qOff));
     if(ragged)
     {
@@ -135,10 +140,10 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
     node->compute_data_type = DataType::FLOAT;
     if(backward)
     {
-        t.push_back(tensor(DO, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-        t.push_back(tensor(DQ, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-        t.push_back(tensor(DK, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-        t.push_back(tensor(DV, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
+        t.push_back(tensor(DO, dataType, {B, H, SQ, D}, qs, qOff));
+        t.push_back(tensor(DQ, dataType, {B, H, SQ, D}, qs, qOff));
+        t.push_back(tensor(DK, dataType, {B, H, SKV, D}, ks, kvOff));
+        t.push_back(tensor(DV, dataType, {B, H, SKV, D}, ks, kvOff));
         SdpaBackwardAttributesT attrs;
         attrs.q_tensor_uid = Q;
         attrs.k_tensor_uid = K;
@@ -249,6 +254,27 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink, bool raggedKv = false
     graph.nodes.push_back(std::move(node));
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(Graph::Pack(builder, &graph));
+    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+}
+
+// @p buffer's forward SDPA node with Philox dropout validated through an RNG dump (SEM-015):
+// dropout_probability @p p, INT64 [1, 1, 1, 1] seed and offset, and a FLOAT [B, H, SQ, SKV]
+// rng_dump. The dump stays dense whether the operands are packed or not: a packed sequence's
+// mask is drawn at the graph's extents and at positions within the sequence.
+inline std::vector<uint8_t> withPhiloxDropout(const std::vector<uint8_t>& buffer, float p)
+{
+    auto graph = UnPackGraph(buffer.data());
+    graph->tensors.push_back(tensor(SEED, DataType::INT64, {1, 1, 1, 1}, {1, 1, 1, 1}));
+    graph->tensors.push_back(tensor(OFFSET, DataType::INT64, {1, 1, 1, 1}, {1, 1, 1, 1}));
+    graph->tensors.push_back(
+        tensor(RNG_DUMP, DataType::FLOAT, {B, H, SQ, SKV}, {H * SQ * SKV, SQ * SKV, SKV, 1}));
+    auto* attrs = graph->nodes.front()->attributes.AsSdpaAttributes();
+    attrs->dropout_probability = p;
+    attrs->seed_tensor_uid = SEED;
+    attrs->offset_tensor_uid = OFFSET;
+    attrs->rng_dump_tensor_uid = RNG_DUMP;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, graph.get()));
     return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
 }
 

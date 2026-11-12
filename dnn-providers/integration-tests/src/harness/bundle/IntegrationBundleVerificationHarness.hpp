@@ -268,6 +268,16 @@ public:
         {
             reportCapture(*_capture);
         }
+        // An attempt still pending here ended in a throw that skipped the code that
+        // settles it, and reporting it as pending would read as "still running".
+        for(auto& result : _referenceBenchmarks)
+        {
+            if(result.status == ReferenceBenchmarkStatus::PENDING)
+            {
+                result.status = ReferenceBenchmarkStatus::ERRORED;
+            }
+            reportReferenceBenchmark(result);
+        }
         reportOutcome(outcome);
         // After the verdict is committed and reported: an engine that does not claim
         // graph-capture safety is out of this lane, not broken, and the verified pass
@@ -298,6 +308,11 @@ public:
     const TensorMap& inputs() const
     {
         return _inputs;
+    }
+
+    const std::vector<ReferenceBenchmarkResult>& referenceBenchmarks() const
+    {
+        return _referenceBenchmarks;
     }
 
     /// Mode B/C support observation: which engines take this graph?
@@ -597,6 +612,8 @@ private:
                                               const OutputTensors& engineOutputs,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
+    void measureReference(double ReferenceBenchmarkResult::*phase,
+                          const std::function<void()>& work);
 
     // Under --graph-capture, captures the engine on the outputs `outcome` just verified,
     // replays it and verifies every replay with _replayVerifier. Keeps the result for
@@ -675,6 +692,7 @@ private:
     // every verified comparison; _oracleOutputs backs it for a reference oracle.
     std::function<VerificationOutcome(OutputTensors&)> _replayVerifier;
     OutputTensors _oracleOutputs;
+    std::vector<ReferenceBenchmarkResult> _referenceBenchmarks;
 };
 
 } // namespace hipdnn_integration_tests::bundle
