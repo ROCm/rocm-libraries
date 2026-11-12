@@ -148,7 +148,7 @@ class TestD256DecodeSupportGates(unittest.TestCase):
         were dropped the predicate must still reject, or the two have drifted."""
         from kernels.common.attention_unified import _d256_decode_cohort
 
-        from dispatch.attention import _problem
+        from dispatch.attention import attention_problem
 
         with _PinnedArch("gfx950"):
             for label, req in (
@@ -157,7 +157,7 @@ class TestD256DecodeSupportGates(unittest.TestCase):
                 ("sinks", _gfx950_d256_decode(use_sinks=True)),
             ):
                 with self.subTest(rejected_by=label):
-                    self.assertFalse(_d256_decode_cohort(_problem(req)))
+                    self.assertFalse(_d256_decode_cohort(attention_problem(req)))
 
 
 class TestD256DecodeRouting(unittest.TestCase):

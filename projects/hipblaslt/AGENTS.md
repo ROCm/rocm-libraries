@@ -12,6 +12,12 @@ This directory (`projects/hipblaslt`) is one component of the larger `rocm-libra
 
 When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the `hipblaslt-pr-quality` agent skill at [`skills/hipblaslt-pr-quality/SKILL.md`](skills/hipblaslt-pr-quality/SKILL.md). It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipBLASLt — it never relaxes a base rule. The skill is advisory and never posts to GitHub/Jira without explicit human approval.
 
+## Verification harness
+
+For the order in which to verify a change (CPU checks first, GPU last) and how the agent scaffolding is
+kept honest across model generations, see [`harness/HARNESS.md`](harness/HARNESS.md). This file and
+`TESTING.md` win on any conflict.
+
 ## Repository layout (high-level)
 
 | Path | Purpose |

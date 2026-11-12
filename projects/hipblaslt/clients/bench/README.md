@@ -32,8 +32,8 @@ cd hipBLASLt; cd build/release
 --c_type <value>           Precision of matrix C. Options: f32_r, f64_r, i32_r, f16_r, bf16_r, i8_r, f32_c, f64_c 
 --d_type <value>           Precision of matrix D. Options: f32_r, f64_r, i32_r, f16_r, bf16_r, i8_r, f32_c, f64_c 
 --compute_type <value>     Precision of computation. Options: s,f32_r,x,xf32_r,f64_r,i32_r          (Default value is: f32_r)
---compute_input_typeA <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the argument has no effect. (Default value is: INVALID)
---compute_input_typeB <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the argument has no effect. (Default value is: INVALID)
+--compute_input_typeA <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the argument has no effect. (Default value is: INVALID)
+--compute_input_typeB <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the argument has no effect. (Default value is: INVALID)
 --scale_type <value>       Precision of scalar. Options: f16_r,bf16_r, f32_c, f64_c
 --initialization <value>   Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01   (Default value is: hpl)
 --transA <value>           N = no transpose, T = transpose, C = conjugate                                       (Default value is: N)

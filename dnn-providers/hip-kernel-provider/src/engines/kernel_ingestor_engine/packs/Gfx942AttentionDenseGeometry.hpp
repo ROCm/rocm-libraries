@@ -11,8 +11,8 @@
 
 /**
  * @file Gfx942AttentionDenseGeometry.hpp
- * @brief The tile rules, launch geometry and window guard gfx942 attention_dense restates
- *        from its Python builder.
+ * @brief The tile rules and launch geometry gfx942 attention_dense restates from its
+ *        Python builder, and this engine's own window guard.
  *
  * A rocKE kernel is launched from Python; an ingestor engine relaunches the same binary
  * from C++. The engine must recompute what the Python launch path computes identically:
@@ -86,10 +86,10 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
  * @brief Does every query block of a causal sliding-window launch see at least one key
  *        tile?
  *
- * Mirrors the zero-trip guard of `supports_attention_dense`: the last query block's window can
- * start past the final key tile, which gives a zero-trip KV loop, a zero softmax
- * denominator and NaN output. The Python rejects such a spec; this engine declines the
- * candidate, since the guard reads the candidate's own tile.
+ * This engine's own zero-trip guard: the last query block's window can start past the
+ * final key tile. The kernel zeroes those rows; the pack declines them anyway, for the
+ * reason windowLeavesRowsWithoutKeys (AttentionDenseNative.cpp) states. The guard reads the
+ * candidate's own tile.
  *
  *     n_q = seqlen_q // block_m;  n_ktiles = seqlen_kv // block_n
  *     n_per = block_m // block_n; swt = sliding_window // block_n
