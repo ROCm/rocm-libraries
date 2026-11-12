@@ -4,7 +4,7 @@
 // A public function that fails with a C++ exception reports the exception text through the
 // error log, so the cause is visible beside the status the caller receives.
 
-#include "scoped_env.hpp"
+#include "../src/scoped_env.hpp"
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
@@ -27,7 +27,7 @@ namespace
         std::exit(0);
     }
 
-    TEST(ExceptionLogging, smoke_ExceptionMessageIsLogged)
+    TEST(HostUnitExceptionLoggingDeathTest, smoke_ExceptionMessageIsLogged)
     {
         // The logger reads its environment once per process, so the case runs in a newly
         // started copy of this binary and the test matches the copy's stderr.
