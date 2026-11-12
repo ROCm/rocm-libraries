@@ -2191,6 +2191,20 @@ inline const FileType* findFileType(std::string_view filename)
     return nullptr;
 }
 
+/// @p p as text for a log line; a name not representable in the native encoding (e.g. an
+/// unpaired UTF-16 surrogate on Windows) yields a placeholder instead of throwing.
+inline std::string pathText(const std::filesystem::path& p) noexcept
+{
+    try
+    {
+        return p.string();
+    }
+    catch(...)
+    {
+        return "<unprintable path>";
+    }
+}
+
 /// @brief Appends every descriptor file under @p root to @p files, sorted by path.
 ///
 /// Sorted per root rather than across all of them, so an earlier root's files stay ahead
@@ -2207,7 +2221,7 @@ inline void
     {
         // INFO, not WARN: a root that does not exist is the normal state of an optional
         // drop-in tree, and only the caller knows whether ending with nothing is a fault.
-        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at " << root);
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at " << pathText(root));
         return;
     }
 
@@ -2226,7 +2240,7 @@ inline void
         std::filesystem::directory_iterator it(dir, error);
         if(error)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: cannot read " << dir << ": "
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: cannot read " << pathText(dir) << ": "
                                                                       << error.message());
             error.clear();
             continue;
@@ -2238,7 +2252,9 @@ inline void
                 // Valid until the increment below, which runs after the last use.
                 const std::filesystem::directory_entry& entry = *it;
                 std::error_code dirError;
-                if(entry.is_directory(dirError) && !entry.is_symlink(dirError))
+                // Links (symlinks and Windows junctions) are not followed, so a link cycle
+                // cannot repeat descriptors, matching recursive_directory_iterator's default.
+                if(entry.symlink_status(dirError).type() == std::filesystem::file_type::directory)
                 {
                     pending.push_back(entry.path());
                 }
@@ -2290,13 +2306,13 @@ inline void
             catch(const std::exception& filenameError)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: skipping an entry under "
-                                        << root << ": " << filenameError.what());
+                                        << pathText(dir) << ": " << filenameError.what());
             }
             it.increment(error);
             if(error)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: could not continue walking "
-                                        << dir << ": " << error.message());
+                                        << pathText(dir) << ": " << error.message());
                 error.clear();
                 break;
             }

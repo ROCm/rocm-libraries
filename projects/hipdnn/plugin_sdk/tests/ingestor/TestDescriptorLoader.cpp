@@ -7396,6 +7396,8 @@ TEST(TestDescriptorLoader, UnreadableDirectoryCostsOnlyItsSubtree)
     }
     const ScopedPermissions restore(dir.path() / "blocked");
     std::filesystem::permissions(dir.path() / "blocked", std::filesystem::perms::none);
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
     detail::collectDescriptorFiles(dir.path(), files);
@@ -7408,6 +7410,35 @@ TEST(TestDescriptorLoader, UnreadableDirectoryCostsOnlyItsSubtree)
     }
     std::sort(names.begin(), names.end());
     EXPECT_EQ(names, (std::vector<std::string>{levelFilename(0), levelFilename(2)}));
+    EXPECT_EQ(countLogsContaining(recorder, "cannot read"), 1u);
+}
+
+// Directory links are not followed: a link back up the tree and a link to a sibling
+// tree each leave every descriptor listed exactly once.
+TEST(TestDescriptorLoader, DirectoryLinksAreNotFollowed)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("links"));
+    std::filesystem::create_directories(dir.path() / "a" / "b");
+    std::filesystem::create_directories(dir.path() / "sib");
+    std::ofstream(dir.path() / "a" / levelFilename(0)).close();
+    std::ofstream(dir.path() / "a" / "b" / levelFilename(1)).close();
+    std::ofstream(dir.path() / "sib" / levelFilename(2)).close();
+    std::filesystem::create_directory_symlink("..", dir.path() / "a" / "b" / "up");
+    std::filesystem::create_directory_symlink(std::filesystem::path("..") / "sib",
+                                              dir.path() / "a" / "sib");
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(dir.path(), files);
+
+    std::vector<std::string> names;
+    names.reserve(files.size());
+    for(const auto& file : files)
+    {
+        names.push_back(file.first.filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names,
+              (std::vector<std::string>{levelFilename(0), levelFilename(1), levelFilename(2)}));
 }
 
 #endif // __linux__
