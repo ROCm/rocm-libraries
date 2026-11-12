@@ -1,0 +1,494 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <hip/hip_runtime.h>
+
+// Derived from MIOpen's MIOpenConvDepthwise3dFwdHip.cpp (solver ConvHipDirectDepthwiseFwd3d).
+//
+// Two kernels share this file, picked by DW_GENERIC:
+//   0  the specialized kernel below: filter, H / W stride and dilation and the output tile are
+//      compile-time constants, so the input windows live in registers.
+//   1  the generic kernel at the end of the file: filter, stride and dilation are launch
+//      arguments, for the depthwise 3D problems no specialized variant was built for.
+// Both compute y[n][k][do][ho][wo] = sum_{z, y, x} x[n][k / mult][di][hi][wi] * w[k][0][z][y][x]
+// with groups == C and K = C * mult, accumulating in fp32.
+//
+// Compile-time parameters common to both:
+//   DW_DTYPE            0 = fp32, 1 = fp16, 2 = bf16
+//   DW_NDHWC            0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+
+#ifndef DW_GENERIC
+#define DW_GENERIC 0
+#endif
+
+#if !DW_GENERIC
+
+// Depthwise forward 3D convolution (groups == C, K = C * multiplier) on plain FMA instructions.
+//
+// y[n][k][do][ho][wo] = sum_{z, y, x} x[n][k / mult][di][hi][wi] * w[k][0][z][y][x]
+//
+// Each thread computes a DW_TD x DW_TH x DW_TW tile of output positions (depths x rows x columns)
+// and accumulates in fp32. It walks the DW_PLANES input planes the tile needs; in each it reads the
+// DW_ROWS input rows, each as one DW_SPAN-wide window held in registers, and applies every
+// (output depth, output row, filter row) combination that meets at it, so each input element is
+// read once per plane instead of once per output. NCDHW: consecutive threads take consecutive W
+// tiles, so the accesses coalesce along W. NDHWC: consecutive threads take consecutive output
+// channels, so they coalesce along C.
+//
+// Compile-time parameters of the specialized kernel (one set per variant):
+//   DW_DTYPE            0 = fp32, 1 = fp16, 2 = bf16
+//   DW_NDHWC            0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+//   DW_KZ, DW_KY, DW_KX filter depth, height, width
+//   DW_SH, DW_SW        stride along H, W
+//   DW_DH, DW_DW        dilation along H, W
+//   DW_TD, DW_TH, DW_TW output tile per thread; DW_TD > 1 requires depth stride and dilation 1
+//   DW_UK               1 = NCDHW grid with one (n, k) output volume per blockIdx.y
+
+#ifndef DW_DTYPE
+#define DW_DTYPE 0
+#endif
+#ifndef DW_NDHWC
+#define DW_NDHWC 0
+#endif
+#ifndef DW_KZ
+#define DW_KZ 3
+#endif
+#ifndef DW_KY
+#define DW_KY 3
+#endif
+#ifndef DW_KX
+#define DW_KX 3
+#endif
+#ifndef DW_SH
+#define DW_SH 1
+#endif
+#ifndef DW_SW
+#define DW_SW 1
+#endif
+#ifndef DW_DH
+#define DW_DH 1
+#endif
+#ifndef DW_DW
+#define DW_DW 1
+#endif
+#ifndef DW_TD
+#define DW_TD 1
+#endif
+#ifndef DW_TH
+#define DW_TH 4
+#endif
+#ifndef DW_TW
+#define DW_TW 4
+#endif
+
+#ifndef DW_UK
+#define DW_UK 0
+#endif
+// Uniform-k grids launch one (n, k) output volume per blockIdx.y; small blocks keep few threads
+// idle when that volume has few tiles.
+#define DW_BLOCK_SIZE (DW_UK ? 64 : 256)
+#define DW_SPAN ((DW_TW - 1) * DW_SW + (DW_KX - 1) * DW_DW + 1)
+#define DW_ROWS ((DW_TH - 1) * DW_SH + (DW_KY - 1) * DW_DH + 1)
+#define DW_PLANES (DW_TD + DW_KZ - 1)
+
+#if DW_DTYPE == 0
+typedef float data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return v;
+}
+__device__ static inline data_t from_float(float v)
+{
+    return v;
+}
+#elif DW_DTYPE == 1
+typedef _Float16 data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return static_cast<float>(v);
+}
+__device__ static inline data_t from_float(float v)
+{
+    return static_cast<data_t>(v);
+}
+#else
+typedef unsigned short data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return __builtin_bit_cast(float, static_cast<unsigned int>(v) << 16);
+}
+__device__ static inline data_t from_float(float v)
+{
+    // Round to nearest even; NaN keeps a quiet mantissa bit.
+    const unsigned int u = __builtin_bit_cast(unsigned int, v);
+    if((u & 0x7fffffffu) > 0x7f800000u)
+        return static_cast<data_t>((u >> 16) | 0x40u);
+    return static_cast<data_t>((u + 0x7fffu + ((u >> 16) & 1u)) >> 16);
+}
+#endif
+
+extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
+    ConvFwdDepthwise3d(const data_t* __restrict__ in,
+                       const data_t* __restrict__ wei,
+                       data_t* __restrict__ out,
+                       int N,
+                       int C,
+                       int Di,
+                       int Hi,
+                       int Wi,
+                       int K,
+                       int Do,
+                       int Ho,
+                       int Wo,
+                       int sd,
+                       int pd,
+                       int ph,
+                       int pw,
+                       int dd)
+{
+    const int mult = K / C;
+    const int wtiles = (Wo + DW_TW - 1) / DW_TW;
+    const int htiles = (Ho + DW_TH - 1) / DW_TH;
+    const int dtiles = (Do + DW_TD - 1) / DW_TD;
+    long idx = static_cast<long>(blockIdx.x) * DW_BLOCK_SIZE + threadIdx.x;
+#if DW_NDHWC
+    // idx = (((n * dtiles + dt) * htiles + ht) * wtiles + wt) * K + k
+    if(idx >= static_cast<long>(N) * dtiles * htiles * wtiles * K)
+        return;
+    const int k = static_cast<int>(idx % K);
+    idx /= K;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ht = static_cast<int>(idx % htiles);
+    idx /= htiles;
+    const int dt = static_cast<int>(idx % dtiles);
+    const int n = static_cast<int>(idx / dtiles);
+    const long w_stride = C;
+#elif DW_UK
+    // One (n, k) output volume per blockIdx.y, so k is wave-uniform and the weights are read
+    // through the scalar unit. idx = (dt * htiles + ht) * wtiles + wt
+    if(idx >= static_cast<long>(dtiles) * htiles * wtiles)
+        return;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ht = static_cast<int>(idx % htiles);
+    const int dt = static_cast<int>(idx / htiles);
+    const int k = static_cast<int>(blockIdx.y % K);
+    const int n = static_cast<int>(blockIdx.y / K);
+    const long w_stride = 1;
+#else
+    // idx = (((n * K + k) * dtiles + dt) * htiles + ht) * wtiles + wt
+    if(idx >= static_cast<long>(N) * K * dtiles * htiles * wtiles)
+        return;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ht = static_cast<int>(idx % htiles);
+    idx /= htiles;
+    const int dt = static_cast<int>(idx % dtiles);
+    idx /= dtiles;
+    const int k = static_cast<int>(idx % K);
+    const int n = static_cast<int>(idx / K);
+    const long w_stride = 1;
+#endif
+    const int c = k / mult;
+    const int wo0 = wt * DW_TW;
+    const int ho0 = ht * DW_TH;
+    const int do0 = dt * DW_TD;
+    const int wi0 = wo0 * DW_SW - pw;
+    const int hi0 = ho0 * DW_SH - ph;
+    const bool inside = wi0 >= 0 && wi0 + DW_SPAN <= Wi;
+
+    float acc[DW_TD][DW_TH][DW_TW];
+    for(int o = 0; o < DW_TD; ++o)
+        for(int a = 0; a < DW_TH; ++a)
+            for(int t = 0; t < DW_TW; ++t)
+                acc[o][a][t] = 0.f;
+
+    const data_t* w_k = wei + static_cast<long>(k) * (DW_KZ * DW_KY * DW_KX);
+    // Input plane p feeds output depth o through filter depth z = p - o. With DW_TD == 1 this is
+    // one plane per filter tap along D (any depth stride / dilation); DW_TD > 1 needs both to be 1.
+    // Only the multi-depth loop is unrolled: unrolling the one-depth loop made it 1.15x to 1.2x
+    // slower on gfx1151.
+#if DW_TD > 1
+#pragma unroll
+#else
+#pragma nounroll
+#endif
+    for(int p = 0; p < DW_PLANES; ++p)
+    {
+        const int di = do0 * sd - pd + p * dd;
+        if(di < 0 || di >= Di)
+            continue;
+        float wv[DW_TD][DW_KY][DW_KX];
+#pragma unroll
+        for(int o = 0; o < DW_TD; ++o)
+        {
+            const int z = p - o;
+            if(z < 0 || z >= DW_KZ)
+                continue;
+#if DW_UK && DW_DTYPE != 0
+            // Scalar loads are 32-bit: read the 16-bit weights as words from the even element at
+            // or below the slice start (the buffer is 4-byte aligned) and pick the halves.
+            const long e0 = (static_cast<long>(k) * DW_KZ + z) * (DW_KY * DW_KX);
+            const unsigned int* w32 = reinterpret_cast<const unsigned int*>(wei) + (e0 >> 1);
+            const int par = static_cast<int>(e0 & 1);
+#pragma unroll
+            for(int i = 0; i < DW_KY * DW_KX; ++i)
+            {
+                const int e = par + i;
+                const unsigned int wd = w32[e >> 1];
+                const auto h = static_cast<unsigned short>((e & 1) ? (wd >> 16) : wd);
+                wv[o][i / DW_KX][i % DW_KX] = to_float(__builtin_bit_cast(data_t, h));
+            }
+#else
+            for(int y = 0; y < DW_KY; ++y)
+                for(int x = 0; x < DW_KX; ++x)
+                    wv[o][y][x] = to_float(w_k[(z * DW_KY + y) * DW_KX + x]);
+#endif
+        }
+#if DW_NDHWC
+        const data_t* plane
+            = in + (static_cast<long>(n) * Di + di) * Hi * static_cast<long>(Wi) * C + c;
+#else
+        const data_t* plane
+            = in + ((static_cast<long>(n) * C + c) * Di + di) * Hi * static_cast<long>(Wi);
+#endif
+#pragma unroll
+        for(int r = 0; r < DW_ROWS; ++r)
+        {
+            const int hi = hi0 + r;
+            if(hi < 0 || hi >= Hi)
+                continue;
+            const data_t* row = plane + static_cast<long>(hi) * Wi * w_stride;
+            float v[DW_SPAN];
+            if(inside)
+            {
+#pragma unroll
+                for(int j = 0; j < DW_SPAN; ++j)
+                    v[j] = to_float(row[(wi0 + j) * w_stride]);
+            }
+            else
+            {
+#pragma unroll
+                for(int j = 0; j < DW_SPAN; ++j)
+                {
+                    const int wi = wi0 + j;
+                    v[j] = (wi >= 0 && wi < Wi) ? to_float(row[wi * w_stride]) : 0.f;
+                }
+            }
+            // Input row r feeds output row a through filter row y when r == a * SH + y * DH.
+#pragma unroll
+            for(int o = 0; o < DW_TD; ++o)
+            {
+                const int z = p - o;
+                if(z < 0 || z >= DW_KZ)
+                    continue;
+#pragma unroll
+                for(int a = 0; a < DW_TH; ++a)
+                {
+#pragma unroll
+                    for(int y = 0; y < DW_KY; ++y)
+                    {
+                        if(a * DW_SH + y * DW_DH != r)
+                            continue;
+#pragma unroll
+                        for(int t = 0; t < DW_TW; ++t)
+#pragma unroll
+                            for(int x = 0; x < DW_KX; ++x)
+                                acc[o][a][t] = __builtin_fmaf(
+                                    v[t * DW_SW + x * DW_DW], wv[o][y][x], acc[o][a][t]);
+                    }
+                }
+            }
+        }
+    }
+
+    for(int o = 0; o < DW_TD; ++o)
+    {
+        const int d_o = do0 + o;
+        if(d_o >= Do)
+            break;
+        for(int a = 0; a < DW_TH; ++a)
+        {
+            const int ho = ho0 + a;
+            if(ho >= Ho)
+                break;
+            for(int t = 0; t < DW_TW; ++t)
+            {
+                const int wo = wo0 + t;
+                if(wo >= Wo)
+                    break;
+#if DW_NDHWC
+                out[(((static_cast<long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
+                    = from_float(acc[o][a][t]);
+#else
+                out[(((static_cast<long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
+                    = from_float(acc[o][a][t]);
+#endif
+            }
+        }
+    }
+}
+
+#else // DW_GENERIC
+
+#ifndef DW_DTYPE
+#define DW_DTYPE 0
+#endif
+#ifndef DW_NDHWC
+#define DW_NDHWC 0
+#endif
+
+// Output columns per thread.
+#define DWG_TW 4
+#define DWG_BLOCK_SIZE 256
+
+#if DW_DTYPE == 0
+typedef float data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return v;
+}
+__device__ static inline data_t from_float(float v)
+{
+    return v;
+}
+#elif DW_DTYPE == 1
+typedef _Float16 data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return static_cast<float>(v);
+}
+__device__ static inline data_t from_float(float v)
+{
+    return static_cast<data_t>(v);
+}
+#else
+typedef unsigned short data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return __builtin_bit_cast(float, static_cast<unsigned int>(v) << 16);
+}
+__device__ static inline data_t from_float(float v)
+{
+    // Round to nearest even; NaN keeps a quiet mantissa bit.
+    const unsigned int u = __builtin_bit_cast(unsigned int, v);
+    if((u & 0x7fffffffu) > 0x7f800000u)
+        return static_cast<data_t>((u >> 16) | 0x40u);
+    return static_cast<data_t>((u + 0x7fffu + ((u >> 16) & 1u)) >> 16);
+}
+#endif
+
+// One thread computes DWG_TW consecutive output columns of one (n, k, do, ho) row, looping over
+// the filter taps with bounds checks. NCDHW: consecutive threads take consecutive column groups;
+// NDHWC: consecutive threads take consecutive output channels.
+extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
+    ConvFwdDepthwise3d(const data_t* __restrict__ in,
+                       const data_t* __restrict__ wei,
+                       data_t* __restrict__ out,
+                       int N,
+                       int C,
+                       int Di,
+                       int Hi,
+                       int Wi,
+                       int K,
+                       int Do,
+                       int Ho,
+                       int Wo,
+                       int Z,
+                       int Y,
+                       int X,
+                       int sd,
+                       int sh,
+                       int sw,
+                       int pd,
+                       int ph,
+                       int pw,
+                       int dd,
+                       int dh,
+                       int dw)
+{
+    const int mult = K / C;
+    const int wtiles = (Wo + DWG_TW - 1) / DWG_TW;
+    long idx = static_cast<long>(blockIdx.x) * DWG_BLOCK_SIZE + threadIdx.x;
+#if DW_NDHWC
+    // idx = (((n * Do + d_o) * Ho + ho) * wtiles + wt) * K + k
+    if(idx >= static_cast<long>(N) * Do * Ho * wtiles * K)
+        return;
+    const int k = static_cast<int>(idx % K);
+    idx /= K;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ho = static_cast<int>(idx % Ho);
+    idx /= Ho;
+    const int d_o = static_cast<int>(idx % Do);
+    const int n = static_cast<int>(idx / Do);
+    const long w_stride = C;
+#else
+    // idx = (((n * K + k) * Do + d_o) * Ho + ho) * wtiles + wt
+    if(idx >= static_cast<long>(N) * K * Do * Ho * wtiles)
+        return;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ho = static_cast<int>(idx % Ho);
+    idx /= Ho;
+    const int d_o = static_cast<int>(idx % Do);
+    idx /= Do;
+    const int k = static_cast<int>(idx % K);
+    const int n = static_cast<int>(idx / K);
+    const long w_stride = 1;
+#endif
+    const int c = k / mult;
+    const int wo0 = wt * DWG_TW;
+
+    float acc[DWG_TW];
+    for(int t = 0; t < DWG_TW; ++t)
+        acc[t] = 0.f;
+
+    const data_t* w_k = wei + static_cast<long>(k) * Z * Y * X;
+    for(int z = 0; z < Z; ++z)
+    {
+        const int di = d_o * sd - pd + z * dd;
+        if(di < 0 || di >= Di)
+            continue;
+#if DW_NDHWC
+        const data_t* plane
+            = in + (static_cast<long>(n) * Di + di) * Hi * static_cast<long>(Wi) * C + c;
+#else
+        const data_t* plane
+            = in + ((static_cast<long>(n) * C + c) * Di + di) * Hi * static_cast<long>(Wi);
+#endif
+        for(int y = 0; y < Y; ++y)
+        {
+            const int hi = ho * sh - ph + y * dh;
+            if(hi < 0 || hi >= Hi)
+                continue;
+            const data_t* row = plane + static_cast<long>(hi) * Wi * w_stride;
+            for(int x = 0; x < X; ++x)
+            {
+                const float wv = to_float(w_k[(z * Y + y) * X + x]);
+#pragma unroll
+                for(int t = 0; t < DWG_TW; ++t)
+                {
+                    const int wi = (wo0 + t) * sw - pw + x * dw;
+                    if(wi >= 0 && wi < Wi)
+                        acc[t] = __builtin_fmaf(to_float(row[wi * w_stride]), wv, acc[t]);
+                }
+            }
+        }
+    }
+
+    for(int t = 0; t < DWG_TW; ++t)
+    {
+        const int wo = wo0 + t;
+        if(wo >= Wo)
+            break;
+#if DW_NDHWC
+        out[(((static_cast<long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k] = from_float(acc[t]);
+#else
+        out[(((static_cast<long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo] = from_float(acc[t]);
+#endif
+    }
+}
+
+#endif // DW_GENERIC
