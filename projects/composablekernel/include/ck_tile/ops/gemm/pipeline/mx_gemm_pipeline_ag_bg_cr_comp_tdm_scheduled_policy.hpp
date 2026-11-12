@@ -7,6 +7,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_mx_asmem_bsmem_creg_tdm_scheduled.hpp"
 #include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
@@ -709,6 +710,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                 tuple<sequence<0, 0>, sequence<2, 1>>,
                 sequence<1, 1, 1, 2>,
                 sequence<4, 1, 3, 2>>{});
+    }
+
+    /// The block GEMM: a wave's LDS fragment reads and WMMAs on this policy's LDS layout.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
+    {
+        return BlockGemmMxAsmemBsmemCRegTDMScheduled<Problem,
+                                                     MxGemmPipelineAgBgCrCompTDMScheduledPolicy>{};
     }
 
     /// The cluster the kernel must be launched with: (x, y, z) = (N tiles, M tiles, 1).

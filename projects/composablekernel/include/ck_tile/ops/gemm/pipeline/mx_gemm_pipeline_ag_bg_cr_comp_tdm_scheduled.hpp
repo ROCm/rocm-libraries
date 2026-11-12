@@ -150,13 +150,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kNumAcc          = kRm * kRn;
     static constexpr index_t kKSteps          = Policy::template GetKSteps<Problem>();
     static constexpr index_t kAtomM           = BlockGemmShape::WarpTile::at(number<0>{});
-    static constexpr index_t kAtomN           = BlockGemmShape::WarpTile::at(number<1>{});
-    static constexpr bool kMma32              = kAtomM == 32;
-    static constexpr index_t kCFragLen        = Policy::template GetCFragLen<Problem>();
     static constexpr index_t kKPerByte        = Policy::template GetKPerByte<Problem>();
-    static constexpr index_t kStepBytes       = Policy::template GetStepBytes<Problem>();
-    static constexpr index_t kChunks          = Policy::template GetChunksPerLane<Problem>();
-    static constexpr index_t kRowWords        = kChunks * 4;
     static constexpr bool kLocalPrefetch      = Policy::template GetLocalPrefetch<Problem>();
     static constexpr bool kHalfB              = Policy::template GetHalfB<Problem>();
     static constexpr bool kHalfBLate          = Policy::template GetHalfBLate<Problem>();
@@ -173,16 +167,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kWait0           = Policy::template GetDscntWait<Problem>(0);
     static constexpr index_t kWait1           = Policy::template GetDscntWait<Problem>(1);
     static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
-    using AFrag                               = int32x16_t;
-    using BFrag                               = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
-    using RowFrag = std::conditional_t<kRowWords == 8, int32x8_t, int32x16_t>;
-    using CVec    = std::conditional_t<kMma32, fp32x16_t, fp32x8_t>;
-    /// The accumulators: one CVec per M and N repeat, index rm * kRn + rn.
-    using CBlockTile = decltype(make_static_distributed_tensor<float>(
-        Policy::template MakeCBlockTileDistribution<Problem>()));
-    using AccRegs    = thread_buffer<CVec, kNumAcc>;
-    static_assert(CBlockTile::get_thread_buffer_size() == kNumAcc * kCFragLen,
-                  "comp_tdm_scheduled: the C block tile holds the C fragments of every repeat");
+    using BlockGemm  = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
+    using CVec       = typename BlockGemm::CVec;
+    using CBlockTile = typename BlockGemm::CBlockTile;
+    using AccRegs    = typename BlockGemm::AccRegs;
+    using ATile      = typename BlockGemm::ATile;
+    using BTile      = typename BlockGemm::BTile;
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
@@ -243,110 +233,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return nullptr;
     }
 
-    /// Whether A's or B's fragments are read through a tile window (see
-    /// MxGemmPipelineAgBgCrCompTDMScheduledPolicy::IsLdsReadLinear); otherwise RowFragment reads
-    /// them.
-    static constexpr bool kTileReadA = Policy::template IsLdsReadLinear<Problem, true>();
-    static constexpr bool kTileReadB = Policy::template IsLdsReadLinear<Problem, false>();
-
-    /// Wave 0's window on A's or B's fragment of one K step at repeat 0 of buffer 0. The wave
-    /// stays out of the window's per-lane coordinate so that its offset remains scalar.
-    template <bool IsA>
-    CK_TILE_DEVICE static auto MakeLdsWindow(CK_TILE_LDS_ADDR uint8_t* smem)
-    {
-        constexpr index_t rows = Policy::template GetFragmentHalves<Problem, IsA>() * 16;
-        const auto view        = make_tensor_view<address_space_enum::lds>(
-            c_style_pointer_cast<int32_t*>(smem),
-            Policy::template MakeLdsBlockDescriptor<Problem, IsA>());
-        return make_tile_window(view,
-                                make_tuple(number<rows>{}, number<kStepBytes / 4>{}),
-                                make_multi_index(0, 0),
-                                Policy::template MakeLdsReadDistribution<Problem, IsA>());
-    }
-    using ALdsWindow = decltype(MakeLdsWindow<true>(nullptr));
-    using BLdsWindow = decltype(MakeLdsWindow<false>(nullptr));
-
-    /// Whether A's or B's scales are read through a tile window (see
-    /// MxGemmPipelineAgBgCrCompTDMScheduledPolicy::IsLdsScaleReadLinear); otherwise ScaleWords
-    /// reads them.
-    static constexpr bool kTileReadAScale = Policy::template IsLdsScaleReadLinear<Problem, true>();
-    static constexpr bool kTileReadBScale = Policy::template IsLdsScaleReadLinear<Problem, false>();
-
-    /// A wave's window on A's or B's scales of K step 0 in buffer 0.
-    template <bool IsA>
-    CK_TILE_DEVICE static auto MakeLdsScaleWindow(CK_TILE_LDS_ADDR uint8_t* smem, index_t wave)
-    {
-        constexpr index_t atom    = IsA ? kAtomM : kAtomN;
-        constexpr index_t repeats = IsA ? kRm : kRn;
-        constexpr index_t lanes   = Policy::template GetScaleLanes<Problem, IsA>();
-        const auto view           = make_tensor_view<address_space_enum::lds>(
-            c_style_pointer_cast<int32_t*>(smem),
-            Policy::template MakeLdsScaleDescriptor<Problem, IsA>());
-        return make_tile_window(view,
-                                make_tuple(number<1>{}, number<lanes>{}, number<repeats>{}),
-                                make_multi_index(0, wave * atom, 0),
-                                Policy::template MakeLdsScaleReadDistribution<Problem, IsA>());
-    }
-    using AScaleWindow = decltype(MakeLdsScaleWindow<true>(nullptr, 0));
-    using BScaleWindow = decltype(MakeLdsScaleWindow<false>(nullptr, 0));
-
-    struct Head
-    {
-        AFrag a[kRm];
-        int32_t as[kRm];
-        int32_t bs[kRn];
-    };
-    /// The B fragments read ahead: all of them, or two halves with half-B.
-    struct BRegs
-    {
-        BFrag b[kRn];
-    };
+    /// The register tiles of the next K step, read one step ahead.
     struct Carry
     {
-        Head head;
-        BRegs b;
+        ATile a;
+        BTile b;
     };
-
-    /// A fragment as an operand of the WMMA traits: the fragment itself, or the 8 data words of
-    /// an fp4 one padded to 16 (the traits pad it again).
-    template <typename Operand, typename Frag>
-    CK_TILE_DEVICE static Operand MmaOperand(const Frag& f)
-    {
-        if constexpr(sizeof(Operand) == sizeof(Frag))
-            return bit_cast<Operand>(f);
-        else
-            return bit_cast<Operand>(__builtin_shufflevector(f, f, 0, 1, 2, 3, 4, 5, 6, 7));
-    }
-
-    CK_TILE_DEVICE static void Mma(CVec& c, const AFrag& a, const BFrag& b, int32_t as, int32_t bs)
-    {
-#if defined(__gfx125__)
-        using WarpGemm    = WarpGemmDispatcher<ADataType,
-                                               BDataType,
-                                               float,
-                                               kAtomM,
-                                               kAtomN,
-                                               mx_tdm_scheduled::kAtomK,
-                                               false>;
-        using AVec        = typename WarpGemm::WarpGemmAttribute::AVecType;
-        using BVec        = typename WarpGemm::WarpGemmAttribute::BVecType;
-        constexpr auto I0 = number<0>{};
-        typename WarpGemm::AWarpTensor a_warp;
-        typename WarpGemm::BWarpTensor b_warp;
-        typename WarpGemm::CWarpTensor c_warp;
-        a_warp.get_thread_buffer().template set_as<AVec>(I0, MmaOperand<AVec>(a));
-        b_warp.get_thread_buffer().template set_as<BVec>(I0, MmaOperand<BVec>(b));
-        c_warp.get_thread_buffer().template set_as<CVec>(I0, c);
-        WarpGemm{}(c_warp, a_warp, b_warp, as, bs);
-        c = c_warp.get_thread_buffer().template get_as<CVec>()[I0];
-#else
-        ignore = c;
-        ignore = a;
-        ignore = b;
-        ignore = as;
-        ignore = bs;
-#endif
-    }
 
     struct Run
     {
@@ -362,8 +254,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         // windows' origins) and the cluster (0 without one).
         index_t tid;
         index_t lane;
-        index_t lane_col;
-        index_t lane_half;
         index_t wave;
         index_t wave_m;
         index_t wave_n;
@@ -371,7 +261,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         index_t block_n;
         index_t cluster_wx = 0;
         index_t cluster_wy = 0;
-        CK_TILE_LDS_ADDR uint8_t* smem;
         uint32_t smem_addr;
         index_t packed_k;
         index_t k_atoms;
@@ -390,10 +279,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         // row * stride + offset and the address takes an extra VALU op.
         index_t a_scale_stride;
         index_t b_scale_stride;
-        ALdsWindow a_window;
-        BLdsWindow b_window;
-        AScaleWindow as_window;
-        BScaleWindow bs_window;
+        BlockGemm block_gemm;
 
         template <typename ADram, typename BDram, typename AScaleDram, typename BScaleDram>
         CK_TILE_DEVICE Run(const ADram& a_dram,
@@ -410,15 +296,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               K(Lengths(a_dram)[number<1>{}]),
               tid(get_thread_id()),
               lane(integer_modulo_nonnegative<mx_tdm_scheduled::kWave>(tid)),
-              lane_col(integer_modulo_nonnegative<16>(lane)),
-              lane_half(integer_divide_nonnegative<16>(lane)),
               // Wave-uniform, so the TDM descriptors built from it stay scalar.
               wave(get_warp_id()),
               wave_m(integer_divide_nonnegative<kWarpN>(wave)),
               wave_n(integer_modulo_nonnegative<kWarpN>(wave)),
               block_m(a_dram.get_window_origin()[number<0>{}]),
               block_n(b_dram.get_window_origin()[number<0>{}]),
-              smem(smem_),
               smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
@@ -426,10 +309,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                   Traits::kHasTail ? K + mx_tdm_scheduled::kAtomK - 1 : K)),
               a_scale_stride(opaque_scalar(M * 4)),
               b_scale_stride(opaque_scalar(N * 4)),
-              a_window(MakeLdsWindow<true>(smem_)),
-              b_window(MakeLdsWindow<false>(smem_)),
-              as_window(MakeLdsScaleWindow<true>(smem_, wave_m)),
-              bs_window(MakeLdsScaleWindow<false>(smem_, wave_n))
+              block_gemm(smem_, lane, wave_m, wave_n)
         {
             if constexpr(kHasCluster)
             {
@@ -451,18 +331,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             return detail::tdm_real_lengths(
                 window.get_bottom_tensor_view().get_tensor_descriptor());
-        }
-
-        /// RowMaps: WMMA positions to tile rows. A lane's M repeats are adjacent A rows, so its A
-        /// scales of a K step are contiguous; its N repeats are adjacent D columns, so one
-        /// accumulator slot is one vector store.
-        CK_TILE_DEVICE index_t MRow(index_t rm, index_t m_local) const
-        {
-            return wave_m * (kRm * kAtomM) + m_local * kRm + rm;
-        }
-        CK_TILE_DEVICE index_t NRow(index_t rn, index_t n_local) const
-        {
-            return wave_n * (kRn * kAtomN) + n_local * kRn + rn;
         }
 
         CK_TILE_DEVICE static constexpr index_t BufferBase(index_t parity)
@@ -761,223 +629,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             }
         }
 
-        // ---------------------------------------------------------------- LdsReader
-
-        CK_TILE_DEVICE int32x4_t Load4(index_t offset) const
-        {
-            return *reinterpret_cast<const CK_TILE_LDS_ADDR int32x4_t*>(smem + offset);
-        }
-
-        CK_TILE_DEVICE index_t LaneK(index_t step) const
-        {
-            return step * kStepBytes + lane_half * mx_tdm_scheduled::kChunkBytes;
-        }
-
-        CK_TILE_DEVICE RowFrag RowFragment(index_t buffer,
-                                           bool is_a,
-                                           index_t row,
-                                           index_t lane_k) const
-        {
-            constexpr MxTdmScheduledOperand a_lds = Policy::template GetLdsOperand<Problem, true>();
-            constexpr MxTdmScheduledOperand b_lds =
-                Policy::template GetLdsOperand<Problem, false>();
-            const uint32_t urow = static_cast<uint32_t>(row);
-            const index_t base =
-                buffer +
-                static_cast<index_t>(
-                    is_a ? mx_tdm_scheduled_row_offset<uint32_t>(a_lds, kLdsRowBytes, urow)
-                         : mx_tdm_scheduled_row_offset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
-                lane_k;
-            constexpr index_t o0 = Policy::template GetChunkOffset<Problem>(0);
-            constexpr index_t o1 = Policy::template GetChunkOffset<Problem>(1);
-            const int32x4_t c0   = Load4(base + o0);
-            const int32x4_t c1   = Load4(base + o1);
-            if constexpr(kChunks == 2)
-            {
-                return __builtin_shufflevector(c0, c1, 0, 1, 2, 3, 4, 5, 6, 7);
-            }
-            else
-            {
-                constexpr index_t o2 = Policy::template GetChunkOffset<Problem>(2);
-                constexpr index_t o3 = Policy::template GetChunkOffset<Problem>(3);
-                const int32x4_t c2   = Load4(base + o2);
-                const int32x4_t c3   = Load4(base + o3);
-                const int32x8_t lo   = __builtin_shufflevector(c0, c1, 0, 1, 2, 3, 4, 5, 6, 7);
-                const int32x8_t hi   = __builtin_shufflevector(c2, c3, 0, 1, 2, 3, 4, 5, 6, 7);
-                return __builtin_shufflevector(
-                    lo, hi, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-            }
-        }
-
-        /// One 8-word row fragment zero-padded to the 16 words of the 16x16x128 operand.
-        CK_TILE_DEVICE static int32x16_t Pad16(const int32x8_t& x)
-        {
-            return __builtin_shufflevector(
-                x, int32x8_t{}, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-        }
-        CK_TILE_DEVICE static int32x16_t Pad16(const int32x16_t& x) { return x; }
-
-        CK_TILE_DEVICE AFrag AFragment(index_t buffer, index_t rm, index_t step) const
-        {
-            if constexpr(kTileReadA)
-            {
-                return Pad16(LdsFragment<true>(buffer, rm, step));
-            }
-            else if constexpr(kMma32)
-            {
-                const index_t lane_k = LaneK(step);
-                const int32x8_t r0   = RowFragment(buffer, true, MRow(rm, lane_col), lane_k);
-                const int32x8_t r1   = RowFragment(buffer, true, MRow(rm, lane_col + 16), lane_k);
-                return __builtin_shufflevector(
-                    r0, r1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-            }
-            else
-            {
-                return Pad16(RowFragment(buffer, true, MRow(rm, lane_col), LaneK(step)));
-            }
-        }
-
-        /// A's or B's fragment of repeat r at K step `step` through its tile window: the wave,
-        /// buffer, repeat and step are a word offset from the window's.
-        template <bool IsA>
-        CK_TILE_DEVICE auto LdsFragment(index_t buffer, index_t r, index_t step) const
-        {
-            constexpr index_t atom        = IsA ? kAtomM : kAtomN;
-            constexpr index_t repeats     = IsA ? kRm : kRn;
-            constexpr auto repeat_offsets = [] {
-                array<index_t, repeats> offsets{};
-                for(index_t i = 0; i < repeats; ++i)
-                    offsets[i] = Policy::template GetLdsRowOffset<Problem, IsA>(i * atom);
-                return offsets;
-            }();
-            constexpr index_t base = Policy::template GetLdsOperand<Problem, IsA>().base / 4;
-            constexpr index_t wave_words =
-                Policy::template GetLdsRowOffset<Problem, IsA>(repeats * atom);
-            const index_t wave_index = IsA ? wave_m : wave_n;
-            const index_t offset = buffer / 4 + base + wave_index * wave_words + repeat_offsets[r] +
-                                   step * (kStepBytes / 4);
-            const auto& window = [&]() -> const auto& {
-                if constexpr(IsA)
-                    return a_window;
-                else
-                    return b_window;
-            }();
-            const auto tile = window.load_with_offset(offset, number<-1>{}, bool_constant<false>{});
-            using Vec       = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
-            return tile.get_thread_buffer().template get_as<Vec>()[number<0>{}];
-        }
-
-        CK_TILE_DEVICE BFrag BFragment(index_t buffer, index_t rn, index_t step) const
-        {
-            const RowFrag f = [&] {
-                if constexpr(kTileReadB)
-                    return LdsFragment<false>(buffer, rn, step);
-                else
-                    return RowFragment(buffer, false, NRow(rn, lane_col), LaneK(step));
-            }();
-            if constexpr(kMma32)
-                return f;
-            else
-                return Pad16(f);
-        }
-
-        /// Per-lane E8M0 words of one K step and repeat count: 16 B reads of four repeats, or one
-        /// read of all of them.
-        template <index_t Count>
-        CK_TILE_DEVICE void ScaleWords(int32_t (&out)[Count], index_t base) const
-        {
-            if constexpr(Count >= 4)
-            {
-                static_for<0, Count / 4, 1>{}([&](auto chunk) {
-                    constexpr index_t i = decltype(chunk)::value;
-                    const int32x4_t w   = Load4(base + i * 16);
-                    out[i * 4 + 0]      = w[0];
-                    out[i * 4 + 1]      = w[1];
-                    out[i * 4 + 2]      = w[2];
-                    out[i * 4 + 3]      = w[3];
-                });
-            }
-            else if constexpr(Count == 2)
-            {
-                const int32x2_t w =
-                    *reinterpret_cast<const CK_TILE_LDS_ADDR int32x2_t*>(smem + base);
-                out[0] = w[0];
-                out[1] = w[1];
-            }
-            else
-            {
-                out[0] = *reinterpret_cast<const CK_TILE_LDS_ADDR int32_t*>(smem + base);
-            }
-        }
-
-        /// A's or B's per-lane E8M0 words of K step `step` through the scale window.
-        template <bool IsA, index_t Count>
-        CK_TILE_DEVICE void LdsScaleWords(int32_t (&out)[Count], index_t buffer, index_t step) const
-        {
-            constexpr MxTdmScheduledOperand op =
-                Policy::template GetLdsOperand<Problem, IsA, true>();
-            constexpr index_t step_words =
-                static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(op, 1u, 0u) -
-                                     op.base) /
-                4;
-            const auto& window = [&]() -> const auto& {
-                if constexpr(IsA)
-                    return as_window;
-                else
-                    return bs_window;
-            }();
-            const auto tile = window.load_with_offset(
-                buffer / 4 + op.base / 4 + step * step_words, number<-1>{}, bool_constant<false>{});
-            static_for<0, Count, 1>{}([&](auto i) { out[i] = tile.get_thread_buffer()[i]; });
-        }
-
-        /// A K step's scales and A rows.
-        CK_TILE_DEVICE Head ReadHead(index_t buffer, index_t step) const
-        {
-            Head h;
-            if constexpr(kTileReadAScale)
-            {
-                LdsScaleWords<true>(h.as, buffer, step);
-            }
-            else
-            {
-                constexpr MxTdmScheduledOperand as_lds =
-                    Policy::template GetLdsOperand<Problem, true, true>();
-                const index_t a_lane = kMma32 ? lane : lane_col;
-                ScaleWords<kRm>(h.as,
-                                buffer +
-                                    static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
-                                        as_lds,
-                                        static_cast<uint32_t>(step),
-                                        static_cast<uint32_t>(MRow(0, a_lane)))));
-            }
-            if constexpr(kTileReadBScale)
-            {
-                LdsScaleWords<false>(h.bs, buffer, step);
-            }
-            else
-            {
-                constexpr MxTdmScheduledOperand bs_lds =
-                    Policy::template GetLdsOperand<Problem, false, true>();
-                ScaleWords<kRn>(h.bs,
-                                buffer +
-                                    static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
-                                        bs_lds,
-                                        static_cast<uint32_t>(step),
-                                        static_cast<uint32_t>(NRow(0, lane_col)))));
-            }
-            static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
-            return h;
-        }
-
-        /// B fragments First .. First + Count - 1 of a K step into b[First ..].
-        template <index_t First, index_t Count>
-        CK_TILE_DEVICE void ReadB(BRegs& regs, index_t buffer, index_t step) const
-        {
-            static_for<First, First + Count, 1>{}(
-                [&](auto rn) { regs.b[rn] = BFragment(buffer, rn, step); });
-        }
-
         // ---------------------------------------------------------------- Pipeline hooks
 
         template <index_t StaticParity>
@@ -1043,24 +694,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 Signal();
         }
 
-        /// The WMMAs of B fragments [First, First + Count) with signal at Signal WMMAs when
-        /// SignalHere: half-B order (j outer, rm inner), else rm outer.
-        template <bool BOuter, index_t First, index_t Count, bool SignalHere>
-        CK_TILE_DEVICE void Wmmas(AccRegs& acc, const Head& h, const BRegs& b) const
-        {
-            constexpr index_t total = kRm * Count;
-            static_for<0, total, 1>{}([&](auto i) {
-                constexpr index_t issued = decltype(i)::value;
-                constexpr index_t rm     = BOuter ? issued % kRm : issued / Count;
-                constexpr index_t rn     = First + (BOuter ? issued / kRm : issued % Count);
-                if constexpr(SignalHere && issued == kSignalWmmas)
-                    Signal();
-                Mma(acc[rm * kRn + rn], h.a[rm], b.b[rn], h.as[rm], h.bs[rn]);
-            });
-            if constexpr(SignalHere && total == kSignalWmmas)
-                Signal();
-        }
-
         /// local_prefetch 1, half-B ahead: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
         template <index_t Steps, index_t StaticParity>
@@ -1074,32 +707,33 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
-                const Head cur         = carry.head;
-                const BRegs cur_b      = carry.b;
+                const ATile cur        = carry.a;
+                const BTile cur_b      = carry.b;
                 if constexpr(!last)
                 {
-                    carry.head = ReadHead(buffer, step + 1);
-                    ReadB<0, kHalf>(carry.b, buffer, step + 1);
+                    carry.a = block_gemm.LocalPrefetchA(buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, buffer, step + 1);
                 }
                 else
                 {
                     Refill<StaticParity>(k0);
-                    carry.head = ReadHead(next_buffer, 0);
-                    ReadB<0, kHalf>(carry.b, next_buffer, 0);
+                    carry.a = block_gemm.LocalPrefetchA(next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, next_buffer, 0);
                 }
                 constexpr bool signal = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kReadsPerStep>();
-                Wmmas<true, 0, kHalf, false>(acc, cur, cur_b);
+                block_gemm.template operator()<true, 0, kHalf>(acc, cur, cur_b);
                 if constexpr(!last)
-                    ReadB<kHalf, kHalf>(carry.b, buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, buffer, step + 1);
                 else
                 {
-                    ReadB<kHalf, kHalf>(carry.b, next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, next_buffer, 0);
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
                 s_wait_dscnt_pinned<kReadsPerStep>();
-                Wmmas<true, kHalf, kHalf, signal>(acc, cur, cur_b);
+                block_gemm.template operator()<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
+                    acc, cur, cur_b, [&] { Signal(); });
             });
         }
 
@@ -1116,25 +750,26 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step     = decltype(s)::value;
                 constexpr bool last        = step + 1 == Steps;
-                const Head cur             = carry.head;
-                const BRegs cur_b          = carry.b;
+                const ATile cur            = carry.a;
+                const BTile cur_b          = carry.b;
                 const index_t src_buf      = last ? next_buffer : buffer;
                 constexpr index_t src_step = last ? 0 : step + 1;
                 constexpr bool signal      = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kWait0>();
                 if constexpr(last)
                     Refill<StaticParity>(k0);
-                carry.head = ReadHead(src_buf, src_step);
-                Wmmas<true, 0, kHalf, false>(acc, cur, cur_b);
+                carry.a = block_gemm.LocalPrefetchA(src_buf, src_step);
+                block_gemm.template operator()<true, 0, kHalf>(acc, cur, cur_b);
                 if constexpr(last)
                 {
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
                 s_wait_dscnt_pinned<kWait1>();
-                ReadB<0, kHalf>(carry.b, src_buf, src_step);
-                Wmmas<true, kHalf, kHalf, signal>(acc, cur, cur_b);
-                ReadB<kHalf, kHalf>(carry.b, src_buf, src_step);
+                block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, src_buf, src_step);
+                block_gemm.template operator()<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
+                    acc, cur, cur_b, [&] { Signal(); });
+                block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, src_buf, src_step);
             });
         }
 
@@ -1150,24 +785,25 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
-                const Head cur         = carry.head;
-                const BRegs cur_b      = carry.b;
+                const ATile cur        = carry.a;
+                const BTile cur_b      = carry.b;
                 if constexpr(!last)
                 {
-                    carry.head = ReadHead(buffer, step + 1);
-                    ReadB<0, kRn>(carry.b, buffer, step + 1);
+                    carry.a = block_gemm.LocalPrefetchA(buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<0, kRn>(carry.b, buffer, step + 1);
                 }
                 else
                 {
                     Refill<StaticParity>(k0);
-                    carry.head = ReadHead(next_buffer, 0);
-                    ReadB<0, kRn>(carry.b, next_buffer, 0);
+                    carry.a = block_gemm.LocalPrefetchA(next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<0, kRn>(carry.b, next_buffer, 0);
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
                 constexpr bool signal = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kReadsPerStep>();
-                Wmmas<false, 0, kRn, signal>(acc, cur, cur_b);
+                block_gemm.template operator()<false, 0, kRn, signal ? kSignalWmmas : -1>(
+                    acc, cur, cur_b, [&] { Signal(); });
             });
         }
 
@@ -1182,25 +818,17 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
-                const Head h           = ReadHead(buffer, step);
-                BRegs b;
-                ReadB<0, kRn>(b, buffer, step);
+                const ATile h          = block_gemm.LocalPrefetchA(buffer, step);
+                BTile b;
+                block_gemm.template LocalPrefetchB<0, kRn>(b, buffer, step);
                 s_wait_dscnt_pinned<0>();
                 if constexpr(last)
                 {
                     Refill<StaticParity>(k0);
                     Signal();
                 }
-                static_for<0, kNumAcc, 1>{}([&](auto i) {
-                    constexpr index_t issued = decltype(i)::value;
-                    constexpr index_t rm     = issued / kRn;
-                    constexpr index_t rn     = issued % kRn;
-                    if constexpr(last && issued == late_at)
-                        Late(k0, parity);
-                    Mma(acc[issued], h.a[rm], b.b[rn], h.as[rm], h.bs[rn]);
-                });
-                if constexpr(last && kNumAcc == late_at)
-                    Late(k0, parity);
+                block_gemm.template operator()<false, 0, kRn, last ? late_at : -1>(
+                    acc, h, b, [&] { Late(k0, parity); });
             });
         }
 
@@ -1242,8 +870,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             Carry carry{};
             if constexpr(kLocalPrefetch)
             {
-                carry.head = ReadHead(BufferBase(0), 0);
-                ReadB<0, kRn>(carry.b, BufferBase(0), 0);
+                carry.a = block_gemm.LocalPrefetchA(BufferBase(0), 0);
+                block_gemm.template LocalPrefetchB<0, kRn>(carry.b, BufferBase(0), 0);
             }
             const index_t full_tiles = integer_divide_nonnegative<kTileK>(K);
             constexpr index_t kOdd   = Traits::kOddTiles;

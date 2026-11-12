@@ -29,6 +29,7 @@
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_default_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1_custom_policy.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_mx_asmem_bsmem_creg_tdm_scheduled.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_problem.hpp"
 #include "ck_tile/ops/gemm/block/block_mx_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/block/block_universal_gemm_as_bs_cr.hpp"
