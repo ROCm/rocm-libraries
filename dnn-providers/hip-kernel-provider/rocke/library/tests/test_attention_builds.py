@@ -122,8 +122,8 @@ def _compile_or_skip(kernel, *, arch: str):
 #     spilling is exactly the mechanism that holds occupancy constant -- so it is a
 #     distinct signal. Occupancy is the static multi-limiter estimate
 #     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
-#     / LDS / workgroup / wave cap, no GPU). Its per-arch caps are still PROVISIONAL
-#     (gfx942 in particular models a conservative 8 waves/SIMD) pending rocprofv3
+#     / LDS / workgroup / wave cap, no GPU). Its VGPR file matches the compiler;
+#     its AGPR, LDS and workgroup limiters are still PROVISIONAL pending rocprofv3
 #     calibration on real hardware, so treat it as a floor, not an exact oracle.
 _KERNEL_RESOURCE_BUDGETS = {
     # gfx950 dense persistent prefill (runtime shape, so no hq/kv/sq/sk tokens): the
@@ -3980,7 +3980,10 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 4096))
+        # The cohort only needs three DISTINCT shapes; the sizes are incidental.
+        # Batch is capped at 32 because a ragged Q is bounded in bytes, and
+        # (64, 4096, 4096) at Hq=32 D=128 lands on exactly 2**31 B.
+        shapes = ((1, 512, 512), (8, 2048, 2048), (32, 4096, 4096))
         base = AttentionDenseSpec(
             **self._BASE_KWARGS,
             persistent=True,
@@ -5885,6 +5888,65 @@ class TestDenseSpecPreflight(unittest.TestCase):
 
         ok, why = supports_attention_dense(
             self._spec(
+                batch=64,
+                seqlen_q=16128,
+                seqlen_kv=16128,
+                num_query_heads=8,
+                num_kv_heads=8,
+            ),
+            arch="gfx950",
+        )
+        self.assertTrue(ok, why)
+
+    def test_ragged_bounds_qo_in_bytes_not_elements(self):
+        """A ragged Q is read through a buffer resource whose num_records AND
+        voffset are i32 BYTES (``buffer_rsrc(q, B*Sq*Hq*D*2)`` fed by
+        ``buffer_load_vN(q_rsrc, mul(addr, 2))``), so its ceiling is half the
+        element count the ``global_load_vN`` paths get.
+
+        The two cases differ ONLY in ``ragged``, which is the point: an element
+        bound would accept both, and a bound that fired on every spec would
+        reject both. 2**30 <= qo_elems < 2**31 is exactly the window where the
+        unit matters, and K/V is held an order of magnitude under so the Q/O
+        marker proves which check fired.
+        """
+        from kernels.common.attention_dense_spec import INT32_LIMIT
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        # 40192 = 157*256 keeps the non-ragged tile multiple legal, so the same
+        # dims are constructible both ways.
+        dims = dict(
+            batch=8,
+            seqlen_q=40192,
+            seqlen_kv=40192,
+            num_query_heads=32,
+            num_kv_heads=8,
+        )
+        qo_elems = 8 * 40192 * 32 * 128
+        self.assertLess(qo_elems, INT32_LIMIT, "test setup error: element bound fires")
+        self.assertGreaterEqual(qo_elems * 2, INT32_LIMIT, "test setup error")
+        kv_bytes = 8 * 40192 * 8 * 128 * 2
+        self.assertLess(kv_bytes, INT32_LIMIT, "test setup error: K/V bound fires")
+
+        ok, why = supports_attention_dense(
+            self._spec(ragged=True, **dims), arch="gfx950"
+        )
+        self.assertFalse(ok, "ragged Q past the 32-bit BYTE limit must be rejected")
+        self.assertIn("Q/O", why, why)
+        self.assertIn("B,", why, f"the ragged refusal must name bytes: {why}")
+
+        ok, why = supports_attention_dense(self._spec(**dims), arch="gfx950")
+        self.assertTrue(ok, f"the same dims are in range when element-addressed: {why}")
+
+    def test_ragged_qo_extent_just_under_the_byte_limit_is_accepted(self):
+        """Paired with the rejection above, so tightening the ragged bound any
+        further would be caught. qo = 2113929216 B and kv = 2113929216 B are both
+        just under 2**31."""
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ok, why = supports_attention_dense(
+            self._spec(
+                ragged=True,
                 batch=64,
                 seqlen_q=16128,
                 seqlen_kv=16128,

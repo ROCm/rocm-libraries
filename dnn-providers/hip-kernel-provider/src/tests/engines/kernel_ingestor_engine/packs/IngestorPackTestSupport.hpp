@@ -179,6 +179,16 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
     return properties;
 }
 
+/// A gfx950 (or @p arch) warp-64 device, by value: matcher tests of the gfx950 engines
+/// run on CPU-only and non-gfx950 hosts.
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties gfx950Properties(std::string arch = "gfx950")
+{
+    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
+    properties.gcnArchName = std::move(arch);
+    properties.warpSize = 64;
+    return properties;
+}
+
 /// The real current device's properties, queried once; zeroed if no device is current.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
