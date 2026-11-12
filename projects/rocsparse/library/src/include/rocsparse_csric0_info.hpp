@@ -31,13 +31,13 @@ struct _rocsparse_csric0_info
 {
 protected:
     const rocsparse::triangular_data_t* m_trm_data{};
-    rocsparse::singular_info_t*         m_singularity_numeric_exact{};
-    rocsparse::singular_info_t*         m_singularity_numeric_near{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_exact{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_near{};
 
 public:
     _rocsparse_csric0_info(const rocsparse::triangular_data_t* trm_data,
-                           rocsparse::singular_info_t*         singularity_numeric_exact,
-                           rocsparse::singular_info_t*         singularity_numeric_near)
+                           rocsparse::pivot_numeric_info_t*    singularity_numeric_exact,
+                           rocsparse::pivot_numeric_info_t*    singularity_numeric_near)
         : m_trm_data(trm_data)
         , m_singularity_numeric_exact(singularity_numeric_exact)
         , m_singularity_numeric_near(singularity_numeric_near)
@@ -50,12 +50,12 @@ public:
         return this->m_trm_data;
     }
 
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_exact()
     {
         return this->m_singularity_numeric_exact;
     }
 
-    rocsparse::singular_info_t* get_singularity_numeric_near()
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_near()
     {
         return this->m_singularity_numeric_near;
     }

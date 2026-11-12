@@ -31,11 +31,11 @@ struct _rocsparse_csrsv_info
 {
 protected:
     const rocsparse::triangular_data_t* m_trm_data{};
-    rocsparse::singular_info_t*         m_singularity_numeric_exact{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_exact{};
 
 public:
     _rocsparse_csrsv_info(const rocsparse::triangular_data_t* trm_data,
-                          rocsparse::singular_info_t*         singularity_numeric_exact)
+                          rocsparse::pivot_numeric_info_t*    singularity_numeric_exact)
         : m_trm_data(trm_data)
         , m_singularity_numeric_exact(singularity_numeric_exact)
     {
@@ -47,7 +47,7 @@ public:
         return this->m_trm_data;
     }
 
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_exact()
     {
         return this->m_singularity_numeric_exact;
     }

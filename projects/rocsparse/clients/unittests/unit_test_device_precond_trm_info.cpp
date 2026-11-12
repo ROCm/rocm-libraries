@@ -234,7 +234,7 @@ namespace
             reset();
         }
 
-        info_guard(const info_guard&)            = delete;
+        info_guard(const info_guard&) = delete;
         info_guard& operator=(const info_guard&) = delete;
     };
 
@@ -269,7 +269,7 @@ namespace
                 (void)rocsparse_destroy_mat_descr(upper);
         }
 
-        trm_fixture(const trm_fixture&)            = delete;
+        trm_fixture(const trm_fixture&) = delete;
         trm_fixture& operator=(const trm_fixture&) = delete;
     };
 
@@ -495,7 +495,7 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     source.set(rocsparse_operation_transpose, rocsparse_fill_mode_upper, trans);
 
     rocsparse::triangular_data_t copy;
-    copy.copy(&source, handle->stream);
+    copy.copy(&source);
     auto* copied_lower = copy.get(rocsparse_operation_none, rocsparse_fill_mode_lower);
     auto* copied_trans = copy.get(rocsparse_operation_transpose, rocsparse_fill_mode_upper);
     ASSERT_NE(copied_lower, nullptr);
@@ -506,7 +506,7 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     EXPECT_EQ(copy.get(rocsparse_operation_transpose, rocsparse_fill_mode_lower), nullptr);
     expect_same_arrays(*lower, *copied_lower);
     expect_same_arrays(*trans, *copied_trans);
-    copy.copy(nullptr, handle->stream);
+    copy.copy(nullptr);
 
     // Two slots may alias the same triangular_info_t: releasing one slot keeps it alive for the
     // other, a copy preserves the aliasing, and the holder frees it once.
@@ -520,7 +520,7 @@ TEST_F(PrecondTrmInfo, trm_data_slots_copy_and_aliasing)
     holder.set(rocsparse_operation_none, rocsparse_fill_mode_upper, own);
 
     rocsparse::triangular_data_t aliased_copy;
-    aliased_copy.copy(&holder, handle->stream);
+    aliased_copy.copy(&holder);
     EXPECT_EQ(aliased_copy.get(rocsparse_operation_none, rocsparse_fill_mode_lower),
               aliased_copy.get(rocsparse_operation_transpose, rocsparse_fill_mode_upper));
     EXPECT_NE(aliased_copy.get(rocsparse_operation_none, rocsparse_fill_mode_lower), shared);

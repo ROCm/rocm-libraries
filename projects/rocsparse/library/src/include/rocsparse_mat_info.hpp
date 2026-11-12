@@ -68,14 +68,17 @@ protected:
     rocsparse::triangular_data_t m_triangular_data;
 
     // Exact numeric singularity shared by every triangular info.
-    rocsparse::singular_info_t* m_singularity_numeric_exact{};
+    rocsparse::pivot_numeric_info_t* m_singularity_numeric_exact{};
 
     // Near numeric singularity shared by the csrilu0, csric0 and csrildlt0 infos.
-    rocsparse::singular_info_t* m_singularity_numeric_near{};
+    rocsparse::pivot_numeric_info_t* m_singularity_numeric_near{};
 
     // Shared by every triangular_info_t of m_triangular_data, which refer to them as const.
     rocsparse::idnvec_descr_t*                m_diag_ind{};
     rocsparse::transposed_sparsity_pattern_t* m_transposed{};
+
+    // Pivot of the triangular data, which holds a mutable pointer to it.
+    rocsparse::pivot_symbolic_info_t* m_pivot_info{};
 
     std::shared_ptr<_rocsparse_csrsv_info>     m_csrsv_info;
     std::shared_ptr<_rocsparse_csrsm_info>     m_csrsm_info;
@@ -116,12 +119,12 @@ public:
     const rocsparse::triangular_data_t* get_triangular_data() const;
     rocsparse::triangular_data_t*       get_triangular_data();
 
-    rocsparse::singular_info_t* get_singularity_numeric_exact();
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_exact();
 
     // Mutable access to transposed storage owned by this mat_info, nullptr otherwise.
     rocsparse::transposed_sparsity_pattern_t*
         get_transposed_sparsity_pattern(const rocsparse::transposed_sparsity_pattern_t* transposed);
-    rocsparse::singular_info_t* get_singularity_numeric_near();
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_near();
 
     void duplicate_trdata(const rocsparse_mat_info src, hipStream_t stream);
     const rocsparse::numeric_boost*            get_boost() const;

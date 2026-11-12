@@ -137,12 +137,12 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle              handle,
-                                          rocsparse_operation           operation,
-                                          rocsparse_const_spmat_descr   A,
-                                          rocsparse::triangular_info_t* info,
-                                          rocsparse::pivot_info_t*      pivot_info,
-                                          rocsparse::idnvec_descr_t*    diag_ind_storage,
+rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle                  handle,
+                                          rocsparse_operation               operation,
+                                          rocsparse_const_spmat_descr       A,
+                                          rocsparse::triangular_info_t*     info,
+                                          rocsparse::pivot_symbolic_info_t* pivot_info,
+                                          rocsparse::idnvec_descr_t*        diag_ind_storage,
                                           rocsparse::transposed_sparsity_pattern_t* transposed,
                                           size_t                                    buffer_size,
                                           void*                                     buffer)

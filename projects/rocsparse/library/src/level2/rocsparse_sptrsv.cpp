@@ -291,9 +291,9 @@ try
                                rocsparse_status_invalid_value);
         }
 
-        const rocsparse::pivot_info_t* symbolic_pivot{};
-        rocsparse::singular_info_t*    exact_pivot{};
-        rocsparse::singular_info_t*    near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         const auto format = sptrsv_descr->get_format();
         switch(format)

@@ -26,8 +26,7 @@
 #include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
 
-void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that,
-                                        hipStream_t                         stream)
+void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that)
 {
     if(that != nullptr && that != this)
     {
@@ -69,16 +68,15 @@ void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that
                 this->rewire_storage(this->m_data[i], src, that);
             }
         }
-
-        this->m_pivot_info->copy_pivot_info_async(that->m_pivot_info, stream);
-        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 }
 
 void rocsparse::triangular_data_t::set_storage(
+    rocsparse::pivot_symbolic_info_t*               pivot_info,
     const rocsparse::idnvec_descr_t*                diag_indices,
     const rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern)
 {
+    this->m_pivot_info                  = pivot_info;
     this->m_diag_indices                = diag_indices;
     this->m_transposed_sparsity_pattern = transposed_sparsity_pattern;
 }
@@ -152,8 +150,6 @@ void rocsparse::triangular_data_t::clear()
 rocsparse::triangular_data_t::~triangular_data_t()
 {
     this->clear();
-    delete this->m_pivot_info;
-    this->m_pivot_info = nullptr;
 }
 
 rocsparse::triangular_info_t* rocsparse::triangular_data_t::get(rocsparse_operation operation,

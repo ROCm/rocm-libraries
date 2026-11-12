@@ -34,8 +34,8 @@ namespace
     {
         if constexpr(std::is_constructible<INFO,
                                            const rocsparse::triangular_data_t*,
-                                           rocsparse::singular_info_t*,
-                                           rocsparse::singular_info_t*>::value)
+                                           rocsparse::pivot_numeric_info_t*,
+                                           rocsparse::pivot_numeric_info_t*>::value)
         {
             return std::make_shared<INFO>(info->get_triangular_data(),
                                           info->get_singularity_numeric_exact(),
@@ -69,12 +69,12 @@ rocsparse::triangular_data_t* _rocsparse_mat_info::get_triangular_data()
     return &this->m_triangular_data;
 }
 
-rocsparse::singular_info_t* _rocsparse_mat_info::get_singularity_numeric_exact()
+rocsparse::pivot_numeric_info_t* _rocsparse_mat_info::get_singularity_numeric_exact()
 {
     return this->m_singularity_numeric_exact;
 }
 
-rocsparse::singular_info_t* _rocsparse_mat_info::get_singularity_numeric_near()
+rocsparse::pivot_numeric_info_t* _rocsparse_mat_info::get_singularity_numeric_near()
 {
     return this->m_singularity_numeric_near;
 }
@@ -397,7 +397,8 @@ void _rocsparse_mat_info::duplicate_trdata(rocsparse_mat_info src, hipStream_t s
 {
     this->m_diag_ind->copy(*src->m_diag_ind);
     this->m_transposed->copy(*src->m_transposed);
-    this->m_triangular_data.copy(&src->m_triangular_data, stream);
+    this->m_triangular_data.copy(&src->m_triangular_data);
+    THROW_IF_ROCSPARSE_ERROR(this->m_pivot_info->copy_pivot_info_async(src->m_pivot_info, stream));
     THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact->copy_singular_info_async(
         src->m_singularity_numeric_exact, stream));
     THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_near->copy_singular_info_async(
@@ -495,12 +496,13 @@ std::shared_ptr<_rocsparse_ellsv_info> _rocsparse_mat_info::get_shared_ellsv_inf
 }
 
 _rocsparse_mat_info::_rocsparse_mat_info()
-    : m_singularity_numeric_exact(new rocsparse::singular_info_t())
-    , m_singularity_numeric_near(new rocsparse::singular_info_t())
+    : m_singularity_numeric_exact(new rocsparse::pivot_numeric_info_t())
+    , m_singularity_numeric_near(new rocsparse::pivot_numeric_info_t())
     , m_diag_ind(new rocsparse::idnvec_descr_t())
     , m_transposed(new rocsparse::transposed_sparsity_pattern_t())
+    , m_pivot_info(new rocsparse::pivot_symbolic_info_t())
 {
-    this->m_triangular_data.set_storage(this->m_diag_ind, this->m_transposed);
+    this->m_triangular_data.set_storage(this->m_pivot_info, this->m_diag_ind, this->m_transposed);
 }
 
 rocsparse::transposed_sparsity_pattern_t* _rocsparse_mat_info::get_transposed_sparsity_pattern(
@@ -570,4 +572,7 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
 
     delete this->m_transposed;
     this->m_transposed = nullptr;
+
+    delete this->m_pivot_info;
+    this->m_pivot_info = nullptr;
 }

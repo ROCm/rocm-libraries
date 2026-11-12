@@ -39,19 +39,19 @@ namespace rocsparse
                                    rocsparse_operation                       operation,
                                    rocsparse_const_spmat_descr               A,
                                    rocsparse::triangular_info_t*             info,
-                                   rocsparse::pivot_info_t*                  pivot_info,
+                                   rocsparse::pivot_symbolic_info_t*         pivot_info,
                                    rocsparse::idnvec_descr_t*                diag_ind,
                                    rocsparse::transposed_sparsity_pattern_t* transposed,
                                    size_t                                    buffer_size,
                                    void*                                     buffer);
 
-    rocsparse_status gellsv_analysis(rocsparse_handle              handle,
-                                     rocsparse_operation           operation,
-                                     rocsparse_const_spmat_descr   A,
-                                     rocsparse::triangular_info_t* info,
-                                     rocsparse::pivot_info_t*      pivot_info,
-                                     size_t                        buffer_size,
-                                     void*                         buffer);
+    rocsparse_status gellsv_analysis(rocsparse_handle                  handle,
+                                     rocsparse_operation               operation,
+                                     rocsparse_const_spmat_descr       A,
+                                     rocsparse::triangular_info_t*     info,
+                                     rocsparse::pivot_symbolic_info_t* pivot_info,
+                                     size_t                            buffer_size,
+                                     void*                             buffer);
 }
 
 namespace rocsparse
@@ -60,8 +60,10 @@ namespace rocsparse
     struct triangular_data_t
     {
     protected:
-        rocsparse::pivot_info_t*      m_pivot_info{new rocsparse::pivot_info_t()};
         rocsparse::triangular_info_t* m_data[4]{};
+
+        // Owned by the mat_info.
+        rocsparse::pivot_symbolic_info_t* m_pivot_info{};
 
         // Owned by the mat_info and shared by every slot; mutable access is passed in by the mat_info.
         const rocsparse::idnvec_descr_t*                m_diag_indices{};
@@ -91,19 +93,20 @@ namespace rocsparse
         triangular_data_t(const triangular_data_t&) = delete;
         triangular_data_t& operator=(const triangular_data_t&) = delete;
 
-        void copy(const triangular_data_t* that, hipStream_t stream);
+        void copy(const triangular_data_t* that);
         void clear();
 
         void set_storage(
+            rocsparse::pivot_symbolic_info_t*               pivot_info,
             const rocsparse::idnvec_descr_t*                diag_indices,
             const rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern);
 
-        rocsparse::pivot_info_t* get_pivot_info()
+        rocsparse::pivot_symbolic_info_t* get_pivot_info()
         {
             return this->m_pivot_info;
         }
 
-        const rocsparse::pivot_info_t* get_pivot_info() const
+        const rocsparse::pivot_symbolic_info_t* get_pivot_info() const
         {
             return this->m_pivot_info;
         }

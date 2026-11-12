@@ -67,7 +67,7 @@ class Info : public HandleTest
 //
 // Covers _rocsparse_csrsv_info::copy (via rocsparse_copy_mat_info),
 // get_singularity_numeric_exact (via zero_pivot),
-// create_singularity_numeric_exact (via solve), the pivot_info_t::
+// create_singularity_numeric_exact (via solve), the pivot_symbolic_info_t::
 // create_zero_pivot_async(indextype,stream) inline overload (via analysis),
 // and rocsparse::triangular_data_t storage_index/create/recreate (via analysis).
 // ======================================================================

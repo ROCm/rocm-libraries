@@ -237,13 +237,13 @@ namespace rocsparse
                                                               temp_buffer);
     }
 
-    rocsparse_status gellsv_analysis(rocsparse_handle              handle,
-                                     rocsparse_operation           operation,
-                                     rocsparse_const_spmat_descr   A,
-                                     rocsparse::triangular_info_t* info,
-                                     rocsparse::pivot_info_t*      pivot_info,
-                                     size_t                        buffer_size,
-                                     void*                         buffer)
+    rocsparse_status gellsv_analysis(rocsparse_handle                  handle,
+                                     rocsparse_operation               operation,
+                                     rocsparse_const_spmat_descr       A,
+                                     rocsparse::triangular_info_t*     info,
+                                     rocsparse::pivot_symbolic_info_t* pivot_info,
+                                     size_t                            buffer_size,
+                                     void*                             buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 

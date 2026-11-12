@@ -26,16 +26,16 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 
-rocsparse_status rocsparse::pivot_info_t::create_zero_pivot_async(int64_t             batch_count,
-                                                                  rocsparse_indextype indextype,
-                                                                  hipStream_t         stream)
+rocsparse_status rocsparse::pivot_symbolic_info_t::create_zero_pivot_async(
+    int64_t batch_count, rocsparse_indextype indextype, hipStream_t stream)
 {
     RETURN_IF_ROCSPARSE_ERROR(this->create_position_async(batch_count, indextype, stream));
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::pivot_info_t::copy_pivot_info_async(const pivot_info_t* that,
-                                                                hipStream_t         stream)
+rocsparse_status
+    rocsparse::pivot_symbolic_info_t::copy_pivot_info_async(const pivot_symbolic_info_t* that,
+                                                            hipStream_t                  stream)
 {
     RETURN_IF_ROCSPARSE_ERROR(this->copy_position_async(that, stream));
     return rocsparse_status_success;
