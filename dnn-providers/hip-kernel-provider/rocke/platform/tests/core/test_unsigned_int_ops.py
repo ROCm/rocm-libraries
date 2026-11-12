@@ -21,7 +21,7 @@ import subprocess
 import numpy as np
 import pytest
 
-from rocke.core.ir import F32, I1, I8, I32, I64, IRBuilder, PtrType
+from rocke.core.ir import F32, I1, I8, I32, I64, IRBuilder, PtrType, Type
 from rocke.core.ir_print import print_ir
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -29,6 +29,7 @@ from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import ERROR, verify
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
+from rocke.tests.engines import ENGINES, assert_engine_rejects_hip
 
 FLAVORS = LLVM_FLAVORS
 
@@ -99,7 +100,7 @@ def test_c_api_builders_match_the_python_builder():
 
     ``ROCKE_UNSIGNED_INT_OPS_CLI`` names the built ``rocke_unsigned_int_ops``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
-    ``rocke_pytest`` ctest sets it. A value that names no file is a broken
+    ``rocke_pytest_*`` ctest entries set it. A value that names no file is a broken
     setup, so it fails instead of skipping.
     """
     path = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
@@ -539,6 +540,38 @@ def test_hip_lowering_spells_unsigned_forms():
     assert "int add1 = (int32_t)((uint32_t)a + (uint32_t)b);" in hip
     assert "bool ult3 = (uint32_t)a < (uint32_t)b;" in hip
     assert "int range5 = a;" in hip
+
+
+# (pred attr, operand type, the refusal): the verifier's rule and text. ``ult``
+# takes i32 or i64 operands, so an f32 or i8 one is refused, not lowered.
+_REFUSED_HIP_PREDS = [
+    ("ult", F32, "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"),
+    ("ult", I8, "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"),
+    ("ugt", I32, "arith.cmp: unknown pred 'ugt'"),
+    (1, I32, "arith.cmp: pred must be a string"),
+]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "pred,operand_type,message",
+    _REFUSED_HIP_PREDS,
+    ids=["ult_f32", "ult_i8", "unknown", "not_a_string"],
+)
+def test_hip_lowering_refuses_a_pred_the_ir_rule_refuses(
+    pred: str | int, operand_type: Type, message: str, engine: str
+) -> None:
+    """Each engine's HIP lowering checks an ``arith.cmp`` pred against the
+    verifier's rule before reading it, and refuses it with a ``ValueError``
+    (``ROCKE_ERR_VALUE``) in the verifier's words. The ctest repeats these
+    cases for the C++ engine without the binding."""
+    b = IRBuilder("refused_pred")
+    a = b.param("a", operand_type)
+    b._op("arith.cmp", [a, a], [I1], attrs={"pred": pred})
+    b.ret()
+    assert_engine_rejects_hip(
+        b.kernel, "gfx942", engine=engine, error_type=ValueError, message=message
+    )
 
 
 def test_hip_add_nuw_compiles_without_nsw(tmp_path):

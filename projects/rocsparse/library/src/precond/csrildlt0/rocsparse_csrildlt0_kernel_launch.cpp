@@ -27,12 +27,13 @@
 #include "rocsparse_csrildlt0_kernel_binsearch.hpp"
 #include "rocsparse_csrildlt0_kernel_hash.hpp"
 
-rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle         handle,
-                                                    rocsparse_csrildlt0_info csrildlt0_info,
-                                                    rocsparse_spmat_descr    A,
-                                                    void*                    diag,
-                                                    size_t                   buffer_size,
-                                                    void*                    buffer)
+rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle                handle,
+                                                    rocsparse_csrildlt0_info        csrildlt0_info,
+                                                    rocsparse_spmat_descr           A,
+                                                    const rocsparse::numeric_boost* boost,
+                                                    void*                           diag,
+                                                    size_t                          buffer_size,
+                                                    void*                           buffer)
 {
     const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                         && handle->asic_rev < 2);
@@ -56,7 +57,7 @@ rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle         han
                                        sizeof(int32_t) * A->rows * A_batch_count,
                                        handle->stream));
 
-    RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrildlt0_info, A, diag, buffer_size, buffer));
+    RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrildlt0_info, A, boost, diag, buffer_size, buffer));
 
     // Every instance aliases instance 0, so they all share its pivot. The diagonal
     // copy stays per instance: it only reads the shared values.

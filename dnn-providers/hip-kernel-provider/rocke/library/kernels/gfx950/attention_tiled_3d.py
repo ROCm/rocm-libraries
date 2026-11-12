@@ -225,8 +225,18 @@ class UnifiedAttention3DTiledSpec:
     # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
     # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
     right_bound: int = 0
+    # emit_lse: the module's reduce also writes the LSE (see
+    # ``UnifiedAttentionReduceTiledSpec.emit_lse``). The segment kernel never reads
+    # it, so its IR is the LSE-off IR; the field is here because a packaged module
+    # is built from this spec alone (``reduce_spec_for``). The runtime dispatcher
+    # leaves it off and passes the problem's value to the reduce directly.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -389,6 +399,7 @@ class UnifiedAttention3DTiledSpec:
                 if self.right_bound != 0
                 else ""
             ),
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1777,18 +1788,23 @@ def supports_tiled_reduce_spec(
 
 
 def reduce_spec_for(
-    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: Optional[bool] = None
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that pairs with segment kernel ``spec``.
 
     Every reduce field but ``emit_lse`` is a segment field, and the dispatcher builds its
     pair (``make_explicit_attention_3d_specs``) through the same derivation,
     ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``, so this is the
-    reduce it launches. ``emit_lse`` comes from the problem, not the segment spec: it
-    defaults off, so the module packs a reduce with ``emit_lse=False`` and no ``lse_ptr``.
+    reduce it launches. ``emit_lse`` defaults to ``spec.emit_lse``, which is how a
+    packaged module (built from the spec alone) gets an LSE reduce; the dispatcher,
+    whose segment specs leave it off, passes the problem's value explicitly. At decode
+    (``seqlen_q == 1``) the reduce's token-major [total_q, Hq, 1] LSE is also the
+    head-major [B, Hq, 1, 1] layout, so no layout field is needed.
     """
     return split_kv_reduce_spec(
-        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
+        UnifiedAttentionReduceTiledSpec,
+        spec,
+        emit_lse=spec.emit_lse if emit_lse is None else emit_lse,
     )
 
 
@@ -1800,7 +1816,7 @@ def build_unified_attention_3d_tiled_module(
     Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
     <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack, so a host that loaded
     the segment kernel finds the reduce in the same module by name. The reduce is
-    :func:`reduce_spec_for` ``(spec)``.
+    :func:`reduce_spec_for` ``(spec)``, so ``spec.emit_lse`` adds its trailing ``lse_ptr``.
     """
     from rocke.helpers import KernelModule
 

@@ -124,6 +124,7 @@ from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
+    validate_varlen_keys,
     zero_keyless_row,
 )
 
@@ -1083,13 +1084,28 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
+
+    # Per-(batch, token) K/V byte stride = Hkv*D*2, shared by the packed and
+    # contiguous bounds below. Runtime under runtime_shape (one binary serves every
+    # head count), baked otherwise. Emitted fresh at each buffer_rsrc so the baked
+    # case keeps its exact two-const node count.
+    def _kv_elem_bytes_ir():
+        return (
+            b.mul(_stride_k(), b.const_i32(2))
+            if spec.runtime_shape
+            else b.const_i32(Hkv * D * 2)
+        )
+
     # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
     # develop emits two here, so sharing one silently breaks byte-identity (the
     # attention_dense representative-IR golden).
     #
-    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
-    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
-    # batch/seqlen param declaration was.
+    # Gated on ``spec.paged`` and ``varlen``, not on ``spec.runtime_shape``: the
+    # branches bound DIFFERENT extents (the whole page cache, the end of this
+    # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
+    # not the removable bookkeeping split that the batch/seqlen param declaration
+    # was. Paged stays first: the spec rejects paged varlen, and a page cache is
+    # addressed through block_tables, never through packed offsets.
     if spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
@@ -1100,22 +1116,37 @@ def build_attention_dense(
         _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
         k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    elif varlen:
+        # Packed K/V: bound each workgroup by the end of ITS sequence,
+        # cu_seqlens_kv[bt + 1] (kv_seq1, loaded above). The spec maxima
+        # batch*seqlen_kv overshoot the packed rows whenever a sequence is shorter
+        # than the maximum, so two loads read past the allocation under them: the
+        # last sequence's one-tile-ahead prefetch and a sliding-window start tile
+        # past a sequence's keys. The descriptor is raw (stride 0), so the hardware
+        # range-checks each lane's byte voffset against num_records. Every K/V DMA
+        # lane moves one dword; a lane at or past the bound reads no memory and
+        # writes 0 into its LDS slot. The bound is a whole number of rows, so the cut
+        # falls exactly at row kv_seq1, which also stops those loads from reading
+        # the next sequence's rows. Rows that have keys never see a zeroed row: the
+        # tiles they consume end at (seqlen_kv_b // BN) * BN <= seqlen_kv_b, the
+        # prefetched tile is never consumed, and a window start tile past the keys
+        # feeds only q-blocks that have no key (their P@V now runs over zero V
+        # rows, not the next sequence's).
+        #
+        # kv_seq1 <= batch*seqlen_kv for a well-formed cu_seqlens_kv, and the preflight
+        # keeps batch*seqlen_kv*Hkv*D*2 < 2**31, so the i32 product cannot overflow.
+        k_row_bytes = _kv_elem_bytes_ir()
+        k_num_records = b.mul(kv_seq1, k_row_bytes)
+        k_rsrc = b.buffer_rsrc(k, k_num_records)
+        v_row_bytes = _kv_elem_bytes_ir()
+        v_num_records = b.mul(kv_seq1, v_row_bytes)
+        v_rsrc = b.buffer_rsrc(v, v_num_records)
     else:
         # Contiguous K/V: num_records must track THIS launch's real extent, since
         # under runtime_shape one kernel serves every seqlen and a baked bound would
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
-        # (one binary serves every head count), baked otherwise. Emitted fresh at each
-        # buffer_rsrc so the baked branch keeps its exact two-const node count.
-        def _kv_elem_bytes_ir():
-            return (
-                b.mul(_stride_k(), b.const_i32(2))
-                if spec.runtime_shape
-                else b.const_i32(Hkv * D * 2)
-            )
-
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
@@ -3119,6 +3150,7 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    validate_varlen: bool = True,
     lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
@@ -3142,6 +3174,13 @@ def run_attention_dense_torch(
     The enabled varlen path checks cumulative offsets on the host (a device
     sync): Q lengths must be block_m multiples, KV lengths positive block_n
     multiples, and both must be within their spec maxima.
+    A varlen launch without LSE checks only what this body would get wrong, also on
+    the host: every KV sequence must be nonempty and, with a sliding window, no
+    sequence may leave query rows without a key (this body zeroes such rows only with
+    LSE). Tile alignment and the spec maxima are not checked without LSE, nor are the
+    first and last offsets or their order. This check reads both offset tensors (a
+    device->host sync): pass ``validate_varlen=False`` to skip it on a hot or
+    graph-captured path. It does not apply with LSE, whose checks always run.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3267,6 +3306,8 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
+    if spec.varlen and not spec.emit_lse and validate_varlen:
+        validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
     validate_dense_lse(
         spec,
         q,

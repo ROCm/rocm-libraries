@@ -57,11 +57,13 @@ Notes hipDNN engines report map for both select and deselect. Any other value, i
 | `CUBLASLT_DEPENDENCY` | error | warn | cuDNN only; not equivalent to `EXTERNAL_LIBRARY_DEPENDENCY` |
 | out-of-range value | error | warn | reported by no hipDNN engine |
 
+Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_behavior_notes({SUPPORTS_GRAPH_CAPTURE})` keeps only those engines.
+
 ### Determinism
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
 
-SDPA backward determinism is per graph: `SdpaBackwardAttributes::set_deterministic_algorithm(true)` reaches the engines, and an engine that cannot guarantee it declines the graph ([SEM-027](./SdpaSemanticsRegister.md)). The numeric-note filter does not select it.
+SDPA backward determinism is per graph: `SdpaBackwardAttributes::set_deterministic_algorithm(true)` reaches the engines, and an engine that cannot guarantee it declines the graph ([SEM-029](./SdpaSemanticsRegister.md)). The numeric-note filter does not select it.
 
 ## Engine filtering
 
@@ -101,7 +103,7 @@ Two accepted ranges are wider than cuDNN's documented contract. The sink range l
 | Operand | cuDNN | hipDNN |
 |---|---|---|
 | `sink_token`, `dsink_token` (forward and backward) | Documented and tested as FLOAT `[1, H_q, 1, 1]`; the frontend checks nothing | FLOAT or Q's data type (the graph I/O data type when Q's is unset), dims exactly `[1, H_q, 1, 1]`; `dsink_token` must have the sink's data type ([SEM-022](./SdpaSemanticsRegister.md)) |
-| Philox `seed`, `offset` (forward and backward) | Documented as INT32 or INT64, `(1,1,1,1)`, CPU or GPU; the frontend checks nothing | INT32 or INT64 with every dim 1 and rank 1 to 4, host or device. `set_value` and cuDNN's scalar constructor produce rank 1 ([SEM-028](./SdpaSemanticsRegister.md)) |
+| Philox `seed`, `offset` (forward and backward) | Documented as INT32 or INT64, `(1,1,1,1)`, CPU or GPU; the frontend checks nothing | INT32 or INT64 with every dim 1 and rank 1 to 4, host or device. `set_value` and cuDNN's scalar constructor produce rank 1 ([SEM-030](./SdpaSemanticsRegister.md)) |
 
 Behavior change in the forward node: the rules above apply to `SdpaFwdNode` as well as `SdpaBwdNode`. A forward graph whose seed or offset has a data type other than INT32 or INT64 (including an unset data type, which resolves to the graph I/O data type and so fails when that is floating point), more than one element, or a rank outside 1 to 4 now fails `validate()` with `INVALID_VALUE`. The forward sink, previously FLOAT only, now also accepts Q's data type. The frontend tests `TestSdpaFwdNode.PreValidateSeedOffsetShapeAndType` and `TestSdpaFwdNode.PreValidateSinkShapeAndType` cover the forward rules.
 
@@ -124,6 +126,7 @@ Behavior change in the forward node: the rules above apply to `SdpaFwdNode` as w
 - `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
+- SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well; cuDNN 9.25 spells the form `cu_seq_len_q` + `seq_len_kv`. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
 
 Code that must also compile against NVIDIA cuDNN cannot use these.
 

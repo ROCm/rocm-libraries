@@ -128,7 +128,7 @@ round once (SEM-012); the API sets no accumulation rule. Sources: `SdpaBwdNode.h
 | Scale | `scale_tensor_uid` | in, optional | one element | FLOAT | one element, pass-by-value, not with `attn_scale_value` (R11, R12) |
 | seq_len_q, seq_len_kv | `seq_len_*_tensor_uid` | in, optional | [B,1,1,1] | INT32 | checked only with `padding_mask` (R10) |
 | Dropout mask | `dropout_mask_tensor_uid` | in, optional | [{B,1},{Hq,1},Sq,Skv] | FP16, BF16 (references: FLOAT) | rank 4, dims (R9) |
-| Seed, Offset; dropout scale, scale_inv | `seed`, `offset`, `dropout_scale(_inv)_tensor_uid` | in, optional | seed, offset: every dim 1; scales: one element | INT32 or INT64; FLOAT | seed and offset: dtype and dims (SEM-028) |
+| Seed, Offset; dropout scale, scale_inv | `seed`, `offset`, `dropout_scale(_inv)_tensor_uid` | in, optional | seed, offset: every dim 1; scales: one element | INT32 or INT64; FLOAT | seed and offset: dtype and dims (SEM-030) |
 | Ragged offsets | `ragged_offset_tensor_uid` on a primary tensor | in, optional | (B+1,1,1,1) | INT32 | tensor rules only |
 
 Every tensor has a declared `alignment` (default 16). `TensorAttributes::validate()` requires a
@@ -194,7 +194,7 @@ hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360
 | SEM-014 dBias | sum of unscaled dS over broadcast dims | aligned |
 | SEM-015 dropout | explicit mask form; Philox needs `rng_dump` | explicit mask modelled; Philox served only with a backward `rng_dump` |
 | SEM-022 sinks | dSink = −Σ exp(sink − LSE) · D over live rows; sink and dSink FLOAT or Q's data type | modelled in both dtypes |
-| SEM-027 determinism, `max_total_seq_len` | `is_deterministic_algorithm` reaches engines; the hints need a ragged tensor | accepted; hints ignored |
+| SEM-029 determinism, `max_total_seq_len` | `is_deterministic_algorithm` reaches engines; the hints need a ragged tensor | accepted; hints ignored |
 | SEM-021 ALiBi | cuDNN form, TOP_LEFT causal only | aligned |
 
 Open points: dQ, dK and dV at padded positions are expected to be 0 until a SEM entry decides (the
@@ -227,7 +227,7 @@ rejection probe.
 | T11 | dBias | dims and dtype = Bias; sum of the unscaled dS over the broadcast dims (SEM-014); explicit dims; packed and padded row pitch | ready | PR |
 | T12 | Scale tensor | one FLOAT element, compile-time constant or runtime pass-by-value (RFC 0016; the backend applies the plugin API 1.2.0 floor itself, so bundles keep `min_required_engine_api_version` 1.0.0), value 0.5 (neither 1.0 nor 1/√Dqk); a device-memory scale is illegal (R12); exclusive with `attn_scale_value` (R11) | ready | Q |
 | T13 | seq_len_q, seq_len_kv | INT32 [B,1,1,1], per-batch values (G13); both required with `padding_mask` (R10) | I6 + HG4 | PR (rejection probe); gated → PR |
-| T14 | Seed, Offset | one INT32 or INT64 element, every dim 1, host or device (Philox dropout, SEM-028) | none: no engine writes a backward `rng_dump`; the references apply one when given | — |
+| T14 | Seed, Offset | one INT32 or INT64 element, every dim 1, host or device (Philox dropout, SEM-030) | none: no engine writes a backward `rng_dump`; the references apply one when given | — |
 | T15, T16 | Dropout mask, scale, scale_inv | mask [{B,1},{Hq,1},Sq,Skv] (R9) with values {0,1} (the references need FLOAT); s = 1/(1−p) with scale_inv = 1−p; scale_inv absent; scale_inv without a mask is U | I6 + HG4 | PR (rejection probe); gated → PR |
 | T17 | Ragged offsets | INT32 (B+1,1,1,1) on each ragged tensor; multiplier ≥ 1; THD packing (G14) | I6 + HG20 | gated → N |
 | T18 | Layout family (innermost stride 1) | packed BHSD; packed BSHD (every corpus graph); sequence stride D + 8; interleaved QKV (BS3HD); each tensor on its own (B,H,S) permutation; random 0–8 element gaps per axis; B = H = 1 (BHSD equals BSHD) | ready | Q |
@@ -387,7 +387,7 @@ of IVP3 (explicit gradient dims); the rest is to file.
 | IVP5 | rank-4 bias: dim 0 ∈ {B,1}, dim 1 ∈ {Hq,1} | PRB-U05 |
 | IVP6 | not `causal_mask` with `causal_mask_bottom_right` | PRB-M01, PRB-M01n |
 | IVP7 | 0 ≤ p < 1; p > 0 needs seed and offset; p not with a mask | PRB-R02, PRB-R02f |
-| IVP8 | dropout scale and scale_inv have one element; seed and offset are INT32 or INT64 with every dim 1 (SEM-028); scale_inv needs a mask | PRB-R05 |
+| IVP8 | dropout scale and scale_inv have one element; seed and offset are INT32 or INT64 with every dim 1 (SEM-030); scale_inv needs a mask | PRB-R05 |
 | IVP9 | seq_len tensors both or neither, INT32 [B,1,1,1] whenever present | PRB-U09 |
 | IVP10 | `alibi_mask` needs R_eff = 0 and TOP_LEFT | PRB-M05, PRB-M06 |
 | IVP11 | IO dtypes ∈ {HALF, BFLOAT16, FLOAT} | PRB-U11 |
@@ -764,11 +764,12 @@ applicability bug: the engine is fixed, or the provider's tier YAML quarantines 
 comment and its ticket (RFC 0022 §6). Before #14346 only 11 of them had a verdict; the rest reported
 SKIP whatever the engine did.
 
-*Non-normative:* on gfx942 (2026-11-04) ASM_SDPA_ENGINE declines 15 of the 21 and accepts six, which
-`ASM_SDPA_ENGINE_test_categories_integration.yaml` quarantines: PRB-U01 and PRB-U03 (ALMIOPEN-3039)
-and PRB-U13 (ALMIOPEN-3038), whose declines #14684 adds; PRB-T04 and PRB-T04n, an O dtype that differs
-from Q's (ALMIOPEN-3050); PRB-R05, `dropout_scale_inv` without a mask (ALMIOPEN-3051). Run alone, each
-of the six fails: "Engine ASM_SDPA_ENGINE accepted expected-rejection bundle".
+*Non-normative:* on gfx942 (2026-11-04) ASM_SDPA_ENGINE declined 15 of the 21 and accepted six. #14684
+adds the declines for PRB-U01 and PRB-U03 (ALMIOPEN-3039) and PRB-U13 (ALMIOPEN-3038). The other three,
+which `ASM_SDPA_ENGINE_test_categories_integration.yaml` quarantines, are PRB-T04 and PRB-T04n, an O
+dtype that differs from Q's (ALMIOPEN-3050), and PRB-R05, `dropout_scale_inv` without a mask
+(ALMIOPEN-3051). Run alone, each of the three fails: "Engine ASM_SDPA_ENGINE accepted
+expected-rejection bundle".
 
 **Regressions** sit in the lowest level that affords them, shrunk only when the defect does not
 depend on the shape; a regression whose reference is shared with the engines also has a G-C case.
@@ -813,11 +814,10 @@ in their levels and the engine TOML skips the three ids: other engines still exe
 names the defect and its ticket, and REG-18c and X07 bf16 keep executing. This gives less false
 coverage than moving them out of the levels, which would hide the class from every engine.
 
-*Non-normative:* ASM_SDPA_ENGINE, the one implementing engine today, accepts the written DEF cases
-and H61 and computes them wrongly. Its TOML skips them, one entry per defect with its ticket
-(DEF-01 ALMIOPEN-3036, DEF-02 ALMIOPEN-3037, DEF-04 ALMIOPEN-3039, DEF-05 and H61
-ALMIOPEN-3038, DEF-06 ALMIOPEN-3043). #14684 (DEF-01, -02, -04, -05) and #14688 (DEF-06) add the
-declines and delete those entries.
+*Non-normative:* ASM_SDPA_ENGINE, the one implementing engine today, accepted the written DEF cases
+and H61 and computed them wrongly. #14684 adds the declines for DEF-01, -02, -04 and -05 (and the
+odd-stride H61 layouts) and deletes their TOML skips. DEF-06 (ALMIOPEN-3043) is still skipped until
+#14688 adds its decline and deletes the entry.
 
 ### 4.3 Products deliberately not run
 
@@ -1060,7 +1060,7 @@ output is finite and its class holds.
   an unwritten element fails; the gradients are finite by contract (SEM-010).
 - **Exact zeros** of dead rows, unattended keys and padded positions need HG9: allclose proves only
   |x| ≤ atol. **Output slack:** a write into the gaps of a strided output passes until HG19.
-- **Determinism** is promised only for a graph with `is_deterministic_algorithm` set (SEM-027): an engine
+- **Determinism** is promised only for a graph with `is_deterministic_algorithm` set (SEM-029): an engine
   that cannot guarantee it declines the graph, and one that accepts it is expected to repeat bitwise. For every
   other graph every run must pass its class, and repeat-and-compare (I5) fails a run-to-run difference above
   the class atol. Until I5, DEF-02a runs three times in its own level-YAML category

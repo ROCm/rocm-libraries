@@ -89,9 +89,9 @@ listed as an accepted hint (the last row).
 | ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
-| Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied); seed and offset INT32 or INT64, all dims 1 | SEM-015, SEM-028 |
+| Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied); seed and offset INT32 or INT64, all dims 1 | SEM-015, SEM-030 |
 | fp8 Q/K/V descales | scalar or `[B, H_kv, 1, 1]` FLOAT (a paged side needs a scalar on the GPU) | |
-| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout | SEM-024 |
+| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout, except probability 0 without an rng_dump (no dropout, SEM-015) | SEM-024 |
 | Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (ragged: any container-valid layout, e.g. `[H,T]` or `[T,H]`; `Max` and `Sum_exp` served by the dense rewrite, bound by `seq_len_q`) | SEM-011, 023 |
 | `generate_stats`, `mma_core_mode`, `implementation`, the node's `compute_data_type` | accepted; engine hints with no meaning for an FP32 oracle | |
 
@@ -108,7 +108,7 @@ listed as an accepted hint (the last row).
 | Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
 | Philox dropout | With an `rng_dump` output: the engine's backward keep mask is applied as an explicit mask with `dropout_scale = 1 / (1 - p)` and `dropout_scale_inv = 1 - p` (SEM-015). Without `rng_dump` the plan declines |
 | Attention sink and `dsink` | `sink_token` and `dsink_token`, FLOAT or Q's data type (the graph I/O data type when Q's is unset), `[1, H_q, 1, 1]`, dSink dtype equal to the sink's; dSink = `-Σ exp(sink - LSE) * D` over live rows, fp32 accumulation, one rounding (SEM-022). `dsink` requires `sink_token`; the LSE passed in must include the sink |
-| `is_deterministic_algorithm`, `max_total_seq_len_q/kv` | accepted; the references are deterministic, the hints are ignored (SEM-027) |
+| `is_deterministic_algorithm`, `max_total_seq_len_q/kv` | accepted; the references are deterministic, the hints are ignored (SEM-029) |
 
 ### 2.3 Reference-only extensions
 
