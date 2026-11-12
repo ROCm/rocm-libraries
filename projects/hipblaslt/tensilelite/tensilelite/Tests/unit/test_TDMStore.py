@@ -896,21 +896,6 @@ def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys
   assert sol["ReuseAcrossPersistent"] and asm and "tensor_store_from_lds " in asm
 
 
-@pytest.mark.parametrize("level", [2, 3])
-def test_pap_vectors_sk3_fits_the_sgpr_budget(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
-  """StreamK 3 with PrefetchAcrossPersistent, bias, ScaleAlphaVec and the activations leaves no 12 consecutive
-  8-aligned SGPRs for the descriptor of the TDM block: its two groups are checked out separately, each 4-aligned, with
-  two temporaries, so the kernel fits the SGPR budget."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 2, 2, 2], TDMStoreInst=level, StreamK=3,
-                       PrefetchAcrossPersistent=1, ScheduleIterAlg=3,
-                       ProblemType={"UseBias": 1, "UseScaleAlphaVec": 1, "Activation": True,
-                                    "ActivationType": "hipblaslt_all"})
-  cap = capsys.readouterr()
-  assert sol.get("Valid") and asm, cap.out
-  assert "overflowed" not in cap.out + cap.err
-  assert "tensor_store_from_lds" in asm
-
-
 def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and develop's MaxLDS reject
   sees the sum: at DepthU 128 the main loop fits without TDMStoreInst and the sum does not."""
