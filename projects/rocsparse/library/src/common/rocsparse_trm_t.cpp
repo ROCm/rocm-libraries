@@ -228,29 +228,15 @@ void rocsparse::trm_t::detach_borrowed_bsrsv(rocsparse_operation operation,
         return;
     }
 
-    // These are the routines whose analysis bsrsv reuse borrows. Scan every
-    // stored slot: the alias is not always at the same operation and fill.
-    const rocsparse::trm_data_t* others[]
+    // Reuse borrows from these three routines only.
+    const rocsparse::trm_data_t* donors[]
         = {this->m_bsric0_info.get(), this->m_bsrilu0_info.get(), this->m_bsrsm_info.get()};
-    const rocsparse_operation ops[]   = {rocsparse_operation_none, rocsparse_operation_transpose};
-    const rocsparse_fill_mode fills[] = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
-
-    for(const rocsparse::trm_data_t* other : others)
+    for(const rocsparse::trm_data_t* donor : donors)
     {
-        if(other == nullptr)
+        if(donor != nullptr && donor->holds(slot))
         {
-            continue;
-        }
-        for(rocsparse_operation op : ops)
-        {
-            for(rocsparse_fill_mode fill : fills)
-            {
-                if(other->get(op, fill) == slot)
-                {
-                    bsrsv->set(operation, fill_mode, nullptr);
-                    return;
-                }
-            }
+            bsrsv->set(operation, fill_mode, nullptr);
+            return;
         }
     }
 }

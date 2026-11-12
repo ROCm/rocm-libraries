@@ -779,6 +779,14 @@ rocsparse_status rocsparse::bsrsv_solve_template(rocsparse_handle          handl
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
+    // This entry point reads the zero pivot as rocsparse_int. A pivot of another
+    // index type comes from a wide analysis on the same info, so reject it.
+    if(bsrsv_info->get_position() != nullptr
+       && bsrsv_info->get_indextype() != rocsparse::get_indextype<rocsparse_int>())
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    }
+
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrsv_solve_core<T, rocsparse_int, rocsparse_int>(
         handle,
         dir,

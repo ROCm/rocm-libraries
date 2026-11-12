@@ -50,6 +50,11 @@ namespace rocsparse
                                                  hipStream_t         stream);
 
         rocsparse_status copy_pivot_info_async(const pivot_info_t* that, hipStream_t stream);
+
+        // Frees the zero pivot when it has another index type, so that the next create
+        // or copy allocates one of indextype. position_t does not retype a buffer in place.
+        rocsparse_status drop_zero_pivot_if_indextype_async(rocsparse_indextype indextype,
+                                                            hipStream_t         stream);
     };
 
 }

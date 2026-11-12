@@ -122,13 +122,28 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
     if(analysis == rocsparse_analysis_policy_reuse)
     {
-        auto trm = info->get_bsrsv_info(trans, descr->fill_mode);
+        auto                     trm   = info->get_bsrsv_info(trans, descr->fill_mode);
+        rocsparse::pivot_info_t* donor = nullptr;
 
+        // donor is the container that owns a borrowed analysis. Its zero pivot holds
+        // the structural zeros that analysis found, so the solve must report them.
         if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans == rocsparse_operation_none))
         {
-            trm = (trm != nullptr) ? trm : info->get_bsric0_info(trans, descr->fill_mode);
-            trm = (trm != nullptr) ? trm : info->get_bsrilu0_info(trans, descr->fill_mode);
-            trm = (trm != nullptr) ? trm : info->get_bsrsm_info(trans, descr->fill_mode);
+            if(trm == nullptr)
+            {
+                trm   = info->get_bsric0_info(trans, descr->fill_mode);
+                donor = (trm != nullptr) ? info->get_bsric0_info() : nullptr;
+            }
+            if(trm == nullptr)
+            {
+                trm   = info->get_bsrilu0_info(trans, descr->fill_mode);
+                donor = (trm != nullptr) ? info->get_bsrilu0_info() : nullptr;
+            }
+            if(trm == nullptr)
+            {
+                trm   = info->get_bsrsm_info(trans, descr->fill_mode);
+                donor = (trm != nullptr) ? info->get_bsrsm_info() : nullptr;
+            }
         }
 
         // Reuse only an analysis built with the same index types. A mismatched one is
@@ -138,11 +153,15 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         {
             info->set_bsrsv_info(trans, descr->fill_mode, trm);
 
-            // The borrowed analysis brings no zero pivot for this container, and the
-            // solve reads it from here. Create it once, without touching a pivot that
-            // this container already holds from its own analysis.
             auto bsrsv_info = info->get_bsrsv_info();
-            if(bsrsv_info->get_position() == nullptr)
+            if(donor != nullptr && donor->get_position() != nullptr)
+            {
+                // Copy the donor's pivot, with the donor's index type.
+                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
+                    donor->get_indextype(), handle->stream));
+                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->copy_pivot_info_async(donor, handle->stream));
+            }
+            else if(bsrsv_info->get_position() == nullptr)
             {
                 RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->create_zero_pivot_async(
                     rocsparse::get_indextype<J>(), handle->stream));
@@ -158,6 +177,11 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     // and leave the analysis with the routine that created it. An analysis
     // this routine owns stays in the slot and is replaced.
     info->detach_borrowed_bsrsv(trans, descr->fill_mode);
+
+    // The new analysis writes its pivot with index type J. Drop a pivot of
+    // another type first, since recreate does not retype it in place.
+    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
+        rocsparse::get_indextype<J>(), handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->recreate(
         handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));

@@ -34,6 +34,17 @@ rocsparse_status rocsparse::pivot_info_t::create_zero_pivot_async(int64_t       
     return rocsparse_status_success;
 }
 
+rocsparse_status
+    rocsparse::pivot_info_t::drop_zero_pivot_if_indextype_async(rocsparse_indextype indextype,
+                                                                hipStream_t         stream)
+{
+    if(this->get_position() != nullptr && this->get_indextype() != indextype)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(this->free_position_async(stream));
+    }
+    return rocsparse_status_success;
+}
+
 rocsparse_status rocsparse::pivot_info_t::copy_pivot_info_async(const pivot_info_t* that,
                                                                 hipStream_t         stream)
 {

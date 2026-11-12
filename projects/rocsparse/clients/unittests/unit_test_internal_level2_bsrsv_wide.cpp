@@ -591,15 +591,51 @@ namespace
         ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
     }
 
-    // bsric0 builds the analysis, bsrsv reuse borrows it, and a non-singular
-    // solve must succeed. The reuse branch gives the solve its own zero pivot.
-    void expect_borrowed_reuse_solves()
+    // Drops the diagonal block of block row missing_row from a block-lower matrix.
+    // The analysis sees a structural zero there, which the solve does not.
+    void remove_diagonal_block(std::vector<rocsparse_int>& row_ptr,
+                               std::vector<rocsparse_int>& col_ind,
+                               std::vector<test_T>&        val,
+                               int32_t                     missing_row)
+    {
+        std::vector<rocsparse_int> new_row_ptr{0};
+        std::vector<rocsparse_int> new_col_ind;
+        std::vector<test_T>        new_val;
+        for(int32_t row = 0; row < kMb; ++row)
+        {
+            for(rocsparse_int j = row_ptr[row]; j < row_ptr[row + 1]; ++j)
+            {
+                if(row == missing_row && col_ind[j] == row)
+                {
+                    continue;
+                }
+                new_col_ind.push_back(col_ind[j]);
+                new_val.insert(new_val.end(),
+                               val.begin() + 4 * static_cast<size_t>(j),
+                               val.begin() + 4 * static_cast<size_t>(j) + 4);
+            }
+            new_row_ptr.push_back(static_cast<rocsparse_int>(new_col_ind.size()));
+        }
+        row_ptr = new_row_ptr;
+        col_ind = new_col_ind;
+        val     = new_val;
+    }
+
+    // bsric0 builds the analysis, bsrsv reuse borrows it, and a solve follows. With
+    // missing_row < 0 the matrix is non-singular and the solve must give the expected
+    // result. Otherwise that block row has a structural zero, and the solve must report
+    // it through rocsparse_bsrsv_zero_pivot, which needs the donor's pivot.
+    void expect_borrowed_reuse_solves(int32_t missing_row = -1)
     {
         std::vector<rocsparse_int> row_ptr;
         std::vector<rocsparse_int> col_ind;
         std::vector<test_T>        val;
         std::vector<rocsparse_int> map;
         build_matrix(true, row_ptr, col_ind, val, map);
+        if(missing_row >= 0)
+        {
+            remove_diagonal_block(row_ptr, col_ind, val, missing_row);
+        }
 
         const rocsparse_int nnzb = static_cast<rocsparse_int>(col_ind.size());
         rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
@@ -701,16 +737,28 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const std::vector<test_T> y = rocsparse_ut::to_host(d_y);
-        ASSERT_EQ(static_cast<int>(y.size()), kRows);
-        for(int32_t row = 0; row < kRows; ++row)
+        if(missing_row < 0)
         {
-            EXPECT_EQ(y[static_cast<size_t>(row)], expected(true, row)) << "row " << row;
+            const std::vector<test_T> y = rocsparse_ut::to_host(d_y);
+            ASSERT_EQ(static_cast<int>(y.size()), kRows);
+            for(int32_t row = 0; row < kRows; ++row)
+            {
+                EXPECT_EQ(y[static_cast<size_t>(row)], expected(true, row)) << "row " << row;
+            }
         }
 
-        rocsparse_int position = -2;
-        EXPECT_EQ(rocsparse_bsrsv_zero_pivot(objects.handle, objects.info, &position),
-                  rocsparse_status_success);
+        rocsparse_int          position = -2;
+        const rocsparse_status status
+            = rocsparse_bsrsv_zero_pivot(objects.handle, objects.info, &position);
+        if(missing_row < 0)
+        {
+            EXPECT_EQ(status, rocsparse_status_success);
+        }
+        else
+        {
+            EXPECT_EQ(status, rocsparse_status_zero_pivot);
+            EXPECT_EQ(position, static_cast<rocsparse_int>(missing_row));
+        }
         ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
     }
 }
@@ -851,4 +899,11 @@ TEST(internal_level2_bsrsv_wide, force_keeps_borrowed_bsric0_analysis)
 TEST(internal_level2_bsrsv_wide, reuse_borrowed_bsric0_solves)
 {
     ASSERT_NO_FATAL_FAILURE(expect_borrowed_reuse_solves());
+}
+
+TEST(internal_level2_bsrsv_wide, reuse_borrowed_structural_zero_reported)
+{
+    // Block row 3 has no diagonal block. The donor's analysis finds it and the
+    // borrowed solve must report row 3, not success.
+    ASSERT_NO_FATAL_FAILURE(expect_borrowed_reuse_solves(3));
 }
