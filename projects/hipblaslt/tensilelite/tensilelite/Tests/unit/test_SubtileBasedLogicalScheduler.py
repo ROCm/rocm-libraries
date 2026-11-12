@@ -7335,6 +7335,71 @@ class TestIssueSaluFirst:
         assert gaps[0] == ["S", "V", "m0", "L"]
 
 
+class TestReadInOpeningBarrierGap:
+    """The first barrier's gap takes the body's next ds_read when it can."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(*gaps):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            readInOpeningBarrierGap)
+        body = readInOpeningBarrierGap(TestKeepValuBehindLeader._body(*gaps))
+        return [[inst.comment for inst in gap]
+                for gap in TestHalfDisjointClumping._gaps(body)]
+
+    @staticmethod
+    def _opener():
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")]
+
+    def test_first_read_moves_into_the_empty_barrier_gap(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(self._opener(), [salu._add("add"), salu._carry(),
+                                          TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [["vmcnt", "barrier", "R"], ["add", "carry"]]
+
+    def test_only_one_read_moves(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener(), [read(7, "R1")], [read(9, "R2")])
+        assert gaps[:3] == [["vmcnt", "barrier", "R1"], [], ["R2"]]
+
+    def test_gap_with_a_read_stays(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener() + [read(7, "R1")], [read(9, "R2")])
+        assert gaps[:2] == [["vmcnt", "barrier", "R1"], ["R2"]]
+
+    def test_read_never_crosses_an_lgkm_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(self._opener(), [SWaitCnt(dscnt=0, comment="drain")],
+                         [TestKeepValuBehindLeader._read(7)])
+        assert gaps[:3] == [["vmcnt", "barrier"], ["drain"], ["R"]]
+
+    def test_read_never_crosses_the_write_of_its_address(self):
+        gaps = self._run(self._opener(), [TestKeepValuBehindLeader._xor(7, "V"),
+                                          TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [["vmcnt", "barrier"], ["V", "R"]]
+
+    def test_read_never_overwrites_an_operand_of_an_earlier_mfma(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        read = DSLoadB128(dst=vgpr(180, 4), src=vgpr(7),
+                          ds=DSModifiers(offset=0), comment="R")
+        gaps = self._run(self._opener(), [read])
+        assert gaps[:2] == [["vmcnt", "barrier"], ["R"]]
+
+    def test_body_without_a_barrier_stays(self):
+        gaps = self._run([], [TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [[], ["R"]]
+
+
 class TestHalfDisjointClumping:
     """Clumping properties of a two-half half-disjoint body.
 

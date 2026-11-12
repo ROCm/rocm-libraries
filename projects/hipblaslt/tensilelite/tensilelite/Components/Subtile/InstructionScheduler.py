@@ -3148,6 +3148,41 @@ def issueSaluFirst(module):
     return module
 
 
+def readInOpeningBarrierGap(module):
+    """Give the gap behind a body's first barrier one local read.
+
+    Every wave then issues an LDS op as the barrier releases. When the gap
+    holds no LDS op, the body's first ds_read after it moves to the end
+    of the gap, ahead of the next MFMA. It crosses no wait, barrier,
+    branch, LDS op or scalar load, so every lgkm count stays exact, and
+    no instruction it crosses and no earlier MFMA of the body touches its
+    registers. Only one read moves: a second one in the gap costs issue.
+    Otherwise the body stays as it is.
+    """
+    leaves = _bodyLeaves(module)
+    barrier = next((i for i, (_c, inst) in enumerate(leaves) if _isBarrier(inst)), None)
+    if barrier is None:
+        return module
+    mfma = next((i for i in range(barrier + 1, len(leaves))
+                 if _isMfma(leaves[i][1])), None)
+    if mfma is None or any(
+            isinstance(leaves[i][1], (LocalReadInstruction, LocalWriteInstruction))
+            for i in range(barrier + 1, mfma)):
+        return module
+    read = next((i for i in range(mfma + 1, len(leaves))
+                 if _incrementsLgkm(leaves[i][1]) or _isOrderFence(leaves[i][1])), None)
+    if read is None or not _isDsRead(leaves[read][1]):
+        return module
+    checked = [i for i in range(read) if _isMfma(leaves[i][1]) or (
+        i > mfma and not isinstance(leaves[i][1], TextBlock))]
+    if not all(_mayReorder(leaves[i][1], leaves[read][1]) for i in checked):
+        return module
+    last = max(i for i in range(read) if _isMfma(leaves[i][1]))
+    _moveLeaves(leaves, _withComments(leaves, range(last + 1, read), read), mfma,
+                before=True)
+    return module
+
+
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,
