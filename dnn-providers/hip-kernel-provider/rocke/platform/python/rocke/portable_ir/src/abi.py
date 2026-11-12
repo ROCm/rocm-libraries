@@ -81,7 +81,7 @@ RECIPE_ABI = 4
 #: is checked at library load: ctypes argtypes are a hand-written mirror of the C
 #: signatures, and calling a mismatched library with them is memory-unsafe rather
 #: than merely wrong.
-BINARY_ABI = 17
+BINARY_ABI = 18
 
 
 class AbiError(RuntimeError):
