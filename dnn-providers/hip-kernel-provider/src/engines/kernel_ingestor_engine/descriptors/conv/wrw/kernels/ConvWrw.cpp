@@ -44,34 +44,51 @@
 #endif
 
 #if defined(CONV_K3_MATH) && CONV_K3_MATH == 1
-/// x -> [hi | hi | lo], dy -> [hi | lo | hi], bf16 hi = round(v), lo = round(v - hi); lo is zero
-/// where the remainder is not a number (an infinite v), so inf stays inf rather than NaN.
-extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
+/// Splits n fp32 values of v into bf16 hi = round(v) and lo = round(v - hi) (zero where the
+/// remainder is not a number: an infinite v stays infinite rather than NaN) and writes them to
+/// three copies: c0, c1, c2 (each n long) take hi, lo or hi by `pattern` (bit i: copy i takes lo).
+/// Eight values a thread, 16-byte loads and stores, when n is a whole number of eights.
+__device__ inline void k3SplitPlane(const float* v, unsigned short* s, long long n, int pattern)
 {
     const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
-    const long long total = a.xElems > a.yElems ? a.xElems : a.yElems;
-    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
-        i += step)
+    const long long first = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if(n % 8 == 0)
     {
-        if(i < a.xElems)
+        typedef float f4 __attribute__((ext_vector_type(4)));
+        typedef unsigned short u8 __attribute__((ext_vector_type(8)));
+        for(long long i = first; i < n / 8; i += step)
         {
-            const float v = a.x[i];
-            const unsigned short h = k1FloatToBf(v);
-            const unsigned short l = k1BfLo(v, h);
-            a.xs[i] = h;
-            a.xs[a.xElems + i] = h;
-            a.xs[2 * a.xElems + i] = l;
+            const f4 a = reinterpret_cast<const f4*>(v)[2 * i];
+            const f4 b = reinterpret_cast<const f4*>(v)[2 * i + 1];
+            u8 h, l;
+#pragma unroll
+            for(int e = 0; e < 8; ++e)
+            {
+                const float x = e < 4 ? a[e] : b[e - 4];
+                h[e] = k1FloatToBf(x);
+                l[e] = k1BfLo(x, h[e]);
+            }
+#pragma unroll
+            for(int c = 0; c < 3; ++c)
+                reinterpret_cast<u8*>(s + c * n)[i] = ((pattern >> c) & 1) != 0 ? l : h;
         }
-        if(i < a.yElems)
-        {
-            const float v = a.dy[i];
-            const unsigned short h = k1FloatToBf(v);
-            const unsigned short l = k1BfLo(v, h);
-            a.ys[i] = h;
-            a.ys[a.yElems + i] = l;
-            a.ys[2 * a.yElems + i] = h;
-        }
+        return;
     }
+    for(long long i = first; i < n; i += step)
+    {
+        const unsigned short h = k1FloatToBf(v[i]);
+        const unsigned short l = k1BfLo(v[i], h);
+#pragma unroll
+        for(int c = 0; c < 3; ++c)
+            s[c * n + i] = ((pattern >> c) & 1) != 0 ? l : h;
+    }
+}
+
+/// x -> [hi | hi | lo], dy -> [hi | lo | hi] (K3SplitArgs).
+extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
+{
+    k3SplitPlane(a.x, a.xs, a.xElems, 4);
+    k3SplitPlane(a.dy, a.ys, a.yElems, 2);
 }
 #endif
 
