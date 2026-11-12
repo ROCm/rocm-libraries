@@ -31,6 +31,7 @@
 #define HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "../util_macro.hpp"
 #include "../util_type.hpp"
@@ -42,7 +43,45 @@
 
 #include <hip/hip_bf16.h>
 
+#include <utility>
+
 BEGIN_HIPCUB_NAMESPACE
+
+#if HIPCUB_USE_LEGACY_API
+// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
+// Deprecated: new code should use hip::minimum<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum instead") Min
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
+    {
+        return (((u) < (t)) ? (u) : (t));
+    }
+};
+
+// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
+// Deprecated: new code should use hip::sum<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::sum instead") Sum
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
+    {
+        return std::forward<T>(t) + std::forward<U>(u);
+    }
+};
+
+// Restored for backward compatibility with code written against older hipCUB (e.g. PyTorch).
+// Deprecated: new code should use _HIPCUB_STD::equal_to<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
+    {
+        return std::forward<T>(t) == std::forward<U>(u);
+    }
+};
+#endif // HIPCUB_USE_LEGACY_API
 
 struct ArgMax
 {

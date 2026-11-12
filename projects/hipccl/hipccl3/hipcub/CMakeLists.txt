@@ -101,6 +101,8 @@ option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
+# No-op when nested under the hipccl3 root, which declares the same option.
+option(HIPCCL_USE_LEGACY_API "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" ON)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
 option(HIPCUB_ENABLE_COVERAGE "Build hipCUB with code coverage enabled" OFF)
 if(DEFINED BUILD_CODE_COVERAGE)
