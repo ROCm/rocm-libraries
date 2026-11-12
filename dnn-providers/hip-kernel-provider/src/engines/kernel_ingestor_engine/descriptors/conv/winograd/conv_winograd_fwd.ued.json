@@ -20,8 +20,7 @@
     "waves",
     "bins",
     "f16math",
-    "pf",
-    "math"
+    "pf"
   ],
   "behavior_notes": [
     "runtime_compilation"

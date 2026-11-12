@@ -26,8 +26,6 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -47,8 +45,7 @@
  * Winograd's error is relative to the magnitude of the tile it shares rounding with, not to the
  * output alone, so the tolerance scales with the largest sum of |products| among the outputs
  * of the neighbourhood (the reference convolution of |x| and |w|), by the bound of the study for
- * each dtype and tile: fp32 1e-5 (F(2,3)) and 5e-5 (F(4,3)), fp16 2e-3, bf16 1.6e-2. The
- * three-bf16 fp32 configs (TF32 permission) are held to TF32's: 5e-4 (2^-11), F(4,3) 2e-3.
+ * each dtype and tile: fp32 1e-5 (F(2,3)) and 5e-5 (F(4,3)), fp16 2e-3, bf16 1.6e-2.
  */
 namespace
 {
@@ -382,16 +379,8 @@ float winogradBound(int64_t m)
     }
 }
 
-/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
-/// three-bf16 ones.
-enum class Math
-{
-    NATIVE,
-    THREE_BF16,
-};
-
 template <typename T>
-void runCase(const DeviceCase& deviceCase, ConvDirection direction, Math math = Math::NATIVE)
+void runCase(const DeviceCase& deviceCase, ConvDirection direction)
 {
     // A few KiB of "last-level cache": the LLC-fit configs slice the batch on every device.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter llc(
@@ -474,8 +463,7 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction, Math math = 
     int ran = 0;
     for(const auto& kernel : catalog(direction))
     {
-        if(!matchesKernel(pack, fixture.context(), kernel, *bound)
-           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
         {
             continue;
         }
@@ -505,9 +493,7 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction, Math math = 
         }
         written.markDeviceModified();
 
-        const int64_t tile = kernel.getIntMetadata("m");
-        const float relative
-            = math == Math::THREE_BF16 ? (tile == 4 ? 2e-3f : 5e-4f) : winogradBound<T>(tile);
+        const float relative = winogradBound<T>(kernel.getIntMetadata("m"));
         const auto* actual = static_cast<const T*>(written.rawHostData());
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
@@ -525,14 +511,6 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction, Math math = 
             }
         });
         EXPECT_EQ(mismatches, 0);
-    }
-    if(math == Math::THREE_BF16)
-    {
-        if(ran == 0)
-        {
-            GTEST_SKIP() << "no three-bf16 config serves this case";
-        }
-        return;
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
 }
@@ -570,101 +548,7 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-/// The three-bf16 fp32 configs (TF32 permission) at TF32's bound. No infinity case: Winograd's
-/// transforms subtract input values, so an infinity becomes NaN in the exact configs as well.
-class TestGpuConvWinogradThreeBf16
-    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
-{
-};
-
-TEST_P(TestGpuConvWinogradThreeBf16, Float)
-{
-    SKIP_IF_NO_DEVICES();
-    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
-    {
-        GTEST_SKIP() << "no three-bf16 configs on this device";
-    }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
-    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), Math::THREE_BF16);
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestGpuConvWinogradThreeBf16,
-                         ::testing::Combine(::testing::ValuesIn(deviceCases()),
-                                            ::testing::Values(ConvDirection::FORWARD,
-                                                              ConvDirection::BACKWARD_DATA)),
-                         [](const auto& info) {
-                             return std::get<0>(info.param).name
-                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
-                                                                                         : "Bwd");
-                         });
-
-/// Opt-in (WINO_TF32_TIMING=<shape CSV>): the best exact and the best three-bf16 config per
-/// shape and direction, TF32 permitted. See ConvTf32Timing.hpp.
-TEST(TestGpuConvWinogradTiming, ExactAgainstThreeBf16)
-{
-    SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
-    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
-    {
-        conv_tf32_timing::timeByForm(
-            packFor(direction),
-            direction,
-            catalog(direction),
-            "WINO_TF32_TIMING",
-            [](const auto& kernel) {
-                return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
-            },
-            direction == ConvDirection::FORWARD ? "@fwd" : "@bwd");
-    }
-}
-
 // ---- Host-only: the shipped catalog ----
-
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some on
-/// every arch with bf16 matrix cores (not gfx908), and bf16 graphs none.
-TEST(TestConvWinogradCatalog, ThreeBf16OnlyUnderTf32Permission)
-{
-    auto shape = dense(24, 40, {13, 11}, 1, false);
-    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
-    {
-        for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
-        {
-            for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
-            {
-                SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16"));
-                shape.dataType = dataType;
-                auto device = testDeviceProperties();
-                device.gcnArchName = arch;
-                device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
-                const auto pack = packFor(direction);
-                const GraphFixture fixture(buildGraph(specFor(shape, direction)), device);
-                const auto bound = matchesGraph(pack, fixture.context());
-                ASSERT_TRUE(bound.has_value());
-                const auto admitted = [&] {
-                    int count = 0;
-                    for(const auto& kernel : catalog(direction))
-                    {
-                        count += kernel.getIntMetadata("math") == 1
-                                 && matchesKernel(pack, fixture.context(), kernel, *bound);
-                    }
-                    return count;
-                };
-                {
-                    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-                        conv_tf32_test::TF32_ENV, "");
-                    EXPECT_EQ(admitted(), 0);
-                }
-                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-                    conv_tf32_test::TF32_ENV, "1");
-                const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908";
-                EXPECT_EQ(admitted() > 0, expected);
-            }
-        }
-    }
-}
 
 TEST(TestConvWinogradCatalog, EveryConfigParses)
 {

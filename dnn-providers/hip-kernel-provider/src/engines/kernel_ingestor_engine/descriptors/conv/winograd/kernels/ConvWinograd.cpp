@@ -21,8 +21,6 @@
 //   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
 //                  wave, fp16 packed input-transform math, gfx12 operand layout
 //   register VALU: CONV_WINO_BK, _F16MATH                       K-block, fp16 packed math
-//   CONV_WINO_X3         1: three-bf16 multipass (fp32 transforms; the GEMM on bf16 matrix cores,
-//                        _MFMA or WMMA with _GFX12; with CONV_TF32_SPLIT3 for the split)
 //   cooperative: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12, _MFMA, _PF  16-channel K tiles per
 //                  wave, 16-tile groups, K waves per row, fp16 packed math, gfx12 operand layout,
 //                  CDNA MFMA (wave64) instead of RDNA WMMA, prefetch (1: the next item's chunk 0
@@ -30,13 +28,6 @@
 
 #include "ConvWinogradSreg.h"
 #include "ConvWinogradWmmaCoop.h"
-#if defined(CONV_WINO_X3) && CONV_WINO_X3
-// Three-bf16: the split kernel (ConvTf32Split, under CONV_TF32_SPLIT3).
-#ifndef K1_BUFFER
-#define K1_BUFFER 0
-#endif
-#include "ConvIgemmCore.h"
-#endif
 
 /// Stages an operand to or from the layout the variant reads.
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradCopy(K5CopyArgs a)
@@ -73,24 +64,10 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradInput(K5Args a)
     k5InputTransform<CONV_WINO_T, CONV_WINO_T, CONV_WINO_M, CONV_WINO_LAYOUT>(a);
 }
 
-#if defined(CONV_WINO_X3) && CONV_WINO_X3
-// Three-bf16 (fp32 transforms, the transformed operands split by ConvTf32Split): the GEMM on bf16
-// matrix cores, CONV_WINO_MFMA (CDNA) or WMMA (CONV_WINO_GFX12 selects gfx12's layout).
-#if CONV_WINO_MFMA
-typedef K5CoopMfma<k5_bf16> K5X3Atom;
-#else
-typedef K5CoopWmma<k5_bf16, CONV_WINO_GFX12 != 0> K5X3Atom;
-#endif
-extern "C" __global__ void __launch_bounds__(4 * K5X3Atom::WAVE) ConvWinogradGemm(K5GemmArgs g)
-{
-    k5GemmMma<K5X3Atom, CONV_WINO_GEMM_BM, CONV_WINO_GEMM_BN, CONV_WINO_GEMM_BK>(g);
-}
-#else
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradGemm(K5GemmArgs g)
 {
     k5Gemm<CONV_WINO_T, CONV_WINO_GEMM_BM, CONV_WINO_GEMM_BN, CONV_WINO_GEMM_BK>(g);
 }
-#endif
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a)
 {

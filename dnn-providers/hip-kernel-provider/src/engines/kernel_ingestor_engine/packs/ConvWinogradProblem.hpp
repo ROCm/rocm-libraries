@@ -94,10 +94,6 @@ struct Config
     /// 1: prefetch further (cooperative: the next item's first chunk behind the epilogue; fused
     /// VALU: two input chunks ahead).
     int pf = 0;
-    /// 1: three-bf16 multipass (TF32 permission, fp32 graphs): fp32 transforms, the transformed
-    /// filter and input split into three bf16 parts along the channels, the GEMM on bf16 matrix
-    /// cores (arch: "gfx9" MFMA, "gfx11" / "gfx12" WMMA).
-    int math = 0;
 };
 
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.
@@ -126,10 +122,6 @@ struct Plan
     size_t uOffset = 0, uBytes = 0;
     size_t vOffset = 0, vBytes = 0;
     size_t mOffset = 0, mBytes = 0;
-    /// Three-bf16: the split transformed filter (whole) and input (one slice), bf16.
-    size_t u3Offset = 0, u3Bytes = 0;
-    size_t v3Offset = 0, v3Bytes = 0;
-    unsigned int splitBlocks = 1; ///< the split's grid (grid-stride, for the larger of the two)
     int sliceImages = 1; ///< images per launch
     int slices = 1;
     size_t workspaceBytes = 0;
@@ -141,9 +133,6 @@ struct Plan
     unsigned int mainBlocks = 1;
     unsigned int mainThreads = 256;
 };
-
-/// Whether the three-bf16 form is admitted on @p gcnArchName (the archs it is built for).
-bool threeBf16Pays(const WinogradProblem& problem, std::string_view gcnArchName);
 
 /// Workspace limit the batch slicing keeps the multipass buffers under (the engine's own
 /// default; HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB overrides).
