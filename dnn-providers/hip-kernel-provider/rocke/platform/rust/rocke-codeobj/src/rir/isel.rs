@@ -1099,7 +1099,7 @@ impl<'a> Isel<'a> {
         if self.burs.is_some() && burs::select(self, op)? {
             return Ok(());
         }
-        // i16 is implemented only as the 16-bit view of a scalar f16 Lever `i16vec` (PLAN decision 18): an
+        // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
         // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
         // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
