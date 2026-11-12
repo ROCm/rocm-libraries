@@ -76,6 +76,10 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
 # HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_CONV
        "Build the conv engine group (naive convolution) for the kernel ingestor" OFF)
+# Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
+# targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
+option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
+       "Register the conv RDNA generic-target compile check (CTest label conv_generic_compile)" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
