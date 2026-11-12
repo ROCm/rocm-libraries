@@ -1285,8 +1285,7 @@ inline bool
 
 // Compares host copies of the outputs (hD_1, and hE, hAmaxD and hBias where they are outputs)
 // with the references. The caller copies them from the launch being checked.
-void check(hipStream_t                   stream,
-           const Arguments&              arg,
+void check(const Arguments&              arg,
            const uint32_t&               gemm_count,
            const std::vector<int64_t>&   M,
            const std::vector<int64_t>&   N,
@@ -1298,16 +1297,12 @@ void check(hipStream_t                   stream,
            const std::vector<size_t>&    size_bias,
            std::vector<HipHostBuffer>&   hD_gold,
            std::vector<HipHostBuffer>&   hD_1,
-           std::vector<HipDeviceBuffer>& dD,
            std::vector<HipHostBuffer>&   hAmaxD_gold,
            std::vector<HipHostBuffer>&   hAmaxD,
-           std::vector<HipDeviceBuffer>& dAmaxD,
            std::vector<HipHostBuffer>&   hE_gold,
            std::vector<HipHostBuffer>&   hE,
-           std::vector<HipDeviceBuffer>& dE,
            std::vector<HipHostBuffer>&   hBias_gold,
            std::vector<HipHostBuffer>&   hBias,
-           std::vector<HipDeviceBuffer>& dBias,
            std::vector<double>&          tol,
            double&                       hipblaslt_error,
            double&                       hipblaslt_atol,
@@ -1320,9 +1315,6 @@ void check(hipStream_t                   stream,
            hipDataType                   Tc,
            hipblasLtBatchMode_t          batchMode = HIPBLASLT_BATCH_MODE_STRIDED)
 {
-    // fetch GPU
-    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-
     // ULP error accumulators (sum/count are used to derive the average below)
     double ulp_sum_total   = 0.0;
     size_t ulp_count_total = 0;
@@ -6487,8 +6479,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     copyOutputsToHost(gemm_count);
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
-                check(stream,
-                      arg,
+                check(arg,
                       gemm_count,
                       M,
                       N,
@@ -6500,16 +6491,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                       size_bias,
                       hD_gold,
                       hD_1,
-                      (*dDp),
                       hAmaxD_gold,
                       hAmaxD,
-                      dAmaxD,
                       hE_gold,
                       hE,
-                      dE,
                       hBias_gold,
                       hBias,
-                      dBias,
                       tol,
                       hipblaslt_error,
                       hipblaslt_atol,
@@ -7112,8 +7099,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
-                check(stream,
-                      arg,
+                check(arg,
                       gemm_count,
                       M,
                       N,
@@ -7125,16 +7111,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                       size_bias,
                       hD_gold,
                       hD_1,
-                      (*dDp),
                       hAmaxD_gold,
                       hAmaxD,
-                      dAmaxD,
                       hE_gold,
                       hE,
-                      dE,
                       hBias_gold,
                       hBias,
-                      dBias,
                       tol,
                       hipblaslt_error,
                       hipblaslt_atol,
