@@ -9,6 +9,8 @@
 
 #include <bit>
 
+#include <fmt/ostream.h>
+
 #define cast_to_unsigned(N) static_cast<typename std::make_unsigned<T>::type>(N)
 
 namespace rocRoller
@@ -545,7 +547,7 @@ namespace rocRoller
 
                 auto rv = std::visit(*this, *expr);
 
-                Log::trace("visitor:\n    {}\n    {}", toString(expr), toString(rv));
+                Log::trace("visitor:\n    {}\n    {}", fmt::streamed(expr), fmt::streamed(rv));
                 return rv;
             }
 
@@ -561,7 +563,7 @@ namespace rocRoller
             auto visitor = FastDivisionExpressionVisitor(cxt);
             auto rv      = visitor.call(expr);
 
-            Log::trace("fastDivision:\n    {}\n    {}", toString(expr), toString(rv));
+            Log::trace("fastDivision:\n    {}\n    {}", fmt::streamed(expr), fmt::streamed(rv));
 
             return rv;
         }

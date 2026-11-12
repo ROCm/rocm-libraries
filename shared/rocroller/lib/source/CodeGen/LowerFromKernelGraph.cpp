@@ -1177,7 +1177,8 @@ namespace rocRoller
             TIMER(t, "LowerFromKernelGraph::generate");
             auto graphPtr = std::make_shared<KernelGraph>(std::move(graph));
 
-            if(Settings::getInstance()->get(Settings::LogGraphs))
+            if(Settings::getInstance()->get(Settings::LogGraphs)
+               && Log::logger().should_log(LogLevel::Debug))
                 rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
                                                    graphPtr->toDOT(true));
 
