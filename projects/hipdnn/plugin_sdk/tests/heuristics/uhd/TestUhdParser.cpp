@@ -63,7 +63,8 @@ enum class Base
     TREE_DATA,
     CUSTOM_LIBRARY,
     STATIC_ORDER,
-    LINEAR_DATA
+    LINEAR_DATA,
+    MLP_DATA
 };
 
 /// A valid document of each body kind. The native one carries every optional block a
@@ -108,6 +109,14 @@ nlohmann::json baseDocument(Base base)
         document.erase("score");
         document["objective"] = "min";
         document["linear_data"] = {{"artifact", "models/linear.fb"}, {"hash", DIGEST}};
+    }
+    else if(base == Base::MLP_DATA)
+    {
+        // An engine estimate: the log of a registered metric, so the score names both.
+        document["adapter"] = "mlp_data";
+        document.erase("native");
+        document["score"]["transform"] = "log";
+        document["mlp_data"] = {{"artifact", "models/mlp.fb"}, {"hash", DIGEST}};
     }
     else if(base == Base::CUSTOM_LIBRARY)
     {
@@ -403,6 +412,21 @@ const std::vector<Refusal> REFUSALS = {
     {"LinearDataNamesAnotherBody",
      Base::LINEAR_DATA,
      [](nlohmann::json& doc) { doc["adapter"] = "table"; }},
+    {"MlpDataWithoutAMetric",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) {
+         doc["score"].erase("metric");
+         doc["score"]["calibrated"] = false;
+     }},
+    {"MlpDataWithAnotherTransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"]["transform"] = "log1p"; }},
+    {"MlpDataWithoutATransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"].erase("transform"); }},
+    {"MlpDataWithoutASignature",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
 };
 
 INSTANTIATE_TEST_SUITE_P(Rule,
@@ -435,6 +459,17 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     EXPECT_FALSE(linear.scoreCalibrated);
     EXPECT_EQ(linear.modelHash, DIGEST);
     EXPECT_EQ(std::filesystem::path(linear.modelArtifactPath).filename().string(), "linear.fb");
+
+    // Either registered metric, each with its own direction.
+    const auto throughput = parseUhdConfig(baseDocument(Base::MLP_DATA), descriptorPath());
+    EXPECT_EQ(throughput.adapterType, "mlp_data");
+    EXPECT_EQ(throughput.scoreMetric, "tflops");
+    EXPECT_EQ(throughput.scoreTransform, "log");
+    EXPECT_EQ(std::filesystem::path(throughput.modelArtifactPath).filename().string(), "mlp.fb");
+    auto time = baseDocument(Base::MLP_DATA);
+    time["score"]["metric"] = "time";
+    time["objective"] = "min";
+    EXPECT_EQ(parseUhdConfig(time, descriptorPath()).scoreMetric, "time");
 
     // An identity transform is what an absent one means.
     auto identity = baseDocument(Base::LINEAR_DATA);

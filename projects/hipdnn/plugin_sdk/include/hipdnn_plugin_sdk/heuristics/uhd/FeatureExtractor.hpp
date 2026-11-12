@@ -30,6 +30,16 @@ class FeatureExtractionContext
 public:
     using ValueMap = std::unordered_map<std::string, VariableContext::ValueType>;
 
+    FeatureExtractionContext() = default;
+
+    /// A context that reads through to @p shared for every name it does not bind itself
+    /// (VariableContext's base). @p shared is never modified and may serve many contexts.
+    explicit FeatureExtractionContext(std::shared_ptr<const FeatureExtractionContext> shared)
+        : _ctx(shared == nullptr ? nullptr
+                                 : std::shared_ptr<const VariableContext>(shared, &shared->_ctx))
+    {
+    }
+
     void bindKernelVars(const ValueMap& props)
     {
         _ctx.bindNamespace("kernel", props);
@@ -73,11 +83,9 @@ public:
     nlohmann::json toJson() const
     {
         auto result = nlohmann::json::object();
-        for(const auto& binding : _ctx.bindings())
-        {
-            const auto& name = binding.first;
-            std::visit([&](const auto& held) { result[name] = held; }, binding.second);
-        }
+        _ctx.forEachBinding([&](const std::string& name, const VariableContext::ValueType& value) {
+            std::visit([&](const auto& held) { result[name] = held; }, value);
+        });
         return result;
     }
     void clear()

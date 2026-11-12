@@ -3,6 +3,7 @@
 
 #include <array>
 #include <gtest/gtest.h>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -1595,5 +1596,149 @@ TEST(TestEngineFeatures, OverrideShapesLeaveEveryGraphAggregateUnknown)
     {
         EXPECT_NE(entry.key().rfind("graph.flops_by_type.", 0), 0U) << entry.key();
     }
+}
+
+/// Owns a packed graph and the wrapper over it, as a plugin receives one.
+class PackedGraph
+{
+public:
+    explicit PackedGraph(const GraphT& graph)
+    {
+        _buffer.Finish(Graph::Pack(_buffer, &graph));
+        _wrapper = std::make_unique<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper>(
+            _buffer.GetBufferPointer(), _buffer.GetSize());
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& get() const
+    {
+        return *_wrapper;
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _buffer;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper> _wrapper;
+};
+
+/// An engine configuration pinning integer knob @p name to @p value.
+class PinnedConfig
+{
+public:
+    PinnedConfig(const std::string& name, int64_t value)
+    {
+        EngineConfigT request;
+        auto knob = std::make_unique<KnobSettingT>();
+        knob->knob_id = name;
+        IntValueT setting;
+        setting.value = value;
+        knob->value.Set(setting);
+        request.knobs.push_back(std::move(knob));
+        _buffer.Finish(EngineConfig::Pack(_buffer, &request));
+        _wrapper
+            = std::make_unique<hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper>(
+                _buffer.GetBufferPointer(), _buffer.GetSize());
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& get() const
+    {
+        return *_wrapper;
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _buffer;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper> _wrapper;
+};
+
+using hipdnn_plugin_sdk::heuristics::problemFeatureCache;
+using hipdnn_plugin_sdk::heuristics::ProblemFeatureCache;
+using hipdnn_plugin_sdk::heuristics::sharedProblemFeatures;
+
+/// Engines asked about one graph build its problem features once and each see them, plus
+/// only their own constraints.
+TEST(TestProblemFeatureCache, EnginesOfOneGraphShareItsProblemFeatures)
+{
+    problemFeatureCache().clear();
+    const PackedGraph graph(convFwdGraph());
+    const PinnedConfig first("tile", 4);
+    const PinnedConfig second("waves", 2);
+
+    const auto a
+        = hipdnn_plugin_sdk::heuristics::engineFeatures(graph.get(), first.get(), Device{});
+    const auto b
+        = hipdnn_plugin_sdk::heuristics::engineFeatures(graph.get(), second.get(), Device{});
+    EXPECT_EQ(problemFeatureCache().size(), 1U);
+
+    auto expectedA = hipdnn_plugin_sdk::heuristics::problemFeatures(graph.get(), Device{}).toJson();
+    auto expectedB = expectedA;
+    expectedA["constraint.knobs.tile"] = 4;
+    expectedB["constraint.knobs.waves"] = 2;
+    EXPECT_EQ(a.toJson(), expectedA);
+    // One engine's constraint never reaches another's context through the shared base.
+    EXPECT_EQ(b.toJson(), expectedB);
+    EXPECT_EQ(sharedProblemFeatures(graph.get(), Device{})->toJson().count("constraint.knobs.tile"),
+              0U);
+}
+
+/// The key is the graph's content and the device: an equal graph in another buffer hits, a
+/// different shape or device misses.
+TEST(TestProblemFeatureCache, KeysOnGraphContentAndDevice)
+{
+    problemFeatureCache().clear();
+    const PackedGraph graph(convFwdGraph());
+    const PackedGraph copy(convFwdGraph());
+    auto otherShape = convFwdGraph();
+    otherShape.tensors[0]->dims[0] = 4;
+    otherShape.tensors[2]->dims[0] = 4;
+    const PackedGraph other(otherShape);
+    Device bigger;
+    bigger.multiProcessorCount = 128;
+
+    const auto shared = sharedProblemFeatures(graph.get(), Device{});
+    EXPECT_EQ(sharedProblemFeatures(copy.get(), Device{}), shared);
+    EXPECT_NE(sharedProblemFeatures(other.get(), Device{}), shared);
+    const auto onBigger = sharedProblemFeatures(graph.get(), bigger);
+    EXPECT_NE(onBigger, shared);
+    EXPECT_EQ(onBigger->toJson(),
+              hipdnn_plugin_sdk::heuristics::problemFeatures(graph.get(), bigger).toJson());
+    EXPECT_EQ(problemFeatureCache().size(), 3U);
+}
+
+/// Override shapes are not graph content (`cache_ignore`), but they change the features, so
+/// the two forms of one graph never share an entry.
+TEST(TestProblemFeatureCache, OverrideShapesAreAnotherProblem)
+{
+    problemFeatureCache().clear();
+    const PackedGraph fixed(convBiasReluGraph());
+    auto overridden = convBiasReluGraph();
+    overridden.is_override_shape_enabled = true;
+    const PackedGraph flexible(overridden);
+
+    EXPECT_EQ(sharedProblemFeatures(fixed.get(), Device{})->toJson().count("graph.flops"), 1U);
+    EXPECT_EQ(sharedProblemFeatures(flexible.get(), Device{})->toJson().count("graph.flops"), 0U);
+}
+
+/// Past CAPACITY graphs the least recently used one is rebuilt; a recently used one is not.
+TEST(TestProblemFeatureCache, EvictsTheLeastRecentlyUsedGraph)
+{
+    problemFeatureCache().clear();
+    std::vector<std::unique_ptr<PackedGraph>> graphs;
+    for(size_t i = 0; i <= ProblemFeatureCache::CAPACITY; ++i)
+    {
+        auto graph = convFwdGraph();
+        graph.tensors[0]->dims[0] = static_cast<int64_t>(i + 1);
+        graph.tensors[2]->dims[0] = static_cast<int64_t>(i + 1);
+        graphs.push_back(std::make_unique<PackedGraph>(graph));
+    }
+    const auto oldest = sharedProblemFeatures(graphs[0]->get(), Device{});
+    const auto touched = sharedProblemFeatures(graphs[1]->get(), Device{});
+    for(size_t i = 2; i < ProblemFeatureCache::CAPACITY; ++i)
+    {
+        sharedProblemFeatures(graphs[i]->get(), Device{});
+    }
+    EXPECT_EQ(sharedProblemFeatures(graphs[0]->get(), Device{}), oldest); // Now most recent.
+    sharedProblemFeatures(graphs[ProblemFeatureCache::CAPACITY]->get(), Device{});
+
+    EXPECT_EQ(problemFeatureCache().size(), ProblemFeatureCache::CAPACITY);
+    EXPECT_EQ(sharedProblemFeatures(graphs[0]->get(), Device{}), oldest);
+    EXPECT_NE(sharedProblemFeatures(graphs[1]->get(), Device{}), touched);
 }
 } // namespace

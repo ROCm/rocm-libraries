@@ -43,10 +43,23 @@ using CategoricalEncoding = std::map<std::string, std::map<std::string, int32_t>
 
 /// The symbols an expression reads, keyed without the `$` sigil (accepted either way).
 /// An unbound name reads as null.
+///
+/// A context may read through to a shared, immutable base context: the features every
+/// engine computes alike for one graph, say, bound once and shared by each engine's own
+/// context. A context's own bindings shadow its base's; unbind() and clearNamespace() remove
+/// only its own, so they cannot uncover or remove a base binding.
 class VariableContext
 {
 public:
     using ValueType = std::variant<double, int64_t, std::string, bool>;
+
+    VariableContext() = default;
+
+    /// @param base Read when a name is not bound here; null for none.
+    explicit VariableContext(std::shared_ptr<const VariableContext> base)
+        : _base(std::move(base))
+    {
+    }
 
     void bind(const std::string& name, ValueType value)
     {
@@ -72,12 +85,14 @@ public:
         return &_bindings.insert_or_assign(name, std::move(value)).first->second;
     }
 
-    /// Removes @p name, as given. Invalidates a pointer bindSlot returned for it.
+    /// Removes @p name, as given, from this context's own bindings. Invalidates a pointer
+    /// bindSlot returned for it.
     void unbind(const std::string& name)
     {
         _bindings.erase(name);
     }
 
+    /// Removes every own binding under `ns.`; a base's bindings are untouched.
     void clearNamespace(const std::string& ns)
     {
         const std::string prefix = ns + ".";
@@ -96,9 +111,7 @@ public:
 
     const ValueType* find(const std::string& name) const
     {
-        const auto it = !name.empty() && name.front() == '$' ? _bindings.find(name.substr(1))
-                                                             : _bindings.find(name);
-        return it == _bindings.end() ? nullptr : &it->second;
+        return !name.empty() && name.front() == '$' ? lookup(name.substr(1)) : lookup(name);
     }
 
     bool has(const std::string& name) const
@@ -106,26 +119,46 @@ public:
         return find(name) != nullptr;
     }
 
+    /// Removes every binding and the base.
     void clear()
     {
         _bindings.clear();
+        _base.reset();
     }
 
-    /// @brief Every binding, keyed without the sigil.
+    /// @brief This context's own bindings, keyed without the sigil; the base's are not
+    ///        included (see forEachBinding()).
     const std::unordered_map<std::string, ValueType>& bindings() const
     {
         return _bindings;
     }
 
+    /// @brief Calls @p visit(name, value) once for every name that reads as bound: own
+    ///        bindings first, then each base's that nothing nearer shadows.
+    template <typename Visitor>
+    void forEachBinding(Visitor&& visit) const
+    {
+        for(const auto* context = this; context != nullptr; context = context->_base.get())
+        {
+            for(const auto& [name, value] : context->_bindings)
+            {
+                if(context == this || lookup(name) == &value)
+                {
+                    visit(name, value);
+                }
+            }
+        }
+    }
+
     /// @brief The jsonexpr data-source contract: @p path arrives without the sigil.
     jsonexpr::Value getData(const std::string& path) const
     {
-        const auto it = _bindings.find(path);
-        if(it == _bindings.end())
+        const auto* value = lookup(path);
+        if(value == nullptr)
         {
             return {};
         }
-        return std::visit([](const auto& held) { return jsonexpr::Value(held); }, it->second);
+        return std::visit([](const auto& held) { return jsonexpr::Value(held); }, *value);
     }
 
 private:
@@ -134,7 +167,18 @@ private:
         return !name.empty() && name.front() == '$' ? name.substr(1) : name;
     }
 
+    /// @p path without the sigil: an own binding, else the base's, else null.
+    const ValueType* lookup(const std::string& path) const
+    {
+        if(const auto it = _bindings.find(path); it != _bindings.end())
+        {
+            return &it->second;
+        }
+        return _base == nullptr ? nullptr : _base->lookup(path);
+    }
+
     std::unordered_map<std::string, ValueType> _bindings;
+    std::shared_ptr<const VariableContext> _base;
 };
 
 /// Descriptor expressions compiled once and evaluated many times.
