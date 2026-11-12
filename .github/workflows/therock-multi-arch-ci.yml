@@ -110,6 +110,8 @@ jobs:
   configure:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: _therock/build_tools/github_actions
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       # TheRock's determine_rocm_test_dependencies.py natively resolves
@@ -130,6 +132,9 @@ jobs:
         with:
           sparse-checkout: |
             .github/repos-config.json
+            .github/skip-ci-config.toml
+            .github/scripts/get_changed_projects.py
+            .github/scripts/tests/test_get_changed_projects.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -141,12 +146,15 @@ jobs:
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
+      - name: Test project selection
+        run: python3 .github/scripts/tests/test_get_changed_projects.py
+
       - name: Configure CI
         id: configure
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+          python3 .github/scripts/get_changed_projects.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
             --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \

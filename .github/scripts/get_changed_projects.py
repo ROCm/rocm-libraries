@@ -1,111 +1,102 @@
 #!/usr/bin/env python3
-"""Get changed project paths based on git diff, validated against repos-config.json."""
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Select TheRock projects using the repository's existing skip-CI policy."""
 
 import fnmatch
-import os
-from dataclasses import dataclass
+import logging
 from pathlib import Path
-from typing import Iterable, Optional
+import tomllib
 
-from ci_utils import get_modified_paths, matches_paths, set_github_output
-from config_loader import load_repo_config
-from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-SKIPPABLE_PATH_PATTERNS = [
-    "*.md",
-    "*.rst",
-    "docs/*",
-    "projects/*/docs/*",
-    "shared/*/docs/*",
-]
-
-# Patterns that trigger a full test run when changed.
-# This includes CI workflows and the scripts that determine project selection logic.
-FULL_TEST_TRIGGER_PATTERNS = [
-    ".github/workflows/therock*",
-    ".github/scripts/therock*",
-    ".github/scripts/get_changed_projects.py",
-    ".github/scripts/ci_utils.py",
-    ".github/scripts/config_loader.py",
-    ".github/scripts/repo_config_model.py",
-    ".github/scripts/pr_detect_changed_subtrees.py",
-    ".github/repos-config.json",
-]
+import configure_external_repo_ci as therock
+from configure_ci_path_filters import get_modified_paths_via_api
 
 
-@dataclass
-class ChangedProjectsResult:
-    """Result of analyzing changed projects."""
+def get_changed_projects(
+    modified_paths: set[str] | None, config_path: Path
+) -> therock.ConfigureResult:
+    run_all = therock.ConfigureResult("", True, "quick")
+    if modified_paths is None:
+        logging.warning("Changed files unavailable - running all tests")
+        return run_all
 
-    changed_projects: str  # Comma-separated list of changed project paths
-    run_all_tests: bool  # Whether to run all tests (e.g., CI files changed)
-    skip_tests: bool  # Whether to skip tests entirely (e.g., docs-only changes)
+    # The project list feeds both Linux and Windows. Platform-specific skips
+    # remain in TheRock's per-platform setup; only common skips apply here.
+    skip_patterns = []
+    for path in (
+        Path(therock.__file__).with_name("skip-ci-base.toml"),
+        config_path.with_name("skip-ci-config.toml"),
+    ):
+        try:
+            with path.open("rb") as f:
+                patterns = tomllib.load(f).get("skip_ci", {}).get("common", [])
+            if not isinstance(patterns, list) or any(
+                not isinstance(p, str) for p in patterns
+            ):
+                raise ValueError("common skip patterns must be a list of strings")
+            skip_patterns.extend(patterns)
+        except (OSError, ValueError, AttributeError) as e:
+            logging.warning(
+                "Cannot load skip policy %s: %s - running all tests", path, e
+            )
+            return run_all
+
+    relevant = {
+        path
+        for path in modified_paths
+        if not any(fnmatch.fnmatch(path, pattern) for pattern in skip_patterns)
+    }
+    logging.info(
+        "Ignoring paths excluded by skip-CI policy: %s",
+        sorted(modified_paths - relevant),
+    )
+    if not relevant:
+        # TheRock setup decides whether the whole run can skip.
+        return therock.ConfigureResult("", False, "standard")
+    if therock.matches_patterns(relevant, therock.FULL_TEST_TRIGGER_PATTERNS):
+        logging.info("Shared CI or test-selection files changed - running all tests")
+        return run_all
+
+    config = therock.load_repo_config(str(config_path))
+    if not config:
+        return run_all
+    configured_projects = therock.get_valid_prefixes(config)
+    valid_prefixes = configured_projects | therock.CI_RELEVANT_NON_SUBTREE_PREFIXES
+    projects = set()
+    unknown = []
+    for path in relevant:
+        if therock.matches_patterns([path], therock.CALLER_WORKFLOW_TRIGGER_PATTERNS):
+            projects.update(configured_projects)
+        else:
+            matched = therock.find_matched_subtrees([path], valid_prefixes)
+            projects.update(matched)
+            if not matched:
+                unknown.append(path)
+    if unknown:
+        logging.info("Unclassified changes %s - running all tests", sorted(unknown))
+        return run_all
+
+    return therock.ConfigureResult(",".join(sorted(projects)), False, "standard")
 
 
-def is_path_skippable(path: str) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
-
-
-def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
-    if paths is None:
-        return False
-    return any(not is_path_skippable(p) for p in paths)
-
-
-def should_run_all_tests(paths: Optional[Iterable[str]]) -> bool:
-    """Check if any changed files should trigger a full test run."""
-    if paths is None:
-        return False
-    return matches_paths(paths, FULL_TEST_TRIGGER_PATTERNS)
-
-
-def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
-    """Get changed project paths validated against repos-config.json.
-
-    Returns a ChangedProjectsResult with:
-    - changed_projects: comma-separated list of changed project paths
-    - run_all_tests: True if CI-related files changed (run full test suite)
-    - skip_tests: True if only skippable files changed (skip tests entirely)
-    """
-    modified_paths = get_modified_paths(base_ref)
-    if not modified_paths:
-        return ChangedProjectsResult(
-            changed_projects="", run_all_tests=False, skip_tests=True
+def main(argv=None):
+    args = therock.parse_args(argv)
+    paths = None
+    if args.event_name in ("pull_request", "push") and args.base_sha and args.head_sha:
+        changed = get_modified_paths_via_api(
+            args.github_repo, args.base_sha, args.head_sha
         )
-
-    # If CI workflow/script files changed, run all tests
-    if should_run_all_tests(modified_paths):
-        return ChangedProjectsResult(
-            changed_projects="", run_all_tests=True, skip_tests=False
-        )
-
-    # If only skippable files changed, skip tests
-    if not check_for_non_skippable_path(modified_paths):
-        return ChangedProjectsResult(
-            changed_projects="", run_all_tests=False, skip_tests=True
-        )
-
-    repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
-    config = load_repo_config(str(repo_config_path))
-    valid_prefixes = get_valid_prefixes(config)
-    matched_subtrees = find_matched_subtrees(list(modified_paths), valid_prefixes)
-
-    return ChangedProjectsResult(
-        changed_projects=",".join(matched_subtrees),
-        run_all_tests=False,
-        skip_tests=False,
+        if changed is not None:
+            paths = set(changed)
+    result = get_changed_projects(paths, Path(args.config_path))
+    therock.set_github_output(
+        {
+            "changed_projects": result.changed_projects,
+            "run_all_tests": str(result.run_all_tests).lower(),
+            "test_type": result.test_type,
+        }
     )
 
 
 if __name__ == "__main__":
-    base_ref = os.environ.get("BASE_REF", "HEAD^")
-    result = get_changed_projects(base_ref)
-    set_github_output(
-        {
-            "changed_projects": result.changed_projects,
-            "run_all_tests": str(result.run_all_tests).lower(),
-            "skip_tests": str(result.skip_tests).lower(),
-        }
-    )
+    main()
