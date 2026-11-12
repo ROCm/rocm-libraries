@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -112,7 +113,7 @@ struct DefaultGeometry
     int64_t tileSize;
     int64_t numWarps;
 };
-constexpr DefaultGeometry DEFAULT_GEOMETRIES[] = {{64, 64, 4}, {128, 32, 2}};
+constexpr std::array<DefaultGeometry, 2> DEFAULT_GEOMETRIES = {{{64, 64, 4}, {128, 32, 2}}};
 constexpr int64_t DEFAULT_BLOCK_M_PER_WARP = 32;
 
 constexpr std::string_view Q_TOKEN = "gfx942_attention_unified_2d.q.uid";

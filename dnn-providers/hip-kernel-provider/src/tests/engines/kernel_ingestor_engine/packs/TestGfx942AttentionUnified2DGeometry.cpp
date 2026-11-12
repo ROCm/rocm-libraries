@@ -161,7 +161,7 @@ TEST(TestGfx942AttentionUnified2DGeometry, RefusesAHeadSizeOutsideTheKernelsRang
 /// (16 * 64 = 1024 = 8 * 64 * 2), so no legal head size and tile falls below it.
 TEST(TestGfx942AttentionUnified2DGeometry, TheTightestSlabMeetsTheCopyWidthExactly)
 {
-    Fields fields{64, 16, 16, 8, 16, false, false};
+    const Fields fields{64, 16, 16, 8, 16, false, false};
     EXPECT_TRUE(isSupportedGfx942Unified2DGeometry(fields));
 }
 

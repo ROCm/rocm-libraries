@@ -860,7 +860,7 @@ TEST(TestGfx942AttentionUnified2DMatchers,
         spec.useConflictFreeVStore = (bits >> 2) & 1;
         spec.useTransposedMaskLimit = (bits >> 3) & 1;
         spec.useTransposedInvariantHoist = (bits >> 4) & 1;
-        if(spec.useTransposedMaskLimit && spec.useTransposedInvariantHoist)
+        if(spec.useTransposedMaskLimit != 0 && spec.useTransposedInvariantHoist != 0)
         {
             continue; // the production stack, ranked above
         }
