@@ -144,6 +144,10 @@ struct Isel<'a> {
     vals: Vec<Option<Val>>,
     lds: &'a FxHashMap<ValueId, u32>,
     depth: u32,
+    /// The lanes that executed a `cf.return` under divergent control flow (`return_op`), when the kernel has one:
+    /// EXEC restores leave them out, and the number of divergent `scf.if` / `scf.for` regions being selected.
+    dead: Option<VRef>,
+    divergent_depth: u32,
     single_wave: bool,
     /// The facts of the target selected for: wave size, lane-mask width.
     t: &'static TargetInfo,
@@ -2088,7 +2092,7 @@ impl<'a> Isel<'a> {
             For => self.for_op(op)?,
             If | IfElse => self.if_op(op)?,
             Yield => {}
-            Return => self.emit(MInst::new(Opc::SEndpgm, [], [])),
+            Return => self.return_op(),
             other => return Err(unsupported(format!("op {other:?} has no direct lowering"))),
         }
         Ok(())
@@ -5366,6 +5370,7 @@ impl<'a> Isel<'a> {
         let saved = self.mreg();
         self.emit(MInst::new(self.lm(Opc::SMovB32), [r(saved)], [self.exec()]));
         self.depth += 1;
+        self.divergent_depth += 1;
         let head = self.new_block();
         let running = self.mreg();
         self.valu(Opc::VCmp(0x41), [r(running)], [r(iv), ub], 0);
@@ -5415,6 +5420,8 @@ impl<'a> Isel<'a> {
         let exit = self.new_block();
         self.f.blocks[leave.0].insts[leave.1].imm = exit as i64;
         self.emit(MInst::new(self.lm(Opc::SMovB32), [self.exec()], [r(saved)]));
+        self.divergent_depth -= 1;
+        self.rejoin();
         for (i, &res) in op.results.iter().enumerate() {
             let view = match self.k.ty(res).clone() {
                 Type::Scalar(Scalar::I64 | Scalar::F64) | Type::Ptr(_) => Val::D(r(sub(carried[i], 0, 1)), r(sub(carried[i], 1, 1))),
@@ -5457,11 +5464,13 @@ impl<'a> Isel<'a> {
         self.emit(MInst::new(Opc::SCbranchExecz, [], []));
         let first = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
         self.new_block();
+        self.divergent_depth += 1;
         self.region(&op.regions[0])?;
         if has_else {
             let else_block = self.new_block();
             self.f.blocks[first.0].insts[first.1].imm = else_block as i64;
             self.salu(self.lm(Opc::SAndNot1B32), [exec], [r(saved), mask]);
+            self.drop_dead_lanes();
             self.emit(MInst::new(Opc::SCbranchExecz, [], []));
             let second = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
             self.new_block();
@@ -5474,7 +5483,48 @@ impl<'a> Isel<'a> {
             self.f.blocks[first.0].insts[first.1].imm = end as i64;
             self.salu(self.lm(Opc::SOrB32), [exec], [exec, r(saved)]);
         }
+        self.divergent_depth -= 1;
+        self.rejoin();
         Ok(())
+    }
+
+    /// `cf.return`. Where every lane that gets here returns (not under a divergent `scf.if` or `scf.for`), the
+    /// wave ends. Otherwise the lanes arriving here are added to `dead` and leave EXEC (the region's EXEC
+    /// restores, `drop_dead_lanes`, keep them out); the wave ends once none is left, at the end of the
+    /// outermost divergent region (`rejoin`).
+    fn return_op(&mut self) {
+        match self.dead {
+            Some(dead) if self.divergent_depth > 0 => {
+                let exec = self.exec();
+                self.salu(self.lm(Opc::SOrB32), [r(dead)], [r(dead), exec]);
+                self.emit(MInst::new(self.lm(Opc::SMovB32), [exec], [Opnd::Imm(0)]));
+            }
+            _ => self.emit(MInst::new(Opc::SEndpgm, [], [])),
+        }
+    }
+
+    /// EXEC without the lanes that returned, after a restore of it.
+    fn drop_dead_lanes(&mut self) {
+        if let Some(dead) = self.dead {
+            let exec = self.exec();
+            self.salu(self.lm(Opc::SAndNot1B32), [exec], [exec, r(dead)]);
+        }
+    }
+
+    /// After a divergent region: EXEC is restored without the lanes that returned, and a wave with none left ends.
+    fn rejoin(&mut self) {
+        if self.dead.is_none() {
+            return;
+        }
+        self.drop_dead_lanes();
+        if self.divergent_depth == 0 {
+            self.emit(MInst::new(Opc::SCbranchExecnz, [], []));
+            let skip = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
+            self.new_block();
+            self.emit(MInst::new(Opc::SEndpgm, [], []));
+            let after = self.new_block();
+            self.f.blocks[skip.0].insts[skip.1].imm = after as i64;
+        }
     }
 }
 
@@ -5526,12 +5576,34 @@ fn inverse_scmp(op: Opc) -> Option<Opc> {
     })
 }
 
+/// Whether a `cf.return` of `kernel` is under an `scf.if` whose condition or an `scf.for` whose bounds differ
+/// between lanes: only some of the lanes that reach it return.
+fn returns_under_divergence(kernel: &Kernel, uniform: &[bool]) -> bool {
+    let uni = |v: &ValueId| uniform.get(v.0 as usize) == Some(&true);
+    let mut stack = vec![(&kernel.body, false)];
+    while let Some((region, divergent)) = stack.pop() {
+        for op in &region.ops {
+            let inner = divergent
+                || match op.kind {
+                    OpKind::If | OpKind::IfElse => !op.operands.first().is_some_and(uni),
+                    OpKind::For => !op.operands.get(..3).is_some_and(|b| b.iter().all(uni)),
+                    _ => false,
+                };
+            if op.kind == OpKind::Return && divergent {
+                return true;
+            }
+            stack.extend(op.regions.iter().map(|r| (r, inner)));
+        }
+    }
+    false
+}
+
 /// An op in `region` that is wrong under a partial EXEC mask: a WMMA writes
-/// every lane whatever EXEC holds, and a barrier or an early return would
-/// leave the lanes that stopped (and other waves) behind.
+/// every lane whatever EXEC holds, and a barrier would leave the lanes that
+/// stopped (and other waves) behind.
 fn unsafe_under_partial_exec(region: &Region) -> Option<OpKind> {
     region.ops.iter().find_map(|op| match op.kind {
-        OpKind::Mma | OpKind::Sync | OpKind::BarrierBare | OpKind::SyncLdsOnly | OpKind::Return => Some(op.kind),
+        OpKind::Mma | OpKind::Sync | OpKind::BarrierBare | OpKind::SyncLdsOnly => Some(op.kind),
         _ => op.regions.iter().find_map(unsafe_under_partial_exec),
     })
 }
@@ -6324,6 +6396,8 @@ pub fn select_for(
         vals: vec![None; kernel.values.len()],
         lds,
         depth: 0,
+        dead: None,
+        divergent_depth: 0,
         single_wave: kernel.max_workgroup_size <= target.info().wave,
         t: target.info(),
         kernarg_ptr: VRef { reg: 0, off: 0, n: 2 },
@@ -6396,6 +6470,11 @@ pub fn select_for(
     let tid = isel.vgpr(1);
     isel.copy(tid, r(tid_fixed));
     isel.tid = tid;
+    if returns_under_divergence(kernel, &isel.uniform) {
+        let dead = isel.mreg();
+        isel.emit(MInst::new(isel.lm(Opc::SMovB32), [r(dead)], [Opnd::Imm(0)]));
+        isel.dead = Some(dead);
+    }
     isel.region(&kernel.body)?;
     let last = isel.f.blocks.last().and_then(|b| b.insts.last()).map(|i| i.op);
     if last != Some(Opc::SEndpgm) {
@@ -7478,10 +7557,11 @@ mod convmem_tests {
         assert!(err.message.contains("Sync"), "{}", err.message);
         // The same body under a uniform bound is fine.
         compiled(&loop_kernel("%c0", "%c1", "%z", &sync)).unwrap_or_else(|e| panic!("{e}"));
-        // An early return in a per-lane loop would end lanes that already left it.
+        // An early return in a per-lane loop takes the lanes still in it out of EXEC for good (not the wave: the
+        // lanes that already left it go on).
         let ret = "        cf.return (  )\n".to_string() + ACCUMULATE;
-        let err = compiled(&loop_kernel("%c0", "%n", "%z", &ret)).err().expect("refused");
-        assert_eq!(err.kind, "ROCKE_DIRECT_UNSUPPORTED", "{}", err.message);
+        let insts = self::insts(&loop_kernel("%c0", "%n", "%z", &ret));
+        assert_eq!(count(&insts, Opc::SCbranchExecnz), 1);
     }
 
     /// Operand and result types, attributes and ranges the LLVM lowering
@@ -7904,6 +7984,40 @@ mod dword_quad_tests {
 
     fn count(listing: &str, mnemonic: &str) -> usize {
         listing.lines().filter(|l| l.trim_start().starts_with(mnemonic)).count()
+    }
+
+    const EARLY_IF: &str = "    %c : i1 = arith.cmp ( {cond}, %n ) { pred = s:\"ge\" }\n    scf.if ( %c )\n      region @then {\n        cf.return (  )\n      }\n";
+
+    /// A return under a divergent `scf.if` takes the lanes it covers out of EXEC for the rest of the kernel and
+    /// ends the wave when none is left; a return under a uniform one still just ends the wave.
+    #[test]
+    fn a_divergent_early_return_masks_the_lanes() {
+        for l in listings(&returning(&EARLY_IF.replace("{cond}", "%tid"))) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_endpgm")), (1, 2), "{l}");
+            assert!(count(&l, "s_and_not1") + count(&l, "s_andn2") >= 1, "{l}");
+        }
+        for l in listings(&returning(&EARLY_IF.replace("{cond}", "%bid"))) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_endpgm")), (0, 2), "{l}");
+            assert_eq!(count(&l, "s_and_not1") + count(&l, "s_andn2"), 0, "{l}");
+        }
+    }
+
+    /// The wave ends only where no lane is waiting to rejoin: once, after the outermost divergent region, however
+    /// the returns nest in `scf.if` regions (either arm) and loops with per-lane bounds.
+    #[test]
+    fn divergent_returns_in_nested_regions_end_the_wave_once() {
+        let nested_if = format!(
+            "    %a : i1 = arith.cmp ( %tid, %ub ) {{ pred = s:\"lt\" }}\n    scf.if ( %a )\n      region @then {{\n{}      }}\n",
+            EARLY_IF.replace("{cond}", "%tid")
+        );
+        let else_arm = "    %a : i1 = arith.cmp ( %tid, %n ) { pred = s:\"lt\" }\n    scf.if_else ( %a )\n      region @then {\n        %x : i32 = arith.add ( %tid, %c1 )\n      }\n      region @else {\n        cf.return (  )\n      }\n";
+        let in_loop = "    scf.for ( %c0, %tid, %c1 ) { iv = s:\"%i\", iv_type = s:\"i32\" }\n      region @body {\n        %q : i1 = arith.cmp ( %i, %n ) { pred = s:\"ge\" }\n        scf.if ( %q )\n          region @then {\n            cf.return (  )\n          }\n        scf.yield (  )\n      }\n";
+        for body in [nested_if.as_str(), else_arm, in_loop] {
+            for l in listings(&returning(body)) {
+                assert_eq!(count(&l, "s_cbranch_execnz"), 1, "{body}\n{l}");
+                assert!(count(&l, "s_and_not1") + count(&l, "s_andn2") >= 1, "{body}\n{l}");
+            }
+        }
     }
 
     /// `arith.sitofp_f32` of a uniform value is uniform (read back into an SGPR), so what is computed from it

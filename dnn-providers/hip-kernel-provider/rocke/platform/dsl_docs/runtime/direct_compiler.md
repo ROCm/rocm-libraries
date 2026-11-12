@@ -277,6 +277,17 @@ on the same inputs in these ways:
   (`ds_read_b32`, `ds_read_b64` or `ds_read_b128` with constraints `=v,v`),
   which one rocKE GEMM emits. Any other template is
   `ROCKE_DIRECT_UNSUPPORTED`.
+- `cf.return` under control flow whose lanes differ (an `scf.if` with a per-lane
+  condition, or an `scf.for` with per-lane bounds) takes only the lanes that
+  reach it out of EXEC for the rest of the kernel, through a lane mask the
+  kernel keeps: each EXEC restore at the end of such a region leaves those lanes
+  out, and the wave ends once none is left, after the outermost such region.
+  Barriers that the remaining lanes reach are then taken by fewer lanes, as in
+  LLVM's lowering of the same IR. A `cf.return` where every lane returns ends
+  the wave at once. The uniformity analysis calls an `arith.sitofp_f32` of a
+  uniform value uniform, as LLVM's does, so the `floor(log2(n))` loop bounds
+  of the unified-attention sequence lookup stay scalar, and the returns they
+  guard are the plain kind.
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
 - `agpr_alloc`: only `[0, 0]`.

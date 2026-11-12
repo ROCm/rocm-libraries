@@ -128,25 +128,20 @@ pub fn lds_pool(bytes: u32, t: &TargetInfo) -> Result<(), CompileError> {
     Ok(())
 }
 
-/// Checks of the optimized kernel against `analysis::classify`. `cf.return`
-/// ends the whole wave, which is right only where every active lane
-/// returns: not inside an `scf.if` whose condition is divergent, nor in a
-/// loop with per-lane bounds, which lanes leave at different trips. A buffer
+/// Checks of the optimized kernel against `analysis::classify`. A buffer
 /// access takes its resource and `soffset` from SGPRs, where the LLVM
-/// backend would loop over the distinct values of divergent ones.
+/// backend would loop over the distinct values of divergent ones. (`cf.return`
+/// under divergent control flow is selected with a mask of the lanes that
+/// returned: `isel::Isel::return_op`.)
 pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError> {
     let uni = |v: &ValueId| uniform.get(v.0 as usize) == Some(&true);
-    let mut stack = vec![(kernel.body.ops.iter(), false)];
-    while let Some((ops, divergent)) = stack.last_mut() {
-        let divergent = *divergent;
+    let mut stack = vec![kernel.body.ops.iter()];
+    while let Some(ops) = stack.last_mut() {
         let Some(op) = ops.next() else {
             stack.pop();
             continue;
         };
         match op.kind {
-            OpKind::Return if divergent => {
-                return Err(unsupported("cf.return under a divergent scf.if condition or loop bound"));
-            }
             OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar
                 if !(op.operands.first().is_some_and(uni) && op.operands.get(2).is_some_and(uni)) =>
             {
@@ -181,15 +176,7 @@ pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError>
             OpKind::InlineAsmIdentity if op.asm_pin() == Some('s') && !op.operands.first().is_some_and(uni) => {
                 return Err(unsupported("an \"=s,0\" pin of a divergent value"));
             }
-            OpKind::If | OpKind::IfElse => {
-                let cond = op.operands.first().is_some_and(uni);
-                stack.extend(op.regions.iter().map(|r| (r.ops.iter(), divergent || !cond)));
-            }
-            OpKind::For => {
-                let bounds = op.operands.get(..3).is_some_and(|b| b.iter().all(uni));
-                stack.extend(op.regions.iter().map(|r| (r.ops.iter(), divergent || !bounds)));
-            }
-            _ => stack.extend(op.regions.iter().map(|r| (r.ops.iter(), divergent))),
+            _ => stack.extend(op.regions.iter().map(|r| r.ops.iter())),
         }
     }
     Ok(())
@@ -1519,8 +1506,7 @@ mod tests {
         assert!(compile(&kernel(&format!("{unused}{plain}"))).is_ok());
     }
 
-    /// A return under a divergent condition, and a divergent buffer
-    /// `soffset` (once read from the first lane only).
+    /// A divergent buffer `soffset` (once read from the first lane only).
     #[test]
     fn divergence_the_hardware_cannot_take_is_rejected() {
         let body = |cond: &str| {
@@ -1529,7 +1515,6 @@ mod tests {
                  %e : f32 = arith.bitcast ( %tid )\n    memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4 }}\n"
             )
         };
-        assert_eq!(rejection(&kernel(&body("%tid"))).0, "ROCKE_DIRECT_UNSUPPORTED");
         let uniform = body("%k").replace("    %c :", "    %k : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    %c :");
         assert!(compile(&kernel(&uniform)).is_ok());
         let buffer = |soffset: &str| {
