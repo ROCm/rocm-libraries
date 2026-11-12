@@ -137,6 +137,7 @@ namespace
         Tensor                b;
         std::optional<Tensor> c; // absent: scale contraction
         Tensor                d;
+        bool                  inPlace = false; // C and D are one buffer
     };
 
     int64_t offset(Tensor const& t, ModeMap const& idx)
@@ -303,19 +304,23 @@ namespace
             };
             upload(&dA, p.a.data);
             upload(&dB, p.b.data);
-            if(p.c)
+            if(p.c && !p.inPlace)
             {
                 upload(&dC, p.c->data);
             }
             // NaN in D: an element the kernel never writes cannot pass the check.
-            upload(&dD, std::vector<float>(p.d.elements, std::numeric_limits<float>::quiet_NaN()));
+            // In place, D starts with C's values.
+            upload(&dD,
+                   p.inPlace
+                       ? p.c->data
+                       : std::vector<float>(p.d.elements, std::numeric_limits<float>::quiet_NaN()));
             if(ws > 0)
             {
                 EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
             }
 
-            r.status
-                = hiptensorContract(h, plan, &p.alpha, dA, dB, &p.beta, dC, dD, dW, ws, nullptr);
+            r.status = hiptensorContract(
+                h, plan, &p.alpha, dA, dB, &p.beta, p.inPlace ? dD : dC, dD, dW, ws, nullptr);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
             r.D.resize(p.d.elements);
@@ -403,6 +408,11 @@ namespace
     {
     };
 
+    // Contractions that hipTensor must refuse.
+    class ContractionRefusedTest : public ContractionTestBase
+    {
+    };
+
     std::string sizeTag(bool unitMode)
     {
         return unitMode ? "UnitMode" : "Full";
@@ -469,6 +479,64 @@ TEST_P(ContractionCLayoutTest, Bilinear)
                               .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
     };
     expectCorrect(mHandle, ext, contraction(lc), contraction(kCanonical));
+}
+
+// C must have D's modes: here C lacks n.
+TEST_F(ContractionRefusedTest, CLacksMode)
+{
+    auto const  ext = extents(false);
+    Contraction p{.alpha = 1.5f,
+                  .beta  = 0.5f,
+                  .a     = makeInput({M0, M1, K0, K1}, ext, kCanonical, 1),
+                  .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
+                  .c     = makeInput({M0, M1}, ext, kCanonical, 3),
+                  .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
+    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// C must give each mode D's extent: here n is 4 in C and 5 in D.
+TEST_F(ContractionRefusedTest, CExtentDiffers)
+{
+    auto const ext  = extents(false);
+    auto       extC = ext;
+    extC[N0]        = 4;
+    Contraction p{.alpha = 1.5f,
+                  .beta  = 0.5f,
+                  .a     = makeInput({M0, M1, K0, K1}, ext, kCanonical, 1),
+                  .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
+                  .c     = makeInput({M0, M1, N0}, extC, kCanonical, 3),
+                  .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
+    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_INVALID_VALUE);
+}
+
+// C and D in one buffer with the same layout: each element is read
+// and written in place.
+TEST_F(ContractionRefusedTest, InPlaceSameLayout)
+{
+    auto const  ext = extents(false);
+    Contraction p{.alpha   = 1.5f,
+                  .beta    = 0.5f,
+                  .a       = makeInput({M0, M1, K0, K1}, ext, kCanonical, 1),
+                  .b       = makeInput({N0, K0, K1}, ext, kCanonical, 2),
+                  .c       = makeInput({M0, M1, N0}, ext, kCanonical, 3),
+                  .d       = makeTensor({M0, M1, N0}, ext, kCanonical),
+                  .inPlace = true};
+    expectCorrect(mHandle, ext, p, p);
+}
+
+// C and D in one buffer with different strides: the kernel would read elements
+// of C that it has already overwritten.
+TEST_F(ContractionRefusedTest, InPlaceStridesDiffer)
+{
+    auto const  ext = extents(false);
+    Contraction p{.alpha   = 1.5f,
+                  .beta    = 0.5f,
+                  .a       = makeInput({M0, M1, K0, K1}, ext, kCanonical, 1),
+                  .b       = makeInput({N0, K0, K1}, ext, kCanonical, 2),
+                  .c       = makeInput({M0, M1, N0}, ext, kCanonical, 3),
+                  .d       = makeTensor({M0, M1, N0}, ext, Layout{false, true}),
+                  .inPlace = true};
+    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
 INSTANTIATE_TEST_SUITE_P(Layouts,
