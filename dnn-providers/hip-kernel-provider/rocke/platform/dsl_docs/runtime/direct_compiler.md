@@ -273,10 +273,14 @@ on the same inputs in these ways:
 ## Limits
 
 - Only gfx1151 and gfx950.
-- `tile.inline_asm`: only the empty `"=v,0"` barrier, and on gfx950 an LDS read
+- `tile.inline_asm`: only the empty `"=v,0"` barrier and `"=s,0"` pin (of a
+  dword or, uniform, a 64-bit pointer), and on gfx950 an LDS read
   (`ds_read_b32`, `ds_read_b64` or `ds_read_b128` with constraints `=v,v`),
-  which one rocKE GEMM emits. Any other template is
-  `ROCKE_DIRECT_UNSUPPORTED`.
+  which one rocKE GEMM emits, and the general templates of `rir/isel_asm.rs`.
+  Those take the clobbers `memory`, `scc`, `vcc` and `m0`; the DMA ring's
+  `s_mov_b32 m0, $1` / `global_load_lds_dword[x4] $0, $2` (a VGPR offset and an
+  SGPR pair) is an LDS DMA whose completion only the kernel's own `s_waitcnt`s
+  order. Any other template or clobber is `ROCKE_DIRECT_UNSUPPORTED`.
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
 - `agpr_alloc`: only `[0, 0]`.

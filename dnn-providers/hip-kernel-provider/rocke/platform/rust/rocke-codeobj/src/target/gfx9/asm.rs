@@ -738,14 +738,17 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             push2(out, t::EncDs { op: code, offset, addr, data0, data1, vdst, ..Default::default() }.pack());
         }
         Fmt::Global if form == Form::Lds => {
-            // global_load_lds: a 64-bit VGPR address (saddr off), the data to LDS at M0.
-            if !defs.is_empty() || !(0..1 << 15).contains(&inst.imm) || nth(uses, 0)?.dwords() != 2 {
-                return Err(bad(format!("{}: a VGPR pair address, no destination, and imm within the offset and sc0, nt, sc1", name())));
+            // global_load_lds: a 64-bit VGPR address (saddr off), or with M_SADDR a 32-bit VGPR offset and an SGPR
+            // pair base; the data to LDS at M0.
+            let saddr_mode = mods & M_SADDR != 0;
+            if !defs.is_empty() || !(0..1 << 15).contains(&inst.imm) || nth(uses, 0)?.dwords() != if saddr_mode { 1 } else { 2 } {
+                return Err(bad(format!("{}: a VGPR pair address (or a VGPR and an SGPR pair), no destination, and imm within the offset and sc0, nt, sc1", name())));
             }
             let addr = vgpr(nth(uses, 0)?)?;
+            let saddr = if saddr_mode { sdst(nth(uses, 1)?)? } else { t::SRC_SADDR_OFF };
             let imm = inst.imm as u32;
             let (offset, sc0, nt, sc1) = (imm & 0xfff, imm >> 12 & 1, imm >> 13 & 1, imm >> 14 & 1);
-            let words = t::EncGlobal { op: code, offset, sc0, nt, sc1, addr, saddr: t::SRC_SADDR_OFF, ..Default::default() };
+            let words = t::EncGlobal { op: code, offset, sc0, nt, sc1, addr, saddr, ..Default::default() };
             push2(out, words.pack());
         }
         Fmt::Global if form == Form::Scratch => {

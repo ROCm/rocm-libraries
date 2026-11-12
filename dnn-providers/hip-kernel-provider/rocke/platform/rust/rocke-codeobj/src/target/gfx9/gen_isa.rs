@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0xbbcbe0bca069002c;
+pub const DESCRIPTION_DIGEST: u64 = 0xcf496b7147502b5c;
 
 // ----- operand codes -----
 
@@ -3231,7 +3231,7 @@ const SIG_115: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off12cpol,
-    mods: 0x0,
+    mods: 0x100,
 };
 const SIG_116: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
