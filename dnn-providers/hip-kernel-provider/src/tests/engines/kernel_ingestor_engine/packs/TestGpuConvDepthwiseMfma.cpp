@@ -310,6 +310,25 @@ std::vector<DeviceCase> deviceCases()
     auto nchwBatch = first(depthwise(6, {7, 14}, {3, 3}, {1, 1}, {1, 1}));
     nchwBatch.n = 9;
     cases.push_back({"NchwK3N9", nchwBatch, FWD});
+    // Planes smaller than the padding plus a tile, every catalog filter, both layouts: a k x k
+    // image to a single pixel (unpadded) and a single pixel padded by k - 1 to a k x k image.
+    // Backward data of the first is MobileFaceNet's 7 x 7 depthwise backward (dy 1 x 1): with a
+    // 1-element plane, loads of several channel pairs reach before the buffer's start or past
+    // its end, not only the first and the last pair's.
+    for(const int64_t k : {3, 5, 7, 9})
+    {
+        const std::string tag = "K" + std::to_string(k);
+        for(const bool channelsLast : {false, true})
+        {
+            const std::string layout = channelsLast ? "Nhwc" : "Nchw";
+            auto toPixel = depthwise(128, {k, k}, {k, k}, {0, 0}, {1, 1}, channelsLast);
+            toPixel.n = 16;
+            cases.push_back({layout + tag + "ToPixel", toPixel, FWD});
+            auto fromPixel = depthwise(128, {1, 1}, {k, k}, {k - 1, k - 1}, {1, 1}, channelsLast);
+            fromPixel.n = 5;
+            cases.push_back({layout + tag + "FromPixel", fromPixel, FWD});
+        }
+    }
     // Unit-stride backward data runs the forward form (filter reflected): every case again.
     const size_t forwardCases = cases.size();
     for(size_t i = 0; i < forwardCases; ++i)
