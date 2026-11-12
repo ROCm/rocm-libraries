@@ -18,7 +18,7 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 ## 3. GPU validation per arch
 
-Every arch whose objects changed needs the GPU tests of each updated direction to pass on a GPU of that arch. Both live in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/`.
+Every arch whose objects changed, and every arch whose launch code changed, needs the GPU tests of each updated direction to pass on a GPU of that arch. A port of shared host code (argument struct, packing, grid, dispatch) changes the launch code of every arch that vendors the module. Both directions' tests live in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/`.
 
 ### Forward
 

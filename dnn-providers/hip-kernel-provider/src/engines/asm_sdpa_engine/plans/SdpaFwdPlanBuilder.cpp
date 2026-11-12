@@ -213,6 +213,10 @@ static bool hasAiterCompatibleRaggedAddressing(
 
 // The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
 // equal Q and KV head counts. AITER sends GQA/MQA for them to CK.
+//
+// Known limitation, not declined: these kernels round Q * scale * log2(e) to bf16, so
+// their error grows with the attention scale. AITER launches them at any scale too.
+// See "Forward precision" in asm/asm_kernels/README.md.
 static bool kernelServesHeadCounts(const std::string& archId,
                                    const std::string& dataTypeId,
                                    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,

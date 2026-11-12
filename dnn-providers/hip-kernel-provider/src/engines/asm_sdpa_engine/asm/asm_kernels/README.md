@@ -32,12 +32,14 @@ Change what a module leaves out with the skill's `plan --exclude`,
 ## Forward precision
 
 The gfx950 bf16 hd256 forward kernels (group mode only) multiply Q by
-scale × log2(e) and round the product to bf16 before QK^T. Their error grows
-with the attention scale. For inputs in [-1, 1], a model of this rounding keeps
-their error inside the 1e-2 bf16 tolerance of the GPU registry tests at the
-standard scale 1/sqrt(256), and puts it above 1e-2 at scale 1.0. The engine
-serves these kernels at any scale, as AITER does. The GPU registry tests run
-every forward row at scale 1/sqrt(hdim_q).
+scale × log2(e) and round the product to bf16 before QK^T, where the hd128 and
+hd192x128 kernels keep that factor in fp32. Their error grows with the
+attention scale. For inputs in [-1, 1], a model of this rounding keeps their
+error inside the 1e-2 bf16 tolerance of the GPU registry tests at the standard
+scale 1/sqrt(256); at scale 1.0 a group-mode case reaches about 0.016. The
+limit is in AITER's kernels, which AITER launches at any scale too, so the
+engine serves them at any scale and does not decline them. The GPU registry
+tests run every forward row at scale 1/sqrt(hdim_q).
 
 ## Backward tables
 

@@ -52,7 +52,7 @@ These diffs come from the module's host-code commit, so they repeat in every pla
 
 ## AITER backward dispatch changes (`reference_changed`)
 
-For `fmha_v3_bwd` the report diffs `get_padded_hdim()`, `get_heuristic_kernel()` and `fmha_v3_bwd()` in `csrc/cpp_itfs/mha_bwd.cu`, and the Python gates in `aiter/ops/mha.py`: `can_impl_fmha_v3_bwd()`, and `_flash_attn_backward()` and `_flash_attn_varlen_backward()` with the per-arch gates nested in them. `mha_bwd()`, the CK path, is never read.
+For `fmha_v3_bwd` the report diffs `get_padded_hdim()`, `get_heuristic_kernel()` and `fmha_v3_bwd()` in `csrc/cpp_itfs/mha_bwd.cu`, and the Python gates in `aiter/ops/mha.py`: `_flash_attn_backward()` and `_flash_attn_varlen_backward()`, with the per-arch gates nested in them and the functions they call, such as `can_impl_fmha_v3_bwd()`. The C++ `mha_bwd()` in `mha_bwd.cu`, the CK path, is never read.
 
 - Every `return -1` in `fmha_v3_bwd()` is a case AITER sends to CK. For each one the diff adds, make `SdpaBwdPlanBuilder::isApplicable` decline the same case, with a reason in its `HIP_KERNEL_RETURN_FALSE_IF` message.
 - The Python gates run first: a case they route to CK never reaches `fmha_v3_bwd()`. Decline each new condition the same way when it is a kernel limit. A condition that only states a routing preference needs no decline; agree with the user which it is. At AITER v0.1.29 the kernel limits include the stride equalities of the unpadded kernels and the gfx950 head-dim set. The routing preferences the engine deliberately does not follow are listed in [structural.md](structural.md).
