@@ -364,13 +364,13 @@ __device__ __forceinline__ FftTile fftTileOf(const ConvFftArgs& a, int local)
     return t;
 }
 
-/// Fills tiles[0, PB) with the block's tiles (pBlock ..) and waits for the block.
+/// Fills tiles[0, PB) with the block's tiles (pBlock ..; PB may exceed the threads) and waits.
 template <int PB>
 __device__ __forceinline__ void fftLoadTiles(FftTile* tiles, const ConvFftArgs& a, int pBlock)
 {
-    if(threadIdx.x < PB)
+    for(int t = threadIdx.x; t < PB; t += blockDim.x)
     {
-        tiles[threadIdx.x] = fftTileOf(a, pBlock + static_cast<int>(threadIdx.x));
+        tiles[t] = fftTileOf(a, pBlock + t);
     }
     __syncthreads();
 }
@@ -607,9 +607,9 @@ __device__ void fftOutputInverse(const ConvFftArgs& a)
     const int pBlock = (blockIdx.x % blocksP) * PB;
     const int g = gb / a.cb;
     const int b = gb % a.cb;
-    if(threadIdx.x < PB)
+    for(int t = threadIdx.x; t < PB; t += blockDim.x)
     {
-        tiles[threadIdx.x] = fftTileOf(a, pBlock + static_cast<int>(threadIdx.x));
+        tiles[t] = fftTileOf(a, pBlock + t);
     }
     for(int q = threadIdx.x; q < F * PB; q += blockDim.x)
     {
